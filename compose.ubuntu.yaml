@@ -1,0 +1,37 @@
+name: core-academy
+
+services:
+  backend:
+    image: core-academy-backend:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      SERVER_PORT: "8019"
+      DB_URL: ${DB_URL:?Set DB_URL in .env.ubuntu}
+      DB_USER: ${DB_USER:?Set DB_USER in .env.ubuntu}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.ubuntu}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.ubuntu}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?Set frontend origins in .env.ubuntu}
+      APP_BOOTSTRAP_ADMIN_ID: ${APP_BOOTSTRAP_ADMIN_ID:-}
+      APP_BOOTSTRAP_ADMIN_USER: ${APP_BOOTSTRAP_ADMIN_USER:-}
+      APP_BOOTSTRAP_ADMIN_PASSWORD: ${APP_BOOTSTRAP_ADMIN_PASSWORD:-}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=65.0 -XX:+ExitOnOutOfMemoryError}
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${HOST_PORT:-8019}:8019"
+    mem_limit: ${APP_MEMORY_LIMIT:-768m}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
