@@ -1,0 +1,77 @@
+name: Backend CI and deploy Ubuntu
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-academy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build Docker image and run tests
+        env:
+          IMAGE: ghcr.io/hmhug19/corebanking-academy
+        run: |
+          docker build --pull --label org.opencontainers.image.source=https://github.com/hmhug19/corebanking-academy --label org.opencontainers.image.revision="$GITHUB_SHA" --tag "$IMAGE:$GITHUB_SHA" .
+      - name: Publish immutable image
+        id: publish
+        if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+        env:
+          IMAGE: ghcr.io/hmhug19/corebanking-academy
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$GITHUB_SHA"
+          digest=$(docker image inspect "$IMAGE:$GITHUB_SHA" --format '{{index .RepoDigests 0}}')
+          [[ "$digest" =~ ^ghcr.io/hmhug19/corebanking-academy@sha256:[a-f0-9]{64}$ ]]
+          printf 'image=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          docker logout ghcr.io
+
+  deploy:
+    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Deploy via restricted SSH key
+        env:
+          SSH_KEY: ${{ secrets.UBUNTU_DEPLOY_SSH_KEY }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY" || { echo 'Add repository secret UBUNTU_DEPLOY_SSH_KEY before deployment.' >&2; exit 1; }
+          key=$(mktemp)
+          hosts=$(mktemp)
+          trap 'rm -f "$key" "$hosts"' EXIT
+          chmod 600 "$key" "$hosts"
+          printf '%s\n' "$SSH_KEY" > "$key"
+          printf '%s\n' '[103.121.90.119]:26266 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJA8LCy2wLBVZ6P1ROY45TDec9V29JO8JKa2z3D+HIGU' > "$hosts"
+          printf '%s\n%s\n%s\n' "$IMAGE" "$GITHUB_ACTOR" "$REGISTRY_TOKEN" |
+            ssh -T -i "$key" -p 26266 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" -o ConnectTimeout=20 dev_user@103.121.90.119 deploy
+      - name: Check public health
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 3 http://103.121.90.119:8019/actuator/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "UP"'
+
