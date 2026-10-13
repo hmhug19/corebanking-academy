@@ -1,0 +1,16 @@
+.git
+.idea
+.vscode
+.codex
+.agents
+target
+.env
+.env.*
+*.iml
+*.log
+*.pem
+*.key
+tmp
+output
+*.tar.gz
+**/.DS_Store
