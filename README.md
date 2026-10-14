@@ -30,7 +30,7 @@ IntelliJ: chọn **Project SDK = JDK 21**, Language level 21 và Maven Runner JR
 ## Chạy local
 
 ```bash
-cp .env.example .env
+cp .env .env
 # Sửa DB_PASSWORD, JWT_SECRET và bộ APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD. Không commit .env.
 # Chạy PostgreSQL: docker compose --env-file .env up -d db
 # Export các biến môi trường trong shell (Docker Compose không tự export cho Maven):

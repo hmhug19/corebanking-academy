@@ -4,7 +4,7 @@ target/
 .vscode/
 .env
 .env.*
-!.env.example
+!.env
 !.env.ubuntu.example
 *.log
 .DS_Store
