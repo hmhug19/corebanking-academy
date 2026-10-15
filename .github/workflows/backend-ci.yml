@@ -2,9 +2,9 @@ name: Backend CI and deploy Ubuntu
 
 on:
   push:
-    branches: [develop]
+    branches: [main]
   pull_request:
-    branches: [develop]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -34,7 +34,7 @@ jobs:
           docker build --pull --label org.opencontainers.image.source=https://github.com/hmhug19/corebanking-academy --label org.opencontainers.image.revision="$GITHUB_SHA" --tag "$IMAGE:$GITHUB_SHA" .
       - name: Publish immutable image
         id: publish
-        if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           IMAGE: ghcr.io/hmhug19/corebanking-academy
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -47,7 +47,7 @@ jobs:
           docker logout ghcr.io
 
   deploy:
-    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
