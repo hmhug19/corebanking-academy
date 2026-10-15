@@ -48,3 +48,11 @@ springdoc:
     operations-sorter: method
   packages-to-scan: vn.com.coreacademy
   paths-to-match: /api/**
+
+logging:
+  config: classpath:log4j2-spring.xml
+  file:
+    path: ${LOG_PATH:./logs}
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    vn.com.coreacademy: ${LOG_LEVEL_APP:INFO}

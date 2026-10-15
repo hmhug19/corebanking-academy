@@ -1,5 +1,7 @@
 package vn.com.coreacademy.identity.service;
 
+import lombok.RequiredArgsConstructor;
+
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
@@ -12,14 +14,10 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 @Service
+@RequiredArgsConstructor
 public class TokenService {
     private final JwtEncoder encoder;
     private final JwtProperties properties;
-
-    public TokenService(JwtEncoder encoder, JwtProperties properties) {
-        this.encoder = encoder;
-        this.properties = properties;
-    }
 
     public TokenResponse issue(UserAccount user) {
         Instant now = Instant.now();

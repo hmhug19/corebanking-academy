@@ -1,5 +1,7 @@
 package vn.com.coreacademy.identity.security;
 
+import lombok.RequiredArgsConstructor;
+
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -15,12 +17,9 @@ import vn.com.coreacademy.identity.repository.UserRepository;
 import java.util.List;
 
 @Component
+@RequiredArgsConstructor
 public class UserJwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
     private final UserRepository users;
-
-    public UserJwtAuthenticationConverter(UserRepository users) {
-        this.users = users;
-    }
 
     @Override
     public AbstractAuthenticationToken convert(Jwt token) {

@@ -1,5 +1,7 @@
 package vn.com.coreacademy.identity.service;
 
+import lombok.RequiredArgsConstructor;
+
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import vn.com.coreacademy.identity.entity.UserAccount;
@@ -9,10 +11,9 @@ import java.util.List;
 import java.util.Locale;
 
 @Service
+@RequiredArgsConstructor
 public class LoginUserResolver {
     private final UserRepository users;
-
-    public LoginUserResolver(UserRepository users) { this.users = users; }
 
     public UserAccount resolve(String login) {
         if (login == null || login.isBlank()) throw new UsernameNotFoundException("Invalid credentials");

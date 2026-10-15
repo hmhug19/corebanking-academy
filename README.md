@@ -10,9 +10,9 @@ MapStruct 1.6.3 đã cấu hình và áp dụng trong `identity.mapper.UserMappe
 
 Source tổ chức theo module chức năng, bên trong chia `controller`, `service`, `repository`, `entity`, `dto` và các package hỗ trợ. `identity` là module mẫu đăng nhập/phân quyền; organization và audit có entity/repository. Xem [quy ước kiến trúc](docs/ARCHITECTURE.md).
 
-Source đã mapping đủ 13 bảng trong schema `learning_hub` theo `docs/sql/learning_hub_identity.sql`: user ID dạng chuỗi, username, credentials riêng, tổ chức, nhóm, chức danh, role/permission và audit. Database name trong JDBC URL khác schema name: script có thể chạy trong database `appdb` hoặc database khác; các entity luôn chỉ rõ schema `learning_hub`.
+Source mapping 8 bảng compact trong schema `learning_hub` theo `docs/sql/learning_hub_identity.sql`: users, orgs, teams, roles, functions, role_functions, user_roles và audit_log. Hồ sơ giữ một org/team chính và position_name. Database name trong JDBC URL khác schema name: script có thể chạy trong database `appdb` hoặc database khác; các entity luôn chỉ rõ schema `learning_hub`.
 
-**Starter, không phải sản phẩm LMS hoàn chỉnh.** Đã có: login bằng username hoặc mã cán bộ, `/me`, JWT HS256, multi-role/permissions và kiểm tra scope GLOBAL/ORG/TEAM/OWN theo context được cung cấp. Thông tin mật khẩu nằm trong `user_credentials`, không nằm trong `users`.
+**Starter, không phải sản phẩm LMS hoàn chỉnh.** Đã có: login bằng username hoặc mã cán bộ, `/me`, JWT HS256, multi-role, màn hình và scope và kiểm tra scope GLOBAL/ORG/TEAM/OWN theo context được cung cấp. Hash mật khẩu LOCAL nằm trong `users.password_hash`; SSO không đăng nhập bằng mật khẩu local.
 
 **Chưa có:** course API và hierarchy, question bank/quiz engine, tiến độ học, content upload/player, reporting, UI Angular, audit event writers, refresh token/SSO và user-management APIs. Entity/repository không đồng nghĩa đã có API quản trị.
 
@@ -51,7 +51,7 @@ curl -X POST http://localhost:8019/api/v1/auth/login \
   -d '{"username":"admin","password":"<APP_BOOTSTRAP_ADMIN_PASSWORD>"}'
 # Lấy accessToken từ response, sau đó:
 curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8019/api/v1/auth/me
-# Trường username cũng nhận mã cán bộ; JWT subject và /me.user.id giữ nguyên chuỗi, kể cả số 0 đầu.
+# Trường username cũng nhận mã cán bộ; JWT subject và /me.user.userId giữ nguyên chuỗi, kể cả số 0 đầu.
 ```
 
 Bootstrap admin cần đủ `APP_BOOTSTRAP_ADMIN_ID`, `APP_BOOTSTRAP_ADMIN_USER` và `APP_BOOTSTRAP_ADMIN_PASSWORD`; để trống cả ba nếu không dùng bootstrap. Chạy SQL seed trước. User, credentials và GLOBAL ADMIN assignment được tạo trong một transaction; không tự reset account đã tồn tại. Script chỉ seed danh mục, không seed user hoặc đơn vị.
@@ -59,19 +59,20 @@ Bootstrap admin cần đủ `APP_BOOTSTRAP_ADMIN_ID`, `APP_BOOTSTRAP_ADMIN_USER`
 ## API có sẵn
 
 - `POST /api/v1/auth/login`: login, nhận JWT Bearer ngắn hạn
-- `GET /api/v1/auth/me`: user, role assignments, effective permissions và scopes
+- `GET /api/v1/auth/me`: hồ sơ, mã role/function, roleGrants, functionDetails, functionScopes
+- `POST /api/v1/auth/logout`: JWT Bearer, trả 204 và thu hồi token của mọi phiên
 - `GET /actuator/health`: health check
 
 ## Phân quyền
 
-- `learning_hub.users` → `user_roles` → `roles` → `role_permission` → `permission`.
+- `learning_hub.users` → `user_roles` → `roles` → `role_functions` → `functions`.
 - `GLOBAL` cho toàn hệ thống; `ORG` khớp tổ chức; `TEAM` phải khớp cả tổ chức và nhóm; `OWN` khớp owner ID của resource do backend cung cấp.
 - Không tự kế thừa ORG xuống tổ chức con. Context phân quyền phải lấy từ dữ liệu server, không tin org/team/owner ID do browser khai báo.
-- `role.manage` và `position.manage` chỉ chấp nhận GLOBAL. Việc gán role vượt quyền còn cần kiểm tra nghiệp vụ khi có API quản trị.
+- `AuthorizationService.requireRole` kiểm tra role và scope trên cùng grant. Mỗi API nghiệp vụ phải chọn role cho hành động cụ thể; quyền màn hình không cho phép tự động CREATE/UPDATE/DELETE. SUPER_ADMIN là role tường minh, không tự bypass API.
 - Angular sử dụng `/auth/me` để hiện menu. Mọi API vẫn kiểm tra server-side.
 - Không nên nhét role/permission vào JWT trong cấu hình này; server đọc RBAC từ DB khi cần.
 
-Trạng thái user trong `/me` là `active/locked/disabled`. Scope response chứa `type`, `orgId`, `teamId`. Username được lưu chữ thường, login username không phân biệt hoa/thường. Đầu vào khớp hai user qua ID và username sẽ bị từ chối.
+Trạng thái user trong `/me` là `active/inactive/locked`. Scope response chứa `type`, `orgId`, `teamId`. Username được lưu chữ thường, login username không phân biệt hoa/thường. Đầu vào khớp hai user qua ID và username sẽ bị từ chối.
 
 Flyway đang tắt. Các migration cũ trong resources chỉ là bản legacy, không tương thích schema mới; không bật lại để khởi tạo schema mới. Hibernate giữ `ddl-auto=validate`, không tự tạo hoặc sửa database.
 
@@ -107,3 +108,7 @@ Token không được lưu lại sau khi reload UI.
 Mặc định SWAGGER_ENABLED=true. Đặt SWAGGER_ENABLED=false trong .env để tắt cả UI và API docs.
 Compose Ubuntu và Compose CI truyền biến này vào container; recreate container sau khi đổi giá trị.
 springdoc 2.9.1 thuộc dòng 2.x dành cho Spring Boot 3: https://springdoc.org/v2/
+
+Chi tiết response `/me`, cách dùng roles/functions và logout: [AUTH_API.md](docs/AUTH_API.md).
+
+Logging dùng Log4j2, console và rolling file: [LOGGING.md](docs/LOGGING.md).

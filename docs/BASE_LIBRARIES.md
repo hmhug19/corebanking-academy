@@ -35,15 +35,15 @@ Processor chỉ phục vụ build; `mapstruct-processor` không là runtime depe
 | Cao | JaCoCo Maven plugin | Khi thiết lập CI và cần báo cáo coverage | Thêm report trước; ngưỡng coverage phải phản ánh test nghiệp vụ, không đặt tùy ý |
 | Cao | Maven Wrapper | Khi muốn developer/CI dùng cùng phiên bản Maven | Commit wrapper và pin distribution; Docker hiện đã cung cấp Maven trong builder |
 | Trung bình | Testcontainers PostgreSQL | Khi có Docker trên máy dev/CI và cần test persistence thật | Kiểm tra script, constraint, FK ghép, repository và transaction trên PostgreSQL thật |
-| Tùy chọn | Lombok | Khi đội chọn giảm boilerplate entity/constructor | Không cần để MapStruct chạy; tránh @Data/toString/equals tự sinh trên quan hệ JPA và credential |
+| Đã cấu hình | Lombok | Getter/setter entity, constructor DI | Kèm lombok-mapstruct-binding; entity không dùng @Data/toString/equals tự sinh |
 | Theo nghiệp vụ | Resilience4j | Khi tích hợp API xác thực bên ngoài hoặc dịch vụ không ổn định | Cấu hình timeout/circuit breaker theo yêu cầu thực tế; không retry mù các request có side effect |
 | Theo vận hành | Micrometer registry Prometheus | Khi hệ thống có Prometheus/monitoring | Actuator đã có; thêm registry khi có nơi thu metrics và chính sách expose endpoint |
 
 [Ma trận springdoc](https://springdoc.org/v2/#springdoc-openapi-what-is-the-compatibility-matrix-of-springdoc-openapi-with-spring-boot), [JaCoCo Maven](https://www.jacoco.org/jacoco/trunk/doc/maven.html), [Testcontainers PostgreSQL](https://java.testcontainers.org/modules/databases/postgres/), [Lombok](https://projectlombok.org/features/), [Resilience4j](https://resilience4j.readme.io/docs/getting-started-3).
 
-Các mục trên là đánh giá, chưa được thêm dependency vào base. Redis/cache, Kafka, Elasticsearch, Querydsl hoặc Apache Commons chỉ thêm khi có use case cụ thể; hiện chưa cần cho module identity.
+Các mục chưa đánh dấu đã cấu hình là đề xuất, chưa được thêm dependency vào base. Redis/cache, Kafka, Elasticsearch, Querydsl hoặc Apache Commons chỉ thêm khi có use case cụ thể; hiện chưa cần cho module identity.
 
-Nếu chọn Lombok cùng MapStruct sau này, cấu hình cả hai annotation processor và binding tương thích theo [hướng dẫn tích hợp](https://mapstruct.org/documentation/stable/reference/html/#_lombok). Không đưa mapper/entity vào common chỉ để tái sử dụng annotation.
+Lombok đã cấu hình cùng MapStruct: dependency provided, annotation processors Lombok/MapStruct và lombok-mapstruct-binding 0.2.0 theo [hướng dẫn tích hợp](https://mapstruct.org/documentation/stable/reference/html/#_lombok). Không đưa mapper/entity vào common chỉ để tái sử dụng annotation.
 
 ## Quy ước cho mapper mới
 

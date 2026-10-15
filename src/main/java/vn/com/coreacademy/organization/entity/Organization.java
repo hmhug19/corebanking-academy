@@ -1,9 +1,15 @@
 package vn.com.coreacademy.organization.entity;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.NoArgsConstructor;
+
 import jakarta.persistence.*;
 import vn.com.coreacademy.common.persistence.UpdatedEntity;
 
-
+@Getter
+@Setter
+@NoArgsConstructor
 @Entity
 @Table(name = "orgs", schema = "learning_hub")
 public class Organization extends UpdatedEntity {
@@ -24,38 +30,13 @@ public class Organization extends UpdatedEntity {
     @Column(name = "name", length = 255, nullable = false)
     private String name;
 
-    @Column(name = "status", length = 10, nullable = false)
+    @Column(name = "status", length = 20, nullable = false)
     private String status = "active";
 
     @Column(name = "sort_no", nullable = false)
     private int sortNo = 0;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = true)
-    @JoinColumn(name = "parent_id", referencedColumnName = "org_id", insertable = false, updatable = false)
+    @JoinColumn(name = "parent_id", referencedColumnName = "org_id", insertable = false, updatable = false, foreignKey = @ForeignKey(ConstraintMode.NO_CONSTRAINT))
     private Organization parent;
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public Long getParentId() { return parentId; }
-    public void setParentId(Long parentId) { this.parentId = parentId; }
-
-    public String getOrgType() { return orgType; }
-    public void setOrgType(String orgType) { this.orgType = orgType; }
-
-    public String getCode() { return code; }
-    public void setCode(String code) { this.code = code; }
-
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
-    public int getSortNo() { return sortNo; }
-    public void setSortNo(int sortNo) { this.sortNo = sortNo; }
-
-    public Organization getParent() { return parent; }
-    public void setParent(Organization parent) { this.parent = parent; }
-
 }

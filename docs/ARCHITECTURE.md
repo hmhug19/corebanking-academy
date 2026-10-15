@@ -62,7 +62,7 @@ Module khác dùng service/DTO hoặc adapter công khai của module; kiểm tr
 
 Service dùng class cụ thể và constructor injection. Chỉ thêm interface khi có nhiều implementation hoặc cần contract thay thế; không tạo cặp Service/ServiceImpl cho mọi class.
 
-Entity/DTO được mapping trong `<module>.mapper` bằng MapStruct. `identity.mapper.UserMapper` là mẫu; service inject mapper thay vì tự dựng UserInfo. Cấu hình chung nằm trong `common.mapper.CentralMapperConfig`: Spring component, constructor injection, thiếu target field hoặc chuyển kiểu mất dữ liệu sẽ lỗi compile. Converter trạng thái cần giữ giá trị `active/locked/disabled`. Exception nghiệp vụ riêng đặt trong `<module>.exception`.
+Entity/DTO được mapping trong `<module>.mapper` bằng MapStruct. `identity.mapper.UserMapper` là mẫu; service inject mapper thay vì tự dựng UserInfo. Cấu hình chung nằm trong `common.mapper.CentralMapperConfig`: Spring component, constructor injection, thiếu target field hoặc chuyển kiểu mất dữ liệu sẽ lỗi compile. Converter trạng thái cần giữ giá trị `active/inactive/locked`. Exception nghiệp vụ riêng đặt trong `<module>.exception`.
 
 ## Common, utils và constants
 
@@ -80,7 +80,7 @@ POST /api/v1/auth/login
   → AuthController → AuthService
   → AuthenticationManager / DaoAuthenticationProvider
   → LocalUserDetailsService → LoginUserResolver → UserRepository
-  → UserCredentialRepository lấy hash từ user_credentials
+  → UserAccount chứa password_hash; chỉ auth_provider=LOCAL được login mật khẩu
   → PasswordEncoder kiểm tra mật khẩu và trạng thái
   → TokenService tạo JWT HS256
 
@@ -94,21 +94,23 @@ GET /api/v1/auth/me
 
 JWT subject là mã cán bộ dạng chuỗi; auth version map cột auth_ver. Quyền đọc từ database, cùng assignment với scope. GLOBAL/ORG/TEAM/OWN được kiểm tra theo resource context; không tự kế thừa xuống tổ chức con. Backend phải xác định org/team/owner từ dữ liệu thật. Learning API chưa triển khai.
 
-Giữ URL login/me và trường request username; username nhận cả mã cán bộ và username, normalize username thành chữ thường. JWT principal luôn dùng mã cán bộ. Từ chối login nếu không có local credentials hoặc định danh khớp nhiều user. Response /me.user.id là chuỗi, status chữ thường; scope chứa orgId/teamId, không còn id/UNIT. Expiry lấy từ app.jwt.expiry-minutes. Lỗi đăng nhập trả 401.
+Giữ URL login/me và trường request username; username nhận cả mã cán bộ và username, normalize username thành chữ thường. JWT principal luôn dùng mã cán bộ. Từ chối login nếu không có local credentials hoặc định danh khớp nhiều user. Response /me.user.userId là chuỗi, status chữ thường; /me trả user, roles, functions, roleGrants, functionDetails và functionScopes; scope chứa orgId/teamId, không còn id/UNIT. Expiry lấy từ app.jwt.expiry-minutes. Lỗi đăng nhập trả 401.
 
 ## Database và script mới
 
-Source mapping đủ 13 bảng của docs/sql/learning_hub_identity.sql, tất cả entity chỉ rõ schema learning_hub. ID user là chuỗi varchar(20), username map user_name, password nằm trong UserCredential. UserStatusConverter lưu active/locked/disabled. RoleAssignment map user_roles với scope/org_id/team_id/granted_by. RolePermission, UserOrganization và UserTeam dùng EmbeddedId có equals/hashCode.
+Source mapping 8 bảng của docs/sql/learning_hub_identity.sql. UserAccount chứa password_hash (JsonIgnore), auth_provider, org_id, team_id và position_name. UserStatusConverter lưu active/inactive/locked. RoleAssignment giữ role và scope riêng cho từng grant. Function và RoleFunction quản lý màn hình FE; không thay thế kiểm tra hành động API.
 
-Timestamp create_time/update_time do default/trigger PostgreSQL sinh; mapped superclass dùng Hibernate Generated để đọc lại giá trị. AuditLog.details dùng JSONB. Quan hệ credentials và nhóm/tổ chức map đúng các FK ghép. Nhiều entity dùng scalar FK để ghi, association read-only để đọc; khi tạo bản ghi cần set scalar/EmbeddedId, không chỉ set association.
+Không sinh FOREIGN KEY vật lý. Các quan hệ là logic, API quản trị khi triển khai phải kiểm tra user/org/team tồn tại, team thuộc org, cây đơn vị không có vòng lặp và quyền của người gán. TEAM grant cho phép org_id NULL; lúc kiểm tra, service đọc team để xác nhận org thực tế. Không tự suy BRN/BRCD/CRA thành cây đơn vị.
 
-Bootstrap cần bộ APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD, tạo user/credentials/GLOBAL ADMIN trong cùng transaction. Script SQL và dữ liệu thật không được sửa trong lần cập nhật mapping.
+create_time dùng default PostgreSQL; update_time được cập nhật bởi JPA lifecycle do SQL compact không có trigger. Role và Function không có timestamp; Team chỉ có create_time; RoleFunction dùng created_at. AuditLog.details dùng JSONB.
+
+Bootstrap cần APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD, tạo user có hash và GLOBAL ADMIN trong cùng transaction; không reset tài khoản có sẵn. SUPER_ADMIN được gán tường minh; không tự cấp cho tài khoản đang login.
 
 `ddl-auto=validate` tránh tự thay đổi schema. Flyway trong cấu hình hiện tại đang tắt; cơ chế khởi tạo database cần được chọn khi triển khai.
 
 ## Kiểm thử
 
-Test package phản chiếu module và trách nhiệm. Test đăng nhập dùng Spring MVC/filter, BCrypt/JWT thật và mock repository. Kiểm tra login theo hai định danh, giữ số 0 đầu, thiếu credentials, định danh mơ hồ, trạng thái tài khoản và thu hồi JWT. Test authorization kiểm tra scope ORG/TEAM/OWN và không ghép nhầm assignment. Test mapping dựng Hibernate metadata/session factory không kết nối DB, đối chiếu đủ 13 bảng, column/type/length và primary key với SQL.
+Test package phản chiếu module và trách nhiệm. Test đăng nhập dùng Spring MVC/filter, BCrypt/JWT thật và mock repository. Kiểm tra login theo hai định danh, giữ số 0 đầu, thiếu credentials, định danh mơ hồ, trạng thái tài khoản và thu hồi JWT. Test authorization kiểm tra scope ORG/TEAM/OWN và không ghép nhầm assignment. Test mapping dựng Hibernate metadata/session factory không kết nối DB, đối chiếu đủ 8 bảng, column/type/length và primary key với SQL.
 
 Sau khi đổi package chạy `mvn clean test` để loại bỏ class cũ trong target, tránh trùng Spring bean/entity. Bộ test này chưa xác nhận schema trên PostgreSQL thực tế.
 
@@ -120,3 +122,12 @@ Sau khi đổi package chạy `mvn clean test` để loại bỏ class cũ trong
 4. Enrollment, assignment, learning progress.
 5. Questions, quiz attempts, server-side scoring.
 6. Dashboard, reports, skill evidence và các module mở rộng.
+
+## Quy ước Lombok
+
+- Entity: @Getter, @Setter, @NoArgsConstructor; không dùng @Data, @ToString hoặc sinh equals/hashCode tự động trên entity/quan hệ JPA. Constructor rỗng và giá trị mặc định giữ nguyên.
+- CreatedEntity/UpdatedEntity chỉ @Getter; không mở setter cho timestamp do persistence quản lý.
+- Service/controller/security có dependency final dùng @RequiredArgsConstructor; vẫn là constructor injection.
+- DTO dùng record tiếp tục giữ record: constructor/accessor đã được Java sinh. LoginRequest, TokenResponse và JwtProperties có toString che secret, không log trực tiếp credential/token.
+- Lombok version theo Spring Boot BOM; lombok-mapstruct-binding 0.2.0 nằm trên annotation processor path để mapper nhận getter sinh bởi Lombok.
+- IntelliJ Reload Maven sau thay đổi; bật Annotation Processing nếu IDE chưa nhận mã sinh. lombok.config ở root được copy vào Docker build.

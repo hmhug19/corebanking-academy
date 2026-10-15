@@ -1,62 +1,57 @@
 package vn.com.coreacademy.identity.service;
 
+import lombok.RequiredArgsConstructor;
+
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import vn.com.coreacademy.identity.dto.RoleGrant;
-import vn.com.coreacademy.identity.dto.Scope;
-import vn.com.coreacademy.identity.dto.UserRights;
+import vn.com.coreacademy.identity.dto.*;
 import vn.com.coreacademy.identity.entity.RoleAssignment;
 import vn.com.coreacademy.identity.enums.ScopeType;
-import vn.com.coreacademy.identity.repository.PermissionRepository;
+import vn.com.coreacademy.identity.repository.FunctionRepository;
 import vn.com.coreacademy.identity.repository.RoleAssignmentRepository;
-
+import vn.com.coreacademy.organization.repository.TeamRepository;
 import java.util.*;
 
 @Service
 @Transactional(readOnly = true)
+@RequiredArgsConstructor
 public class AuthorizationService {
     private final RoleAssignmentRepository assignments;
-    private final PermissionRepository permissions;
-
-    public AuthorizationService(RoleAssignmentRepository assignments, PermissionRepository permissions) {
-        this.assignments = assignments;
-        this.permissions = permissions;
-    }
+    private final FunctionRepository functions;
+    private final TeamRepository teams;
 
     public UserRights rights(String userId) {
         List<RoleGrant> roles = new ArrayList<>();
-        Set<String> effective = new TreeSet<>();
+        Map<Long, FunctionInfo> screens = new LinkedHashMap<>();
         Map<String, List<Scope>> scoped = new TreeMap<>();
-        for (RoleAssignment assignment : assignments.findActiveForUser(userId)) {
-            Scope scope = new Scope(assignment.getScopeType(), assignment.getOrgId(), assignment.getTeamId());
-            roles.add(new RoleGrant(assignment.getRole().getCode(), scope));
-            for (String code : permissions.findCodesForRole(assignment.getRole().getId())) {
-                effective.add(code);
-                scoped.computeIfAbsent(code, key -> new ArrayList<>()).add(scope);
+        for (RoleAssignment grant : assignments.findActiveForUser(userId)) {
+            Scope scope = new Scope(grant.getScopeType(), grant.getOrgId(), grant.getTeamId());
+            roles.add(new RoleGrant(grant.getRole().getCode(), grant.getRole().getName(), scope));
+            for (var f : functions.findActiveForRole(grant.getRole().getId())) {
+                screens.putIfAbsent(f.getId(), new FunctionInfo(f.getId(), f.getCode(), f.getName(), f.getRoutePattern(), f.getParentFunctionId(), f.getSortNo()));
+                scoped.computeIfAbsent(f.getCode(), key -> new ArrayList<>()).add(scope);
             }
         }
-        return new UserRights(roles, effective, scoped);
+        List<FunctionInfo> ordered = screens.values().stream()
+                .sorted(Comparator.comparingInt(FunctionInfo::sortNo).thenComparing(FunctionInfo::id)).toList();
+        return new UserRights(roles, ordered, scoped);
     }
-
-    // Permission and scope must belong to the same role assignment.
-    public void require(String userId, String permission, Long organizationId) {
-        require(userId, permission, organizationId, null, null);
-    }
-
-    public void require(String userId, String permission, Long organizationId, Long teamId, String ownerId) {
-        for (RoleAssignment assignment : assignments.findActiveForUser(userId)) {
-            if (!permissions.findCodesForRole(assignment.getRole().getId()).contains(permission)) continue;
-            if (assignment.getScopeType() == ScopeType.GLOBAL) return;
-            // Shared catalog changes cannot be authorized by an ORG/TEAM assignment.
-            if (Set.of("role.manage", "position.manage").contains(permission)) continue;
-            if (assignment.getScopeType() == ScopeType.ORG
-                    && organizationId != null && organizationId.equals(assignment.getOrgId())) return;
-            if (assignment.getScopeType() == ScopeType.TEAM
-                    && organizationId != null && organizationId.equals(assignment.getOrgId())
-                    && teamId != null && teamId.equals(assignment.getTeamId())) return;
-            if (assignment.getScopeType() == ScopeType.OWN && userId.equals(ownerId)) return;
+    // API actions must explicitly choose the required role; screen access never authorizes writes.
+    // Role and scope must match on the same assignment. No implicit SUPER_ADMIN bypass.
+    public void requireRole(String userId, String role, Long orgId, Long teamId, String ownerId) {
+        for (RoleAssignment grant : assignments.findActiveForUser(userId)) {
+            if (!grant.getRole().getCode().equals(role)) continue;
+            ScopeType scope = grant.getScopeType();
+            if (scope == ScopeType.GLOBAL && grant.getOrgId() == null && grant.getTeamId() == null) return;
+            if (scope == ScopeType.ORG && orgId != null && orgId.equals(grant.getOrgId()) && grant.getTeamId() == null) return;
+            if (scope == ScopeType.TEAM && teamId != null && teamId.equals(grant.getTeamId()) && orgId != null) {
+                var team = teams.findById(teamId).orElse(null);
+                if (team != null && "active".equals(team.getStatus()) && orgId.equals(team.getOrgId())
+                        && (grant.getOrgId() == null || orgId.equals(grant.getOrgId()))) return;
+            }
+            if (scope == ScopeType.OWN && grant.getOrgId() == null && grant.getTeamId() == null && userId.equals(ownerId)) return;
         }
-        throw new AccessDeniedException("Permission or organization scope denied");
+        throw new AccessDeniedException("Role or scope denied");
     }
 }

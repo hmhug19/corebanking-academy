@@ -1,16 +1,20 @@
 package vn.com.coreacademy.common.persistence;
 
+import lombok.Getter;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.MappedSuperclass;
-import org.hibernate.annotations.Generated;
-import org.hibernate.generator.EventType;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import java.time.Instant;
 
+@Getter
 @MappedSuperclass
 public abstract class UpdatedEntity extends CreatedEntity {
-    @Generated(event = {EventType.INSERT, EventType.UPDATE})
-    @Column(name = "update_time", nullable = false, insertable = false, updatable = false)
-    private Instant updateTime;
+    @Column(name = "update_time", nullable = false)
+    private Instant updateTime = Instant.now();
 
-    public Instant getUpdateTime() { return updateTime; }
+    @PrePersist
+    @PreUpdate
+    protected void touchUpdateTime() { updateTime = Instant.now(); }
 }

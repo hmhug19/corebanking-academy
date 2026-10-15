@@ -1,5 +1,7 @@
 package vn.com.coreacademy.identity.bootstrap;
 
+import lombok.RequiredArgsConstructor;
+
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -7,33 +9,22 @@ import vn.com.coreacademy.identity.constants.SecurityConstants;
 import vn.com.coreacademy.identity.entity.Role;
 import vn.com.coreacademy.identity.entity.RoleAssignment;
 import vn.com.coreacademy.identity.entity.UserAccount;
-import vn.com.coreacademy.identity.entity.UserCredential;
 import vn.com.coreacademy.identity.enums.ScopeType;
 import vn.com.coreacademy.identity.repository.RoleAssignmentRepository;
 import vn.com.coreacademy.identity.repository.RoleRepository;
-import vn.com.coreacademy.identity.repository.UserCredentialRepository;
 import vn.com.coreacademy.identity.repository.UserRepository;
 
 import java.util.Locale;
 
 @Service
+@RequiredArgsConstructor
 public class BootstrapAdminService {
     private final UserRepository users;
-    private final UserCredentialRepository credentials;
     private final RoleRepository roles;
     private final RoleAssignmentRepository grants;
     private final PasswordEncoder encoder;
 
-    public BootstrapAdminService(UserRepository users, UserCredentialRepository credentials,
-                                 RoleRepository roles, RoleAssignmentRepository grants, PasswordEncoder encoder) {
-        this.users = users;
-        this.credentials = credentials;
-        this.roles = roles;
-        this.grants = grants;
-        this.encoder = encoder;
-    }
-
-    @Transactional
+@Transactional
     public void create(String userId, String username, String password) {
         if (userId.isBlank() && username.isBlank() && password.isBlank()) return;
         if (userId.isBlank() || username.isBlank() || password.isBlank())
@@ -57,12 +48,9 @@ public class BootstrapAdminService {
         user.setId(userId);
         user.setUsername(normalizedUsername);
         user.setFullName("Bootstrap Admin");
+        user.setPasswordHash(encoder.encode(password));
+        user.setPasswordChangedTime(java.time.Instant.now());
         users.saveAndFlush(user);
-        UserCredential credential = new UserCredential();
-        credential.setUserId(userId);
-        credential.setUsername(normalizedUsername);
-        credential.setPasswordHash(encoder.encode(password));
-        credentials.save(credential);
         RoleAssignment assignment = new RoleAssignment();
         assignment.setUser(user);
         assignment.setRole(role);

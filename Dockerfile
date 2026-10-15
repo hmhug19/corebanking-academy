@@ -2,7 +2,7 @@
 FROM maven:3-eclipse-temurin-21-noble AS build
 WORKDIR /build
 
-COPY pom.xml ./
+COPY pom.xml lombok.config ./
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp dependency:go-offline
 
 COPY src ./src
@@ -18,6 +18,7 @@ RUN apt-get update \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
 
 WORKDIR /app
+RUN mkdir -p /app/logs && chown 10001:10001 /app/logs
 COPY --from=build --chown=10001:10001 /build/target/corebanking-academy-*.jar ./app.jar
 
 ENV SERVER_PORT=8019
