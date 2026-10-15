@@ -1,6 +1,6 @@
 # CI/CD backend lên Ubuntu
 
-Pipeline chạy khi push/merge vào `develop`. Pull request vào `develop` chỉ build/test. Có thể bấm Run workflow và chọn `develop` để deploy thủ công.
+Pipeline chạy khi push/merge vào `main`. Pull request vào `main` chỉ build/test. Có thể bấm Run workflow và chọn `main` để deploy thủ công.
 
 Dockerfile hiện tại build/test bằng Java 21; image được push private lên `ghcr.io/hmhug19/corebanking-academy` và deploy bằng digest bất biến. Workflow dùng GITHUB_TOKEN của từng job, không cần lưu GitHub PAT trên Ubuntu.
 
@@ -9,7 +9,7 @@ Dockerfile hiện tại build/test bằng Java 21; image được push private l
 1. Server cần cài `deploy/ci/compose.ci.yaml` vào `/etc/core-academy-ci/compose.yaml` và `deploy/ci/deploy-ci.sh` vào `/usr/local/sbin/core-academy-ci-deploy`, owner root, quyền 644 và 755 tương ứng.
 2. SSH key CI được cấu hình trên `dev_user` với forced command và cấm forwarding/PTY. Sudo chỉ miễn mật khẩu cho script deploy cố định, không cho shell hoặc lệnh sudo bất kỳ.
 3. Thêm repository Actions secret `UBUNTU_DEPLOY_SSH_KEY` bằng private key CI đã chuẩn bị riêng. Không commit hoặc gửi private key vào chat.
-4. Merge workflow vào `develop`, hoặc bấm Run workflow trên `develop` sau khi merge.
+4. Merge workflow vào `main`, hoặc bấm Run workflow trên `main` sau khi merge.
 
 DB/JWT/runtime config lấy từ `/opt/core-academy/backend/.env.ubuntu` hiện có. PostgreSQL, Redis và dữ liệu không được recreate theo pipeline. Không chạy migration tự động; Flyway hiện tắt trong ứng dụng.
 
