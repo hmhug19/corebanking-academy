@@ -61,7 +61,7 @@ IntelliJ: Reload Maven, bật annotation processing và giữ JDK 21 cho Project
 ## Chuẩn bị đưa base lên Git
 
 - Source hiện dùng `vn.com.coreacademy`, đã bỏ import package cũ trong test và cập nhật tài liệu.
-- `.gitignore` loại `.env` thật, target, output/tmp/logs, archive triển khai, IDE và file key/certificate riêng. Chỉ `.env.example` và `.env.ubuntu.example` là mẫu được phép đưa lên Git.
+- `.gitignore` loại `.env` thật, target, output/tmp/logs, archive triển khai, IDE và file key/certificate riêng. File môi trường chứa secret chỉ lưu trên máy chạy ứng dụng, không đưa lên Git.
 - File mẫu không có password/JWT thật; DB host dùng placeholder. `.gitattributes` chuẩn hóa LF cho source/config để làm việc Windows/Ubuntu.
 - `target/generated-sources` là output build, không commit. Configuration metadata sẽ được sinh lại khi build.
 - Migration Flyway trong resources là legacy của schema cũ; Flyway vẫn tắt. Script `docs/sql/learning_hub_identity.sql` là nguồn khởi tạo schema hiện tại. Thiết kế migration cho schema mới là bước riêng.

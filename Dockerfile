@@ -18,7 +18,7 @@ RUN apt-get update \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
 
 WORKDIR /app
-COPY --from=build --chown=10001:10001 /build/target/core-academy-*.jar ./app.jar
+COPY --from=build --chown=10001:10001 /build/target/corebanking-academy-*.jar ./app.jar
 
 ENV SERVER_PORT=8019
 USER 10001:10001

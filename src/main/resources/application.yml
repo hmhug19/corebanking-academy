@@ -6,7 +6,7 @@ spring:
   config:
     import: "optional:file:./.env[.properties]"
   application:
-    name: core-academy
+    name: corebanking-academy
   datasource:
     url: ${DB_URL}
     username: ${DB_USER}
@@ -35,3 +35,16 @@ app:
     admin-id: ${APP_BOOTSTRAP_ADMIN_ID:}
     admin-user: ${APP_BOOTSTRAP_ADMIN_USER:}
     admin-password: ${APP_BOOTSTRAP_ADMIN_PASSWORD:}
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+    path: /swagger-ui.html
+    persist-authorization: false
+    disable-swagger-default-url: true
+    display-request-duration: true
+    tags-sorter: alpha
+    operations-sorter: method
+  packages-to-scan: vn.com.coreacademy
+  paths-to-match: /api/**

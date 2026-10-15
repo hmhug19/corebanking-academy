@@ -18,7 +18,7 @@ Source đã mapping đủ 13 bảng trong schema `learning_hub` theo `docs/sql/l
 
 ## Yêu cầu
 
-Triển khai backend bằng Docker trên Ubuntu: xem [hướng dẫn build/deploy](docs/DEPLOY_UBUNTU.md). Dùng `Dockerfile`, `compose.ubuntu.yaml` và `.env.ubuntu.example`; PostgreSQL hiện có được cấu hình qua biến môi trường.
+Triển khai backend bằng Docker trên Ubuntu: xem [hướng dẫn build/deploy](docs/DEPLOY_UBUNTU.md). Dùng `Dockerfile`, `compose.ubuntu.yaml` và file cấu hình riêng trên server; PostgreSQL hiện có được cấu hình qua biến môi trường.
 
 - JDK 21 cho build/chạy local; Docker dùng JDK/JRE 21
 - Maven 3.6.3+ (khuyên Maven 3.9.x)
@@ -30,17 +30,15 @@ IntelliJ: chọn **Project SDK = JDK 21**, Language level 21 và Maven Runner JR
 ## Chạy local
 
 ```bash
-cp .env .env
 # Sửa DB_PASSWORD, JWT_SECRET và bộ APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD. Không commit .env.
 # Chạy PostgreSQL: docker compose --env-file .env up -d db
-# Export các biến môi trường trong shell (Docker Compose không tự export cho Maven):
-set -a; source .env; set +a
+# Spring Boot tự đọc file .env tại thư mục project.
 mvn clean test
 # Chạy docs/sql/learning_hub_identity.sql trên database đích trước khi chạy app.
 mvn spring-boot:run
 ```
 
-Nếu shell không hỗ trợ `source`, export biến môi trường bằng cách khác. Đợi PostgreSQL healthy trước khi chạy Spring Boot.
+Nếu dùng PostgreSQL local qua Docker, đợi database healthy trước khi chạy Spring Boot.
 
 Spring Boot tự đọc file `.env` ở thư mục chạy nhờ `spring.config.import`. Khi chạy IntelliJ, đặt Working directory là thư mục project. File dùng định dạng properties `KEY=value`, không dùng `export` hoặc bọc giá trị bằng dấu nháy. Biến môi trường vẫn ghi đè giá trị trong `.env`; không đặt `JWT_SECRET` rỗng trong Run Configuration. `.env` đã được ignore, không commit secret. Nếu file không tồn tại thì cấu hình lấy từ biến môi trường.
 
@@ -94,3 +92,18 @@ RHEL 7.9 đã cũ. Kiểm tra Java 21 runtime, TLS/repo, chính sách vận hàn
 - Dev 4: Angular learner dashboard, course, lesson player.
 - Dev 5: Angular admin, quiz, reporting.
 - Dev 6: knowledge, issue, practice, skill integration.
+
+## Swagger / OpenAPI
+
+- Swagger UI: http://localhost:8019/swagger-ui.html
+- OpenAPI JSON: http://localhost:8019/v3/api-docs
+- Đổi host/port theo môi trường triển khai.
+
+Trên UI, gọi POST /api/v1/auth/login bằng username hoặc mã cán bộ và mật khẩu.
+Copy accessToken, bấm Authorize và chỉ dán token (không thêm Bearer), rồi gọi GET /api/v1/auth/me.
+Trang tài liệu không yêu cầu login; API nghiệp vụ vẫn kiểm tra JWT và quyền.
+Token không được lưu lại sau khi reload UI.
+
+Mặc định SWAGGER_ENABLED=true. Đặt SWAGGER_ENABLED=false trong .env để tắt cả UI và API docs.
+Compose Ubuntu và Compose CI truyền biến này vào container; recreate container sau khi đổi giá trị.
+springdoc 2.9.1 thuộc dòng 2.x dành cho Spring Boot 3: https://springdoc.org/v2/

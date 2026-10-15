@@ -39,13 +39,13 @@ git clone URL_REPO_CORE_ACADEMY /opt/core-academy-backend
 cd /opt/core-academy-backend
 ```
 
-Nếu dùng SFTP/SCP, copy `Dockerfile`, `.dockerignore`, `compose.ubuntu.yaml`, `.env.ubuntu.example`, `pom.xml`, `src/`, `docs/sql/learning_hub_identity.sql` và các hướng dẫn cần dùng. Không cần copy `target/` hoặc `.env` local. Dockerfile cần SQL vì test mapping đối chiếu với script này.
+Nếu dùng SFTP/SCP, copy `Dockerfile`, `.dockerignore`, `compose.ubuntu.yaml`, `pom.xml`, `src/`, `docs/sql/learning_hub_identity.sql` và các hướng dẫn cần dùng. Không cần copy `target/` hoặc `.env` local. Dockerfile cần SQL vì test mapping đối chiếu với script này.
 
 Có thể đóng gói bằng PowerShell tại máy Windows, chỉ chọn các file source/config mẫu:
 
 ```powershell
 Set-Location D:\POC\core-academy-backend
-tar -czf core-academy-source.tar.gz Dockerfile .dockerignore compose.ubuntu.yaml .env.ubuntu.example .java-version pom.xml src docs deploy
+tar -czf core-academy-source.tar.gz Dockerfile .dockerignore compose.ubuntu.yaml .java-version pom.xml src docs deploy
 scp .\core-academy-source.tar.gz ubuntu@IP_SERVER:/tmp/
 ```
 
@@ -63,7 +63,7 @@ Thay `ubuntu@IP_SERVER` bằng user SSH và IP thực tế; thêm `-i PATH_TO_KE
 
 ```bash
 cd /opt/core-academy-backend
-cp .env.ubuntu.example .env.ubuntu
+touch .env.ubuntu
 chmod 600 .env.ubuntu
 nano .env.ubuntu
 ```
