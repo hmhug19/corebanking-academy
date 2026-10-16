@@ -2,9 +2,13 @@
 
 Base path: `/api/v1/auth`. Login nhận username hoặc mã cán bộ; `/me` và `/logout` yêu cầu `Authorization: Bearer <accessToken>`.
 
+## POST /login
+
+Body LoginRequest trực tiếp: `{"username":"hunghm8","password":"<PASSWORD>"}`. HTTP 200 trả BaseResponse<TokenResponse>; JWT tại `data.accessToken`. Chi tiết envelope và lỗi: [API_CONTRACT.md](API_CONTRACT.md).
+
 ## GET /me
 
-HTTP 200; Cache-Control: no-store. Ví dụ minh họa, các trường snapshot nguồn BRN/BRCD/CRA/BDS/dept/QLNS và lastSyncTime không liệt kê hết trong ví dụ:
+HTTP 200; Cache-Control: no-store. Payload sau nằm trong `BaseResponse.data`, không còn ở root response. Ví dụ minh họa, các trường snapshot nguồn BRN/BRCD/CRA/BDS/dept/QLNS và lastSyncTime không liệt kê hết trong ví dụ:
 
 ```json
 {
@@ -97,11 +101,11 @@ HTTP 200; Cache-Control: no-store. Ví dụ minh họa, các trường snapshot 
 - `functionScopes`: phạm vi truy cập màn hình theo các role đã gán. Không được dùng thông tin menu để cho phép CREATE/UPDATE/DELETE; API phải kiểm tra role/scope với dữ liệu thật.
 - Không trả passwordHash, JWT hoặc auth_ver trong hồ sơ.
 
-Contract cũ `authorization` được thay bằng các trường top-level trên; frontend cần cập nhật chỗ đọc response.
+Các trường trên nằm trong `response.data`; frontend không đọc trực tiếp từ root hoặc `authorization` cũ.
 
 ## POST /logout
 
-Không cần request body. Yêu cầu JWT còn hiệu lực. Trả **204 No Content** khi thành công. Frontend xóa token và hồ sơ/quyền đã cache, chuyển về trang đăng nhập.
+Không cần request body. Yêu cầu JWT còn hiệu lực. Trả **200 OK** với BaseResponse thành công và `data: null`. Frontend xóa token và hồ sơ/quyền đã cache, chuyển về trang đăng nhập.
 
 Backend tăng users.auth_ver bằng một atomic UPDATE có điều kiện khớp version trong JWT, đồng thời cập nhật update_time. **Logout thu hồi mọi JWT đã phát hành của tài khoản trên tất cả thiết bị**, không cần bảng session/denylist và không thay schema. Tất cả instance ứng dụng kiểm tra version từ database ở mỗi request.
 

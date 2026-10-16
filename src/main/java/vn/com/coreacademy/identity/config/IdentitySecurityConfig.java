@@ -55,7 +55,8 @@ public class IdentitySecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http, UserJwtAuthenticationConverter converter) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, UserJwtAuthenticationConverter converter,
+                                    vn.com.coreacademy.common.web.ApiSecurityErrorHandler errors) throws Exception {
         http.csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -64,7 +65,9 @@ public class IdentitySecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll()
                         .anyRequest().authenticated())
-                .oauth2ResourceServer(resource -> resource.jwt(jwt -> jwt.jwtAuthenticationConverter(converter)))
+                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors))
+                .oauth2ResourceServer(resource -> resource.authenticationEntryPoint(errors).accessDeniedHandler(errors)
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(converter)))
                 .cors(cors -> {});
         return http.build();
     }

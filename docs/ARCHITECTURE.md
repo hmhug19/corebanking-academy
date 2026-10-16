@@ -13,7 +13,7 @@ vn.com.coreacademy
 │   └── CorsConfig
 ├── common                         # Thành phần dùng chung, không thuộc nghiệp vụ
 │   ├── dto
-│   │   └── ApiError
+│   │   └── BaseResponse / FieldViolation
 │   └── exception
 │       └── ApiExceptionHandler
 │   # common/persistence: CreatedEntity và UpdatedEntity dùng timestamp do DB sinh
@@ -131,3 +131,7 @@ Sau khi đổi package chạy `mvn clean test` để loại bỏ class cũ trong
 - DTO dùng record tiếp tục giữ record: constructor/accessor đã được Java sinh. LoginRequest, TokenResponse và JwtProperties có toString che secret, không log trực tiếp credential/token.
 - Lombok version theo Spring Boot BOM; lombok-mapstruct-binding 0.2.0 nằm trên annotation processor path để mapper nhận getter sinh bởi Lombok.
 - IntelliJ Reload Maven sau thay đổi; bật Annotation Processing nếu IDE chưa nhận mã sinh. lombok.config ở root được copy vào Docker build.
+
+## Envelope HTTP
+
+JSON API nghiệp vụ tuân theo [API_CONTRACT.md](API_CONTRACT.md). Controller nhận DTO request trực tiếp và trả BaseResponse có kiểu; service giữ DTO nghiệp vụ. ApiExceptionHandler và ApiSecurityErrorHandler trả chung contract lỗi; RequestIdFilter quản lý X-Request-Id/MDC. Logout trả HTTP 200 với envelope thay 204.

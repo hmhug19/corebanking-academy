@@ -18,6 +18,7 @@
 |---|---|
 | Cấu trúc module, layer, Java/JPA/mapper | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Dependency và thư viện nền | [docs/BASE_LIBRARIES.md](docs/BASE_LIBRARIES.md), [pom.xml](pom.xml) |
+| Envelope, request ID, validation và lỗi API | [docs/API_CONTRACT.md](docs/API_CONTRACT.md) |
 | Login, JWT, me, logout và contract frontend | [docs/AUTH_API.md](docs/AUTH_API.md) |
 | Identity, tổ chức, RBAC và SQL | [docs/sql/README.md](docs/sql/README.md), [docs/sql/learning_hub_identity.sql](docs/sql/learning_hub_identity.sql) |
 | Logging | [docs/LOGGING.md](docs/LOGGING.md) |
@@ -37,6 +38,7 @@ Các tài liệu mô tả thiết kế và hiện trạng, không phải bằng 
 
 ## API, database và bảo mật
 
+- JSON API nghiệp vụ nhận DTO request trực tiếp, không bọc data hoặc kế thừa base request; response dùng BaseResponse<T>; lỗi MVC/Security cùng envelope, giữ HTTP status. Request ID ở X-Request-Id/MDC. Đọc docs/API_CONTRACT.md; không bọc Swagger/health/file/stream.
 - Giữ API dưới `/api/v1`; dùng DTO request/response rõ ràng và cập nhật Swagger khi đổi contract. Không đổi tên trường hoặc cấu trúc response ngoài phạm vi nhiệm vụ.
 - Local dùng một file `.env` ở thư mục chạy, application.yml tự import. Không tạo thêm profile/file env local khi chưa cần. Cấu hình server/CI độc lập, không ghi đè bằng secret local.
 - Không in, log hoặc commit password, password hash, JWT, signing secret hay private key. Không tin rằng .gitignore đã bảo vệ secret; kiểm tra file được chọn trước khi commit.

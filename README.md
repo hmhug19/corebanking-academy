@@ -49,7 +49,7 @@ curl http://localhost:8019/actuator/health
 curl -X POST http://localhost:8019/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"<APP_BOOTSTRAP_ADMIN_PASSWORD>"}'
-# Lấy accessToken từ response, sau đó:
+# Lấy accessToken từ response.data.accessToken, sau đó:
 curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8019/api/v1/auth/me
 # Trường username cũng nhận mã cán bộ; JWT subject và /me.user.userId giữ nguyên chuỗi, kể cả số 0 đầu.
 ```
@@ -60,7 +60,7 @@ Bootstrap admin cần đủ `APP_BOOTSTRAP_ADMIN_ID`, `APP_BOOTSTRAP_ADMIN_USER`
 
 - `POST /api/v1/auth/login`: login, nhận JWT Bearer ngắn hạn
 - `GET /api/v1/auth/me`: hồ sơ, mã role/function, roleGrants, functionDetails, functionScopes
-- `POST /api/v1/auth/logout`: JWT Bearer, trả 204 và thu hồi token của mọi phiên
+- `POST /api/v1/auth/logout`: JWT Bearer, trả BaseResponse HTTP 200 và thu hồi token của mọi phiên
 - `GET /actuator/health`: health check
 
 ## Phân quyền
@@ -112,3 +112,5 @@ springdoc 2.9.1 thuộc dòng 2.x dành cho Spring Boot 3: https://springdoc.org
 Chi tiết response `/me`, cách dùng roles/functions và logout: [AUTH_API.md](docs/AUTH_API.md).
 
 Logging dùng Log4j2, console và rolling file: [LOGGING.md](docs/LOGGING.md).
+
+Quy chuẩn request DTO, BaseResponse, request ID và lỗi: [API_CONTRACT.md](docs/API_CONTRACT.md).

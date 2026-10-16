@@ -3,7 +3,7 @@
     <Properties>
         <Property name="APP_NAME">${spring:spring.application.name:-corebanking-academy}</Property>
         <Property name="LOG_DIR">${spring:logging.file.path:-./logs}</Property>
-        <Property name="PATTERN">%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [${APP_NAME}] [%t] %c{1.} - %msg%n%throwable</Property>
+        <Property name="PATTERN">%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [${APP_NAME}] [%t] [requestId=%X{requestId}] %c{1.} - %msg%n%throwable</Property>
     </Properties>
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
