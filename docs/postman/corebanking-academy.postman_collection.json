@@ -1,0 +1,1338 @@
+{
+  "info": {
+    "_postman_id": "8976642c-9960-435e-83a1-05694c22bdd7",
+    "name": "Corebanking Academy - Identity API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Bộ 21 API Identity/Organization theo source hiện tại.\n\n## Bắt đầu\n1. Import collection và một trong hai environment Local/Dev. Chọn environment tương ứng.\n2. Điền username (mã cán bộ hoặc username) và password của tài khoản đã được cấp. Mật khẩu/token trong file export được để trống.\n3. Gửi Login: accessToken tự lưu vào environment và được các request khác kế thừa qua Bearer auth. Login dùng No Auth.\n4. Gửi Me. Nếu mustChangePassword=true, thực hiện Đổi mật khẩu riêng, cập nhật password trong environment rồi Login lại trước khi gọi API quản trị.\n5. Gửi Danh mục vai trò để tự bind learnerRoleId/instructorRoleId/adminRoleId/reportViewerRoleId khi role tồn tại.\n\n## Thử CRUD\nTạo org -> tạo team -> tạo user -> cấp/thu hồi role. Response tạo mới tự bind orgId/teamId/targetUserId/grantId. Có thể điền ID tài nguyên được phép kiểm thử vào environment để gọi request riêng. Request list không tự chọn ID của bản ghi đầu tiên.\n\nĐây là bộ request dùng thủ công hoặc chạy từng folder phù hợp, không phải kịch bản cleanup toàn bộ dữ liệu. Đổi mật khẩu/logout thu hồi token. Nhóm còn user hoặc grant tham chiếu (kể cả grant đã thu hồi) không xóa được; cần dùng nhóm rỗng để kiểm tra DELETE thành công. Không có API hard-delete user/org.\n\n## Kết quả\nLuôn kiểm tra status. Validation/lỗi nghiệp vụ có thể trả HTTP 200 với status=ERROR; request kiểm thử thành công sẽ báo test fail để người chạy xem messageCode/errors. 401/403/500 giữ HTTP tương ứng. Filter tùy chọn mặc định disabled; bật khi cần. Không export lại environment có password/token thật để commit.\n"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "(function () {",
+          "    if (!pm.environment.name) {",
+          "        throw new Error(\"Chọn environment Local hoặc Dev trước khi gửi request.\");",
+          "    }",
+          "    [\"username\", \"password\", \"initialPassword\", \"newPassword\"].forEach(function (key) {",
+          "        pm.variables.set(key + \"Json\", JSON.stringify(pm.environment.get(key) || \"\"));",
+          "    });",
+          "    pm.request.headers.upsert({key: \"Accept\", value: \"application/json\"});",
+          "    pm.request.headers.upsert({key: \"X-Request-Id\", value: pm.variables.replaceIn(\"pm-{{$guid}}\")});",
+          "})();"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "(function () {",
+          "    let response;",
+          "    pm.test(\"Response là JSON hợp lệ\", function () {",
+          "        response = pm.response.json();",
+          "        pm.expect(response).to.be.an(\"object\");",
+          "    });",
+          "    if (!response) return;",
+          "",
+          "    pm.test(\"BaseResponse có status và messageCode đúng quy ước\", function () {",
+          "        pm.expect(response.status).to.be.oneOf([\"SUCCESS\", \"ERROR\"]);",
+          "        pm.expect(response.messageCode).to.match(/^[A-Z]+-[A-Z]+(?:_[A-Z]+)*$/);",
+          "        pm.expect(typeof response.message).to.eql(\"string\");",
+          "        pm.expect(typeof response.messageTitle).to.eql(\"string\");",
+          "        pm.expect(Object.prototype.hasOwnProperty.call(response, \"data\")).to.eql(true);",
+          "    });",
+          "    pm.test(\"responseId khớp X-Request-Id\", function () {",
+          "        pm.expect(response.responseId).to.eql(pm.response.headers.get(\"X-Request-Id\"));",
+          "    });",
+          "    pm.test(\"Chi tiết lỗi không lộ giá trị bị từ chối\", function () {",
+          "        const errors = response.errors || [];",
+          "        pm.expect(Array.isArray(errors)).to.eql(true);",
+          "        pm.expect(errors.every(function (error) {",
+          "            return typeof error.field === \"string\" && /^[A-Z]+(?:_[A-Z]+)*$/.test(error.code)",
+          "                && typeof error.message === \"string\" && !Object.prototype.hasOwnProperty.call(error, \"rejectedValue\");",
+          "        })).to.eql(true);",
+          "    });",
+          "    if (pm.response.code >= 400) {",
+          "        pm.test(\"Lỗi HTTP có status=ERROR\", function () { pm.expect(response.status).to.eql(\"ERROR\"); });",
+          "    }",
+          "    if (pm.response.code === 401) {",
+          "        pm.environment.unset(\"accessToken\");",
+          "        pm.environment.unset(\"tokenExpiresAt\");",
+          "    }",
+          "})();"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Đăng nhập và hồ sơ",
+      "description": "Login trước, sau đó lấy hồ sơ/quyền. Token lưu riêng theo environment.",
+      "item": [
+        {
+          "name": "Đăng nhập - tự lưu accessToken",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Nhận username hoặc mã cán bộ, chưa hỗ trợ email. Không kế thừa Bearer token cũ.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": {{usernameJson}},\n  \"password\": {{passwordJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset(\"accessToken\");",
+                  "pm.environment.unset(\"tokenExpiresAt\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (pm.response.code === 200 && response.status === \"SUCCESS\" && response.data",
+                  "        && typeof response.data.accessToken === \"string\" && response.data.accessToken.trim()) {",
+                  "        pm.environment.set(\"accessToken\", response.data.accessToken);",
+                  "        const seconds = Number(response.data.expiresInSeconds);",
+                  "        if (Number.isFinite(seconds) && seconds > 0) {",
+                  "            pm.environment.set(\"tokenExpiresAt\", new Date(Date.now() + seconds * 1000).toISOString());",
+                  "        }",
+                  "    } else {",
+                  "        pm.environment.unset(\"accessToken\");",
+                  "        pm.environment.unset(\"tokenExpiresAt\");",
+                  "    }",
+                  "    pm.test(\"Token được tự bind vào environment\", function () {",
+                  "        pm.expect(typeof pm.environment.get(\"accessToken\")).to.eql(\"string\");",
+                  "        pm.expect(Boolean(pm.environment.get(\"accessToken\"))).to.eql(true);",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hồ sơ và quyền hiện tại",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Nếu mustChangePassword=true, đổi mật khẩu rồi đăng nhập lại trước khi gọi API quản trị."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.status === \"SUCCESS\" && response.data && response.data.user.mustChangePassword != null) {",
+                  "        pm.environment.set(\"mustChangePassword\", String(response.data.user.mustChangePassword));",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Vai trò",
+      "description": "Lấy roleId từ server; assignableScopes quyết định quyền cấp vai trò.",
+      "item": [
+        {
+          "name": "Danh mục vai trò - tự lưu roleId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "roles"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.status !== \"SUCCESS\" || !Array.isArray(response.data)) return;",
+                  "    const variables = {LEARNER: \"learnerRoleId\", INSTRUCTOR: \"instructorRoleId\",",
+                  "        ADMIN: \"adminRoleId\", REPORT_VIEWER: \"reportViewerRoleId\"};",
+                  "    Object.keys(variables).forEach(function (code) {",
+                  "        pm.environment.unset(variables[code]);",
+                  "        const role = response.data.find(function (item) { return item.code === code; });",
+                  "        if (role) pm.environment.set(variables[code], String(role.roleId));",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Tổ chức",
+      "description": "Tạo/sửa theo phạm vi quyền; tạo org chỉ dành global admin. Tạo thành công tự lưu orgId.",
+      "item": [
+        {
+          "name": "Danh sách tổ chức",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs?page=0&size=20&sort=sortNo,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "sortNo,asc"
+                },
+                {
+                  "key": "q",
+                  "value": "{{searchQ}}",
+                  "disabled": true
+                },
+                {
+                  "key": "rootOnly",
+                  "value": "true",
+                  "disabled": true
+                },
+                {
+                  "key": "parentId",
+                  "value": "{{orgId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "orgType",
+                  "value": "UNIT",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Không gửi đồng thời rootOnly=true và parentId. q tìm literal, tối đa 100 ký tự."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo tổ chức - tự lưu orgId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orgType\": \"UNIT\",\n  \"code\": \"PM_ORG_{{$timestamp}}\",\n  \"name\": \"Đơn vị kiểm thử Postman\",\n  \"sortNo\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset(\"orgId\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(201); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.status === \"SUCCESS\" && response.data && response.data.id != null) {",
+                  "        pm.environment.set(\"orgId\", String(response.data.id));",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chi tiết tổ chức",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "{{orgId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cập nhật tổ chức",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/{{orgId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "{{orgId}}"
+              ]
+            },
+            "description": "Chỉ gửi field muốn sửa. status cần global admin; không đổi parentId/orgType.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Đơn vị kiểm thử Postman - cập nhật\",\n  \"sortNo\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Nhóm",
+      "description": "Các request dùng orgId/teamId của environment. Team phải thuộc đúng tổ chức.",
+      "item": [
+        {
+          "name": "Danh sách nhóm thuộc tổ chức",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/{{orgId}}/teams?page=0&size=20&sort=name,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "{{orgId}}",
+                "teams"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "name,asc"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo nhóm - tự lưu teamId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/{{orgId}}/teams",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "{{orgId}}",
+                "teams"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"PM_TEAM_{{$timestamp}}\",\n  \"name\": \"Nhóm kiểm thử Postman\",\n  \"description\": \"Dữ liệu kiểm thử API\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset(\"teamId\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(201); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.status === \"SUCCESS\" && response.data && response.data.id != null) {",
+                  "        pm.environment.set(\"teamId\", String(response.data.id));",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cập nhật nhóm",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teams/{{teamId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "teams",
+                "{{teamId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nhóm kiểm thử Postman - cập nhật\",\n  \"description\": \"Đã cập nhật thông tin nhóm\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Người dùng",
+      "description": "targetUserId là tài khoản đang quản lý, khác user đăng nhập. Điền initialPassword trước khi tạo user.",
+      "item": [
+        {
+          "name": "Danh sách người dùng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users?page=0&size=20&sort=fullName,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "fullName,asc"
+                },
+                {
+                  "key": "q",
+                  "value": "{{searchQ}}",
+                  "disabled": true
+                },
+                {
+                  "key": "roleCode",
+                  "value": "LEARNER",
+                  "disabled": true
+                },
+                {
+                  "key": "orgId",
+                  "value": "{{orgId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "teamId",
+                  "value": "{{teamId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo người dùng - tự lưu targetUserId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users"
+              ]
+            },
+            "description": "Nếu newUserId/newUsername trống thì tự tạo định danh theo thời gian. User mới phải đổi mật khẩu tạm; không gán role ngầm.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{newUserId}}\",\n  \"username\": \"{{newUsername}}\",\n  \"fullName\": \"Người dùng kiểm thử Postman\",\n  \"email\": \"postman.user@example.test\",\n  \"positionName\": \"Chuyên viên\",\n  \"orgId\": {{orgId}},\n  \"teamId\": {{teamId}},\n  \"initialPassword\": {{initialPasswordJson}},\n  \"initialRoleGrants\": [{\"roleId\": {{learnerRoleId}}, \"scope\": \"OWN\"}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    pm.environment.unset(\"targetUserId\");",
+                  "    pm.environment.unset(\"grantId\");",
+                  "    const generated = \"pm\" + Date.now();",
+                  "    if (!pm.environment.get(\"newUserId\")) pm.variables.set(\"newUserId\", generated);",
+                  "    if (!pm.environment.get(\"newUsername\")) pm.variables.set(\"newUsername\", \"postman.\" + generated);",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(201); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.status === \"SUCCESS\" && response.data && response.data.user.userId != null) {",
+                  "        pm.environment.set(\"targetUserId\", String(response.data.user.userId));",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chi tiết người dùng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cập nhật người dùng",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}"
+              ]
+            },
+            "description": "Đổi membership bằng orgId/teamId trong cùng body; chuyển org/team thu hồi mọi grant khác OWN. Null xóa field nullable, bỏ qua giữ nguyên.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Người dùng kiểm thử Postman - cập nhật\",\n  \"positionName\": \"Chuyên viên kỹ thuật\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cập nhật trạng thái tài khoản",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "status"
+              ]
+            },
+            "description": "Giá trị: active/inactive/locked. Không tự khóa tài khoản đang đăng nhập; thay đổi sẽ thu hồi token của target.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"inactive\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Phân quyền",
+      "description": "Role và scope thuộc cùng grant; không dùng chức danh để suy quyền.",
+      "item": [
+        {
+          "name": "Cấp vai trò - tự lưu grantId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/role-grants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "role-grants"
+              ]
+            },
+            "description": "OWN/GLOBAL không gửi orgId/teamId; ORG gửi orgId; TEAM gửi teamId. Chỉ SUPER_ADMIN cấp/thu hồi ADMIN/SUPER_ADMIN.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleId\": {{instructorRoleId}},\n  \"scope\": \"ORG\",\n  \"orgId\": {{orgId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset(\"grantId\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(201); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.status === \"SUCCESS\" && response.data && response.data.grantId != null) {",
+                  "        pm.environment.set(\"grantId\", String(response.data.grantId));",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thu hồi vai trò",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/{{targetUserId}}/role-grants/{{grantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "{{targetUserId}}",
+                "role-grants",
+                "{{grantId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () { if (pm.response.json().status === \"SUCCESS\") pm.environment.unset(\"grantId\"); })();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Xóa nhóm",
+      "description": "Chỉ dùng với nhóm rỗng, chưa có grant lịch sử tham chiếu.",
+      "item": [
+        {
+          "name": "Xóa nhóm",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teams/{{teamId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "teams",
+                "{{teamId}}"
+              ]
+            },
+            "description": "Nhóm còn user/grant tham chiếu trả HTTP 200/ERROR với ORGANIZATION-TEAM_IN_USE. Test thành công sẽ fail trong trường hợp này để người chạy thấy thao tác chưa được thực hiện."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () { if (pm.response.json().status === \"SUCCESS\") pm.environment.unset(\"teamId\"); })();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 - Hồ sơ cá nhân và mật khẩu",
+      "description": "Thực hiện riêng khi cần. Đổi mật khẩu thành công thu hồi token, cần cập nhật password rồi Login lại.",
+      "item": [
+        {
+          "name": "Cập nhật hồ sơ cá nhân",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Chỉ LOCAL và đã đổi mật khẩu tạm. Có thể sửa fullName/email/positionName; không sửa tổ chức/quyền.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionName\": \"Chuyên viên kỹ thuật\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đổi mật khẩu - xóa token đã thu hồi",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "password"
+              ]
+            },
+            "description": "Điền newPassword từ 6 ký tự, tối đa 72 byte UTF-8 và khác mật khẩu hiện tại. Sau thành công cập nhật password rồi Login lại; không tự thay credential trong environment.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": {{passwordJson}},\n  \"newPassword\": {{newPasswordJson}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();",
+                  "",
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    if (response.status === \"SUCCESS\") {",
+                  "        pm.environment.unset(\"accessToken\");",
+                  "        pm.environment.unset(\"tokenExpiresAt\");",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 - Đăng xuất",
+      "description": "Đăng xuất mọi phiên. Xóa accessToken khỏi environment khi thành công hoặc token đã không còn hiệu lực.",
+      "item": [
+        {
+          "name": "Đăng xuất - xóa accessToken",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"Logout thành công hoặc phiên đã bị thu hồi\", function () {",
+                  "        pm.expect(pm.response.code).to.be.oneOf([200, 401]);",
+                  "        pm.expect(pm.response.code === 200 ? response.status === \"SUCCESS\" : response.status === \"ERROR\").to.eql(true);",
+                  "    });",
+                  "    if (response.status === \"SUCCESS\" || pm.response.code === 401) {",
+                  "        pm.environment.unset(\"accessToken\");",
+                  "        pm.environment.unset(\"tokenExpiresAt\");",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

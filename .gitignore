@@ -16,3 +16,6 @@ logs/
 *.p12
 *.pfx
 *.jks
+
+# Personal notes and local verification reports
+/docs/local/

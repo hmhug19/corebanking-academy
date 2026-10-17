@@ -1,15 +1,26 @@
 package vn.com.coreacademy.audit.entity;
 
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
-
-import jakarta.persistence.*;
-import vn.com.coreacademy.common.persistence.CreatedEntity;
-import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.Map;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.ConstraintMode;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import vn.com.coreacademy.common.persistence.CreatedEntity;
 import vn.com.coreacademy.identity.entity.UserAccount;
 
 @Getter
@@ -40,6 +51,12 @@ public class AuditLog extends CreatedEntity {
     private Map<String, Object> details = new LinkedHashMap<>();
 
     @ManyToOne(fetch = FetchType.LAZY, optional = true)
-    @JoinColumn(name = "actor_id", referencedColumnName = "user_id", insertable = false, updatable = false, foreignKey = @ForeignKey(ConstraintMode.NO_CONSTRAINT))
+    @JoinColumn(
+        name = "actor_id",
+        referencedColumnName = "user_id",
+        insertable = false,
+        updatable = false,
+        foreignKey = @ForeignKey(ConstraintMode.NO_CONSTRAINT)
+    )
     private UserAccount actor;
 }

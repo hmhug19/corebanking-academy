@@ -1,14 +1,23 @@
 package vn.com.coreacademy.identity.entity;
 
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
-
-import jakarta.persistence.*;
-import vn.com.coreacademy.common.persistence.UpdatedEntity;
 import java.time.Instant;
-import vn.com.coreacademy.identity.enums.UserStatus;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import vn.com.coreacademy.common.persistence.UpdatedEntity;
 import vn.com.coreacademy.identity.converter.UserStatusConverter;
+import vn.com.coreacademy.identity.enums.AuthProvider;
+import vn.com.coreacademy.identity.enums.UserStatus;
 
 @Getter
 @Setter
@@ -29,6 +38,7 @@ public class UserAccount extends UpdatedEntity {
     @Column(name = "full_name", length = 255, nullable = false)
     private String fullName;
 
+    // Metadata từ nguồn; không suy cây tổ chức hoặc quyền quản trị từ BRN/BRCD/CRA.
     @Column(name = "brn", length = 20)
     private String brn;
 
@@ -66,24 +76,35 @@ public class UserAccount extends UpdatedEntity {
     @Convert(converter = UserStatusConverter.class)
     private UserStatus status = UserStatus.ACTIVE;
 
+    // Tăng phiên bản để thu hồi JWT có claim av cũ, không cần lưu từng token.
     @Column(name = "auth_ver", nullable = false)
     private long authorizationVersion = 0;
 
     @Column(name = "last_sync_time")
     private Instant lastSyncTime;
 
+    // Tổ chức/nhóm nội bộ; service kiểm tra quan hệ logic vì schema không có FK vật lý.
     @Column(name = "org_id")
     private Long orgId;
+
     @Column(name = "team_id")
     private Long teamId;
+
     @Column(name = "position_name", length = 255)
     private String positionName;
+
     @Column(name = "auth_provider", length = 20, nullable = false)
     @Enumerated(EnumType.STRING)
-    private vn.com.coreacademy.identity.enums.AuthProvider authProvider = vn.com.coreacademy.identity.enums.AuthProvider.LOCAL;
-    @com.fasterxml.jackson.annotation.JsonIgnore
+    private AuthProvider authProvider = AuthProvider.LOCAL;
+
+    @JsonIgnore
     @Column(name = "password_hash", length = 255)
     private String passwordHash;
+
+    // Cho phép đăng nhập để đổi mật khẩu tạm, nhưng chặn quản trị cho tới khi đổi xong.
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword;
+
     @Column(name = "password_changed_time")
     private Instant passwordChangedTime;
 }

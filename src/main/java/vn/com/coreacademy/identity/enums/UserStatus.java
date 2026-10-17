@@ -9,8 +9,14 @@ public enum UserStatus {
     ACTIVE("active"), LOCKED("locked"), INACTIVE("inactive");
 
     private final String value;
+
     public static UserStatus fromValue(String value) {
-        for (UserStatus status : values()) if (status.value.equals(value)) return status;
+        for (UserStatus status : values()) {
+            if (status.value.equals(value)) {
+                return status;
+            }
+        }
+
         throw new IllegalArgumentException("Unknown user status: " + value);
     }
 }

@@ -1,13 +1,21 @@
 package vn.com.coreacademy.common.web;
 
-import org.slf4j.MDC;
 import java.util.UUID;
 
-/** No extra ThreadLocal: use the same context as logging. */
+import org.slf4j.MDC;
+
+/**
+ * Dùng chung MDC với logging để envelope và log có cùng requestId, không tạo ThreadLocal riêng.
+ */
 public final class RequestIdContext {
-    public static final String HEADER = "X-Request-Id";
     public static final String MDC_KEY = "requestId";
-    private RequestIdContext() {}
+
+    private RequestIdContext() {
+    }
+
+    /**
+     * Dùng ID từ MDC hoặc tạo ID dự phòng khi chạy ngoài filter; không ghi ID mới vào MDC.
+     */
     public static String currentOrNew() {
         String value = MDC.get(MDC_KEY);
         return value == null || value.isBlank() ? UUID.randomUUID().toString() : value;

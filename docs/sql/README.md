@@ -1,24 +1,33 @@
-# Identity / Organization / RBAC compact
+# Khởi tạo Identity / Organization / RBAC
 
-`learning_hub_identity.sql` là bản sao SQL compact do người dùng cung cấp, gồm 8 bảng: orgs, teams, users, roles, functions, role_functions, user_roles, audit_log. PostgreSQL 14+, schema learning_hub. Chỉ dùng để tạo mới; không chạy đè schema đang có dữ liệu. Flyway đang tắt, Hibernate ddl-auto=validate. Không có migration hoặc thay đổi database tự động trong bước cập nhật source.
+Nguồn SQL duy nhất: [learning_hub_identity.sql](learning_hub_identity.sql), PostgreSQL 14+. Chạy toàn bộ file một lần trong database/schema mới hoặc vừa được tạo lại. Không cần script upgrade, gán root, extension pgcrypto, tham số bind hoặc Flyway. File không tạo/xóa database và không tự DROP dữ liệu; không chạy đè database đang có dữ liệu cần giữ.
 
-## Dữ liệu và quan hệ
+## Nội dung
 
-- users.user_id là mã cán bộ dạng chuỗi; user_name duy nhất. Login hỗ trợ cả hai, không phân biệt hoa/thường cho username và từ chối định danh khớp nhiều user.
-- LOCAL dùng users.password_hash BCrypt; SSO để NULL và không dùng API login mật khẩu local. Không trả hash trong /me.
-- Một org_id/team_id chính, position_name là text. Không tự suy quan hệ cây từ BRN/BRCD/CRA.
-- Không có FOREIGN KEY vật lý. Khi xây dựng API quản trị phải kiểm tra các tham chiếu logic, team thuộc org và ngăn chu trình parent_id.
-- functions là màn hình FE; role_functions không cấp quyền thao tác ghi cho API. Backend kiểm tra role và scope của cùng user_roles grant; scope GLOBAL/ORG/TEAM/OWN.
-- Role/Function không có timestamp; Team chỉ có create_time; role_functions dùng created_at. update_time ở các entity có cột này được JPA cập nhật khi ghi.
+- 8 bảng: orgs, teams, users, roles, functions, role_functions, user_roles, audit_log; kèm comment cho từng bảng/cột và 12 index.
+- 5 vai trò: SUPER_ADMIN, ADMIN, LEARNER, INSTRUCTOR, REPORT_VIEWER; 16 chức năng và mapping màn hình hiện có. Danh mục màn hình không có nghĩa backend đã triển khai API khóa học/thi/báo cáo.
+- Một tổ chức gốc trong phạm vi demo: BIDV110B803 — Ban Quản lý và phát triển Core Banking (UNIT). 15 nhóm/bộ phận giữ nguyên mã và tên từ dữ liệu nguồn; gồm Ban Giám đốc, BA&QC, phát triển Core/Kênh, tích hợp, quản trị và hỗ trợ. Không tạo phòng trung gian hoặc node cha ngoài phạm vi; HO/WORK_LOGIC là loại nguồn, không thay trực tiếp org_type nội bộ.
+- 7 tài khoản LOCAL, 8 phân quyền theo đúng cặp role/scope và một audit khởi tạo. ID số tự tăng được database sinh; dữ liệu tham chiếu bằng mã, không cần chỉnh sequence.
+- Không có FOREIGN KEY vật lý. Service kiểm tra quan hệ logic, cây active, org/team và scope. users.must_change_password đã nằm trong schema; không cần nâng cột sau tạo.
 
-## Chạy script
+## Đăng nhập demo
 
-Dùng SQL Editor trên database mới với quyền tạo schema/bảng. Script chính BEGIN/COMMIT tạo bảng và seed bốn role cùng màn hình. Không chạy lại khi bảng đã tồn tại.
+Mật khẩu công khai của bộ dữ liệu demo: **Demo@123**. Có thể đăng nhập bằng mã cán bộ hoặc username dưới đây; tất cả tài khoản seed có must_change_password=false, không bắt buộc đổi mật khẩu lần đầu. Mật khẩu mới từ 6 ký tự và tối đa 72 byte UTF-8. Đây là dữ liệu tổng hợp được yêu cầu cho demo, không dùng tài khoản hoặc mật khẩu thật.
 
-Phần SUPER_ADMIN ở sau COMMIT là thao tác gán quyền riêng, chứa tham số `:bootstrap_user_id`: cần bind đúng mã cán bộ của tài khoản đã tồn tại trong SQL client trước khi chạy. Không gửi nguyên file với tham số chưa bind qua JDBC/psql. Vì không có FK, SQL không tự phát hiện gán quyền cho user không tồn tại. Phần cuối không nằm trong transaction tạo schema; kiểm tra kết quả hai phần riêng biệt. Script không tạo user và không reset password.
+| Mã cán bộ | Username | Vai trò / phạm vi | Tổ chức / nhóm |
+|---|---|---|---|
+| 000001 | super.admin | SUPER_ADMIN / GLOBAL | Ban Core Banking / chưa gán nhóm |
+| 000002 | quantri | ADMIN / GLOBAL | Ban Core Banking / chưa gán nhóm |
+| 000003 | quantri.ban | ADMIN / ORG BIDV110B803 | Ban Core Banking / chưa gán nhóm |
+| 000004 | hocvien | LEARNER / OWN | Nhóm BA&QC Tiền gửi — BIDV110B803103 |
+| 000005 | giangvien | INSTRUCTOR / ORG BIDV110B803 và LEARNER / OWN | Nhóm phát triển Core Banking — BIDV110B8031281 |
+| 000006 | baocao | REPORT_VIEWER / TEAM BIDV110B8031000 | Ban Giám đốc — BIDV110B8031000 |
+| 000007 | hocvien.tichhop | LEARNER / OWN | Nhóm Tích hợp Core Banking — BIDV110B8031280 |
 
-Khi đổi schema của database có dữ liệu, cần một migration riêng được kiểm tra trước; bản SQL này không phải migration.
+1. Chạy script bằng SQL client trên database mới, với quyền tạo schema, bảng và index.
+2. Cấu hình DB_URL/DB_USER/DB_PASSWORD, JWT_SECRET trong .env hiện tại. Giữ ddl-auto=validate và Flyway off. Nếu runtime DB user khác chủ schema, DBA cấp quyền schema/bảng/sequence theo hướng dẫn triển khai.
+3. Để trống ba biến APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD vì script đã tạo root. Bootstrap Java vẫn giữ cho trường hợp khởi tạo có chủ đích; khi có root active thì không tạo thêm hoặc reset quyền/mật khẩu.
+4. Đăng nhập super.admin hoặc 000001 bằng mật khẩu demo. /auth/me trả mustChangePassword=false và quyền SUPER_ADMIN; có thể dùng ngay các API quản trị. Tài khoản LOCAL tạo mới qua API hoặc root tạo qua bootstrap vẫn phải đổi mật khẩu tạm như logic hiện tại.
+5. quantri.ban quản lý toàn Ban gồm 15 nhóm và các tài khoản thường trong Ban; hocvien.tichhop là học viên nhóm tích hợp, không phải user ngoài đơn vị. Quyền TEAM của baocao chỉ gắn với Ban Giám đốc; tên bộ phận/chức danh không tự cấp quyền quản trị. Chỉ SUPER_ADMIN quản lý tài khoản đang mang vai trò quản trị.
 
-## Kiểm tra source
-
-`mvn clean verify` kiểm tra đủ 8 bảng, column/type/length/primary key cùng các luồng login và role/scope. `/api/v1/auth/me` trả `roles`, `functions`, `roleGrants`, `functionDetails`, `functionScopes`; frontend cần dùng contract mới thay cho permissions/permissionScopes.
+Schema/seed cùng một transaction PostgreSQL; có lỗi thì rollback transaction trước khi chạy lại. Database đã có dữ liệu cần giữ phải có kế hoạch thay đổi riêng, không dùng file khởi tạo để nâng cấp hoặc reset. Không có script nào tự chạy khi ứng dụng khởi động.

@@ -1,10 +1,17 @@
 package vn.com.coreacademy.identity.entity;
 
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
+import java.time.Instant;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 @Getter
 @Setter
@@ -16,10 +23,13 @@ public class RoleFunction {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
     private Long id;
+
     @Column(name = "role_id", nullable = false)
     private Long roleId;
+
     @Column(name = "function_id", nullable = false)
     private Long functionId;
+
     @Column(name = "created_at", nullable = false)
-    private java.time.Instant createdAt = java.time.Instant.now();
+    private Instant createdAt = Instant.now();
 }

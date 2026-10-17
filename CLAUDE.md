@@ -1,9 +1,9 @@
 # Hướng dẫn cho Claude
 
-Trước khi thực hiện công việc, đọc và tuân theo [AGENTS.md](AGENTS.md) ở root repository. Đây là nguồn quy tắc chung cho developer và các coding agent.
+Trước khi thực hiện nhiệm vụ liên quan source code:
 
-- Đọc tài liệu được AGENTS.md tham chiếu theo phạm vi công việc.
-- Đọc thêm AGENTS.md trong các thư mục con liên quan, nếu có.
-- Khi source/config và tài liệu mâu thuẫn, xác minh và nêu rõ điểm lệch theo quy tắc trong AGENTS.md.
-- Không duy trì bộ quy chuẩn kiến trúc, code style hoặc bảo mật trùng lặp tại đây. Cập nhật quy tắc chung trong AGENTS.md hoặc tài liệu chuyên đề tương ứng.
-- Yêu cầu trực tiếp của người dùng được xử lý theo thứ tự ưu tiên đã nêu trong AGENTS.md, trong giới hạn các chỉ dẫn hệ thống của công cụ.
+1. Đọc và tuân thủ [AGENTS.md](AGENTS.md) và [DEVELOPMENT_GUIDELINES.md](DEVELOPMENT_GUIDELINES.md).
+2. Đọc hướng dẫn thư mục con và tài liệu chuyên đề được dẫn theo phạm vi task; xác minh bằng source/config thực tế.
+3. Áp dụng cùng quy tắc với các coding agent khác, gồm giới hạn phạm vi, bảo vệ dữ liệu/secret và kiểm chứng trước khi kết luận.
+
+Không duy trì bộ style/kiến trúc/kiểm thử riêng tại đây; cập nhật nguồn chung và giữ thay đổi của người dùng.

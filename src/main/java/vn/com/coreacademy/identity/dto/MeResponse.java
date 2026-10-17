@@ -5,4 +5,5 @@ import java.util.Map;
 
 public record MeResponse(UserInfo user, List<String> roles, List<String> functions,
                          List<RoleGrant> roleGrants, List<FunctionInfo> functionDetails,
-                         Map<String, List<Scope>> functionScopes) {}
+                         Map<String, List<Scope>> functionScopes) {
+}

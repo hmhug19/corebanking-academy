@@ -1,13 +1,17 @@
 package vn.com.coreacademy.common.persistence;
 
-import lombok.Getter;
+import java.time.Instant;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.MappedSuperclass;
+
+import lombok.Getter;
 import org.hibernate.annotations.Generated;
 import org.hibernate.generator.EventType;
-import java.time.Instant;
 
+/**
+ * create_time do default database sinh; Hibernate đọc lại sau insert, không ghi đè từ ứng dụng.
+ */
 @Getter
 @MappedSuperclass
 public abstract class CreatedEntity {

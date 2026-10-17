@@ -9,9 +9,9 @@ import org.springframework.context.annotation.Configuration;
 public class DevBootstrap {
     @Bean
     CommandLineRunner bootstrapAdmin(BootstrapAdminService bootstrap,
-                                    @Value("${app.bootstrap.admin-id:}") String userId,
-                                    @Value("${app.bootstrap.admin-user:}") String username,
-                                    @Value("${app.bootstrap.admin-password:}") String password) {
+                                     @Value("${app.bootstrap.admin-id:}") String userId,
+                                     @Value("${app.bootstrap.admin-user:}") String username,
+                                     @Value("${app.bootstrap.admin-password:}") String password) {
         return args -> bootstrap.create(userId, username, password);
     }
 }

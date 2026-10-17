@@ -1,3 +1,3 @@
 package vn.com.coreacademy.identity.enums;
 
-public enum ScopeType { GLOBAL, ORG, TEAM, OWN }
+public enum ScopeType {GLOBAL, ORG, TEAM, OWN}

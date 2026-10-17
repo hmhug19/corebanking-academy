@@ -6,7 +6,7 @@ COPY pom.xml lombok.config ./
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp dependency:go-offline
 
 COPY src ./src
-# IdentityMappingTest compares Hibernate metadata with this standalone script.
+# Keep the canonical Identity initialization script in the build context; it is never auto-executed.
 COPY docs/sql/learning_hub_identity.sql ./docs/sql/learning_hub_identity.sql
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp clean verify
 

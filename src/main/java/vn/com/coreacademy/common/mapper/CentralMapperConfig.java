@@ -7,11 +7,11 @@ import org.mapstruct.NullValueCheckStrategy;
 import org.mapstruct.ReportingPolicy;
 
 @MapperConfig(
-        componentModel = MappingConstants.ComponentModel.SPRING,
-        injectionStrategy = InjectionStrategy.CONSTRUCTOR,
-        unmappedTargetPolicy = ReportingPolicy.ERROR,
-        typeConversionPolicy = ReportingPolicy.ERROR,
-        nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS
+    componentModel = MappingConstants.ComponentModel.SPRING,
+    injectionStrategy = InjectionStrategy.CONSTRUCTOR,
+    unmappedTargetPolicy = ReportingPolicy.ERROR,
+    typeConversionPolicy = ReportingPolicy.ERROR,
+    nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS
 )
 public interface CentralMapperConfig {
 }

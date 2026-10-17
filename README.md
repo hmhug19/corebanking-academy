@@ -1,24 +1,24 @@
 # CORE Academy Backend — Modular Monolith Starter
 
-Spring Boot **3.5.16 GA** / Java **21 LTS** / Maven / PostgreSQL / Flyway / Spring Security / JWT.
+Spring Boot **3.5.16 GA** / Java **21 LTS** / Maven / PostgreSQL / SQL thủ công / Spring Security / JWT.
 
-Nhánh Spring Boot 3.5 dùng bản GA 3.5.16, tương thích Java 21 theo [system requirements chính thức](https://docs.spring.io/spring-boot/3.5/system-requirements.html). Maven compile/release target 21; Docker build và runtime đều dùng Temurin 21. Dependency version được quản lý bởi Spring Boot parent, không pin riêng Spring/Hibernate/Jackson.
+Nhánh Spring Boot 3.5 dùng bản GA 3.5.16, tương thích Java 21 theo [system requirements chính thức](https://docs.spring.io/spring-boot/3.5/system-requirements.html). Maven compile/release target hiện tại là 17; Docker build và runtime đều dùng Temurin 21. Dependency version được quản lý bởi Spring Boot parent, không pin riêng Spring/Hibernate/Jackson.
 
-MapStruct 1.6.3 đã cấu hình và áp dụng trong `identity.mapper.UserMapper`; quy ước và đánh giá các thư viện khác nằm trong [BASE_LIBRARIES.md](docs/BASE_LIBRARIES.md). Spring Boot configuration processor sinh metadata cho cấu hình; generated code chỉ nằm trong `target`.
+MapStruct 1.6.3 đã cấu hình và áp dụng trong `identity.mapper.UserMapper`; quy ước và đánh giá các thư viện khác nằm trong [Thư viện và build](docs/ARCHITECTURE.md#libraries). Spring Boot configuration processor sinh metadata cho cấu hình; generated code chỉ nằm trong `target`.
 
 ## Trạng thái
 
-Source tổ chức theo module chức năng, bên trong chia `controller`, `service`, `repository`, `entity`, `dto` và các package hỗ trợ. `identity` là module mẫu đăng nhập/phân quyền; organization và audit có entity/repository. Xem [quy ước kiến trúc](docs/ARCHITECTURE.md).
+Source tổ chức theo module chức năng, bên trong chia `controller`, `service`, `repository`, `entity`, `dto` và các package hỗ trợ. `identity` có xác thực và quản trị user/role; organization có API org/team và audit ghi sự kiện. Xem [kiến trúc hiện tại](docs/ARCHITECTURE.md); quy chuẩn phát triển/style dùng chung tại [DEVELOPMENT_GUIDELINES.md](DEVELOPMENT_GUIDELINES.md).
 
 Source mapping 8 bảng compact trong schema `learning_hub` theo `docs/sql/learning_hub_identity.sql`: users, orgs, teams, roles, functions, role_functions, user_roles và audit_log. Hồ sơ giữ một org/team chính và position_name. Database name trong JDBC URL khác schema name: script có thể chạy trong database `appdb` hoặc database khác; các entity luôn chỉ rõ schema `learning_hub`.
 
 **Starter, không phải sản phẩm LMS hoàn chỉnh.** Đã có: login bằng username hoặc mã cán bộ, `/me`, JWT HS256, multi-role, màn hình và scope và kiểm tra scope GLOBAL/ORG/TEAM/OWN theo context được cung cấp. Hash mật khẩu LOCAL nằm trong `users.password_hash`; SSO không đăng nhập bằng mật khẩu local.
 
-**Chưa có:** course API và hierarchy, question bank/quiz engine, tiến độ học, content upload/player, reporting, UI Angular, audit event writers, refresh token/SSO và user-management APIs. Entity/repository không đồng nghĩa đã có API quản trị.
+**Chưa có:** course API và hierarchy, question bank/quiz engine, tiến độ học, content upload/player, reporting, UI Angular và refresh token/SSO integration. Phạm vi 21 API core Identity đã triển khai được mô tả trong [Contract Identity](docs/api/IDENTITY.md).
 
 ## Yêu cầu
 
-Triển khai backend bằng Docker trên Ubuntu: xem [hướng dẫn build/deploy](docs/DEPLOY_UBUNTU.md). Dùng `Dockerfile`, `compose.ubuntu.yaml` và file cấu hình riêng trên server; PostgreSQL hiện có được cấu hình qua biến môi trường.
+Triển khai backend bằng Docker trên Ubuntu: xem [hướng dẫn build/deploy](docs/operations/DEPLOY_UBUNTU.md). Dùng `Dockerfile`, `compose.ubuntu.yaml` và file cấu hình riêng trên server; PostgreSQL hiện có được cấu hình qua biến môi trường.
 
 - JDK 21 cho build/chạy local; Docker dùng JDK/JRE 21
 - Maven 3.6.3+ (khuyên Maven 3.9.x)
@@ -30,7 +30,7 @@ IntelliJ: chọn **Project SDK = JDK 21**, Language level 21 và Maven Runner JR
 ## Chạy local
 
 ```bash
-# Sửa DB_PASSWORD, JWT_SECRET và bộ APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD. Không commit .env.
+# Cấu hình DB_URL/DB_USER/DB_PASSWORD, JWT_SECRET. Để trống bộ APP_BOOTSTRAP_ADMIN_* khi dùng seed demo.
 # Chạy PostgreSQL: docker compose --env-file .env up -d db
 # Spring Boot tự đọc file .env tại thư mục project.
 mvn clean test
@@ -48,13 +48,13 @@ Spring Boot tự đọc file `.env` ở thư mục chạy nhờ `spring.config.i
 curl http://localhost:8019/actuator/health
 curl -X POST http://localhost:8019/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<APP_BOOTSTRAP_ADMIN_PASSWORD>"}'
+  -d '{"username":"super.admin","password":"Demo@123"}'
 # Lấy accessToken từ response.data.accessToken, sau đó:
 curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8019/api/v1/auth/me
 # Trường username cũng nhận mã cán bộ; JWT subject và /me.user.userId giữ nguyên chuỗi, kể cả số 0 đầu.
 ```
 
-Bootstrap admin cần đủ `APP_BOOTSTRAP_ADMIN_ID`, `APP_BOOTSTRAP_ADMIN_USER` và `APP_BOOTSTRAP_ADMIN_PASSWORD`; để trống cả ba nếu không dùng bootstrap. Chạy SQL seed trước. User, credentials và GLOBAL ADMIN assignment được tạo trong một transaction; không tự reset account đã tồn tại. Script chỉ seed danh mục, không seed user hoặc đơn vị.
+Script duy nhất [learning_hub_identity.sql](docs/sql/learning_hub_identity.sql) tạo đủ schema và dữ liệu demo, gồm super.admin (000001), quantri và các vai trò nghiệp vụ. Mật khẩu tạm Demo@123, bắt buộc đổi sau đăng nhập đầu; xem [danh sách tài khoản và cách chạy](docs/sql/README.md). Không cần APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD khi dùng bộ seed này. Bootstrap Java vẫn giữ cho trường hợp khởi tạo có chủ đích, không reset hoặc cấp lại quyền cho user đã tồn tại.
 
 ## API có sẵn
 
@@ -67,14 +67,14 @@ Bootstrap admin cần đủ `APP_BOOTSTRAP_ADMIN_ID`, `APP_BOOTSTRAP_ADMIN_USER`
 
 - `learning_hub.users` → `user_roles` → `roles` → `role_functions` → `functions`.
 - `GLOBAL` cho toàn hệ thống; `ORG` khớp tổ chức; `TEAM` phải khớp cả tổ chức và nhóm; `OWN` khớp owner ID của resource do backend cung cấp.
-- Không tự kế thừa ORG xuống tổ chức con. Context phân quyền phải lấy từ dữ liệu server, không tin org/team/owner ID do browser khai báo.
+- ORG bao gồm node được gán và cây con active khi toàn bộ đường cha hợp lệ. Context phân quyền phải lấy từ dữ liệu server, không tin org/team/owner ID do browser khai báo.
 - `AuthorizationService.requireRole` kiểm tra role và scope trên cùng grant. Mỗi API nghiệp vụ phải chọn role cho hành động cụ thể; quyền màn hình không cho phép tự động CREATE/UPDATE/DELETE. SUPER_ADMIN là role tường minh, không tự bypass API.
 - Angular sử dụng `/auth/me` để hiện menu. Mọi API vẫn kiểm tra server-side.
 - Không nên nhét role/permission vào JWT trong cấu hình này; server đọc RBAC từ DB khi cần.
 
 Trạng thái user trong `/me` là `active/inactive/locked`. Scope response chứa `type`, `orgId`, `teamId`. Username được lưu chữ thường, login username không phân biệt hoa/thường. Đầu vào khớp hai user qua ID và username sẽ bị từ chối.
 
-Flyway đang tắt. Các migration cũ trong resources chỉ là bản legacy, không tương thích schema mới; không bật lại để khởi tạo schema mới. Hibernate giữ `ddl-auto=validate`, không tự tạo hoặc sửa database.
+Flyway đang tắt; đã loại bỏ các migration legacy không tương thích. Chỉ dùng docs/sql/learning_hub_identity.sql để khởi tạo cụm Identity mới. Hibernate giữ `ddl-auto=validate`, không tự tạo hoặc sửa database.
 
 ## Lưu ý production / server RHEL 7.9
 
@@ -109,8 +109,18 @@ Mặc định SWAGGER_ENABLED=true. Đặt SWAGGER_ENABLED=false trong .env đ�
 Compose Ubuntu và Compose CI truyền biến này vào container; recreate container sau khi đổi giá trị.
 springdoc 2.9.1 thuộc dòng 2.x dành cho Spring Boot 3: https://springdoc.org/v2/
 
-Chi tiết response `/me`, cách dùng roles/functions và logout: [AUTH_API.md](docs/AUTH_API.md).
+Logging dùng Log4j2, console và rolling file: [LOGGING.md](docs/operations/LOGGING.md).
 
-Logging dùng Log4j2, console và rolling file: [LOGGING.md](docs/LOGGING.md).
+Quy chuẩn request DTO, BaseResponse, request ID và lỗi: [API_CONTRACT.md](docs/api/API_CONTRACT.md).
 
-Quy chuẩn request DTO, BaseResponse, request ID và lỗi: [API_CONTRACT.md](docs/API_CONTRACT.md).
+## Tài liệu theo phạm vi
+
+- Quy tắc phát triển: [DEVELOPMENT_GUIDELINES.md](DEVELOPMENT_GUIDELINES.md); AGENTS.md/CLAUDE.md là điểm vào cho agent.
+- Thiết kế và thư viện hiện có: [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Triển khai tự động: [CI/CD](docs/operations/CICD.md).
+- Chỉ commit tài liệu dùng chung trong docs/api, docs/operations, docs/sql và kiến trúc. Ghi chú/nhật ký cá nhân để docs/local; mockup để docs/uiux. Hai thư mục này bị Git ignore.
+
+## Identity administration
+
+- [Contract Identity](docs/api/IDENTITY.md) — 21 API core, form và luồng lỗi.
+- Database mới/tạo lại: chạy duy nhất [learning_hub_identity.sql](docs/sql/learning_hub_identity.sql), gồm schema và seed demo. Database có dữ liệu cần giữ phải có kế hoạch thay đổi riêng; không chạy đè script khởi tạo.

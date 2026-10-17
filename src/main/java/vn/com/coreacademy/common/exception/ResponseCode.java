@@ -7,27 +7,54 @@ import org.springframework.http.HttpStatus;
 @Getter
 @RequiredArgsConstructor
 public enum ResponseCode implements ApiResponseCode {
-    SUCCESS(HttpStatus.OK, "CORE-0000", "Request completed successfully", "Success"),
-    VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "CORE-0400-VALIDATION", "Request validation failed", "Invalid request"),
-    MALFORMED_REQUEST(HttpStatus.BAD_REQUEST, "CORE-0400-JSON", "Request body is missing or malformed", "Invalid request"),
-    BAD_REQUEST(HttpStatus.BAD_REQUEST, "CORE-0400", "Request rejected", "Invalid request"),
-    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "CORE-0401", "Authentication failed or token is invalid", "Authentication required"),
-    FORBIDDEN(HttpStatus.FORBIDDEN, "CORE-0403", "You do not have permission to perform this action", "Access denied"),
-    NOT_FOUND(HttpStatus.NOT_FOUND, "CORE-0404", "Requested resource was not found", "Not found"),
-    METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "CORE-0405", "HTTP method is not supported", "Method not allowed"),
-    NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "CORE-0406", "Requested response format is not supported", "Not acceptable"),
-    CONFLICT(HttpStatus.CONFLICT, "CORE-0409", "Request conflicts with the current resource state", "Conflict"),
-    UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "CORE-0415", "Request content type is not supported", "Unsupported media type"),
-    TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "CORE-0429", "Too many requests", "Too many requests"),
-    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "CORE-0500", "An unexpected error occurred", "Server error");
+    SUCCESS(HttpStatus.OK, "CORE-SUCCESS", "Thao tác thành công.", "Thành công"),
+    VALIDATION_FAILED(HttpStatus.OK, "CORE-VALIDATION_FAILED",
+        "Dữ liệu đầu vào không hợp lệ.", "Thông tin chưa hợp lệ"),
+    MALFORMED_REQUEST(HttpStatus.BAD_REQUEST, "CORE-MALFORMED_REQUEST",
+        "Nội dung yêu cầu bị thiếu hoặc JSON không đúng cú pháp.", "Yêu cầu không hợp lệ"),
+    BAD_REQUEST(HttpStatus.BAD_REQUEST, "CORE-BAD_REQUEST", "Yêu cầu không hợp lệ.", "Yêu cầu không hợp lệ"),
+    UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "CORE-UNAUTHENTICATED",
+        "Phiên đăng nhập không hợp lệ hoặc đã hết hiệu lực. Vui lòng đăng nhập lại.", "Yêu cầu đăng nhập"),
+    FORBIDDEN(HttpStatus.FORBIDDEN, "CORE-ACCESS_DENIED",
+        "Bạn không có quyền thực hiện thao tác này.", "Không có quyền truy cập"),
+    NOT_FOUND(HttpStatus.NOT_FOUND, "CORE-ENDPOINT_NOT_FOUND",
+        "Không tìm thấy tài nguyên yêu cầu.", "Không tìm thấy dữ liệu"),
+    RESOURCE_NOT_FOUND(HttpStatus.OK, "CORE-RESOURCE_NOT_FOUND",
+        "Không tìm thấy dữ liệu yêu cầu.", "Không tìm thấy dữ liệu"),
+    METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "CORE-METHOD_NOT_ALLOWED",
+        "Phương thức HTTP không được hỗ trợ.", "Phương thức không hợp lệ"),
+    NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "CORE-NOT_ACCEPTABLE",
+        "Định dạng phản hồi yêu cầu không được hỗ trợ.", "Định dạng không được hỗ trợ"),
+    CONFLICT(HttpStatus.OK, "CORE-STATE_CONFLICT",
+        "Thao tác không phù hợp với trạng thái dữ liệu hiện tại.", "Xung đột dữ liệu"),
+    UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "CORE-UNSUPPORTED_MEDIA_TYPE",
+        "Kiểu nội dung yêu cầu không được hỗ trợ.", "Kiểu nội dung không hợp lệ"),
+    TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "CORE-TOO_MANY_REQUESTS",
+        "Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau.", "Quá nhiều yêu cầu"),
+    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "CORE-INTERNAL_ERROR",
+        "Hệ thống gặp lỗi. Vui lòng thử lại sau hoặc cung cấp responseId để được hỗ trợ.", "Lỗi hệ thống");
 
     private final HttpStatus httpStatus;
     private final String code;
     private final String message;
     private final String title;
 
+    @Override
+    public boolean isSuccess() {
+        return this == SUCCESS;
+    }
+
+    /** Ánh xạ lỗi HTTP hạ tầng tường minh, không suy từ mã nghiệp vụ có thể dùng cùng HTTP 200. */
     public static ResponseCode forHttpStatus(int status) {
-        for (ResponseCode code : values()) if (code.httpStatus.value() == status && code != VALIDATION_FAILED && code != MALFORMED_REQUEST) return code;
-        return status >= 500 ? INTERNAL_ERROR : BAD_REQUEST;
+        return switch (status) {
+            case 401 -> UNAUTHORIZED;
+            case 403 -> FORBIDDEN;
+            case 404 -> NOT_FOUND;
+            case 405 -> METHOD_NOT_ALLOWED;
+            case 406 -> NOT_ACCEPTABLE;
+            case 415 -> UNSUPPORTED_MEDIA_TYPE;
+            case 429 -> TOO_MANY_REQUESTS;
+            default -> status >= 500 ? INTERNAL_ERROR : BAD_REQUEST;
+        };
     }
 }

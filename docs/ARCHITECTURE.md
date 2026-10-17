@@ -1,137 +1,130 @@
-# Quy ước kiến trúc CORE Academy
+# Kiến trúc Corebanking Academy
 
-Baseline: JDK 21 LTS, Spring Boot 3.5.16 GA. Maven parent quản lý version các thư viện; compile target và Docker build/runtime cùng dùng Java 21.
+Tài liệu này mô tả cấu trúc và luồng đang có. Quy tắc phát triển, phân lớp, MapStruct/Lombok và format được quản lý tập trung tại [DEVELOPMENT_GUIDELINES.md](../DEVELOPMENT_GUIDELINES.md#java-conventions); không duy trì bộ convention thứ hai tại đây.
 
-## Cấu trúc thống nhất
+## Baseline và cấu trúc
 
-Ứng dụng là modular monolith: một Spring Boot application, tổ chức theo chức năng ở cấp đầu tiên, theo trách nhiệm kỹ thuật bên trong từng module. `identity` là module mẫu; organization và audit có mapping persistence. Learning và các module khác chưa có implementation, sẽ dùng cùng cấu trúc.
+Modular monolith với package `vn.com.coreacademy`. Phiên bản thực tế lấy từ pom.xml và Dockerfile: Spring Boot 3.5.16, compiler target Java 17, container build/runtime Java 21. Không suy phiên bản từ tên repository hoặc tài liệu cũ.
 
 ```text
 vn.com.coreacademy
 ├── CoreAcademyApplication
-├── config                         # Cấu hình hạ tầng toàn ứng dụng
-│   └── CorsConfig
-├── common                         # Thành phần dùng chung, không thuộc nghiệp vụ
-│   ├── dto
-│   │   └── BaseResponse / FieldViolation
-│   └── exception
-│       └── ApiExceptionHandler
-│   # common/persistence: CreatedEntity và UpdatedEntity dùng timestamp do DB sinh
+├── config                         # Wiring toàn ứng dụng
+│   ├── SecurityConfig / JwtProperties
+│   └── CorsConfig / OpenApiConfig
+├── security                       # Caller và HTTP security adapters dùng chung
+│   ├── SecurityContextUtils (static)
+│   └── ApiSecurityErrorHandler / SecurityConstants
+├── common                         # Không phụ thuộc nghiệp vụ
+│   ├── constants                  # HttpHeaderNames; chuẩn HTTP dùng thư viện sẵn có
+│   ├── dto / exception            # Envelope và lỗi chung
+│   ├── web                        # RequestIdFilter, RequestIdContext, PageQuery
+│   └── mapper / persistence / validation
 ├── identity
-│   ├── controller                 # HTTP endpoints
-│   │   └── AuthController
-│   ├── service                    # Use case và transaction
-│   │   ├── AuthService
-│   │   ├── AuthorizationService
-│   │   └── TokenService
-│   ├── repository                 # Truy cập dữ liệu
-│   ├── entity                     # JPA entities
-│   ├── dto                        # Request/response
-│   ├── enums                      # UserStatus, ScopeType
-│   ├── converter                  # UserStatusConverter lưu status chữ thường
-│   ├── constants                  # SecurityConstants
-│   ├── security                   # Adapter Spring Security và current user
-│   ├── config                     # IdentitySecurityConfig, JwtProperties
-│   └── bootstrap                  # Khởi tạo admin có cấu hình
-├── organization                   # entity/repository tổ chức, nhóm, chức danh
-├── audit                          # entity/repository audit_log
-├── learning                       # Chưa có implementation
-├── assessment
-├── content
-├── progress
-├── reporting
-└── ...
+│   ├── controller / service / repository / entity / dto / mapper
+│   ├── constants                  # RoleCodes
+│   ├── security                   # Account-aware adapters và PasswordPolicy
+│   └── bootstrap / converter / enums / exception
+├── organization                   # API, use case và persistence org/team
+├── audit                          # Ghi audit cùng transaction
+└── learning / assessment / ...     # Phạm vi nghiệp vụ khác
 ```
 
-## Trách nhiệm và phụ thuộc
+Sơ đồ là cấu trúc module, không phải danh sách tính năng hoàn thiện. Identity có controller/service/repository/entity/dto/mapper/security; Organization có API org/team; Audit có ghi sự kiện. Các module học tập và báo cáo vẫn là phạm vi riêng.
 
-| Package | Trách nhiệm | Quy tắc |
-|---|---|---|
-| controller | Nhận HTTP, validate request, lấy caller, gọi service, chọn HTTP status | Không gọi repository, không viết nghiệp vụ, không trả entity |
-| service | Use case, kiểm tra quyền, phối hợp repository, dựng DTO | Đặt transaction ở use case; không phụ thuộc controller |
-| repository | JPA query và persistence | Không xử lý HTTP hay quyết định quyền của caller |
-| entity | Mapping database và trạng thái đối tượng | Field private; không dùng làm request/response |
-| dto | Hợp đồng request/response | Dùng record khi phù hợp; không trả password hash |
-| enums | Tập giá trị đóng như trạng thái, loại scope | JPA lưu STRING, tránh phụ thuộc thứ tự enum |
-| constants | Giá trị cố định có tên thuộc module | Không gom mọi hằng số vào GlobalConstants |
-| security | Adapter xác thực, chuyển JWT thành principal, lấy current user | Là Spring bean khi có dependency; không đặt vào utils |
-| config | Wiring bean và binding cấu hình | Cấu hình riêng nằm trong module, hạ tầng chung nằm ở root config |
-| bootstrap | Khởi tạo dữ liệu kỹ thuật có cấu hình | Không seed dữ liệu thật hoặc secrets cố định |
+## Ranh giới xử lý
 
-Module khác dùng service/DTO hoặc adapter công khai của module; kiểm tra quyền qua `identity.service.AuthorizationService`. Mapping quan hệ persistence có thể tham chiếu entity ở module khác bằng FK; use case không truy vấn repository của module khác trực tiếp. `common` không import module nghiệp vụ. Chưa có công cụ cưỡng chế ranh giới module tự động.
+```text
+HTTP → controller (request/validation/caller)
+     → service (use case/quyền/transaction)
+     → repository → PostgreSQL
+     → mapper/DTO → BaseResponse
+```
 
-Service dùng class cụ thể và constructor injection. Chỉ thêm interface khi có nhiều implementation hoặc cần contract thay thế; không tạo cặp Service/ServiceImpl cho mọi class.
+Common chứa contract, exception, persistence base, mapper config, validation và web helpers dùng chung. Cấu hình hạ tầng ở root config; cấu hình riêng nghiệp vụ nằm trong module. Identity/Organization administration phối hợp repository trong transaction để giữ quan hệ logic, không có FK vật lý. Chưa có công cụ tự động cưỡng chế ranh giới module.
 
-Entity/DTO được mapping trong `<module>.mapper` bằng MapStruct. `identity.mapper.UserMapper` là mẫu; service inject mapper thay vì tự dựng UserInfo. Cấu hình chung nằm trong `common.mapper.CentralMapperConfig`: Spring component, constructor injection, thiếu target field hoặc chuyển kiểu mất dữ liệu sẽ lỗi compile. Converter trạng thái cần giữ giá trị `active/inactive/locked`. Exception nghiệp vụ riêng đặt trong `<module>.exception`.
-
-## Common, utils và constants
-
-- `common.dto`, `common.exception`: hợp đồng lỗi và xử lý lỗi chung, hiện đã có code.
-- `common.util`: chỉ thêm khi có hàm thuần dùng chung nhiều module, ví dụ xử lý chuỗi/thời gian. Không chứa service, phân quyền, truy vấn database hoặc truy cập Spring context. Hiện chưa có utility cần dùng chung nên chưa tạo lớp rỗng.
-- `<module>.util`: helper riêng của module, nếu cần.
-- `<module>.constants`: hằng số thuộc module, hiện có SecurityConstants.
-- `common.constants`: chỉ dùng khi hằng số có cùng ý nghĩa ở nhiều module và không thuộc module cụ thể; hiện chưa cần.
-- Giá trị thay đổi theo môi trường phải ở configuration properties. `JwtProperties` bind `app.jwt`, kiểm tra expiry và che signing secret trong `toString()`.
-
-## Luồng mẫu
+## Xác thực và phân quyền
 
 ```text
 POST /api/v1/auth/login
-  → AuthController → AuthService
-  → AuthenticationManager / DaoAuthenticationProvider
-  → LocalUserDetailsService → LoginUserResolver → UserRepository
-  → UserAccount chứa password_hash; chỉ auth_provider=LOCAL được login mật khẩu
-  → PasswordEncoder kiểm tra mật khẩu và trạng thái
-  → TokenService tạo JWT HS256
+ → AuthController → AuthService → AuthenticationManager
+ → LocalUserDetailsService → LoginUserResolver → users
+ → BCrypt LOCAL credentials → TokenService → JWT
 
 GET /api/v1/auth/me
-  → SecurityFilterChain / JwtDecoder
-  → UserJwtAuthenticationConverter kiểm tra trạng thái và auth version
-  → AuthController / CurrentUser
-  → AuthService → AuthorizationService → MeResponse
+ → RequestIdFilter → Spring Security/JwtDecoder
+ → UserJwtAuthenticationConverter (status/auth_ver)
+ → AuthController → AuthService lấy userId qua SecurityContextUtils
+ → AuthorizationService → MeResponse
 
+Administrative API
+ → controller chuyển request → service tự lấy caller qua SecurityContextUtils
+ → IdentityAccessPolicy (action + scope từ DB)
+ → query có scope trước count/pagination
+ → transaction + IdentityWriteLock → persistence + audit
 ```
 
-JWT subject là mã cán bộ dạng chuỗi; auth version map cột auth_ver. Quyền đọc từ database, cùng assignment với scope. GLOBAL/ORG/TEAM/OWN được kiểm tra theo resource context; không tự kế thừa xuống tổ chức con. Backend phải xác định org/team/owner từ dữ liệu thật. Learning API chưa triển khai.
+IdentityAccessPolicy xác định phạm vi quản trị; AuthorizationService dùng cùng quy tắc cây ORG cho quyền theo role. PostgreSQL advisory transaction lock điều phối admin writes giữa các instance. PATCH DTO dùng field-presence để phân biệt bỏ qua và null; read-model mapping dùng MapStruct.
 
-Giữ URL login/me và trường request username; username nhận cả mã cán bộ và username, normalize username thành chữ thường. JWT principal luôn dùng mã cán bộ. Từ chối login nếu không có local credentials hoặc định danh khớp nhiều user. Response /me.user.userId là chuỗi, status chữ thường; /me trả user, roles, functions, roleGrants, functionDetails và functionScopes; scope chứa orgId/teamId, không còn id/UNIT. Expiry lấy từ app.jwt.expiry-minutes. Lỗi đăng nhập trả 401.
+## Persistence và contract
 
-## Database và script mới
+- Tám bảng compact: users, orgs, teams, roles, functions, role_functions, user_roles, audit_log. Chi tiết timestamp/type/quan hệ tại [SQL README](sql/README.md) và schema.
+- Cụm Identity có một script khởi tạo learning_hub_identity.sql, gồm schema và seed demo với users.must_change_password. Script chỉ dùng cho database mới/tạo lại; hướng dẫn tại [SQL README](sql/README.md).
+- [API_CONTRACT.md](api/API_CONTRACT.md): envelope, request ID, validation và lỗi MVC/Security.
+- [Contract Identity](api/IDENTITY.md): 21 API xác thực, hồ sơ, quản trị tài khoản, org/team và role/scope.
 
-Source mapping 8 bảng của docs/sql/learning_hub_identity.sql. UserAccount chứa password_hash (JsonIgnore), auth_provider, org_id, team_id và position_name. UserStatusConverter lưu active/inactive/locked. RoleAssignment giữ role và scope riêng cho từng grant. Function và RoleFunction quản lý màn hình FE; không thay thế kiểm tra hành động API.
+## Request và caller context
 
-Không sinh FOREIGN KEY vật lý. Các quan hệ là logic, API quản trị khi triển khai phải kiểm tra user/org/team tồn tại, team thuộc org, cây đơn vị không có vòng lặp và quyền của người gán. TEAM grant cho phép org_id NULL; lúc kiểm tra, service đọc team để xác nhận org thực tế. Không tự suy BRN/BRCD/CRA thành cây đơn vị.
+RequestIdFilter là Servlet component chạy trước Spring Security, dùng chung HttpHeaderNames.REQUEST_ID với CORS. Filter giữ ID qua request attribute khi dispatch lại, đặt X-Request-Id/MDC và khôi phục MDC trong finally; không cache/log body hoặc kiểm tra role. Chỉ đăng ký một lần; chưa thêm access-log filter hoặc executor propagation.
 
-create_time dùng default PostgreSQL; update_time được cập nhật bởi JPA lifecycle do SQL compact không có trigger. Role và Function không có timestamp; Team chỉ có create_time; RoleFunction dùng created_at. AuditLog.details dùng JSONB.
+SecurityContextUtils là class final với static methods isAuthenticated(), getUserId(), getAuthorizationVersion(). User ID lấy từ sub, auth version lấy từ av trong JWT đã xác thực. Hai getter từ chối context thiếu/sai thay vì trả anonymous/null. Helper không có bean/model caller riêng, không chứa user profile/role, không đọc header, decode lại token hoặc gọi DB/Redis/HTTP.
 
-Bootstrap cần APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD, tạo user có hash và GLOBAL ADMIN trong cùng transaction; không reset tài khoản có sẵn. SUPER_ADMIN được gán tường minh; không tự cấp cho tài khoản đang login.
+Use case cần user hiện tại tự lấy userId tại service, controller không truyền caller qua mọi lời gọi. Các policy/audit/helper nội bộ vẫn nhận actorId khi cần phối hợp trong transaction. Những use case tự lấy context phụ thuộc context xác thực; job hoặc @Async không tự có user hiện tại, phải thiết lập/truyền context tin cậy rõ ràng. Không dùng userId target trong request làm actor.
 
-`ddl-auto=validate` tránh tự thay đổi schema. Flyway trong cấu hình hiện tại đang tắt; cơ chế khởi tạo database cần được chọn khi triển khai.
+SecurityConfig ở cấp ứng dụng wiring các bean xác thực và UserJwtAuthenticationConverter của Identity. JwtProperties vẫn bind app.jwt như trước. Identity giữ LocalUserDetailsService, kiểm tra tài khoản/status/auth_ver, phát token và policy role/scope. constants kỹ thuật, mã role và giá trị môi trường có chủ sở hữu riêng, không gom thành một registry toàn cục.
 
-## Kiểm thử
+21 endpoint giữ URL, body và response contract; controller không còn Authentication parameter nên không cần @Parameter(hidden=true) để ẩn caller trong Swagger. Logout vẫn thu hồi mọi phiên bằng auth_ver của token hiện tại.
 
-Test package phản chiếu module và trách nhiệm. Test đăng nhập dùng Spring MVC/filter, BCrypt/JWT thật và mock repository. Kiểm tra login theo hai định danh, giữ số 0 đầu, thiếu credentials, định danh mơ hồ, trạng thái tài khoản và thu hồi JWT. Test authorization kiểm tra scope ORG/TEAM/OWN và không ghép nhầm assignment. Test mapping dựng Hibernate metadata/session factory không kết nối DB, đối chiếu đủ 8 bảng, column/type/length và primary key với SQL.
+Chính sách HTTP cache chung đặt tại SecurityConfig qua cache-control header writer của Spring Security: Cache-Control: no-cache, no-store, max-age=0, must-revalidate; Pragma: no-cache; Expires: 0. Controller và exception handler không lặp chính sách này. Endpoint có nhu cầu cache khác có thể khai báo header riêng; phải kiểm chứng response thực tế khi thêm override.
 
-Sau khi đổi package chạy `mvn clean test` để loại bỏ class cũ trong target, tránh trùng Spring bean/entity. Bộ test này chưa xác nhận schema trên PostgreSQL thực tế.
+## Quản trị gốc và bootstrap
 
-## Lộ trình tiếp theo
+SUPER_ADMIN GLOBAL có quyền nghiệp vụ toàn hệ thống và quyền quản trị ADMIN/SUPER_ADMIN. ADMIN GLOBAL/ORG chỉ quản lý tài khoản thường theo scope; tài khoản mang vai trò quản trị được bảo vệ khỏi sửa hồ sơ, trạng thái, chuyển tổ chức/nhóm hoặc thay đổi grant bởi ADMIN. IdentityAccessPolicy.Boundary tách global (phạm vi dữ liệu) khỏi superAdmin (quyền quản trị gốc); không suy cấp quyền quản trị từ global.
 
-1. Kiểm tra schema thực tế PostgreSQL và dữ liệu khởi tạo.
-2. API quản lý tổ chức, user, nhóm, chức danh, gán quyền và ghi audit.
-3. Domain → Program → Course → Chapter → Lesson → Blocks và file storage.
-4. Enrollment, assignment, learning progress.
-5. Questions, quiz attempts, server-side scoring.
-6. Dashboard, reports, skill evidence và các module mở rộng.
+Gợi ý editable/revocable dùng cùng policy với kiểm tra ghi. SUPER_ADMIN active cuối cùng được bảo vệ bằng kiểm tra sau flush trong transaction giữ IdentityWriteLock; ADMIN GLOBAL không thay thế điều kiện này. API hiện có giữ nguyên route/schema, /roles dùng assignableScopes để giới hạn các vai trò được cấp và thêm capability ADMIN_ROLE_GRANT cho SUPER_ADMIN.
 
-## Quy ước Lombok
+Bootstrap cấu hình bằng ba biến APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD hiện có: chỉ tạo user LOCAL mới với SUPER_ADMIN GLOBAL khi chưa có root active, bắt buộc đổi mật khẩu và ghi audit cùng transaction. User đã tồn tại giữ nguyên mật khẩu/quyền khi restart. Mật khẩu tạo mới, đổi hoặc bootstrap từ 6 ký tự đến 72 byte UTF-8. Script SQL khởi tạo mới đã seed super.admin nên không cần bootstrap Java khi dùng bộ dữ liệu demo. Database hiện có cần giữ dữ liệu phải có kế hoạch thay đổi riêng, không tự nâng quyền ADMIN hiện có.
 
-- Entity: @Getter, @Setter, @NoArgsConstructor; không dùng @Data, @ToString hoặc sinh equals/hashCode tự động trên entity/quan hệ JPA. Constructor rỗng và giá trị mặc định giữ nguyên.
-- CreatedEntity/UpdatedEntity chỉ @Getter; không mở setter cho timestamp do persistence quản lý.
-- Service/controller/security có dependency final dùng @RequiredArgsConstructor; vẫn là constructor injection.
-- DTO dùng record tiếp tục giữ record: constructor/accessor đã được Java sinh. LoginRequest, TokenResponse và JwtProperties có toString che secret, không log trực tiếp credential/token.
-- Lombok version theo Spring Boot BOM; lombok-mapstruct-binding 0.2.0 nằm trên annotation processor path để mapper nhận getter sinh bởi Lombok.
-- IntelliJ Reload Maven sau thay đổi; bật Annotation Processing nếu IDE chưa nhận mã sinh. lombok.config ở root được copy vào Docker build.
+<a id="libraries"></a>
 
-## Envelope HTTP
+## Thư viện và build
 
-JSON API nghiệp vụ tuân theo [API_CONTRACT.md](API_CONTRACT.md). Controller nhận DTO request trực tiếp và trả BaseResponse có kiểu; service giữ DTO nghiệp vụ. ApiExceptionHandler và ApiSecurityErrorHandler trả chung contract lỗi; RequestIdFilter quản lý X-Request-Id/MDC. Logout trả HTTP 200 với envelope thay 204.
+Phiên bản và dependencies lấy từ pom.xml; Dockerfile xác định JDK/JRE của container. Không duy trì danh sách đề xuất dependency chưa sử dụng.
+
+| Nhóm | Thành phần hiện có |
+|---|---|
+| REST / validation | Spring MVC, Jackson, Bean Validation |
+| Persistence | Spring Data JPA, Hibernate, PostgreSQL JDBC, HikariCP |
+| Security | Spring Security, OAuth2 Resource Server, BCrypt |
+| Mapping | MapStruct 1.6.3, CentralMapperConfig, mapper trong từng module |
+| Code generation | Lombok theo Boot BOM, lombok-mapstruct-binding, Spring Boot configuration processor |
+| Vận hành | Actuator, SLF4J + Log4j2; loại logging mặc định Logback |
+| Kiểm thử | Spring Boot Test, JUnit/Mockito, Spring Security Test; dependency không có nghĩa là đã có test |
+| Schema | Flyway có dependency nhưng tắt; khởi tạo thủ công bằng SQL Identity |
+
+Annotation processors chạy tại compile; mapper sinh ở target/generated-sources/annotations và metadata cấu hình là output build, không sửa/commit. IntelliJ dùng JDK 21 cho Project/Maven Runner, Reload Maven và bật annotation processing. Quy tắc Java, Lombok và MapStruct nằm tại guideline chung.
+
+## Giới hạn kiểm chứng
+
+Repository hiện chưa có test source tự động. Maven verify kiểm tra build và chỉ chạy test thực sự tồn tại; không coi build thành công là kiểm thử nghiệp vụ. Smoke check cục bộ với H2 không thay thế kiểm tra PostgreSQL, advisory lock nhiều instance, Docker hoặc môi trường triển khai thật. Nhật ký kiểm tra cá nhân nằm ngoài tài liệu contract được commit.
+
+
+## Search và custom repository
+
+User và Organization search dùng repository fragment tại identity.repository.custom và organization.repository.custom. Service xác định scope qua IdentityAccessPolicy, kiểm tra filter rồi gọi searchUsers/searchOrganizations; không còn Specification/JpaSpecificationExecutor. Danh sách team chỉ lọc orgId dùng derived query có Pageable, không tạo fragment riêng.
+
+NativeSearchQuery tại common.persistence dùng chung FROM/WHERE/parameters cho list/count, escape LIKE literal, ánh xạ sort qua whitelist và phân trang tại DB. Mỗi search tạo một instance; helper không biết bảng hoặc role. Filter rỗng được giữ thành điều kiện không có kết quả. PageableExecutionUtils tránh count khi suy ra chính xác từ page.
+
+UserSearchRow là read model chỉ gồm cột cần cho UserSummary, không có password/hash hoặc metadata nguồn. Role filter dùng EXISTS để một user nhiều grant vẫn chỉ chiếm một dòng. Role labels vẫn được lọc theo cùng policy; visibleGrantIds tải org của các team theo lô, không query theo từng grant. findActiveForUsers chỉ fetch role; lấy user ID từ association không cần tải cả hồ sơ tài khoản.
+
+Search vẫn dùng contains (`%q%`) và OFFSET theo contract hiện tại; B-tree không tự bảo đảm tăng tốc contains và offset lớn vẫn có chi phí. Chưa thêm index/trigram/keyset pagination hoặc sửa schema; cần đo PostgreSQL với dữ liệu đại diện trước khi quyết định. Native SQL không được coi là bằng chứng tự thân về hiệu năng.
