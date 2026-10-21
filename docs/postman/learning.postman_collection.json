@@ -1,0 +1,1459 @@
+{
+  "info": {
+    "name": "Corebanking Academy - Learning APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "API Learning mới. Chọn từng request theo luồng trong docs/api/LEARNING_CURL.md. Không chạy toàn collection theo thứ tự vì có thao tác pause/revoke và các API tùy chọn."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8019"
+    },
+    {
+      "key": "instructorToken",
+      "value": ""
+    },
+    {
+      "key": "learnerToken",
+      "value": ""
+    },
+    {
+      "key": "orgId",
+      "value": ""
+    },
+    {
+      "key": "fieldId",
+      "value": ""
+    },
+    {
+      "key": "programId",
+      "value": ""
+    },
+    {
+      "key": "moduleId",
+      "value": ""
+    },
+    {
+      "key": "courseId",
+      "value": ""
+    },
+    {
+      "key": "revisionId",
+      "value": ""
+    },
+    {
+      "key": "revisionVersion",
+      "value": "0"
+    },
+    {
+      "key": "courseVersion",
+      "value": "0"
+    },
+    {
+      "key": "groupId",
+      "value": ""
+    },
+    {
+      "key": "groupVersion",
+      "value": "0"
+    },
+    {
+      "key": "learnerId",
+      "value": ""
+    },
+    {
+      "key": "targetOrgId",
+      "value": ""
+    },
+    {
+      "key": "assignmentId",
+      "value": ""
+    },
+    {
+      "key": "recipientId",
+      "value": ""
+    },
+    {
+      "key": "enrollmentId",
+      "value": ""
+    },
+    {
+      "key": "blockId",
+      "value": ""
+    },
+    {
+      "key": "assetId",
+      "value": ""
+    },
+    {
+      "key": "reminderId",
+      "value": ""
+    },
+    {
+      "key": "progressVersion",
+      "value": "0"
+    },
+    {
+      "key": "progressSequence",
+      "value": "1"
+    },
+    {
+      "key": "catalogVersion",
+      "value": "0"
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Danh sách fields",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/fields?ownerOrgId={{orgId}}&page=0&size=20",
+        "description": "Danh mục được lọc quyền và phân trang tại database."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. Tạo fields",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/fields",
+        "description": "Mã được kiểm tra trùng trong transaction; các ID cha phải tồn tại và thuộc đúng tổ chức.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"fieldId\": null,\n  \"code\": \"FIELD-DEMO-01\",\n  \"name\": \"Nghiệp vụ Core Banking\",\n  \"description\": \"Nội dung thử nghiệm do người kiểm thử tạo.\",\n  \"status\": \"published\",\n  \"sortNo\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('fieldId', d.id);",
+              "pm.collectionVariables.set('catalogVersion', d.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. Cập nhật fields",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/fields/{{fieldId}}?expectedVersion={{catalogVersion}}",
+        "description": "Thay thông tin danh mục, không chuyển tổ chức/lĩnh vực; paused chặn học theo danh mục.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"fieldId\": null,\n  \"code\": \"FIELD-DEMO-01\",\n  \"name\": \"Nghiệp vụ Core Banking\",\n  \"description\": \"Nội dung thử nghiệm do người kiểm thử tạo.\",\n  \"status\": \"published\",\n  \"sortNo\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('fieldId', d.id);",
+              "pm.collectionVariables.set('catalogVersion', d.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04. Danh sách programs",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/programs?ownerOrgId={{orgId}}&page=0&size=20",
+        "description": "Danh mục được lọc quyền và phân trang tại database."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05. Tạo programs",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/programs",
+        "description": "Mã được kiểm tra trùng trong transaction; các ID cha phải tồn tại và thuộc đúng tổ chức.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"fieldId\": {{fieldId}},\n  \"code\": \"PROGRAM-DEMO-01\",\n  \"name\": \"Nền tảng nghiệp vụ\",\n  \"description\": \"Nội dung thử nghiệm do người kiểm thử tạo.\",\n  \"status\": \"published\",\n  \"sortNo\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('programId', d.id);",
+              "pm.collectionVariables.set('catalogVersion', d.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06. Cập nhật programs",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/programs/{{programId}}?expectedVersion={{catalogVersion}}",
+        "description": "Thay thông tin danh mục, không chuyển tổ chức/lĩnh vực; paused chặn học theo danh mục.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"fieldId\": {{fieldId}},\n  \"code\": \"PROGRAM-DEMO-01\",\n  \"name\": \"Nền tảng nghiệp vụ\",\n  \"description\": \"Nội dung thử nghiệm do người kiểm thử tạo.\",\n  \"status\": \"published\",\n  \"sortNo\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('programId', d.id);",
+              "pm.collectionVariables.set('catalogVersion', d.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07. Danh sách modules",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/modules?fieldId={{fieldId}}&page=0&size=20",
+        "description": "Danh mục được lọc quyền và phân trang tại database."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08. Tạo modules",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/modules",
+        "description": "Mã được kiểm tra trùng trong transaction; các ID cha phải tồn tại và thuộc đúng tổ chức.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"fieldId\": {{fieldId}},\n  \"code\": \"MODULE-DEMO-01\",\n  \"name\": \"Tổng quan\",\n  \"description\": \"Nội dung thử nghiệm do người kiểm thử tạo.\",\n  \"status\": \"published\",\n  \"sortNo\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('moduleId', d.id);",
+              "pm.collectionVariables.set('catalogVersion', d.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09. Cập nhật modules",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/training-catalog/modules/{{moduleId}}?expectedVersion={{catalogVersion}}",
+        "description": "Thay thông tin danh mục, không chuyển tổ chức/lĩnh vực; paused chặn học theo danh mục.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"fieldId\": {{fieldId}},\n  \"code\": \"MODULE-DEMO-01\",\n  \"name\": \"Tổng quan\",\n  \"description\": \"Nội dung thử nghiệm do người kiểm thử tạo.\",\n  \"status\": \"published\",\n  \"sortNo\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('moduleId', d.id);",
+              "pm.collectionVariables.set('catalogVersion', d.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Tạo khóa học và bản nháp đầu tiên",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses",
+        "description": "Tạo khóa thuộc phạm vi giảng viên, mã khóa duy nhất và chủ sở hữu do backend xác định.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"ownerTeamId\": null,\n  \"code\": \"COURSE-DEMO-01\",\n  \"title\": \"Tổng quan Core Banking\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('courseId', d.course.id);",
+              "pm.collectionVariables.set('courseVersion', d.course.rowVersion);",
+              "pm.collectionVariables.set('revisionId', d.revision.id);",
+              "pm.collectionVariables.set('revisionVersion', d.revision.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Xem cây nội dung để biên soạn",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}",
+        "description": "Chỉ người có quyền sửa khóa được xem bản nháp; không gửi revisionId sẽ lấy bản mới nhất."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('courseId', d.course.id);",
+              "pm.collectionVariables.set('courseVersion', d.course.rowVersion);",
+              "pm.collectionVariables.set('revisionId', d.revision.id);",
+              "pm.collectionVariables.set('revisionVersion', d.revision.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Lưu toàn bộ nội dung bản nháp",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/revisions/{{revisionId}}",
+        "description": "PUT thay toàn bộ cây nháp và cấp lại ID chương/bài/khối; thứ tự theo mảng. Gửi expectedVersion mới nhất.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"expectedVersion\": {{revisionVersion}},\n  \"programId\": {{programId}},\n  \"moduleId\": {{moduleId}},\n  \"title\": \"Tổng quan Core Banking\",\n  \"summary\": \"Khóa đào tạo nội bộ.\",\n  \"level\": \"basic\",\n  \"defaultRequirement\": \"optional\",\n  \"coverAssetId\": null,\n  \"coverIcon\": \"layers\",\n  \"coverColor\": \"#E3F1EF\",\n  \"objectives\": [\n    \"Hiểu cấu trúc và các bước vận hành.\"\n  ],\n  \"chapters\": [\n    {\n      \"title\": \"Chương 1: Tổng quan\",\n      \"lessons\": [\n        {\n          \"title\": \"Bài 1: Khái niệm\",\n          \"lessonType\": \"content\",\n          \"estimatedDurationSeconds\": 300,\n          \"isRequired\": true,\n          \"blocks\": [\n            {\n              \"blockType\": \"text\",\n              \"title\": \"Giới thiệu\",\n              \"body\": \"## Nội dung\\nTổng quan nghiệp vụ Core Banking.\",\n              \"bodyFormat\": \"markdown\",\n              \"completionMode\": \"manual\",\n              \"completionThreshold\": null,\n              \"isRequired\": true,\n              \"assets\": [],\n              \"steps\": []\n            },\n            {\n              \"blockType\": \"process\",\n              \"title\": \"Quy trình cơ bản\",\n              \"body\": null,\n              \"bodyFormat\": null,\n              \"completionMode\": \"manual\",\n              \"completionThreshold\": null,\n              \"isRequired\": true,\n              \"assets\": [],\n              \"steps\": [\n                {\n                  \"title\": \"Tiếp nhận yêu cầu\",\n                  \"description\": \"Kiểm tra thông tin đầu vào.\"\n                },\n                {\n                  \"title\": \"Xác nhận\",\n                  \"description\": \"Lưu kết quả xử lý.\"\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ],\n  \"rewardPoints\": 0\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "if (d.chapters?.[0]?.lessons?.[0]?.blocks?.[0]) pm.collectionVariables.set('blockId', d.chapters[0].lessons[0].blocks[0].block.id);",
+              "pm.collectionVariables.set('courseId', d.course.id);",
+              "pm.collectionVariables.set('courseVersion', d.course.rowVersion);",
+              "pm.collectionVariables.set('revisionId', d.revision.id);",
+              "pm.collectionVariables.set('revisionVersion', d.revision.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. Xuất bản khóa học",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/revisions/{{revisionId}}/publish",
+        "description": "Kiểm tra nội dung, danh mục và tài nguyên trước khi đóng băng revision. Không reset tiến độ cũ.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"expectedVersion\": {{revisionVersion}}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('courseId', d.course.id);",
+              "pm.collectionVariables.set('courseVersion', d.course.rowVersion);",
+              "pm.collectionVariables.set('revisionId', d.revision.id);",
+              "pm.collectionVariables.set('revisionVersion', d.revision.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. Mở bản nháp để chỉnh sửa",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/draft",
+        "description": "Tái sử dụng draft hiện có hoặc clone từ bản published; không sao chép tiến độ."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('courseId', d.course.id);",
+              "pm.collectionVariables.set('courseVersion', d.course.rowVersion);",
+              "pm.collectionVariables.set('revisionId', d.revision.id);",
+              "pm.collectionVariables.set('revisionVersion', d.revision.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15. Sao chép thành khóa mới",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/copy",
+        "description": "Cấp mã mới và clone nội dung thành draft; không copy người học, giao học hoặc chia sẻ.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"code\": \"COURSE-DEMO-COPY-01\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. Tạm dừng hoặc lưu trữ khóa học",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/state",
+        "description": "Nhận active/paused/archived và expectedVersion của courses; giữ lịch sử học.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"expectedVersion\": {{courseVersion}},\n  \"status\": \"paused\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17. Xem chia sẻ khóa học",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/shares",
+        "description": "Chỉ người quản lý nội dung khóa được xem và sửa quyền khai thác theo đơn vị."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18. Chia sẻ hoặc thu hồi chia sẻ",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/shares",
+        "description": "Chia sẻ cấp quyền khai thác, không cấp quyền sửa nội dung. Thu hồi không xóa giao học cũ.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orgId\": {{targetOrgId}},\n  \"includeDescendants\": false,\n  \"canAssign\": true,\n  \"canSelfEnroll\": true,\n  \"active\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "19. Giao khóa học cho cá nhân/nhóm/đơn vị",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments",
+        "description": "Chốt người nhận khi giao, giới hạn 500 học viên/đợt và giữ idempotencyKey khi retry cùng payload.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"revisionId\": {{revisionId}},\n  \"assigningOrgId\": {{orgId}},\n  \"title\": \"Đợt đào tạo đầu tiên\",\n  \"startAt\": \"2020-01-01T00:00:00Z\",\n  \"dueAt\": \"2030-12-31T16:59:59Z\",\n  \"requirement\": \"mandatory\",\n  \"enrollmentMode\": \"continue\",\n  \"reminderEnabled\": true,\n  \"reminderDaysBefore\": 3,\n  \"idempotencyKey\": \"learning-demo-assignment-01\",\n  \"targets\": [\n    {\n      \"targetType\": \"user\",\n      \"userId\": \"{{learnerId}}\",\n      \"teamId\": null,\n      \"orgId\": null,\n      \"groupId\": null,\n      \"includeDescendants\": false\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "const recipient = d.recipients.find(x => x.userId === pm.collectionVariables.get('learnerId'));",
+              "if (recipient) { pm.collectionVariables.set('recipientId', recipient.id); pm.collectionVariables.set('enrollmentId', recipient.enrollmentId); }",
+              "pm.collectionVariables.set('assignmentId', d.assignment.id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20. Xem các đợt giao của đơn vị",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/assignments?assigningOrgId={{orgId}}&page=0&size=20",
+        "description": "Kiểm tra phạm vi assigningOrgId và quyền khai thác khóa trước phân trang."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21. Tự đăng ký khóa học tự chọn",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/courses/{{courseId}}/enrollments",
+        "description": "Học viên tự đăng ký bản published được phép khám phá; giữ lần học tương thích nếu đã có."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('enrollmentId', d.id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22. Danh sách nhóm học tập",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-groups?ownerOrgId={{orgId}}&page=0&size=20",
+        "description": "Chỉ trả nhóm của tổ chức trong phạm vi quản lý."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "23. Tạo nhóm học tập",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-groups",
+        "description": "Nhóm học độc lập nhóm chuyên môn, không tạo hay cấp role Identity.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ownerOrgId\": {{orgId}},\n  \"code\": \"GROUP-DEMO-01\",\n  \"name\": \"Nhóm đào tạo mới\",\n  \"description\": \"Nhóm học tự lập.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('groupId', d.group.id);",
+              "pm.collectionVariables.set('groupVersion', d.group.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "24. Xem nhóm và thành viên",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-groups/{{groupId}}",
+        "description": "Trả các membership đang hiệu lực; lịch sử rời nhóm vẫn được giữ."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('groupId', d.group.id);",
+              "pm.collectionVariables.set('groupVersion', d.group.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "25. Thay danh sách thành viên nhóm học",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-groups/{{groupId}}/members",
+        "description": "Thêm/rời nhóm trong một transaction; không thay snapshot người nhận của các đợt giao trước.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"expectedVersion\": {{groupVersion}},\n  \"userIds\": [\n    \"{{learnerId}}\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('groupId', d.group.id);",
+              "pm.collectionVariables.set('groupVersion', d.group.rowVersion);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "26. Danh sách khóa học giảng viên",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/instructor/courses?page=0&size=20",
+        "description": "Lọc owner/scope trước count và phân trang; số người được giao là số user khác nhau."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "27. Xem đợt giao và người nhận",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assignments/{{assignmentId}}",
+        "description": "Chỉ quản lý đơn vị giao được xem danh sách người nhận và các nguồn target."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "28. Thu hồi một nghĩa vụ giao học",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assignments/recipients/{{recipientId}}/revoke",
+        "description": "Không xóa enrollment/điểm/tiến độ; giữ quyền học nếu còn nguồn hợp lệ khác.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"Thu hồi giao học theo yêu cầu người kiểm thử.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "29. Khóa học của tôi",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/courses?page=0&size=20",
+        "description": "Một thẻ mỗi khóa ở lần học hiện hành; tính nghĩa vụ và hạn từ giao học thực tế."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30. Danh mục khóa học của học viên",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/catalog?page=0&size=20",
+        "description": "Bao gồm khóa được giao và khóa được phép khám phá chưa đăng ký."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31. Xem nội dung và vị trí tiếp tục học",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/enrollments/{{enrollmentId}}",
+        "description": "Chỉ hồ sơ học của caller; trả cây revision đã nhận và tiến độ từng khối."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32. Ghi tương tác học và tổng hợp tiến độ",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/enrollments/{{enrollmentId}}/blocks/{{blockId}}/progress",
+        "description": "Gửi expectedVersion/sequence; backend tự tính tỷ lệ, kiểm tra trang PDF và khoảng xem video.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"expectedVersion\": {{progressVersion}},\n  \"sequence\": {{progressSequence}},\n  \"complete\": true,\n  \"videoPositionSeconds\": null,\n  \"watchedFromSeconds\": null,\n  \"watchedToSeconds\": null,\n  \"pdfPage\": null\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('progressVersion', d.block.rowVersion);",
+              "pm.collectionVariables.set('progressSequence', Number(d.block.lastEventSequence)+1);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "33. Thông báo nhắc học đến hạn",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/reminders",
+        "description": "Thông báo trong ứng dụng, chỉ người nhận đang cần học được thấy."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "34. Đánh dấu đã đọc nhắc học",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/reminders/{{reminderId}}/read",
+        "description": "Chỉ caller sở hữu người nhận được đánh dấu thông báo đã đọc."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "35. Upload tài nguyên",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets?ownerOrgId={{orgId}}&pageCount=1",
+        "description": "Video cần durationSeconds; PDF cần pageCount.",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "pm.collectionVariables.set('assetId', d.id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "36. Tải tài nguyên",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets/{{assetId}}/content?blockId={{blockId}}&enrollmentId={{enrollmentId}}",
+        "description": "Học viên gửi blockId và enrollmentId; giảng viên có thể tải file mình quản lý."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

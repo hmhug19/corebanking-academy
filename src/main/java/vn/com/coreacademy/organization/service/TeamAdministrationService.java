@@ -20,6 +20,7 @@ import vn.com.coreacademy.identity.repository.UserRepository;
 import vn.com.coreacademy.identity.repository.projection.TeamMemberPreview;
 import vn.com.coreacademy.identity.service.IdentityAccessPolicy;
 import vn.com.coreacademy.identity.service.IdentityWriteLock;
+import vn.com.coreacademy.learning.service.LearningReferenceService;
 import vn.com.coreacademy.organization.dto.CreateTeamRequest;
 import vn.com.coreacademy.organization.dto.TeamInfo;
 import vn.com.coreacademy.organization.dto.TeamUpdateRequest;
@@ -39,6 +40,7 @@ public class TeamAdministrationService {
     private final OrganizationAdministrationService organizations;
     private final IdentityAccessPolicy access;
     private final IdentityWriteLock writeLock;
+    private final LearningReferenceService learningReferences;
     private final OrganizationMapper mapper;
     private final IdentityAuditService audit;
 
@@ -138,7 +140,9 @@ public class TeamAdministrationService {
         writeLock.acquire();
         Team team = visible(actorId, teamId);
         access.requireActiveOrg(team.getOrgId());
-        if (users.existsByTeamId(teamId) || assignments.existsByTeamId(teamId)) {
+        // Không có FK: giữ nhóm đã được Learning tham chiếu, kể cả snapshot lịch sử đã hoàn thành/thu hồi.
+        if (users.existsByTeamId(teamId) || assignments.existsByTeamId(teamId)
+            || learningReferences.teamInUse(teamId)) {
             throw new BusinessException(OrganizationResponseCode.TEAM_IN_USE);
         }
 

@@ -13,7 +13,7 @@ public enum OrganizationResponseCode implements ApiResponseCode {
     TEAM_CODE_EXISTS(HttpStatus.OK, "ORGANIZATION-TEAM_CODE_EXISTS",
         "Mã nhóm đã được sử dụng trong tổ chức này.", "Trùng mã nhóm"),
     TEAM_IN_USE(HttpStatus.OK, "ORGANIZATION-TEAM_IN_USE",
-        "Không thể xóa nhóm còn thành viên hoặc phân quyền tham chiếu.", "Nhóm đang được sử dụng"),
+        "Không thể xóa nhóm còn thành viên, phân quyền hoặc dữ liệu học tập tham chiếu.", "Nhóm đang được sử dụng"),
     HIERARCHY_INVALID(HttpStatus.OK, "ORGANIZATION-HIERARCHY_INVALID",
         "Phòng phải trực thuộc đơn vị; tổ chức cha không được là phòng.", "Cấu trúc tổ chức chưa hợp lệ");
 

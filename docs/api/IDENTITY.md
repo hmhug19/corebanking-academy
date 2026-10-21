@@ -128,7 +128,7 @@ Chuyển membership: FE cảnh báo **mọi grant khác OWN của target sẽ b�
 - Counts `memberCount`, `teamCount` tại `/orgs` là số lượng trực tiếp của node, không phải cộng toàn cây. `/users?orgId=...` lọc node và cây con active; dùng teamId khi xem thành viên nhóm.
 - `/orgs/{id}` trả `{organization: OrganizationInfo, administrators:[...]}`. Administrators là tối đa 20 ADMIN ORG gán trực tiếp tại node, không gộp global admin hoặc quyền kế thừa. Quản trị chi tiết qua user/role-grants.
 - TeamInfo: `{id,orgId,code,name,description,status,memberCount,memberPreview:[{userId,fullName}]}`; preview tối đa 5, nút “Xem tất cả” dùng `/users?teamId=...`.
-- Form team có code/name/description. Không chuyển org hoặc đổi trạng thái team trong demo. Xóa chỉ khi không có member và không có role grant tham chiếu, kể cả grant đã thu hồi (HTTP 200/ERROR, mã ORGANIZATION-TEAM_IN_USE nếu còn tham chiếu lịch sử). Không tự xóa user/grant theo cascade.
+- Form team có code/name/description. Không chuyển org hoặc đổi trạng thái team trong demo. Xóa chỉ khi không có member, role grant hoặc dữ liệu Learning tham chiếu, kể cả grant đã thu hồi và snapshot học tập (HTTP 200/ERROR, mã ORGANIZATION-TEAM_IN_USE nếu còn tham chiếu lịch sử). Không tự xóa user/grant/tiến độ theo cascade.
 
 ## 4. Bảng role/scope
 
@@ -211,4 +211,4 @@ Swagger `/swagger-ui/index.html` là nguồn schema request/response chi tiết.
 - Swagger `/swagger-ui/index.html` và OpenAPI `/v3/api-docs`: schema request/response chi tiết từ phiên bản backend đang triển khai.
 - [Postman collection](../postman/corebanking-academy.postman_collection.json), [Local environment](../postman/local.postman_environment.json), [Dev environment](../postman/dev.postman_environment.json): mẫu đủ 21 API, login tự bind accessToken vào environment đang chọn. Local dùng `http://localhost:8019`, Dev dùng `http://103.121.90.119:8019`; tự nhập mật khẩu vào environment, không commit credential/token đã điền.
 
-Test theo từng luồng và chọn ID dữ liệu phù hợp; không chạy toàn collection như một kịch bản tự động dọn dữ liệu. Đổi mật khẩu/đăng xuất làm token cũ hết hiệu lực; xóa nhóm còn thành viên hoặc grant tham chiếu sẽ trả lỗi nghiệp vụ. Xem hướng dẫn Postman trong API_CONTRACT trước khi chạy.
+Test theo từng luồng và chọn ID dữ liệu phù hợp; không chạy toàn collection như một kịch bản tự động dọn dữ liệu. Đổi mật khẩu/đăng xuất làm token cũ hết hiệu lực; xóa nhóm còn thành viên, grant hoặc tham chiếu Learning sẽ trả lỗi nghiệp vụ. Xem hướng dẫn Postman trong API_CONTRACT trước khi chạy.
