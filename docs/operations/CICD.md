@@ -32,3 +32,4 @@ API giữ tại `http://103.121.90.119/api/v1/...`, health tại `http://103.121
 ## Phạm vi
 
 Repository hiện chứa BE, chưa có source Angular. Pipeline này chỉ triển khai BE; giao diện Angular demo hiện có giữ nguyên.
+
