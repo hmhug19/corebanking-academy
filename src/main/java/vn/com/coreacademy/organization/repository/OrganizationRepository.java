@@ -9,6 +9,19 @@ import vn.com.coreacademy.organization.entity.Organization;
 import vn.com.coreacademy.organization.repository.custom.OrganizationRepositoryCustom;
 
 public interface OrganizationRepository extends JpaRepository<Organization, Long>, OrganizationRepositoryCustom {
+    @Query(value = """
+        with recursive ancestors(org_id, parent_id) as (
+            select org_id, parent_id from learning_hub.orgs
+            where org_id = :id and status = 'active'
+            union
+            select o.org_id, o.parent_id from learning_hub.orgs o
+            join ancestors a on o.org_id = a.parent_id
+            where o.status = 'active'
+        )
+        select org_id from ancestors
+        """, nativeQuery = true)
+    List<Long> findActiveAncestorIds(@Param("id") Long id);
+
     boolean existsByCodeIgnoreCaseAndIdNot(String code, Long id);
 
     /**

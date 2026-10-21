@@ -17,6 +17,10 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: false
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 501MB
 management:
   endpoints:
     web:
@@ -26,6 +30,8 @@ management:
     health:
       show-details: never
 app:
+  learning:
+    asset-dir: ${LEARNING_ASSET_DIR:./data/learning-assets}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30

@@ -48,9 +48,9 @@ public class TeamController {
     @Operation(
         summary = "Xóa nhóm chưa có dữ liệu tham chiếu",
         description = """
-            Xóa nhóm không còn thành viên hoặc phân quyền tham chiếu.
+            Xóa nhóm không còn thành viên, phân quyền hoặc dữ liệu học tập tham chiếu.
             - Tổ chức của nhóm phải đang hoạt động và thuộc phạm vi quản lý.
-            - Còn tham chiếu trả mã `ORGANIZATION-TEAM_IN_USE`, kể cả phân quyền đã thu hồi.
+            - Còn tham chiếu trả mã `ORGANIZATION-TEAM_IN_USE`, kể cả phân quyền đã thu hồi hoặc lịch sử học tập.
             """
     )
     @ApiResponse(responseCode = "200",

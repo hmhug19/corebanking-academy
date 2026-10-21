@@ -1,5 +1,19 @@
 # Khởi tạo Identity / Organization / RBAC
 
+## Bổ sung module Learning
+
+Backend hiện có thêm 36 API Learning và 26 bảng được định nghĩa tại
+[learning_hub_learning.sql](learning_hub_learning.sql). Review và chạy file Learning **một lần sau Identity**
+trên môi trường được phép, trước khi chạy bản ứng dụng có entity Learning. File không có FK/REFERENCES,
+không seed/reset/cấp quyền và không sửa 8 bảng Identity. Không chạy lại trên schema đã có các bảng Learning;
+nếu đã có dữ liệu cần kế hoạch nâng cấp riêng. Giữ ddl-auto=validate và Flyway off.
+
+Contract và hướng dẫn từng bảng: [LEARNING.md](../api/LEARNING.md).
+Request mẫu: [cURL](../api/LEARNING_CURL.md), [Postman](../postman/learning.postman_collection.json).
+SQL Identity dưới đây vẫn là nguồn khởi tạo duy nhất của **cụm Identity**, không thay bằng SQL Learning.
+
+## Identity / Organization / RBAC
+
 Nguồn SQL duy nhất: [learning_hub_identity.sql](learning_hub_identity.sql), PostgreSQL 14+. Chạy toàn bộ file một lần trong database/schema mới hoặc vừa được tạo lại. Không cần script upgrade, gán root, extension pgcrypto, tham số bind hoặc Flyway. File không tạo/xóa database và không tự DROP dữ liệu; không chạy đè database đang có dữ liệu cần giữ.
 
 ## Nội dung

@@ -4,6 +4,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -11,9 +12,30 @@ import org.springframework.data.repository.query.Param;
 import vn.com.coreacademy.common.persistence.IdCount;
 import vn.com.coreacademy.identity.entity.UserAccount;
 import vn.com.coreacademy.identity.repository.custom.UserRepositoryCustom;
+import vn.com.coreacademy.identity.repository.projection.LearningPersonRow;
 import vn.com.coreacademy.identity.repository.projection.TeamMemberPreview;
 
 public interface UserRepository extends JpaRepository<UserAccount, String>, UserRepositoryCustom {
+    /** Chỉ resolve học viên active có LEARNER/OWN hợp lệ, giới hạn tại DB trước khi giao đồng bộ. */
+    @Query("""
+        select u.id as id, u.fullName as fullName, u.orgId as orgId, u.teamId as teamId
+        from UserAccount u
+        where u.status = ACTIVE and u.mustChangePassword = false
+          and ((:kind = 'user' and u.id in :userIds)
+            or (:kind = 'org' and u.orgId in :orgIds)
+            or (:kind = 'team' and u.teamId = :teamId and u.orgId in :orgIds))
+          and exists (
+            select g.id from RoleAssignment g
+            where g.user.id = u.id and g.active = true and g.role.active = true
+              and g.role.code = 'LEARNER' and g.scopeType = OWN
+              and g.orgId is null and g.teamId is null
+          )
+        order by u.id
+        """)
+    List<LearningPersonRow> findLearningCandidates(@Param("kind") String kind,
+        @Param("userIds") Collection<String> userIds, @Param("orgIds") Collection<Long> orgIds,
+        @Param("teamId") Long teamId, Pageable pageable);
+
     long countByOrgId(Long orgId);
 
     long countByTeamIdAndOrgId(Long teamId, Long orgId);

@@ -11,6 +11,7 @@ core-academy-source.tar.gz
 output/
 tmp/
 logs/
+data/learning-assets/
 *.pem
 *.key
 *.p12

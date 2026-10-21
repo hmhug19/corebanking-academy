@@ -27,10 +27,14 @@ vn.com.coreacademy
 │   └── bootstrap / converter / enums / exception
 ├── organization                   # API, use case và persistence org/team
 ├── audit                          # Ghi audit cùng transaction
-└── learning / assessment / ...     # Phạm vi nghiệp vụ khác
+├── learning                        # Danh mục, nội dung, giao học, tài nguyên và tiến độ
+└── assessment / reporting / ...    # Phạm vi nghiệp vụ chưa triển khai
 ```
 
-Sơ đồ là cấu trúc module, không phải danh sách tính năng hoàn thiện. Identity có controller/service/repository/entity/dto/mapper/security; Organization có API org/team; Audit có ghi sự kiện. Các module học tập và báo cáo vẫn là phạm vi riêng.
+Identity có controller/service/repository/entity/dto/mapper/security; Organization có API org/team; Audit ghi
+sự kiện trong transaction. Learning có 36 operation và 26 bảng scalar-ID theo [LEARNING.md](api/LEARNING.md),
+truy cập hồ sơ/scope qua LearningIdentityService của Identity. Quiz Engine, báo cáo năng lực và gamification
+chưa triển khai; không suy chức năng đã có từ tên package hoặc bảng điểm nối assessment.
 
 ## Ranh giới xử lý
 
@@ -67,6 +71,9 @@ Administrative API
 IdentityAccessPolicy xác định phạm vi quản trị; AuthorizationService dùng cùng quy tắc cây ORG cho quyền theo role. PostgreSQL advisory transaction lock điều phối admin writes giữa các instance. PATCH DTO dùng field-presence để phân biệt bỏ qua và null; read-model mapping dùng MapStruct.
 
 ## Persistence và contract
+
+- [Sơ đồ DB Learning](api/LEARNING.md#sơ-đồ-quan-hệ-dữ-liệu): ảnh các nhóm bảng nội dung, giao học và tiến độ,
+  kèm cách đọc quan hệ bằng ID và hướng dẫn từng bảng.
 
 - Tám bảng compact: users, orgs, teams, roles, functions, role_functions, user_roles, audit_log. Chi tiết timestamp/type/quan hệ tại [SQL README](sql/README.md) và schema.
 - Cụm Identity có một script khởi tạo learning_hub_identity.sql, gồm schema và seed demo với users.must_change_password. Script chỉ dùng cho database mới/tạo lại; hướng dẫn tại [SQL README](sql/README.md).
