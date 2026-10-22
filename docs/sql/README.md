@@ -12,6 +12,16 @@ Contract và hướng dẫn từng bảng: [LEARNING.md](../api/LEARNING.md).
 Request mẫu: [cURL](../api/LEARNING_CURL.md), [Postman](../postman/learning.postman_collection.json).
 SQL Identity dưới đây vẫn là nguồn khởi tạo duy nhất của **cụm Identity**, không thay bằng SQL Learning.
 
+## Bổ sung kho tri thức "Trợ lý AI"
+
+[learning_hub_knowledge.sql](learning_hub_knowledge.sql) tạo `knowledge_documents` (đồng thời là hàng đợi xử lý nền)
+và `knowledge_document_chunks` (đoạn văn bản kèm vector `vector(1024)` của bge-m3, chỉ mục HNSW cosine). Cần
+PostgreSQL có extension pgvector (local: image `pgvector/pgvector:pg16` trong `compose.yaml`); file tự chạy
+`CREATE EXTENSION IF NOT EXISTS vector` nên tài khoản chạy script cần quyền tạo extension. Thứ tự chạy trên database
+mới: Identity → Learning → Knowledge, mỗi file một lần. Không FK/REFERENCES, không DROP, không seed; giữ
+ddl-auto=validate và Flyway off. Chức năng `AI_ASSISTANT` nằm trong file Identity.
+Contract: [KNOWLEDGE.md](../api/KNOWLEDGE.md).
+
 ## Identity / Organization / RBAC
 
 Nguồn SQL duy nhất: [learning_hub_identity.sql](learning_hub_identity.sql), PostgreSQL 14+. Chạy toàn bộ file một lần trong database/schema mới hoặc vừa được tạo lại. Không cần script upgrade, gán root, extension pgcrypto, tham số bind hoặc Flyway. File không tạo/xóa database và không tự DROP dữ liệu; không chạy đè database đang có dữ liệu cần giữ.
@@ -19,7 +29,7 @@ Nguồn SQL duy nhất: [learning_hub_identity.sql](learning_hub_identity.sql), 
 ## Nội dung
 
 - 8 bảng: orgs, teams, users, roles, functions, role_functions, user_roles, audit_log; kèm comment cho từng bảng/cột và 12 index.
-- 5 vai trò: SUPER_ADMIN, ADMIN, LEARNER, INSTRUCTOR, REPORT_VIEWER; 16 chức năng và mapping màn hình hiện có. Danh mục màn hình không có nghĩa backend đã triển khai API khóa học/thi/báo cáo.
+- 5 vai trò: SUPER_ADMIN, ADMIN, LEARNER, INSTRUCTOR, REPORT_VIEWER; 17 chức năng (gồm AI_ASSISTANT, route /assistant, cấp cho mọi vai trò) và mapping màn hình hiện có. Danh mục màn hình không có nghĩa backend đã triển khai API khóa học/thi/báo cáo.
 - Một tổ chức gốc trong phạm vi demo: BIDV110B803 — Ban Quản lý và phát triển Core Banking (UNIT). 15 nhóm/bộ phận giữ nguyên mã và tên từ dữ liệu nguồn; gồm Ban Giám đốc, BA&QC, phát triển Core/Kênh, tích hợp, quản trị và hỗ trợ. Không tạo phòng trung gian hoặc node cha ngoài phạm vi; HO/WORK_LOGIC là loại nguồn, không thay trực tiếp org_type nội bộ.
 - 7 tài khoản LOCAL, 8 phân quyền theo đúng cặp role/scope và một audit khởi tạo. ID số tự tăng được database sinh; dữ liệu tham chiếu bằng mã, không cần chỉnh sequence.
 - Không có FOREIGN KEY vật lý. Service kiểm tra quan hệ logic, cây active, org/team và scope. users.must_change_password đã nằm trong schema; không cần nâng cột sau tạo.

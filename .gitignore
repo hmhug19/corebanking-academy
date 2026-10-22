@@ -12,6 +12,7 @@ output/
 tmp/
 logs/
 data/learning-assets/
+data/knowledge/
 *.pem
 *.key
 *.p12

@@ -32,6 +32,27 @@ management:
 app:
   learning:
     asset-dir: ${LEARNING_ASSET_DIR:./data/learning-assets}
+  knowledge:
+    storage-dir: ${KNOWLEDGE_STORAGE_DIR:./data/knowledge}
+    max-file-size: ${KNOWLEDGE_MAX_FILE_SIZE:20MB}
+    worker:
+      poll-interval: ${KNOWLEDGE_WORKER_POLL:2s}
+      concurrency: ${KNOWLEDGE_WORKER_CONCURRENCY:1}
+      max-attempts: 3
+    chunk:
+      target-tokens: 600
+      max-tokens: 800
+      overlap-tokens: 80
+    retrieval:
+      top-k: 5
+      min-similarity: 0.35
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat-model: ${OLLAMA_CHAT_MODEL:qwen3:8b}
+      embed-model: ${OLLAMA_EMBED_MODEL:bge-m3}
+      connect-timeout: 5s
+      read-timeout: 180s
+      keep-alive: 10m
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30
