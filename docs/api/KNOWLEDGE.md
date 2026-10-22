@@ -75,6 +75,67 @@ tiếng Việt). `pageCount` chỉ có với PDF đã xử lý. Không trả `st
 | `CORE-VALIDATION_FAILED`          | `page`/`size`/`status` không hợp lệ                        |
 | `CORE-RESOURCE_NOT_FOUND`         | Không có tài liệu                                          |
 
+## Hỏi đáp (chat)
+
+Một lượt, độc lập: backend không giữ hội thoại. Câu hỏi 1–300 ký tự sau khi bỏ khoảng trắng hai đầu. Quy trình:
+nhúng câu hỏi (bge-m3) → tìm `top-k` đoạn gần nhất (cosine) → loại đoạn dưới `min-similarity` → nếu không còn đoạn nào,
+trả đúng câu "Không tìm thấy thông tin này trong tài liệu." mà **không gọi model** → ngược lại gửi các đoạn làm ngữ cảnh
+cho `qwen3:8b` (`think: false`, `temperature 0.1`). Trích dẫn dựng từ metadata của các đoạn, không phân tích từ văn bản
+model; nếu model tự trả đúng câu không tìm thấy thì `found = false` và bỏ trích dẫn.
+
+### POST /api/v1/knowledge/chat
+
+Cần Bearer token (mọi vai trò). Trả `BaseResponse<ChatAnswerView>`.
+
+```json
+{ "question": "CIF là gì?" }
+```
+
+```json
+{
+  "status": "SUCCESS",
+  "data": {
+    "answer": "CIF là mã khách hàng duy nhất [1].",
+    "found": true,
+    "citations": [
+      {
+        "n": 1,
+        "documentId": 42,
+        "fileName": "Quy-trinh-EOD.pdf",
+        "page": 3,
+        "lineStart": 13,
+        "lineEnd": 27,
+        "snippet": "CIF (Customer Information File) là mã khách hàng duy nhất…"
+      }
+    ]
+  }
+}
+```
+
+`page` là null với `.md` và `.docx`. `snippet` tối đa 280 ký tự, cắt ở ranh giới từ và thêm "…".
+Không tìm thấy: `found = false`, `answer` là câu cố định, `citations = []`.
+
+### POST /api/v1/knowledge/chat/stream
+
+Cùng đầu vào, trả `application/x-ndjson` (mỗi dòng một JSON, không bọc `BaseResponse`, có header
+`X-Accel-Buffering: no`). Client nên gửi `Accept: application/x-ndjson, application/json` để một lời từ chối trước khi
+stream (envelope JSON) không bị trả 406.
+
+| type        | Trường                                | Ý nghĩa                                                       |
+| ----------- | ------------------------------------- | ------------------------------------------------------------- |
+| `retrieved` | `count`                               | Số đoạn đủ liên quan, gửi ngay khi tìm xong                   |
+| `delta`     | `text`                                | Một đoạn văn bản của câu trả lời, nối theo thứ tự             |
+| `done`      | `found`, `citations`                  | Kết thúc; `citations` như trên, rỗng khi `found = false`      |
+| `error`     | `messageCode`, `message`              | Lỗi giữa chừng (Ollama dừng sau khi đã bắt đầu), kết thúc dòng |
+
+Khi không có đoạn nào đủ liên quan: `retrieved(0)`, một `delta` là câu cố định, `done(found=false)`.
+Câu hỏi không hợp lệ hoặc AI chưa sẵn sàng **trước khi** stream bắt đầu là envelope JSON `status: ERROR` như `/chat`.
+
+| messageCode                | Khi nào                                       |
+| -------------------------- | --------------------------------------------- |
+| `CORE-VALIDATION_FAILED`   | Câu hỏi trống hoặc dài quá 300 ký tự          |
+| `KNOWLEDGE-AI_UNAVAILABLE` | Ollama không phản hồi (nhúng hoặc sinh câu trả lời) |
+
 ## Xử lý nền
 
 Bảng `knowledge_documents` đồng thời là hàng đợi: worker định kỳ nhận bản ghi `queued` bằng

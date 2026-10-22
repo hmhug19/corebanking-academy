@@ -132,6 +132,80 @@
           }
         }
       ]
+    },
+    {
+      "name": "05. Hỏi đáp",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/knowledge/chat",
+        "description": "Câu trả lời hoàn chỉnh kèm trích dẫn (tệp, trang, dòng). Không tìm thấy: found=false, citations rỗng.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"CIF là gì?\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06. Hỏi đáp (stream NDJSON)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/x-ndjson, application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/knowledge/chat/stream",
+        "description": "Mỗi dòng một sự kiện: retrieved, delta..., done hoặc error. Postman hiển thị sau khi kết thúc.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"CIF là gì?\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.eql(200));",
+              "const lines = pm.response.text().trim().split('\\n').map(JSON.parse);",
+              "pm.test('Kết thúc bằng done hoặc error', () => pm.expect(['done', 'error']).to.include(lines[lines.length - 1].type));"
+            ]
+          }
+        }
+      ]
     }
   ]
 }
