@@ -1,7 +1,9 @@
 package vn.com.coreacademy.identity.service;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -16,7 +18,7 @@ import vn.com.coreacademy.identity.repository.UserRepository;
 import vn.com.coreacademy.organization.repository.OrganizationRepository;
 import vn.com.coreacademy.organization.repository.TeamRepository;
 
-/** Adapter công khai để Learning sử dụng hồ sơ/scope mà không truy cập repository Identity trực tiếp. */
+/** Adapter công khai để Learning và Knowledge sử dụng hồ sơ/scope mà không truy cập repository Identity trực tiếp. */
 @Service
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
@@ -47,6 +49,13 @@ public class LearningIdentityService {
         var user = users.findById(id).filter(u -> u.getStatus() == UserStatus.ACTIVE)
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
         return new Person(user.getId(), user.getFullName(), user.getOrgId(), user.getTeamId());
+    }
+
+    /** Tên hiển thị theo lô cho một trang kết quả; mã không tồn tại bị bỏ qua. */
+    public Map<String, String> fullNames(Collection<String> ids) {
+        Map<String, String> names = new HashMap<>();
+        users.findAllById(ids).forEach(user -> names.put(user.getId(), user.getFullName()));
+        return names;
     }
 
     public String activeOrg(Long id) {

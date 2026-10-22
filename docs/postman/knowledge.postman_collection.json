@@ -1,0 +1,137 @@
+{
+  "info": {
+    "name": "Corebanking Academy - Knowledge APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Kho tri thức Trợ lý AI. Đăng nhập bằng collection Identity để có accessToken (environment). Chi tiết: docs/api/KNOWLEDGE.md."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8019"
+    },
+    {
+      "key": "documentId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Tải tài liệu lên",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/knowledge/documents",
+        "description": "Chọn tệp .pdf, .md hoặc .docx ở part file; trả 201 với status queued.",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": []
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. Danh sách tài liệu",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/knowledge/documents?page=0&size=20",
+        "description": "Toàn bộ kho dùng chung, mới nhất trước."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. Tài liệu của tôi đang xử lý",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/knowledge/documents?mine=true&status=queued&status=processing",
+        "description": "Dùng để theo dõi tiến độ xử lý của chính mình."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04. Chi tiết tài liệu",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/knowledge/documents/{{documentId}}",
+        "description": "Trạng thái hiện tại của một tài liệu."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
