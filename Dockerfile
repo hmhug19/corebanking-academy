@@ -6,8 +6,9 @@ COPY pom.xml lombok.config ./
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp dependency:go-offline
 
 COPY src ./src
-# Keep the canonical Identity initialization script in the build context; it is never auto-executed.
-COPY docs/sql/learning_hub_identity.sql ./docs/sql/learning_hub_identity.sql
+# The SQL scripts are never auto-executed; the persistence tests load them into a throwaway database when the build
+# can reach a Docker daemon, and are skipped when it cannot.
+COPY docs/sql ./docs/sql
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp clean verify
 
 FROM eclipse-temurin:21-jre-noble AS runtime
