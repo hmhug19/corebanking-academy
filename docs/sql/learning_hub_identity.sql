@@ -1,7 +1,7 @@
 -- COREBANKING ACADEMY - IDENTITY / ORGANIZATION / RBAC
 -- PostgreSQL 14+. Chạy TOÀN BỘ file một lần trên database/schema mới hoặc vừa được tạo lại.
 -- Script không tạo/xóa database, không DROP dữ liệu và không phải migration cho DB đang có dữ liệu.
--- Gồm 8 bảng, comment/index, 5 vai trò, 16 chức năng, cây tổ chức và tài khoản demo.
+-- Gồm 8 bảng, comment/index, 5 vai trò, 17 chức năng, cây tổ chức và tài khoản demo.
 -- Không dùng extension, Flyway, tham số bind hoặc script SQL phụ. Không có FOREIGN KEY vật lý.
 -- Backend kiểm tra role + scope + hành động; functions chỉ là danh mục màn hình hiện có.
 -- Tài khoản gốc demo: 000001 / super.admin; mật khẩu công khai của dữ liệu demo: Demo@123.
@@ -278,6 +278,7 @@ INSERT INTO learning_hub.functions(code, name, route_pattern, sort_no) VALUES
     ('REPORTING'              , 'Báo cáo đào tạo'              , '/reports'          , 130),
     ('SYSTEM_AUDIT'           , 'Nhật ký hệ thống'             , '/admin/system'     , 140),
     ('KNOWLEDGE_HUB'          , 'Kho tri thức'                 , '/knowledge'        , 150),
+    ('AI_ASSISTANT'           , 'Trợ lý AI'                    , '/assistant'        , 155),
     ('ISSUE_HUB'              , 'Tra cứu sự cố'                , '/issues'           , 160);
 
 -- 12. Dữ liệu nền: vai trò - chức năng
@@ -287,16 +288,19 @@ SELECT r.role_id, f.function_id
 FROM learning_hub.roles r
 CROSS JOIN learning_hub.functions f
 WHERE (r.code = 'LEARNER' AND f.code IN (
-          'PROFILE', 'COURSE_LEARNING', 'LEARNING_PROGRESS', 'QUIZ_TAKING', 'KNOWLEDGE_HUB', 'ISSUE_HUB'
+          'PROFILE', 'COURSE_LEARNING', 'LEARNING_PROGRESS', 'QUIZ_TAKING', 'KNOWLEDGE_HUB', 'ISSUE_HUB',
+          'AI_ASSISTANT'
       ))
    OR (r.code = 'INSTRUCTOR' AND f.code IN (
-          'PROFILE', 'COURSE_MANAGEMENT', 'LESSON_MANAGEMENT', 'QUESTION_BANK', 'QUIZ_MANAGEMENT', 'REPORTING'
+          'PROFILE', 'COURSE_MANAGEMENT', 'LESSON_MANAGEMENT', 'QUESTION_BANK', 'QUIZ_MANAGEMENT', 'REPORTING',
+          'AI_ASSISTANT'
       ))
    OR (r.code IN ('ADMIN', 'SUPER_ADMIN') AND f.code IN (
           'PROFILE', 'USER_MANAGEMENT', 'ORGANIZATION_MANAGEMENT', 'ROLE_MANAGEMENT', 'COURSE_MANAGEMENT',
-          'LESSON_MANAGEMENT', 'QUESTION_BANK', 'QUIZ_MANAGEMENT', 'COURSE_ASSIGNMENT', 'REPORTING', 'SYSTEM_AUDIT'
+          'LESSON_MANAGEMENT', 'QUESTION_BANK', 'QUIZ_MANAGEMENT', 'COURSE_ASSIGNMENT', 'REPORTING', 'SYSTEM_AUDIT',
+          'AI_ASSISTANT'
       ))
-   OR (r.code = 'REPORT_VIEWER' AND f.code IN ('PROFILE', 'REPORTING'));
+   OR (r.code = 'REPORT_VIEWER' AND f.code IN ('PROFILE', 'REPORTING', 'AI_ASSISTANT'));
 
 -- 13. Dữ liệu demo: tổ chức và nhóm theo dữ liệu nguồn được cung cấp.
 -- Ban là gốc trong phạm vi demo; không tạo các cấp BIDV/Trụ sở chính/Khối CNTT nằm ngoài phạm vi.

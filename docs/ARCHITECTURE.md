@@ -28,6 +28,7 @@ vn.com.coreacademy
 ├── organization                   # API, use case và persistence org/team
 ├── audit                          # Ghi audit cùng transaction
 ├── learning                        # Danh mục, nội dung, giao học, tài nguyên và tiến độ
+├── knowledge                       # Kho tri thức Trợ lý AI: tải lên, worker nền, RAG cục bộ (Ollama + pgvector)
 └── assessment / reporting / ...    # Phạm vi nghiệp vụ chưa triển khai
 ```
 
@@ -35,6 +36,10 @@ Identity có controller/service/repository/entity/dto/mapper/security; Organizat
 sự kiện trong transaction. Learning có 36 operation và 26 bảng scalar-ID theo [LEARNING.md](api/LEARNING.md),
 truy cập hồ sơ/scope qua LearningIdentityService của Identity. Quiz Engine, báo cáo năng lực và gamification
 chưa triển khai; không suy chức năng đã có từ tên package hoặc bảng điểm nối assessment.
+
+Knowledge là kho tài liệu dùng chung (mọi vai trò): bảng `knowledge_documents` đồng thời là hàng đợi cho worker
+`@Scheduled` (trích xuất theo trang/dòng → chia đoạn → nhúng bge-m3 → pgvector). Chi tiết contract, cấu hình và
+luồng xử lý tại [KNOWLEDGE.md](api/KNOWLEDGE.md); chỉ gọi Ollama cục bộ, không gửi dữ liệu ra ngoài.
 
 ## Ranh giới xử lý
 

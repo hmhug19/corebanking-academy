@@ -1,0 +1,147 @@
+package vn.com.coreacademy.knowledge.service;
+
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
+import vn.com.coreacademy.audit.service.IdentityAuditService;
+import vn.com.coreacademy.common.dto.PageResponse;
+import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.common.exception.ResponseCode;
+import vn.com.coreacademy.common.web.PageQuery;
+import vn.com.coreacademy.identity.service.LearningIdentityService;
+import vn.com.coreacademy.knowledge.dto.KnowledgeViews.KnowledgeDocumentView;
+import vn.com.coreacademy.knowledge.dto.KnowledgeViews.UploaderView;
+import vn.com.coreacademy.knowledge.entity.DocumentStatus;
+import vn.com.coreacademy.knowledge.entity.KnowledgeDocument;
+import vn.com.coreacademy.knowledge.exception.KnowledgeResponseCode;
+import vn.com.coreacademy.knowledge.extraction.FileTypeDetector;
+import vn.com.coreacademy.knowledge.extraction.KnowledgeFileType;
+import vn.com.coreacademy.knowledge.repository.KnowledgeDocumentRepository;
+import vn.com.coreacademy.security.SecurityContextUtils;
+
+/**
+ * Upload, list and read documents of the shared knowledge base. Every signed-in user may upload and everyone sees
+ * every document; processing happens later in {@link DocumentIngestionWorker}, never inside a request.
+ */
+@Service
+@RequiredArgsConstructor
+public class KnowledgeDocumentService {
+    private static final int MAX_FILE_NAME_LENGTH = 255;
+    private static final String UPLOADED_ACTION = "KNOWLEDGE_DOCUMENT_UPLOADED";
+
+    private final KnowledgeFileStore store;
+    private final FileTypeDetector detector;
+    private final KnowledgeDocumentRepository documents;
+    private final LearningIdentityService identity;
+    private final IdentityAuditService audit;
+    private final TransactionTemplate transaction;
+
+    /**
+     * Checks the file, stores it and queues it. Refused files never reach the queue; the bytes are written outside the
+     * transaction so no database lock is held while the upload is copied, and removed again if anything fails.
+     */
+    public KnowledgeDocumentView upload(MultipartFile file) {
+        String userId = SecurityContextUtils.getUserId();
+        String name = displayName(file.getOriginalFilename());
+
+        // Step 1: everything refusable without touching the disk.
+        KnowledgeFileType type = detector.checkMetadata(name, file.getSize(), file.getContentType());
+
+        // Step 2: store, then confirm the bytes really are that type.
+        String key = store.store(file);
+        boolean committed = false;
+        try {
+            detector.checkContent(type, store.resolve(key));
+
+            // Step 3: the row and its audit record commit together.
+            KnowledgeDocument saved = transaction.execute(status -> {
+                KnowledgeDocument document = new KnowledgeDocument();
+                document.setUploadedBy(userId);
+                document.setFileName(name);
+                document.setMimeType(type.getMimeType());
+                document.setSizeBytes(file.getSize());
+                document.setStorageKey(key);
+                KnowledgeDocument created = documents.saveAndFlush(document);
+                audit.record(userId, UPLOADED_ACTION, "knowledge_document", created.getId().toString(), null,
+                    Map.of("mimeType", created.getMimeType(), "sizeBytes", created.getSizeBytes()));
+                return created;
+            });
+            committed = true;
+
+            return view(saved, identity.fullNames(List.of(userId)));
+        } finally {
+            if (!committed) {
+                store.discard(key);
+            }
+        }
+    }
+
+    /** Newest first. {@code mine} keeps the caller's uploads; {@code statuses} empty or null keeps every status. */
+    @Transactional(readOnly = true)
+    public PageResponse<KnowledgeDocumentView> list(int page, int size, boolean mine, List<String> statuses) {
+        PageRequest paging = PageQuery.of(page, size, "createTime,desc", Set.of("createTime"));
+        Set<DocumentStatus> wanted = parseStatuses(statuses);
+
+        Page<KnowledgeDocument> result = mine
+            ? documents.findByUploadedByAndStatusIn(SecurityContextUtils.getUserId(), wanted, paging)
+            : documents.findByStatusIn(wanted, paging);
+
+        // One batch of names for the whole page.
+        Map<String, String> names = identity.fullNames(
+            result.getContent().stream().map(KnowledgeDocument::getUploadedBy).distinct().toList());
+
+        return PageResponse.from(result.map(document -> view(document, names)));
+    }
+
+    @Transactional(readOnly = true)
+    public KnowledgeDocumentView get(long documentId) {
+        KnowledgeDocument document = documents.findById(documentId)
+            .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
+
+        return view(document, identity.fullNames(List.of(document.getUploadedBy())));
+    }
+
+    private static Set<DocumentStatus> parseStatuses(List<String> statuses) {
+        if (statuses == null || statuses.isEmpty()) {
+            return EnumSet.allOf(DocumentStatus.class);
+        }
+        Set<DocumentStatus> parsed = EnumSet.noneOf(DocumentStatus.class);
+        for (String value : statuses) {
+            try {
+                parsed.add(DocumentStatus.fromValue(value));
+            } catch (IllegalArgumentException exception) {
+                throw BusinessException.validation("status", "INVALID_VALUE", "Trạng thái không được hỗ trợ.");
+            }
+        }
+
+        return parsed;
+    }
+
+    /** The display name is the last path segment without control characters; it is never used as a path. */
+    private static String displayName(String originalName) {
+        String name = originalName == null ? "file" : originalName.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1).replaceAll("[\\p{Cntrl}]", "_");
+        if (name.isBlank() || name.length() > MAX_FILE_NAME_LENGTH) {
+            throw new BusinessException(KnowledgeResponseCode.FILE_INVALID);
+        }
+
+        return name;
+    }
+
+    private static KnowledgeDocumentView view(KnowledgeDocument document, Map<String, String> names) {
+        return new KnowledgeDocumentView(document.getId(), document.getFileName(), document.getMimeType(),
+            document.getSizeBytes(), document.getStatus().getValue(), document.getErrorMessage(),
+            document.getPageCount(), document.getChunkCount(),
+            new UploaderView(document.getUploadedBy(), names.getOrDefault(document.getUploadedBy(), "")),
+            document.getCreateTime(), document.getProcessedAt());
+    }
+}
