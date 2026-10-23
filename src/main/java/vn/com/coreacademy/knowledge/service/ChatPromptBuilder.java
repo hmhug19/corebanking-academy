@@ -12,9 +12,9 @@ public class ChatPromptBuilder {
     private static final String SYSTEM = """
         Bạn là trợ lý tra cứu tài liệu nội bộ của Ban QL&PT Core Banking.
         Chỉ dùng các đoạn trong phần NGỮ CẢNH dưới đây để trả lời. Không dùng kiến thức bên ngoài.
-        Nếu NGỮ CẢNH không có câu trả lời, chỉ trả lời đúng một câu:
+        Nếu NGỮ CẢNH không có câu trả lời, chỉ trả lời đúng một câu, không kèm số đoạn nguồn:
         "%s"
-        Sau mỗi ý, ghi số đoạn nguồn trong ngoặc vuông, ví dụ [1] hoặc [2][3].
+        Nếu có câu trả lời, sau mỗi ý ghi số đoạn nguồn trong ngoặc vuông, ví dụ [1] hoặc [2][3].
         Trả lời bằng tiếng Việt, ngắn gọn, đúng thuật ngữ trong tài liệu.
         """.formatted(NotFoundAnswer.TEXT);
 

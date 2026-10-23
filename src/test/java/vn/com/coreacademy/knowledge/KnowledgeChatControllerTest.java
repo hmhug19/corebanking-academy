@@ -153,7 +153,7 @@ class KnowledgeChatControllerTest extends KnowledgeIntegrationTest {
         assertThat(lines.get(0)).isEqualTo("{\"type\":\"retrieved\",\"count\":1}");
         assertThat(lines.get(1)).isEqualTo("{\"type\":\"delta\",\"text\":\"CIF là \"}");
         assertThat(lines.get(2)).isEqualTo("{\"type\":\"delta\",\"text\":\"mã khách hàng [1].\"}");
-        assertThat(lines.get(3)).startsWith("{\"type\":\"done\",\"found\":true,\"citations\":[{\"n\":1,")
+        assertThat(lines.get(3)).startsWith("{\"type\":\"done\",\"found\":true,\"answer\":\"CIF là mã khách hàng [1].\",\"citations\":[{\"n\":1,")
             .contains("\"fileName\":\"Quy-trinh-EOD.pdf\"").contains("\"page\":2").contains("\"lineStart\":4");
     }
 

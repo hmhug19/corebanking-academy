@@ -125,10 +125,11 @@ stream (envelope JSON) không bị trả 406.
 | ----------- | ------------------------------------- | ------------------------------------------------------------- |
 | `retrieved` | `count`                               | Số đoạn đủ liên quan, gửi ngay khi tìm xong                   |
 | `delta`     | `text`                                | Một đoạn văn bản của câu trả lời, nối theo thứ tự             |
-| `done`      | `found`, `citations`                  | Kết thúc; `citations` như trên, rỗng khi `found = false`      |
+| `done`      | `found`, `answer`, `citations`        | Kết thúc; `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `citations` như trên, rỗng khi `found = false` |
 | `error`     | `messageCode`, `message`              | Lỗi giữa chừng (Ollama dừng sau khi đã bắt đầu), kết thúc dòng |
 
 Khi không có đoạn nào đủ liên quan: `retrieved(0)`, một `delta` là câu cố định, `done(found=false)`.
+Khi mô hình tự trả lời "không tìm thấy" (kể cả kèm `[n]`), `done` có `found=false`, `answer` là đúng câu cố định và `citations=[]`.
 Câu hỏi không hợp lệ hoặc AI chưa sẵn sàng **trước khi** stream bắt đầu là envelope JSON `status: ERROR` như `/chat`.
 
 | messageCode                | Khi nào                                       |

@@ -14,8 +14,11 @@ public sealed interface ChatStreamEvent {
     record Delta(String type, String text) implements ChatStreamEvent {
     }
 
-    /** Last line on success; citations may be empty when the model found nothing. */
-    record Done(String type, boolean found, List<CitationView> citations) implements ChatStreamEvent {
+    /**
+     * Last line on success. {@code answer} is the final text: what the deltas added up to, or the fixed sentence when
+     * the model said nothing was found (a client replaces what it streamed). Citations are empty in that case.
+     */
+    record Done(String type, boolean found, String answer, List<CitationView> citations) implements ChatStreamEvent {
     }
 
     /** Last line on failure after the stream has started. */
@@ -30,8 +33,8 @@ public sealed interface ChatStreamEvent {
         return new Delta("delta", text);
     }
 
-    static Done done(boolean found, List<CitationView> citations) {
-        return new Done("done", found, citations);
+    static Done done(boolean found, String answer, List<CitationView> citations) {
+        return new Done("done", found, answer, citations);
     }
 
     static Error error(String messageCode, String message) {

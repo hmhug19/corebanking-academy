@@ -192,6 +192,7 @@ class KnowledgeChatServiceTest {
         assertThat(events.get(1).path("text").asText()).isEqualTo("CIF là ");
         assertThat(events.get(2).path("text").asText()).isEqualTo("mã khách hàng [1].");
         assertThat(events.get(3).path("found").asBoolean()).isTrue();
+        assertThat(events.get(3).path("answer").asText()).isEqualTo("CIF là mã khách hàng [1].");
         assertThat(events.get(3).path("citations")).hasSize(2);
         assertThat(events.get(3).path("citations").get(0).path("lineStart").asInt()).isEqualTo(13);
     }
@@ -206,6 +207,7 @@ class KnowledgeChatServiceTest {
         assertThat(events.get(0).path("count").asInt()).isZero();
         assertThat(events.get(1).path("text").asText()).isEqualTo(NotFoundAnswer.TEXT);
         assertThat(events.get(2).path("found").asBoolean()).isFalse();
+        assertThat(events.get(2).path("answer").asText()).isEqualTo(NotFoundAnswer.TEXT);
         assertThat(events.get(2).path("citations")).isEmpty();
         verify(ollama, never()).chatStream(anyList(), any(), any());
     }
@@ -220,6 +222,19 @@ class KnowledgeChatServiceTest {
         JsonNode done = events.get(events.size() - 1);
         assertThat(done.path("type").asText()).isEqualTo("done");
         assertThat(done.path("found").asBoolean()).isFalse();
+        assertThat(done.path("citations")).isEmpty();
+    }
+
+    @Test
+    void streamReplacesTheTextWithTheFixedSentenceWhenTheModelAddsSourceMarkers() throws IOException {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        streamDeltas("Không tìm thấy thông tin này trong tài liệu.", "[1][2]");
+
+        List<JsonNode> events = run(service.stream("Hỏi"));
+
+        JsonNode done = events.get(events.size() - 1);
+        assertThat(done.path("found").asBoolean()).isFalse();
+        assertThat(done.path("answer").asText()).isEqualTo(NotFoundAnswer.TEXT);
         assertThat(done.path("citations")).isEmpty();
     }
 

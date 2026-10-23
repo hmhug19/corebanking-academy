@@ -97,7 +97,7 @@ public class KnowledgeChatService {
             write(output, ChatStreamEvent.retrieved(retrieval.hits().size()));
             if (retrieval.hits().isEmpty()) {
                 write(output, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
-                write(output, ChatStreamEvent.done(false, List.of()));
+                write(output, ChatStreamEvent.done(false, NotFoundAnswer.TEXT, List.of()));
                 return;
             }
 
@@ -115,7 +115,7 @@ public class KnowledgeChatService {
             }
 
             ChatAnswerView answer = conclude(text.toString().strip(), retrieval.hits());
-            write(output, ChatStreamEvent.done(answer.found(), answer.citations()));
+            write(output, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations()));
         };
     }
 
