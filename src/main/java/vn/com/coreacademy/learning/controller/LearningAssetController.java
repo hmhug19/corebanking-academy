@@ -10,6 +10,9 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -41,6 +44,8 @@ public class LearningAssetController {
     private final LearningAssetService assets;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Upload tài nguyên học tập",
         description = """
@@ -57,6 +62,12 @@ public class LearningAssetController {
     }
 
     @GetMapping("/{assetId}/content")
+    @ApiResponse(responseCode = "200", description = "Nội dung tệp đầy đủ, không bọc BaseResponse.",
+        content = @Content(mediaType = MediaType.APPLICATION_OCTET_STREAM_VALUE,
+            schema = @Schema(type = "string", format = "binary")))
+    @ApiResponse(responseCode = "206", description = "Một phần nội dung tệp khi gửi Range hợp lệ.",
+        content = @Content(mediaType = MediaType.APPLICATION_OCTET_STREAM_VALUE,
+            schema = @Schema(type = "string", format = "binary")))
     @Operation(
         summary = "Mở/tải tài nguyên có kiểm soát quyền",
         description = """

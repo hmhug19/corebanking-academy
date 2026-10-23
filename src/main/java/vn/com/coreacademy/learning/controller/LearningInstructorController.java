@@ -1,6 +1,7 @@
 package vn.com.coreacademy.learning.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -25,6 +26,8 @@ public class LearningInstructorController {
     private final LearningSearchService search;
 
     @GetMapping("/courses")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Danh sách khóa học giảng viên",
         description = """

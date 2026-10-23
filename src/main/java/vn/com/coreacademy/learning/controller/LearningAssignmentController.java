@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -31,6 +32,8 @@ public class LearningAssignmentController {
     private final LearningAssignmentService assignments;
 
     @GetMapping("/{assignmentId}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Xem đợt giao và người nhận",
         description = """
@@ -42,6 +45,8 @@ public class LearningAssignmentController {
     }
 
     @PostMapping("/recipients/{recipientId}/revoke")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Thu hồi một nghĩa vụ giao học",
         description = """

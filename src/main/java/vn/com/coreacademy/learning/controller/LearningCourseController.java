@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -39,6 +40,8 @@ public class LearningCourseController {
     private final LearningAssignmentService assignments;
 
     @PostMapping
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Tạo khóa học và bản nháp đầu tiên",
         description = """
@@ -51,6 +54,8 @@ public class LearningCourseController {
     }
 
     @GetMapping("/{courseId}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Xem cây nội dung để biên soạn",
         description = """
@@ -63,6 +68,8 @@ public class LearningCourseController {
     }
 
     @PutMapping("/{courseId}/revisions/{revisionId}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Lưu toàn bộ nội dung bản nháp",
         description = """
@@ -76,6 +83,8 @@ public class LearningCourseController {
     }
 
     @PostMapping("/{courseId}/revisions/{revisionId}/publish")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Xuất bản khóa học",
         description = """
@@ -88,6 +97,8 @@ public class LearningCourseController {
     }
 
     @PostMapping("/{courseId}/draft")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Mở bản nháp để chỉnh sửa",
         description = """
@@ -99,6 +110,8 @@ public class LearningCourseController {
     }
 
     @PostMapping("/{courseId}/copy")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Sao chép thành khóa mới",
         description = """
@@ -111,6 +124,8 @@ public class LearningCourseController {
     }
 
     @PatchMapping("/{courseId}/state")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Tạm dừng hoặc lưu trữ khóa học",
         description = """
@@ -123,6 +138,8 @@ public class LearningCourseController {
     }
 
     @GetMapping("/{courseId}/shares")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Xem chia sẻ khóa học",
         description = """
@@ -134,6 +151,8 @@ public class LearningCourseController {
     }
 
     @PutMapping("/{courseId}/shares")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Chia sẻ hoặc thu hồi chia sẻ",
         description = """
@@ -146,6 +165,8 @@ public class LearningCourseController {
     }
 
     @PostMapping("/{courseId}/assignments")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Giao khóa học cho cá nhân/nhóm/đơn vị",
         description = """
@@ -158,6 +179,8 @@ public class LearningCourseController {
     }
 
     @GetMapping("/{courseId}/assignments")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Xem các đợt giao của đơn vị",
         description = """
@@ -171,6 +194,8 @@ public class LearningCourseController {
     }
 
     @PostMapping("/{courseId}/enrollments")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Tự đăng ký khóa học tự chọn",
         description = """

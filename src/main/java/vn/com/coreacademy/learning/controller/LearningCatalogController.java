@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -34,6 +35,8 @@ public class LearningCatalogController {
     private final LearningCatalogService catalog;
 
     @GetMapping("/fields")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Danh sách fields",
         description = """
@@ -46,6 +49,8 @@ public class LearningCatalogController {
     }
 
     @PostMapping("/fields")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Tạo fields",
         description = """
@@ -58,6 +63,8 @@ public class LearningCatalogController {
     }
 
     @PutMapping("/fields/{id}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Cập nhật fields",
         description = """
@@ -70,6 +77,8 @@ public class LearningCatalogController {
     }
 
     @GetMapping("/programs")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Danh sách programs",
         description = """
@@ -83,6 +92,8 @@ public class LearningCatalogController {
     }
 
     @PostMapping("/programs")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Tạo programs",
         description = """
@@ -95,6 +106,8 @@ public class LearningCatalogController {
     }
 
     @PutMapping("/programs/{id}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Cập nhật programs",
         description = """
@@ -107,6 +120,8 @@ public class LearningCatalogController {
     }
 
     @GetMapping("/modules")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Danh sách modules",
         description = """
@@ -119,6 +134,8 @@ public class LearningCatalogController {
     }
 
     @PostMapping("/modules")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Tạo modules",
         description = """
@@ -131,6 +148,8 @@ public class LearningCatalogController {
     }
 
     @PutMapping("/modules/{id}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Cập nhật modules",
         description = """

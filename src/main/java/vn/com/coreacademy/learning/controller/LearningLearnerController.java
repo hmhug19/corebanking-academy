@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -38,6 +39,8 @@ public class LearningLearnerController {
     private final LearningSearchService search;
 
     @GetMapping("/courses")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Khóa học của tôi",
         description = """
@@ -55,6 +58,8 @@ public class LearningLearnerController {
     }
 
     @GetMapping("/catalog")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Danh mục khóa học của học viên",
         description = """
@@ -72,6 +77,8 @@ public class LearningLearnerController {
     }
 
     @GetMapping("/enrollments/{enrollmentId}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Xem nội dung và vị trí tiếp tục học",
         description = """
@@ -83,6 +90,8 @@ public class LearningLearnerController {
     }
 
     @PutMapping("/enrollments/{enrollmentId}/blocks/{blockId}/progress")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Ghi tương tác học và tổng hợp tiến độ",
         description = """
@@ -95,6 +104,8 @@ public class LearningLearnerController {
     }
 
     @GetMapping("/reminders")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Thông báo nhắc học đến hạn",
         description = """
@@ -106,6 +117,8 @@ public class LearningLearnerController {
     }
 
     @PostMapping("/reminders/{reminderId}/read")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
         summary = "Đánh dấu đã đọc nhắc học",
         description = """
