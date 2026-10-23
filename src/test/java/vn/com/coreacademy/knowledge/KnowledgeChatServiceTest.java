@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.stream.IntStream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,9 +33,11 @@ import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.groups.Tuple.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -48,6 +51,9 @@ class KnowledgeChatServiceTest {
         "CIF (Customer Information File) là mã khách hàng duy nhất.", 0.82);
     private static final ChunkHit GL = new ChunkHit(2, 43, "Checklist.md", null, 5, 9,
         "Đối chiếu số dư GL trước khi chạy EOD.", 0.55);
+    // The same chunk from a second upload of the file: other ids, same text up to whitespace.
+    private static final ChunkHit CIF_COPY = new ChunkHit(4, 45, "Quy-trinh-EOD (1).pdf", 3, 13, 27,
+        "CIF  (Customer Information File) là mã khách hàng duy nhất.\n", 0.81);
     private static final ChunkHit WEAK = new ChunkHit(3, 44, "Khac.docx", null, 1, 2, "Nội dung không liên quan.",
         0.12);
 
@@ -93,7 +99,7 @@ class KnowledgeChatServiceTest {
     }
 
     @Test
-    void aNormalAnswerCitesEveryRetrievedChunkWithItsPageAndLines() {
+    void aNormalAnswerCitesOnlyTheChunksItMarksWithTheirPageAndLines() {
         when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, WEAK, GL));
         when(ollama.chat(anyList(), any())).thenReturn("CIF là mã khách hàng duy nhất [1].");
 
@@ -101,7 +107,7 @@ class KnowledgeChatServiceTest {
 
         assertThat(answer.found()).isTrue();
         assertThat(answer.answer()).isEqualTo("CIF là mã khách hàng duy nhất [1].");
-        assertThat(answer.citations()).hasSize(2);
+        assertThat(answer.citations()).hasSize(1);
         assertThat(answer.citations().get(0)).satisfies(citation -> {
             assertThat(citation.n()).isEqualTo(1);
             assertThat(citation.documentId()).isEqualTo(42);
@@ -111,17 +117,73 @@ class KnowledgeChatServiceTest {
             assertThat(citation.lineEnd()).isEqualTo(27);
             assertThat(citation.snippet()).isEqualTo(CIF.content());
         });
-        assertThat(answer.citations().get(1).n()).isEqualTo(2);
-        assertThat(answer.citations().get(1).page()).isNull();
-        assertThat(answer.citations().get(1).fileName()).isEqualTo("Checklist.md");
     }
 
     @Test
-    void citationsComeFromTheChunksNotFromTheModelText() {
+    void aCitationKeepsTheNumberTheModelSawEvenWhenEarlierChunksAreLeftOut() {
         when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
-        when(ollama.chat(anyList(), any())).thenReturn("Trả lời không có dấu nguồn nào, hoặc [9] sai số.");
+        when(ollama.chat(anyList(), any())).thenReturn("Đối chiếu GL trước EOD [2].");
+
+        ChatAnswerView answer = service.answer("Trước EOD cần làm gì?");
+
+        assertThat(answer.citations()).singleElement().satisfies(citation -> {
+            assertThat(citation.n()).isEqualTo(2);
+            assertThat(citation.fileName()).isEqualTo("Checklist.md");
+            assertThat(citation.page()).isNull();
+        });
+    }
+
+    @Test
+    void everyMarkerFormNamesItsChunksAndEachChunkIsCitedOnce() {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(ollama.chat(anyList(), any())).thenReturn("Ý một [2][1]. Ý hai [1, 2]. Lại [2].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
+    }
+
+    @Test
+    void withoutAUsableMarkerEveryRetrievedChunkIsASource() {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn, chỉ [9] và [12345678901].");
+
+        assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
+    }
+
+    @Test
+    void outOfRangeMarkersAreIgnoredBesideAValidOne() {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(ollama.chat(anyList(), any())).thenReturn("CIF [1][7].");
+
+        assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1);
+    }
+
+    @Test
+    void aChunkStoredTwiceReachesThePromptAndTheSourcesOnce() {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, CIF_COPY, GL));
+        when(ollama.chat(anyList(), any())).thenReturn("CIF [1]. GL [2].");
+
+        ChatAnswerView answer = service.answer("CIF và GL?");
+
+        verify(chunks).search(any(), eq(15));
+        assertThat(answer.citations()).extracting(c -> c.n(), c -> c.documentId())
+            .containsExactly(tuple(1, 42L), tuple(2, 43L));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Message>> captor = ArgumentCaptor.forClass(List.class);
+        verify(ollama).chat(captor.capture(), any());
+        String prompt = captor.getValue().get(1).content();
+        assertThat(prompt).contains("[1] (Quy-trinh-EOD.pdf").contains("[2] (Checklist.md")
+            .doesNotContain("Quy-trinh-EOD (1).pdf").doesNotContain("[3]");
+    }
+
+    @Test
+    void distinctChunksStopAtTopK() {
+        List<ChunkHit> many = IntStream.range(0, 8)
+            .mapToObj(i -> new ChunkHit(10 + i, 50 + i, "f" + i + ".md", null, 1, 1, "Đoạn " + i, 0.9 - i * 0.01))
+            .toList();
+        when(chunks.search(any(), anyInt())).thenReturn(many);
+        when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn.");
+
+        assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2, 3, 4, 5);
     }
 
     @Test
@@ -193,7 +255,7 @@ class KnowledgeChatServiceTest {
         assertThat(events.get(2).path("text").asText()).isEqualTo("mã khách hàng [1].");
         assertThat(events.get(3).path("found").asBoolean()).isTrue();
         assertThat(events.get(3).path("answer").asText()).isEqualTo("CIF là mã khách hàng [1].");
-        assertThat(events.get(3).path("citations")).hasSize(2);
+        assertThat(events.get(3).path("citations")).hasSize(1);
         assertThat(events.get(3).path("citations").get(0).path("lineStart").asInt()).isEqualTo(13);
     }
 

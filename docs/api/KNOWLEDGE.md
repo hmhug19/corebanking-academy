@@ -113,6 +113,10 @@ Cần Bearer token (mọi vai trò). Trả `BaseResponse<ChatAnswerView>`.
 ```
 
 `page` là null với `.md` và `.docx`. `snippet` tối đa 280 ký tự, cắt ở ranh giới từ và thêm "…".
+`citations` chỉ gồm các đoạn mà `answer` ghi `[n]` (dạng `[1]`, `[2][3]`, `[1, 2]`), theo thứ tự xếp hạng, mỗi đoạn một
+lần, `n` giữ đúng số trong prompt (có thể không liên tiếp). `[n]` ngoài khoảng bị bỏ qua; nếu không có `[n]` hợp lệ nào thì
+trả mọi đoạn đã đưa vào prompt. Mọi trường của nguồn lấy từ metadata của đoạn, không lấy từ văn bản model. Trước khi đưa
+vào prompt, các đoạn có nội dung trùng (tệp tải lên lại) chỉ giữ đoạn liên quan nhất.
 Không tìm thấy: `found = false`, `answer` là câu cố định, `citations = []`.
 
 ### POST /api/v1/knowledge/chat/stream

@@ -19,7 +19,7 @@ public final class ChatViews {
         @Schema(description = "280 ký tự đầu của đoạn, cắt ở ranh giới từ.") String snippet) {
     }
 
-    @Schema(description = "Câu trả lời; found=false thì citations rỗng.")
+    @Schema(description = "Câu trả lời; citations là các đoạn được ghi [n] trong answer; found=false thì rỗng.")
     public record ChatAnswerView(String answer, boolean found, List<CitationView> citations) {
     }
 }

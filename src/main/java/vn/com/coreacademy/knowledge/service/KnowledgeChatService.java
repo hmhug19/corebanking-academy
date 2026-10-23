@@ -4,8 +4,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
-import java.util.stream.IntStream;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,8 +33,8 @@ import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 
 /**
  * Answers a question from the shared knowledge base only: embed, find the closest chunks, and let the local model
- * answer from them. Citations are built from the retrieved chunks' metadata, never parsed from the model's text. The
- * question and the answer are never logged; only sizes and durations are.
+ * answer from them. Citations are built from the retrieved chunks' metadata; the model's [n] markers only choose which
+ * of those chunks are shown. The question and the answer are never logged; only sizes and durations are.
  */
 @Slf4j
 @Service
@@ -37,6 +42,11 @@ import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 public class KnowledgeChatService {
     private static final int MAX_QUESTION_LENGTH = 300;
     private static final int SNIPPET_LENGTH = 280;
+    // Re-uploaded files store the same text again, so search asks for more than top-k and keeps the distinct ones.
+    private static final int CANDIDATE_FACTOR = 3;
+    // [1], [2][3] and [1, 2] all name chunks; anything else in brackets is ignored.
+    private static final Pattern MARKER = Pattern.compile("\\[(\\d+(?:\\s*,\\s*\\d+)*)]");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private final OllamaClient ollama;
     private final DocumentChunkRepository chunks;
@@ -59,8 +69,9 @@ public class KnowledgeChatService {
         try {
             float[] vector = ollama.embed(List.of(question)).get(0);
             KnowledgeProperties.Retrieval retrieval = properties.retrieval();
-            hits = chunks.search(vector, retrieval.topK()).stream()
+            List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR).stream()
                 .filter(hit -> hit.similarity() >= retrieval.minSimilarity()).toList();
+            hits = distinct(candidates, retrieval.topK());
         } catch (OllamaUnavailableException | OllamaException exception) {
             throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
         }
@@ -124,11 +135,53 @@ public class KnowledgeChatService {
             return notFound();
         }
 
-        // Every retrieved chunk is a source, numbered as the model saw it; the model's [n] markers are not trusted.
-        List<CitationView> citations = IntStream.range(0, hits.size()).mapToObj(i -> citation(i + 1, hits.get(i)))
-            .toList();
+        // Sources keep the numbers the model saw. Only the chunks it marked are shown; markers outside 1..size are
+        // ignored, and an answer with no usable marker shows every retrieved chunk rather than none.
+        Set<Integer> cited = citedNumbers(text, hits.size());
+        List<CitationView> citations = new ArrayList<>();
+        for (int n = 1; n <= hits.size(); n++) {
+            if (cited.isEmpty() || cited.contains(n)) {
+                citations.add(citation(n, hits.get(n - 1)));
+            }
+        }
 
         return new ChatAnswerView(text, true, citations);
+    }
+
+    /** The best {@code limit} hits whose text differs, best first; a copy of a file already seen adds nothing. */
+    static List<ChunkHit> distinct(List<ChunkHit> hits, int limit) {
+        Set<String> seen = new HashSet<>();
+        List<ChunkHit> kept = new ArrayList<>();
+        for (ChunkHit hit : hits) {
+            if (kept.size() == limit) {
+                break;
+            }
+            if (seen.add(WHITESPACE.matcher(hit.content().strip()).replaceAll(" "))) {
+                kept.add(hit);
+            }
+        }
+
+        return kept;
+    }
+
+    /** Chunk numbers named by [n] markers in the answer, limited to 1..size. */
+    static Set<Integer> citedNumbers(String text, int size) {
+        Set<Integer> numbers = new TreeSet<>();
+        Matcher matcher = MARKER.matcher(text);
+        while (matcher.find()) {
+            for (String part : matcher.group(1).split(",")) {
+                String digits = part.strip();
+                // More than 3 digits cannot be a chunk number (top-k is small) and could overflow parseInt.
+                if (digits.length() <= 3) {
+                    int n = Integer.parseInt(digits);
+                    if (n >= 1 && n <= size) {
+                        numbers.add(n);
+                    }
+                }
+            }
+        }
+
+        return numbers;
     }
 
     private static ChatAnswerView notFound() {
