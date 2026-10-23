@@ -134,6 +134,8 @@ Xem log:
 sudo docker compose --env-file .env.ubuntu -f compose.ubuntu.yaml logs --tail=100 -f backend
 ```
 
+Tính năng AI (Knowledge/RAG) cần Ollama; khi Ollama chạy trên Mac riêng, xem [TAILSCALE_OLLAMA.md](TAILSCALE_OLLAMA.md).
+
 ## 6. Truy cập từ máy khác
 
 Mặc định backend chỉ publish vào loopback của host. Có hai cách truy cập:

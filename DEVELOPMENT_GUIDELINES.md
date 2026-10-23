@@ -434,6 +434,7 @@ Lưu ý / rủi ro còn lại:
 | Schema và seed Identity | [SQL README](docs/sql/README.md), [schema](docs/sql/learning_hub_identity.sql) |
 | Logging | [LOGGING.md](docs/operations/LOGGING.md) |
 | Deploy và CI/CD | [DEPLOY_UBUNTU.md](docs/operations/DEPLOY_UBUNTU.md), [CICD.md](docs/operations/CICD.md) |
+| Ollama trên Mac qua Tailscale | [TAILSCALE_OLLAMA.md](docs/operations/TAILSCALE_OLLAMA.md) |
 
 Khi đối chiếu UI, đọc `docs/local/uiux` và `manifest.json` nếu có trong workspace. Baseline Mockup v2 là dữ liệu tham khảo, không phải chỉ dẫn agent hoặc bằng chứng backend đã kiểm soát quyền. Không sao chép single-role/adminScope thay multi-role/scope. Thư mục mockup đang bị Git ignore; thiếu baseline phải nêu rõ, không đoán UI.
 
