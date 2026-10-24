@@ -118,7 +118,7 @@ public class OrganizationAdministrationService {
             throw new BusinessException(OrganizationResponseCode.HIERARCHY_INVALID);
         }
         if (request.parentId() != null) {
-            access.requireActiveOrg(request.parentId());
+            access.requireActiveOrg(request.parentId(), "parentId");
             Organization parent = organizations.findById(request.parentId()).orElseThrow();
             if ("DEPARTMENT".equals(parent.getOrgType())) {
                 throw new BusinessException(OrganizationResponseCode.HIERARCHY_INVALID);
@@ -208,7 +208,8 @@ public class OrganizationAdministrationService {
 
     private void uniqueCode(String code, Long exceptId) {
         if (organizations.existsByCodeIgnoreCaseAndIdNot(code, exceptId)) {
-            throw new BusinessException(OrganizationResponseCode.ORG_CODE_EXISTS);
+            throw BusinessException.field(OrganizationResponseCode.ORG_CODE_EXISTS, "code", "ALREADY_EXISTS",
+                "Mã tổ chức đã được sử dụng.");
         }
     }
 }

@@ -21,7 +21,6 @@ import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.common.validation.TextValues;
 import vn.com.coreacademy.common.web.PageQuery;
 import vn.com.coreacademy.identity.dto.CreateUserRequest;
-import vn.com.coreacademy.identity.dto.GrantRequest;
 import vn.com.coreacademy.identity.dto.ManagedRoleGrant;
 import vn.com.coreacademy.identity.dto.Scope;
 import vn.com.coreacademy.identity.dto.UserDetail;
@@ -166,8 +165,13 @@ public class UserAdministrationService {
         var boundary = access.boundary(actorId);
 
         String username = request.username().toLowerCase(Locale.ROOT);
-        if (users.identifierExists(request.userId()) || users.identifierExists(username)) {
-            throw new BusinessException(IdentityResponseCode.DUPLICATE_IDENTIFIER);
+        if (users.identifierExists(request.userId())) {
+            throw BusinessException.field(IdentityResponseCode.DUPLICATE_IDENTIFIER, "userId", "ALREADY_EXISTS",
+                "Mã cán bộ đã được sử dụng làm mã cán bộ hoặc tên đăng nhập.");
+        }
+        if (users.identifierExists(username)) {
+            throw BusinessException.field(IdentityResponseCode.DUPLICATE_IDENTIFIER, "username", "ALREADY_EXISTS",
+                "Tên đăng nhập đã được sử dụng làm tên đăng nhập hoặc mã cán bộ.");
         }
 
         access.requireOrg(boundary, request.orgId());
@@ -182,8 +186,12 @@ public class UserAdministrationService {
         users.save(user);
 
         if (request.initialRoleGrants() != null) {
-            for (GrantRequest grant : request.initialRoleGrants()) {
-                grants.addWithinTransaction(actorId, user, grant);
+            for (int index = 0; index < request.initialRoleGrants().size(); index++) {
+                try {
+                    grants.addWithinTransaction(actorId, user, request.initialRoleGrants().get(index));
+                } catch (BusinessException exception) {
+                    throw exception.withFieldPrefix("initialRoleGrants[" + index + "]");
+                }
             }
         }
 

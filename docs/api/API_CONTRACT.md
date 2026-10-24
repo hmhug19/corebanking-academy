@@ -26,7 +26,7 @@ Ví dụ thành công:
 
 - data luôn có khóa, null khi không có payload; khi thành công có kiểu DTO theo Swagger. Không trả entity hoặc credential/hash/token nội bộ trong lỗi.
 - errors chỉ có khi có chi tiết lỗi trường, gồm field/code/message; không có rejectedValue. Field path có thể là `initialRoleGrants[0].roleId`. Field rỗng chỉ lỗi toàn request như EMPTY_UPDATE.
-- Cùng messageCode dùng một message/title mặc định. FE không so sánh chuỗi message để phân loại lỗi.
+- Cùng messageCode dùng một message/title mặc định. Nếu có đúng một errors item, message ngoài bằng errors[0].message; nếu có nhiều lỗi hoặc không có chi tiết thì dùng message mặc định. messageTitle vẫn theo mã nghiệp vụ. FE không so sánh chuỗi message để phân loại lỗi.
 - BaseResponse.ok tạo SUCCESS; BaseResponse.fail tạo ERROR, độc lập với HTTP status. ApiResponseCode.isSuccess phân biệt mã thành công; không suy từ HTTP 200 hoặc prefix chuỗi.
 
 ## Lỗi và HTTP status
@@ -40,6 +40,7 @@ Ví dụ thành công:
 | Body bắt buộc bị thiếu, JSON sai cú pháp | 400 | ERROR |
 | URL API không tồn tại | 404 | ERROR |
 | Method/Accept/Content-Type không hỗ trợ | 405/406/415 | ERROR |
+| Range file sai/không hỗ trợ | 416 | ERROR |
 | Vượt giới hạn request nếu được cấu hình | 429 | ERROR |
 | Lỗi hệ thống ngoài dự kiến | 500 | ERROR |
 
@@ -53,7 +54,7 @@ Ví dụ validation trả HTTP 200:
   "timestamp": "2026-10-17T00:00:00Z",
   "status": "ERROR",
   "messageCode": "CORE-VALIDATION_FAILED",
-  "message": "Dữ liệu đầu vào không hợp lệ.",
+  "message": "Thông tin không đúng định dạng.",
   "messageTitle": "Thông tin chưa hợp lệ",
   "data": null,
   "errors": [
@@ -65,6 +66,48 @@ Ví dụ validation trả HTTP 200:
 Annotation validation được chuyển sang mã chi tiết ổn định REQUIRED/INVALID_FORMAT/INVALID_LENGTH/OUT_OF_RANGE/INVALID_VALUE. Validation tại service bổ sung TOO_LONG, EMPTY_UPDATE, CONFLICTING_FIELDS, UNSUPPORTED_FIELD, PASSWORD_POLICY hoặc SAME_AS_CURRENT khi phù hợp. Mật khẩu mới có giới hạn 72 byte UTF-8; Size trên DTO kiểm tra độ dài String, PasswordPolicy kiểm tra giới hạn byte. Lỗi nghiệp vụ vẫn ném BusinessException để rollback transaction dù response HTTP là 200.
 
 ApiExceptionHandler chuẩn hóa lỗi MVC/service; ApiSecurityErrorHandler xử lý lỗi Security với cùng envelope. HTTP 405 giữ Allow; lỗi token tại Security giữ WWW-Authenticate: Bearer. ResponseId hỗ trợ tra cứu lỗi hệ thống; không trả exception message/stack/SQL hoặc giá trị mật khẩu cho client. Không gom lỗi DB bất ngờ thành lỗi nghiệp vụ để che lỗi hệ thống.
+
+## Chi tiết lỗi nghiệp vụ theo field
+
+Giữ nguyên messageCode và HTTP 200/ERROR cho lỗi nghiệp vụ. Khi xác định được trường cần sửa, errors chứa field/code/message; xử lý tuần tự, không cam kết gom mọi lỗi nghiệp vụ trong một lượt. Không thêm API check trùng riêng. Backend vẫn kiểm tra khi lưu dù FE đã validate đầu vào.
+
+| Case | messageCode | field | errors[].code |
+|---|---|---|---|
+| Mã cán bộ trùng mã cán bộ hoặc username đã có | IDENTITY-IDENTIFIER_EXISTS | userId | ALREADY_EXISTS |
+| Username trùng username hoặc mã cán bộ đã có | IDENTITY-IDENTIFIER_EXISTS | username | ALREADY_EXISTS |
+| Trùng mã tổ chức/phòng | ORGANIZATION-ORG_CODE_EXISTS | code | ALREADY_EXISTS |
+| Trùng mã nhóm trong cùng tổ chức | ORGANIZATION-TEAM_CODE_EXISTS | code | ALREADY_EXISTS |
+| Thiếu tổ chức khi gán nhóm | IDENTITY-MEMBERSHIP_INVALID | orgId | REQUIRED |
+| Tổ chức không còn tồn tại | IDENTITY-MEMBERSHIP_INVALID | orgId hoặc field theo ngữ cảnh | NOT_FOUND |
+| Tổ chức/cấp cha ngừng hoạt động hoặc cây không hợp lệ | IDENTITY-MEMBERSHIP_INVALID | orgId hoặc field theo ngữ cảnh | INVALID_VALUE |
+| Nhóm không tồn tại/ngừng hoạt động/khác tổ chức | IDENTITY-MEMBERSHIP_INVALID hoặc IDENTITY-SCOPE_INVALID | teamId | NOT_FOUND / INACTIVE / MISMATCH |
+| Vai trò không tồn tại hoặc ngừng hoạt động | IDENTITY-SCOPE_INVALID | roleId | INVALID_VALUE |
+| Thiếu target theo scope | IDENTITY-SCOPE_INVALID | orgId / teamId | REQUIRED |
+| Gửi target không được phép cho scope | IDENTITY-SCOPE_INVALID | orgId / teamId | NOT_ALLOWED |
+| Phân quyền role/scope/target đã tồn tại | IDENTITY-ROLE_GRANT_EXISTS | roleId | ALREADY_EXISTS |
+
+Lỗi trong initialRoleGrants dùng đường dẫn có chỉ số, ví dụ initialRoleGrants[0].roleId. Tổ chức cha khi tạo node dùng parentId; khi chọn TEAM không gửi orgId, lỗi tổ chức của nhóm gắn vào teamId. Không thay lỗi thiếu quyền thành lỗi field hoặc phân biệt dữ liệu ngoài scope để dò tài nguyên. Lỗi xóa nhóm đang được sử dụng, bảo vệ SUPER_ADMIN cuối cùng và đăng nhập sai vẫn giữ thông báo toàn thao tác.
+
+Ví dụ trùng username:
+
+```json
+{
+  "responseId": "fe-request-003",
+  "timestamp": "2026-10-17T00:00:00Z",
+  "status": "ERROR",
+  "messageCode": "IDENTITY-IDENTIFIER_EXISTS",
+  "message": "Tên đăng nhập đã được sử dụng làm tên đăng nhập hoặc mã cán bộ.",
+  "messageTitle": "Trùng thông tin tài khoản",
+  "data": null,
+  "errors": [
+    {
+      "field": "username",
+      "code": "ALREADY_EXISTS",
+      "message": "Tên đăng nhập đã được sử dụng làm tên đăng nhập hoặc mã cán bộ."
+    }
+  ]
+}
+```
 
 ## Danh mục messageCode
 
@@ -84,6 +127,7 @@ CORE đặt trong common.exception.ResponseCode; module có enum riêng implemen
 | CORE-NOT_ACCEPTABLE | 406 | Định dạng phản hồi yêu cầu không được hỗ trợ. |
 | CORE-STATE_CONFLICT | 200 | Thao tác không phù hợp với trạng thái dữ liệu hiện tại. |
 | CORE-UNSUPPORTED_MEDIA_TYPE | 415 | Kiểu nội dung yêu cầu không được hỗ trợ. |
+| CORE-RANGE_NOT_SATISFIABLE | 416 | Khoảng byte yêu cầu không hợp lệ hoặc không được hỗ trợ. |
 | CORE-TOO_MANY_REQUESTS | 429 | Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau. |
 | CORE-INTERNAL_ERROR | 500 | Hệ thống gặp lỗi. Vui lòng thử lại sau hoặc cung cấp responseId để được hỗ trợ. |
 | IDENTITY-CREDENTIALS_INVALID | 401 | Tên đăng nhập hoặc mật khẩu không đúng. |
@@ -110,7 +154,7 @@ RequestIdFilter chạy trước Security, giữ ID qua dispatch, đặt header/M
 ## Tích hợp FE và Swagger
 
 - Login lấy token từ data.accessToken chỉ khi status=SUCCESS; /me đọc data.user/roles/functions/roleGrants/functionDetails/functionScopes.
-- HTTP interceptor cần xử lý cả nhánh HTTP 200 với status=ERROR. Hiển thị lỗi trường từ errors; xử lý nghiệp vụ theo messageCode. Login 401 hiển thị lỗi form; token 401 xóa phiên; 403 báo không có quyền, tránh retry lặp.
+- HTTP interceptor cần xử lý cả nhánh HTTP 200 với status=ERROR. Hiển thị lỗi trường từ errors; xử lý nghiệp vụ theo messageCode. Login 401 hiển thị lỗi form; token 401 xóa phiên; 403 phân nhánh IDENTITY-PASSWORD_CHANGE_REQUIRED để chuyển sang đổi mật khẩu; CORE-ACCESS_DENIED báo không có quyền, tránh retry lặp.
 - Tạo mới thành công vẫn trả 201; tạo mới thất bại nghiệp vụ trả 200/ERROR, không có resource/Location thành công. Logout thành công trả 200/SUCCESS/data=null; FE cũng xóa phiên local khi token bị từ chối 401.
 - Swagger mô tả 200/SUCCESS và 200/ERROR; endpoint tạo mới có cả 201 và 200. StandardApiErrors giữ lỗi giao thức/bảo mật chung. Schema data của response thành công có thể nullable trong lỗi.
 - Không tự retry thao tác ghi chỉ vì timeout hoặc có responseId. Monitoring cần đếm status/messageCode ngoài HTTP status để nhận diện lỗi nghiệp vụ.
@@ -119,7 +163,7 @@ Thay đổi contract: mã cũ có HTTP số đã được thay bằng mã semant
 
 ## Kiểm chứng
 
-Maven clean verify kiểm tra build và test thực sự tồn tại; repository hiện chưa có test source. Kiểm tra HTTP riêng cần xác minh SUCCESS/ERROR độc lập HTTP, field errors, lỗi login/token/quyền, lỗi giao thức và rollback. Smoke check với H2 không thay kiểm tra PostgreSQL, advisory lock nhiều instance hoặc Docker.
+Maven clean verify kiểm tra build và test thực sự tồn tại; repository hiện có test Knowledge; kiểm tra số test thực sự chạy và test bị skip theo môi trường. Kiểm tra HTTP riêng cần xác minh SUCCESS/ERROR độc lập HTTP, field errors, lỗi login/token/quyền, lỗi giao thức và rollback. Smoke check với H2 không thay kiểm tra PostgreSQL, advisory lock nhiều instance hoặc Docker.
 
 
 ## Postman

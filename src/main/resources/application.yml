@@ -19,6 +19,7 @@ spring:
     enabled: false
   servlet:
     multipart:
+      location: ${UPLOAD_TEMP_DIR:${java.io.tmpdir}}
       max-file-size: 500MB
       max-request-size: 501MB
 management:
@@ -30,8 +31,18 @@ management:
     health:
       show-details: never
 app:
-  learning:
-    asset-dir: ${LEARNING_ASSET_DIR:./data/learning-assets}
+  storage:
+    temp-dir: ${UPLOAD_TEMP_DIR:${java.io.tmpdir}}
+    s3:
+      endpoint: ${S3_ENDPOINT}
+      bucket: ${S3_BUCKET:academy-media}
+      region: ${S3_REGION:us-east-1}
+      access-key: ${S3_ACCESS_KEY}
+      secret-key: ${S3_SECRET_KEY}
+      path-style-access: ${S3_PATH_STYLE_ACCESS:true}
+      connect-timeout-seconds: ${S3_CONNECT_TIMEOUT_SECONDS:5}
+      read-timeout-seconds: ${S3_READ_TIMEOUT_SECONDS:60}
+      call-timeout-seconds: ${S3_CALL_TIMEOUT_SECONDS:600}
   knowledge:
     storage-dir: ${KNOWLEDGE_STORAGE_DIR:./data/knowledge}
     max-file-size: ${KNOWLEDGE_MAX_FILE_SIZE:20MB}

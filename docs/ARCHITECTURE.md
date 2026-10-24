@@ -20,6 +20,7 @@ vn.com.coreacademy
 │   ├── dto / exception            # Envelope và lỗi chung
 │   ├── web                        # RequestIdFilter, RequestIdContext, PageQuery
 │   └── mapper / persistence / validation
+├── storage                        # S3 config/client và put/stat/read/delete dùng chung
 ├── identity
 │   ├── controller / service / repository / entity / dto / mapper
 │   ├── constants                  # RoleCodes
@@ -128,7 +129,7 @@ Annotation processors chạy tại compile; mapper sinh ở target/generated-sou
 
 ## Giới hạn kiểm chứng
 
-Repository hiện chưa có test source tự động. Maven verify kiểm tra build và chỉ chạy test thực sự tồn tại; không coi build thành công là kiểm thử nghiệp vụ. Smoke check cục bộ với H2 không thay thế kiểm tra PostgreSQL, advisory lock nhiều instance, Docker hoặc môi trường triển khai thật. Nhật ký kiểm tra cá nhân nằm ngoài tài liệu contract được commit.
+Repository hiện có test của Knowledge. Maven verify phải kiểm tra kết quả thực tế và các test bị skip do thiếu Docker; compile/package thành công không đồng nghĩa toàn bộ test pass. Smoke check cục bộ với H2 không thay thế kiểm tra PostgreSQL, advisory lock nhiều instance, Docker hoặc môi trường triển khai thật. Nhật ký kiểm tra cá nhân nằm ngoài tài liệu contract được commit.
 
 
 ## Search và custom repository
@@ -140,3 +141,15 @@ NativeSearchQuery tại common.persistence dùng chung FROM/WHERE/parameters cho
 UserSearchRow là read model chỉ gồm cột cần cho UserSummary, không có password/hash hoặc metadata nguồn. Role filter dùng EXISTS để một user nhiều grant vẫn chỉ chiếm một dòng. Role labels vẫn được lọc theo cùng policy; visibleGrantIds tải org của các team theo lô, không query theo từng grant. findActiveForUsers chỉ fetch role; lấy user ID từ association không cần tải cả hồ sơ tài khoản.
 
 Search vẫn dùng contains (`%q%`) và OFFSET theo contract hiện tại; B-tree không tự bảo đảm tăng tốc contains và offset lớn vẫn có chi phí. Chưa thêm index/trigram/keyset pagination hoặc sửa schema; cần đo PostgreSQL với dữ liệu đại diện trước khi quyết định. Native SQL không được coi là bằng chứng tự thân về hiệu năng.
+
+## Tài nguyên Learning và AIStor
+
+S3/AIStor là kho lưu file lâu dài duy nhất cho tài nguyên Learning. Knowledge từ thay đổi song song vẫn có storage-dir riêng, chưa được chuyển trong task này. Module storage ngang hàng Learning/Identity: storage.config bind app.storage.s3 và wiring SDK; ObjectStorage cung cấp put/stat/read/delete, không có public controller hay policy nghiệp vụ. Learning giữ validation, quyền, metadata/audit và cleanup khi DB rollback. Không đặt client S3 vào common.utils và không có adapter/fallback local.
+
+UploadStaging quản lý file tạm và SHA-256 theo stream; StagedFile đóng bằng try-with-resources để dọn file cả khi validation/upload lỗi. LearningAssetStore giữ kiểm tra signature/extension, giới hạn byte, metadata video/PDF, key learning/UUID và cleanup khi PUT lỗi. LearningAssetService kiểm quyền, lưu storageType=s3, metadata/audit và dọn object khi DB rollback. Hai nhánh cleanup giữ tại nơi quyết định thất bại vì S3 và DB không có transaction chung.
+
+GET content: LearningAssetController → LearningAssetService.download (kiểm quyền/metadata trong transaction ngắn) → ObjectDownloadHandler (HEAD/GET S3, Range/If-Range, header, stream đồng bộ 64 KiB). Metadata ObjectDownload là DTO nội bộ, không trả key qua API; ByteRange là chi tiết package storage.web. Controller không giữ helper stream và không giữ transaction khi truyền file. Range hợp lệ trả 206, sai hoặc multiple ranges trả 416, HEAD không tải object. Lỗi trước stream theo BaseResponse; lỗi sau commit không chèn JSON vào binary.
+
+SDK MinIO 9.0.3 với OkHttp JVM 5.3.2/Kotlin runtime 2.2.21; một bucket private academy-media, endpoint/credential qua S3_* bắt buộc. Không tạo bucket, không mở anonymous, không tự lấy root credential. Compose nối project_edge và dùng disk volume riêng cho file tạm. HealthUP hiện tại không kiểm khả năng đọc/ghi S3.
+
+Không thay schema assets; storage_type/key đã có. Row local cũ trả LEARNING-ASSET_STORAGE_UNSUPPORTED, không tự đổi metadata hoặc xóa file; chuyển dữ liệu cần kế hoạch riêng. [Triển khai và nghiệm thu](operations/DEPLOY_UBUNTU.md#aistor-integration) mô tả môi trường Ubuntu, tunnel local, cấu hình và các giới hạn kiểm chứng.

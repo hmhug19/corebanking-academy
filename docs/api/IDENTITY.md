@@ -57,6 +57,10 @@ Cờ bắt buộc đổi mật khẩu được bật khi tạo user LOCAL qua AP
 
 `POST /auth/logout` không cần body, yêu cầu token còn hiệu lực và thu hồi mọi phiên của tài khoản qua auth_ver. FE xóa token/cache khi thành công hoặc nhận 401. Request đang xử lý trước thời điểm thu hồi có thể hoàn tất; token mới phát sau khi thu hồi vẫn hợp lệ. Chưa có thao tác kết thúc phiên trên hệ thống SSO bên ngoài.
 
+### Hiển thị lỗi nghiệp vụ trên form
+
+Trùng mã cán bộ/username, mã tổ chức, mã nhóm và lỗi membership/role/scope có errors theo field. FE hiển thị errors[].message tại ô nhập/selector tương ứng; field lồng nhau có dạng initialRoleGrants[0].teamId. Một lỗi thì message ngoài giống thông báo chi tiết, nhiều lỗi thì message ngoài tổng quát. Không cần tách messageCode cho từng field hoặc gọi API kiểm tra trùng riêng; xem bảng ánh xạ trong [API_CONTRACT](API_CONTRACT.md#chi-tiết-lỗi-nghiệp-vụ-theo-field). Các mã nghiệp vụ và HTTP status giữ nguyên.
+
 ### Cấu trúc dữ liệu FE cần phân biệt
 
 Các cấu trúc dưới đây nằm trong `data` của BaseResponse; `errors` chỉ xuất hiện khi có chi tiết lỗi. Dùng `status` để xác định kết quả, `messageCode` để chọn cách xử lý; không so sánh chuỗi `message`/`messageTitle`.

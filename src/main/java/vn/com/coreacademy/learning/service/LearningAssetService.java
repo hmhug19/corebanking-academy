@@ -5,7 +5,7 @@ import java.math.BigDecimal;
 import java.util.Map;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
+import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.entity.Course;
@@ -21,11 +22,15 @@ import vn.com.coreacademy.learning.entity.CourseLesson;
 import vn.com.coreacademy.learning.entity.CourseRevision;
 import vn.com.coreacademy.learning.entity.LearningAsset;
 import vn.com.coreacademy.learning.entity.LessonBlock;
+import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.mapper.LearningMapper;
 import vn.com.coreacademy.learning.repository.LearningRepository;
+import vn.com.coreacademy.storage.dto.ObjectDownload;
+import vn.com.coreacademy.storage.service.ObjectStorage;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class LearningAssetService {
     private final LearningAssetStore store;
     private final LearningRepository repository;
@@ -36,16 +41,12 @@ public class LearningAssetService {
     private final IdentityAuditService audit;
     private final PlatformTransactionManager transactionManager;
 
-    public record Download(Resource resource, String mimeType, String name) {
-    }
-
     public LearningViews.LearningAssetView upload(Long orgId, MultipartFile file, BigDecimal durationSeconds,
                                                   Integer pageCount) throws IOException {
-        // Bước 1: xác thực scope trước khi ghi đĩa; upload ngoài transaction để không giữ DB lock khi truyền file.
+        // Bước 1: xác thực scope trước khi ghi S3; upload ngoài transaction để không giữ DB lock khi truyền file.
         Actor actor = access.actor();
         access.requireManage(actor, orgId, actor.person().teamId(), actor.person().id());
         LearningAssetStore.Stored stored = store.store(file, durationSeconds, pageCount);
-        boolean committed = false;
         try {
             var result = new TransactionTemplate(transactionManager).execute(status -> {
                 // Bước 2: kiểm tra lại quyền và ghi metadata/audit nguyên tử sau khi file đã sẵn sàng.
@@ -55,7 +56,7 @@ public class LearningAssetService {
                 LearningAsset asset = new LearningAsset();
                 asset.setOwnerOrgId(orgId);
                 asset.setUploadedBy(current.person().id());
-                asset.setStorageType("local");
+                asset.setStorageType(ObjectStorage.TYPE);
                 asset.setStorageKey(stored.key());
                 asset.setOriginalName(stored.name());
                 asset.setMimeType(stored.mime());
@@ -70,18 +71,21 @@ public class LearningAssetService {
                 repository.flush();
                 return mapper.view(asset);
             });
-            committed = true;
             return result;
-        } finally {
-            // Bước 3: lỗi DB/validation phải dọn đúng file UUID vừa tạo, không quét/xóa thư mục tài nguyên.
-            if (!committed) {
+        } catch (RuntimeException | Error exception) {
+            // Giữ lỗi gốc nếu dọn S3 thất bại; DB và object store không có transaction chung.
+            try {
                 store.discard(stored.key());
+            } catch (RuntimeException cleanup) {
+                log.error("S3 metadata rollback cleanup failed; reconcile objectKey={}", stored.key());
+                exception.addSuppressed(cleanup);
             }
+            throw exception;
         }
     }
 
     @Transactional(readOnly = true)
-    public Download download(Long assetId, Long blockId, Long enrollmentId) {
+    public ObjectDownload download(Long assetId, Long blockId, Long enrollmentId) {
         var actor = access.actor();
         LearningAsset asset = repository.require(LearningAsset.class, assetId);
         boolean allowed = false;
@@ -111,7 +115,11 @@ public class LearningAssetService {
         if (!allowed || !"ready".equals(asset.getStatus())) {
             throw new AccessDeniedException("Asset access denied");
         }
-        return new Download(store.resource(asset.getStorageKey()), asset.getMimeType(), asset.getOriginalName());
+        if (!ObjectStorage.TYPE.equals(asset.getStorageType())) {
+            throw new BusinessException(LearningResponseCode.ASSET_STORAGE_UNSUPPORTED);
+        }
+        return new ObjectDownload(asset.getStorageKey(), asset.getMimeType(), asset.getOriginalName(),
+            asset.getSizeBytes());
     }
 
     private CourseRevision revisionOf(Long blockId) {
