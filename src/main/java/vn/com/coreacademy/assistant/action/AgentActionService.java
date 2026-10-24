@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant.action;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import vn.com.coreacademy.assistant.agent.AgentContext;
+import vn.com.coreacademy.assistant.agent.AssistantAccess;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.dto.ActionResultView;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
@@ -23,14 +24,16 @@ public class AgentActionService {
     private final AuthService auth;
 
     public ActionResultView confirm(String actionId) {
+        AgentContext context = AgentContext.of(AssistantAccess.require(auth.me()));
         PendingAction action = store.take(actionId, SecurityContextUtils.getUserId());
         var tool = registry.find(action.tool())
             .orElseThrow(() -> new BusinessException(AssistantResponseCode.ACTION_NOT_FOUND));
 
-        return tool.execute(action, AgentContext.of(auth.me()));
+        return tool.execute(action, context);
     }
 
     public void cancel(String actionId) {
+        AssistantAccess.require(auth.me());
         store.cancel(actionId, SecurityContextUtils.getUserId());
     }
 }

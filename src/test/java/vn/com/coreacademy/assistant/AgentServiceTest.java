@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import vn.com.coreacademy.assistant.action.PendingAction;
 import vn.com.coreacademy.assistant.agent.AgentContext;
@@ -50,6 +51,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -72,8 +74,8 @@ class AgentServiceTest {
             false, 1L, "ORG", "Đơn vị", "UNIT", null, null, null, "Chuyên viên", null, null, null, null, null, null,
             null, null, null, null, null, null);
         FunctionInfo screen = new FunctionInfo(9L, "USER_MANAGEMENT", "Quản lý người dùng", "/admin/users", null, 90);
-        when(auth.me()).thenReturn(new MeResponse(profile, List.of(), List.of("USER_MANAGEMENT"), List.of(),
-            List.of(screen), Map.of()));
+        when(auth.me()).thenReturn(new MeResponse(profile, List.of(), List.of("USER_MANAGEMENT", "AI_ASSISTANT"),
+            List.of(), List.of(screen), Map.of()));
     }
 
     /** Built per call: the registry reads the tools once, so the test's tools must exist before it is created. */
@@ -182,6 +184,16 @@ class AgentServiceTest {
         assertThat(events.get(2).path("answer").asText()).isEqualTo("Xin chào");
         assertThat(events.get(2).path("citations").size()).isZero();
         verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any());
+    }
+
+    @Test
+    void aUserWithoutTheAssistantFunctionIsRefusedBeforeAnythingRuns() {
+        MeResponse me = auth.me();
+        when(auth.me()).thenReturn(new MeResponse(me.user(), me.roles(), List.of("USER_MANAGEMENT"), me.roleGrants(),
+            me.functionDetails(), me.functionScopes()));
+
+        assertThatThrownBy(() -> ask("Xin chào")).isInstanceOf(AccessDeniedException.class);
+        verify(ollama, never()).isAvailable();
     }
 
     @Test

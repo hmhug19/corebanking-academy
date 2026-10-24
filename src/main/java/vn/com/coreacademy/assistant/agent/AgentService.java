@@ -113,7 +113,7 @@ public class AgentService {
      * and the stream body never needs the security context. {@code history} holds the request's text turns only.
      */
     public StreamingResponseBody stream(List<ChatMessage> history) {
-        AgentContext context = AgentContext.of(auth.me());
+        AgentContext context = AgentContext.of(AssistantAccess.require(auth.me()));
         if (!ollama.isAvailable()) {
             throw new BusinessException(AssistantResponseCode.AI_UNAVAILABLE);
         }

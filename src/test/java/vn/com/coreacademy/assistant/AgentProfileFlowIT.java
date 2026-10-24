@@ -149,6 +149,30 @@ class AgentProfileFlowIT extends KnowledgeIntegrationTest {
         assertThat(position()).isEqualTo("Đã đổi nơi khác");
     }
 
+    @Test
+    void aUserWithoutTheAssistantFunctionIsRefusedOnEveryEndpoint() throws Exception {
+        originalPosition = position();
+        String actionId = proposeAPositionChange();
+        // A temporary password empties the user's rights, AI_ASSISTANT included.
+        jdbc.update("UPDATE learning_hub.users SET must_change_password = true WHERE user_id = ?", LEARNER);
+        try {
+            mvc.perform(post(AGENT + "/stream").with(as(LEARNER)).accept(NDJSON, MediaType.APPLICATION_JSON)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"messages\":[{\"role\":\"user\",\"content\":\"Xin chào\"}]}"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+            mvc.perform(post(AGENT + "/actions/" + actionId + "/cancel").with(as(LEARNER)))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+            mvc.perform(post(AGENT + "/actions/" + actionId + "/confirm").with(as(LEARNER)))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+        } finally {
+            jdbc.update("UPDATE learning_hub.users SET must_change_password = false WHERE user_id = ?", LEARNER);
+        }
+
+        assertThat(position()).isEqualTo(originalPosition);
+        mvc.perform(post(AGENT + "/actions/" + actionId + "/cancel").with(as(LEARNER)))
+            .andExpect(jsonPath("$.status").value("SUCCESS"));
+    }
+
     private static RequestPostProcessor as(String userId) {
         return jwt().jwt(token -> token.subject(userId));
     }

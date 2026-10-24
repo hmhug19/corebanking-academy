@@ -6,7 +6,8 @@ cá nhân. Công cụ chỉ **đọc** chạy ngay; công cụ **thay đổi d�
 thành một yêu cầu chờ và chỉ chạy khi người dùng xác nhận bằng một request riêng, dưới quyền của chính họ.
 
 - Request mẫu: [Postman](../postman/assistant.postman_collection.json). Swagger: `/swagger-ui.html`.
-- Mọi API dưới `/api/v1/assistant/agent`, yêu cầu JWT hợp lệ (mọi vai trò), trả `BaseResponse` (xem
+- Mọi API dưới `/api/v1/assistant/agent`, yêu cầu JWT hợp lệ và chức năng `AI_ASSISTANT` (seed cấp cho mọi vai trò;
+  tài khoản còn phải đổi mật khẩu tạm không có chức năng nào), thiếu thì `CORE-ACCESS_DENIED` (HTTP 403). Trả `BaseResponse` (xem
   [API_CONTRACT.md](API_CONTRACT.md)) trừ luồng NDJSON của `/stream`.
 - Chỉ gọi Ollama cục bộ; không gửi dữ liệu ra ngoài máy chủ. Nhật ký chỉ ghi tên công cụ, số lượng và thời gian,
   không ghi câu hỏi, câu trả lời hay giá trị hồ sơ.
@@ -176,6 +177,7 @@ mất mọi yêu cầu; app báo yêu cầu đã hết hạn khi xác nhận.
 | `ASSISTANT-ACTION_NOT_FOUND` | 200  | Yêu cầu không có, hết hạn, đã xác nhận/huỷ, hoặc của người khác (cùng một mã, id không tiết lộ gì) |
 | `ASSISTANT-ACTION_STALE`     | 200  | Dữ liệu đã đổi từ lúc trợ lý đề xuất (khi xác nhận)                                |
 | `CORE-VALIDATION_FAILED`     | 200  | Request `/stream` không hợp lệ                                                     |
+| `CORE-ACCESS_DENIED`         | 403  | Người gọi không có chức năng `AI_ASSISTANT` (mọi API của trợ lý nhanh)              |
 | `CORE-INTERNAL_ERROR`        | —    | Lỗi bất ngờ giữa stream (sự kiện `error`, thông báo chung)                         |
 
 ## Giới hạn đã biết
