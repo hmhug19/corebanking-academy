@@ -53,6 +53,11 @@ app:
       connect-timeout: 5s
       read-timeout: 180s
       keep-alive: 10m
+  assistant:
+    agent:
+      max-steps: ${ASSISTANT_AGENT_MAX_STEPS:4}
+      history-messages: 20
+      action-ttl: ${ASSISTANT_ACTION_TTL:10m}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30

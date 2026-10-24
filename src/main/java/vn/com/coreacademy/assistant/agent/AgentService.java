@@ -1,0 +1,173 @@
+package vn.com.coreacademy.assistant.agent;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.dto.AgentStreamEvent;
+import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
+import vn.com.coreacademy.assistant.tool.AgentTool;
+import vn.com.coreacademy.assistant.tool.FinishedAnswer;
+import vn.com.coreacademy.assistant.tool.ToolOutcome;
+import vn.com.coreacademy.assistant.tool.TurnState;
+import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.common.exception.ResponseCode;
+import vn.com.coreacademy.identity.dto.MeResponse;
+import vn.com.coreacademy.identity.dto.UserRights;
+import vn.com.coreacademy.identity.service.AuthService;
+import vn.com.coreacademy.knowledge.ai.ChatMessage;
+import vn.com.coreacademy.knowledge.ai.ChatTurn;
+import vn.com.coreacademy.knowledge.ai.OllamaClient;
+import vn.com.coreacademy.knowledge.ai.OllamaException;
+import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
+import vn.com.coreacademy.knowledge.ai.ToolCall;
+import vn.com.coreacademy.knowledge.ai.ToolDefinition;
+
+/**
+ * Runs one user turn: asks the local model with the tools this user may use, runs the tools it calls and streams the
+ * answer. Read tools run inside the loop and their result goes back to the model; tools that navigate or propose a
+ * data change end the turn, so nothing that changes data ever runs here. Messages, arguments and tool results are
+ * never logged: only tool names, counts and durations are.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AgentService {
+    static final String UNKNOWN_TOOL = "Công cụ không tồn tại.";
+    static final String BAD_ARGUMENTS = "Tham số của công cụ không hợp lệ.";
+    static final String STEP_CAP_ANSWER =
+        "Mình chưa xử lý được yêu cầu này. Bạn thử diễn đạt lại ngắn gọn hơn nhé.";
+
+    private final OllamaClient ollama;
+    private final AuthService auth;
+    private final ToolRegistry registry;
+    private final AssistantProperties properties;
+    private final ObjectMapper json;
+
+    /**
+     * The context and the tool list are built now, on the request thread, so a refusal is still an ordinary envelope
+     * and the stream body never needs the security context. {@code history} holds the request's text turns only.
+     */
+    public StreamingResponseBody stream(List<ChatMessage> history) {
+        AgentContext context = contextOf(auth.me());
+        if (!ollama.isAvailable()) {
+            throw new BusinessException(AssistantResponseCode.AI_UNAVAILABLE);
+        }
+
+        List<AgentTool> tools = registry.availableTo(context);
+        List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(context)).toList();
+        return output -> run(output, history, context, tools, definitions);
+    }
+
+    private static AgentContext contextOf(MeResponse me) {
+        UserRights rights = new UserRights(me.roleGrants(), me.functionDetails(), me.functionScopes());
+        return new AgentContext(me.user().userId(), me.user(), rights);
+    }
+
+    private void run(OutputStream output, List<ChatMessage> history, AgentContext context, List<AgentTool> tools,
+                     List<ToolDefinition> definitions) {
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system(AgentPrompt.SYSTEM));
+        messages.addAll(history);
+        TurnState turn = new TurnState();
+
+        try {
+            for (int step = 0; step < properties.maxSteps(); step++) {
+                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), definitions, OllamaClient.Options.AGENT,
+                    delta -> write(output, AgentStreamEvent.delta(delta)));
+                if (answer.toolCalls().isEmpty()) {
+                    finish(output, turn, answer.content().strip());
+                    return;
+                }
+
+                messages.add(ChatMessage.assistant(answer.content(), answer.toolCalls()));
+                for (ToolCall call : answer.toolCalls()) {
+                    write(output, AgentStreamEvent.tool(call.name()));
+                    ToolOutcome outcome = runTool(call, context, tools, turn);
+                    if (end(output, outcome)) {
+                        return;
+                    }
+                    messages.add(ChatMessage.tool(call.name(), ((ToolOutcome.Result) outcome).text()));
+                }
+            }
+            write(output, AgentStreamEvent.done(STEP_CAP_ANSWER, List.of()));
+        } catch (UncheckedIOException exception) {
+            // The client went away: nobody is left to read an error event.
+            throw exception;
+        } catch (OllamaUnavailableException | OllamaException exception) {
+            write(output, AgentStreamEvent.error(AssistantResponseCode.AI_UNAVAILABLE.getCode(),
+                AssistantResponseCode.AI_UNAVAILABLE.getMessage()));
+        } catch (RuntimeException exception) {
+            // The message could quote the user's text or profile; log the type and the stack only.
+            log.error("Assistant turn failed type={} stack={}", exception.getClass().getName(),
+                Arrays.toString(exception.getStackTrace()));
+            write(output, AgentStreamEvent.error(ResponseCode.INTERNAL_ERROR.getCode(),
+                ResponseCode.INTERNAL_ERROR.getMessage()));
+        }
+    }
+
+    private ToolOutcome runTool(ToolCall call, AgentContext context, List<AgentTool> tools, TurnState turn) {
+        AgentTool tool = tools.stream().filter(candidate -> candidate.name().equals(call.name())).findFirst()
+            .orElse(null);
+        if (tool == null) {
+            return new ToolOutcome.Result(UNKNOWN_TOOL);
+        }
+
+        JsonNode arguments = call.arguments();
+        if (arguments == null || !arguments.isObject()) {
+            return new ToolOutcome.Result(BAD_ARGUMENTS);
+        }
+
+        long started = System.nanoTime();
+        ToolOutcome outcome = tool.run(arguments, context, turn);
+        log.info("Assistant tool name={} outcome={} durationMs={}", tool.name(), outcome.getClass().getSimpleName(),
+            (System.nanoTime() - started) / 1_000_000);
+        return outcome;
+    }
+
+    /** Writes the closing events of a terminal outcome; false for a result that goes back to the model. */
+    private boolean end(OutputStream output, ToolOutcome outcome) {
+        if (outcome instanceof ToolOutcome.Navigate navigate) {
+            write(output, AgentStreamEvent.navigate(navigate.path(), navigate.title()));
+            write(output, AgentStreamEvent.done(navigate.text(), List.of()));
+            return true;
+        }
+        if (outcome instanceof ToolOutcome.ActionRequired required) {
+            write(output, AgentStreamEvent.actionRequired(required.action().view()));
+            write(output, AgentStreamEvent.done(required.text(), List.of()));
+            return true;
+        }
+
+        return false;
+    }
+
+    private void finish(OutputStream output, TurnState turn, String answer) {
+        FinishedAnswer finished = turn.finisher().map(finisher -> finisher.finish(answer))
+            .orElseGet(() -> new FinishedAnswer(answer, List.of()));
+        write(output, AgentStreamEvent.done(finished.answer(), finished.citations()));
+    }
+
+    private void write(OutputStream output, AgentStreamEvent event) {
+        try {
+            output.write(json.writeValueAsString(event).getBytes(StandardCharsets.UTF_8));
+            output.write('\n');
+            output.flush();
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Cannot serialise an agent event", exception);
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+    }
+}
