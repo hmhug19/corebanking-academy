@@ -166,3 +166,10 @@ mất mọi yêu cầu; app báo yêu cầu đã hết hạn khi xác nhận.
 | `ASSISTANT-ACTION_STALE`     | 200  | Dữ liệu đã đổi từ lúc trợ lý đề xuất (khi xác nhận)                                |
 | `CORE-VALIDATION_FAILED`     | 200  | Request `/stream` không hợp lệ                                                     |
 | `CORE-INTERNAL_ERROR`        | —    | Lỗi bất ngờ giữa stream (sự kiện `error`, thông báo chung)                         |
+
+## Giới hạn đã biết
+
+- Câu hỏi ngoài tài liệu: mô hình nhỏ đôi khi diễn đạt lại câu "không tìm thấy" thay vì dùng đúng câu cố định. Câu diễn đạt
+  lại không có `[n]`, nên theo quy tắc của `kb-chat` (không có dấu `[n]` hợp lệ thì trả mọi đoạn đã truy xuất) nó mang theo
+  nguồn. Đổi quy tắc này nằm ngoài phạm vi của tính năng.
+- Khi `open_screen` từ chối, mô hình đôi khi nhắc lại mã chức năng thay vì tên màn hình. Không có gì được mở.
