@@ -242,6 +242,18 @@ class OllamaClientTest {
     }
 
     @Test
+    void aStreamCutBeforeItsDoneLineIsAnOllamaException() {
+        handler = exchange -> new Reply(200, """
+            {"message":{"role":"assistant","content":"Chào "},"done":false}
+            """);
+
+        assertThatThrownBy(() -> client().chatWithTools(List.of(ChatMessage.user("u")), List.of(),
+            OllamaClient.Options.AGENT, delta -> { })).isInstanceOf(OllamaException.class);
+        assertThatThrownBy(() -> client().chatStream(List.of(OllamaClient.Message.user("u")),
+            OllamaClient.Options.GROUNDED, delta -> { })).isInstanceOf(OllamaException.class);
+    }
+
+    @Test
     void chatWithToolsMapsAnHttpErrorToAnOllamaException() {
         handler = exchange -> new Reply(500, "{\"error\":\"boom\"}");
 

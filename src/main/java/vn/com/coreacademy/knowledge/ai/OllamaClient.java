@@ -174,6 +174,8 @@ public class OllamaClient {
                 return;
             }
         }
+        // A model runner that dies mid-answer closes the connection without a done line; the text is incomplete.
+        throw new OllamaException("Ollama closed the stream before its done line");
     }
 
     private List<float[]> embedBatch(List<String> batch) {
