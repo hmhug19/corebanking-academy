@@ -150,6 +150,127 @@ class OllamaClientTest {
     }
 
     @Test
+    void chatStreamBodyCarriesNoToolsAndPlainMessages() {
+        handler = exchange -> new Reply(200, "{\"message\":{\"content\":\"\"},\"done\":true}\n");
+
+        client().chatStream(List.of(OllamaClient.Message.user("u")), OllamaClient.Options.GROUNDED, delta -> { });
+
+        JsonNode request = requests.get(0);
+        assertThat(request.has("tools")).isFalse();
+        assertThat(request.path("messages").get(0).fieldNames()).toIterable().containsExactly("role", "content");
+    }
+
+    @Test
+    void chatWithToolsSendsToolsStreamAndThinkFalse() {
+        handler = exchange -> new Reply(200, "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true}\n");
+        ToolDefinition search = new ToolDefinition("search_documents", "Tìm tài liệu", json.createObjectNode()
+            .put("type", "object"));
+
+        client().chatWithTools(List.of(ChatMessage.system("s"), ChatMessage.user("u")), List.of(search),
+            OllamaClient.Options.AGENT, delta -> { });
+
+        JsonNode request = requests.get(0);
+        assertThat(request.path("model").asText()).isEqualTo("test-chat");
+        assertThat(request.path("stream").asBoolean(false)).isTrue();
+        assertThat(request.path("think").asBoolean(true)).isFalse();
+        assertThat(request.path("options").path("temperature").asDouble()).isEqualTo(0.1);
+        assertThat(request.path("options").path("num_ctx").asInt()).isEqualTo(8192);
+        JsonNode tool = request.path("tools").get(0);
+        assertThat(tool.path("type").asText()).isEqualTo("function");
+        assertThat(tool.path("function").path("name").asText()).isEqualTo("search_documents");
+        assertThat(tool.path("function").path("description").asText()).isEqualTo("Tìm tài liệu");
+        assertThat(tool.path("function").path("parameters").path("type").asText()).isEqualTo("object");
+        assertThat(request.path("messages").get(1).fieldNames()).toIterable().containsExactly("role", "content");
+    }
+
+    @Test
+    void chatWithToolsSerialisesToolCallsAndToolResultsOfEarlierSteps() {
+        handler = exchange -> new Reply(200, "{\"message\":{\"content\":\"\"},\"done\":true}\n");
+        ToolCall call = ToolCall.of("search_documents", json.createObjectNode().put("query", "CIF"));
+
+        client().chatWithTools(List.of(ChatMessage.user("u"), ChatMessage.assistant("", List.of(call)),
+            ChatMessage.tool("search_documents", "[1] ...")), List.of(), OllamaClient.Options.AGENT, delta -> { });
+
+        JsonNode messages = requests.get(0).path("messages");
+        JsonNode function = messages.get(1).path("tool_calls").get(0).path("function");
+        assertThat(function.path("name").asText()).isEqualTo("search_documents");
+        assertThat(function.path("arguments").path("query").asText()).isEqualTo("CIF");
+        assertThat(messages.get(2).path("role").asText()).isEqualTo("tool");
+        assertThat(messages.get(2).path("tool_name").asText()).isEqualTo("search_documents");
+    }
+
+    @Test
+    void chatWithToolsStreamsContentAndCollectsToolCallsAcrossLines() {
+        handler = exchange -> new Reply(200, """
+            {"message":{"role":"assistant","content":"Để "},"done":false}
+            {"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"open_screen","arguments":{"functionCode":"USER_MANAGEMENT"}}}]},"done":false}
+            {"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_documents","arguments":{"query":"CIF"}}}]},"done":false}
+            {"message":{"role":"assistant","content":""},"done":true}
+            """);
+        List<String> deltas = new ArrayList<>();
+
+        ChatTurn turn = client().chatWithTools(List.of(ChatMessage.user("u")), List.of(), OllamaClient.Options.AGENT,
+            deltas::add);
+
+        assertThat(deltas).containsExactly("Để ");
+        assertThat(turn.content()).isEqualTo("Để ");
+        assertThat(turn.toolCalls()).extracting(ToolCall::name).containsExactly("open_screen", "search_documents");
+        assertThat(turn.toolCalls().get(0).arguments().path("functionCode").asText()).isEqualTo("USER_MANAGEMENT");
+        assertThat(turn.toolCalls().get(1).arguments().path("query").asText()).isEqualTo("CIF");
+    }
+
+    @Test
+    void chatWithToolsReturnsNoToolCallsForAPlainAnswer() {
+        handler = exchange -> new Reply(200, """
+            {"message":{"role":"assistant","content":"Chào "},"done":false}
+            {"message":{"role":"assistant","content":"bạn"},"done":true}
+            """);
+
+        ChatTurn turn = client().chatWithTools(List.of(ChatMessage.user("u")), List.of(), OllamaClient.Options.AGENT,
+            delta -> { });
+
+        assertThat(turn.content()).isEqualTo("Chào bạn");
+        assertThat(turn.toolCalls()).isEmpty();
+    }
+
+    @Test
+    void chatWithToolsFailsWhenOllamaReportsAnErrorLine() {
+        handler = exchange -> new Reply(200, "{\"error\":\"model runner crashed\"}\n");
+
+        assertThatThrownBy(() -> client().chatWithTools(List.of(ChatMessage.user("u")), List.of(),
+            OllamaClient.Options.AGENT, delta -> { })).isInstanceOf(OllamaException.class);
+    }
+
+    @Test
+    void aStreamCutBeforeItsDoneLineIsAnOllamaException() {
+        handler = exchange -> new Reply(200, """
+            {"message":{"role":"assistant","content":"Chào "},"done":false}
+            """);
+
+        assertThatThrownBy(() -> client().chatWithTools(List.of(ChatMessage.user("u")), List.of(),
+            OllamaClient.Options.AGENT, delta -> { })).isInstanceOf(OllamaException.class);
+        assertThatThrownBy(() -> client().chatStream(List.of(OllamaClient.Message.user("u")),
+            OllamaClient.Options.GROUNDED, delta -> { })).isInstanceOf(OllamaException.class);
+    }
+
+    @Test
+    void onlyTheNamesOfOfferedToolsAreLoggedSoAnInventedNameCannotCarryText() {
+        ToolDefinition search = new ToolDefinition("search_documents", "d", json.createObjectNode());
+        List<ToolCall> calls = List.of(ToolCall.of("search_documents", json.createObjectNode()),
+            ToolCall.of("Nguyễn Văn A 0912345678", json.createObjectNode()));
+
+        assertThat(OllamaClient.loggedToolNames(calls, List.of(search))).containsExactly("search_documents", "unknown");
+    }
+
+    @Test
+    void chatWithToolsMapsAnHttpErrorToAnOllamaException() {
+        handler = exchange -> new Reply(500, "{\"error\":\"boom\"}");
+
+        assertThatThrownBy(() -> client().chatWithTools(List.of(ChatMessage.user("u")), List.of(),
+            OllamaClient.Options.AGENT, delta -> { })).isInstanceOf(OllamaException.class).hasMessageContaining("500");
+    }
+
+    @Test
     void chatStreamFailsWhenOllamaReportsAnErrorLine() {
         handler = exchange -> new Reply(200, "{\"error\":\"model runner crashed\"}\n");
 
@@ -175,6 +296,8 @@ class OllamaClientTest {
             .isInstanceOf(OllamaUnavailableException.class);
         assertThatThrownBy(() -> offline.chatStream(List.of(OllamaClient.Message.user("u")),
             OllamaClient.Options.GROUNDED, delta -> { })).isInstanceOf(OllamaUnavailableException.class);
+        assertThatThrownBy(() -> offline.chatWithTools(List.of(ChatMessage.user("u")), List.of(),
+            OllamaClient.Options.AGENT, delta -> { })).isInstanceOf(OllamaUnavailableException.class);
     }
 
     private OllamaClient client() {

@@ -22,6 +22,10 @@ spring:
       location: ${UPLOAD_TEMP_DIR:${java.io.tmpdir}}
       max-file-size: 500MB
       max-request-size: 501MB
+  mvc:
+    async:
+      # A streamed answer (agent or document chat) may make max-steps model calls, each up to the Ollama read-timeout.
+      request-timeout: ${ASSISTANT_STREAM_TIMEOUT:15m}
 management:
   endpoints:
     web:
@@ -64,6 +68,12 @@ app:
       connect-timeout: 5s
       read-timeout: 180s
       keep-alive: 10m
+  assistant:
+    agent:
+      max-steps: ${ASSISTANT_AGENT_MAX_STEPS:4}
+      history-messages: 20
+      action-ttl: ${ASSISTANT_ACTION_TTL:10m}
+      max-concurrent-turns: ${ASSISTANT_MAX_CONCURRENT_TURNS:4}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30

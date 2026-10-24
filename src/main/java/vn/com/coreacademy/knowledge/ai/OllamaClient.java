@@ -9,7 +9,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,6 +61,9 @@ public class OllamaClient {
     public record Options(double temperature, int numCtx) {
         /** Low temperature and a context wide enough for the retrieved chunks. */
         public static final Options GROUNDED = new Options(0.1, 8192);
+
+        /** The agent loop: the same settings as {@link #GROUNDED}, named for its own use. */
+        public static final Options AGENT = new Options(0.1, 8192);
     }
 
     /** Whether Ollama answers {@code GET /api/version}; never throws. */
@@ -111,7 +116,51 @@ public class OllamaClient {
             millisSince(started));
     }
 
+    /**
+     * One model call with tools ({@code stream:true}). Content deltas go to {@code onDelta} as they arrive; the
+     * {@code tool_calls} of every line are collected in order. Neither the messages nor the arguments are logged.
+     */
+    public ChatTurn chatWithTools(List<ChatMessage> messages, List<ToolDefinition> tools, Options options,
+                                  Consumer<String> onDelta) {
+        long started = System.nanoTime();
+        Map<String, Object> body = chatBody(messages, options, true);
+        body.put("tools", tools.stream().map(OllamaClient::toolBody).toList());
+        StringBuilder content = new StringBuilder();
+        List<ToolCall> toolCalls = new ArrayList<>();
+        try {
+            client.post().uri("/api/chat").contentType(MediaType.APPLICATION_JSON).body(body)
+                .exchange((request, response) -> {
+                    if (response.getStatusCode().isError()) {
+                        throw new OllamaException("Ollama answered HTTP " + response.getStatusCode().value());
+                    }
+                    BufferedReader reader =
+                        new BufferedReader(new InputStreamReader(response.getBody(), StandardCharsets.UTF_8));
+                    readStream(reader, delta -> {
+                        content.append(delta);
+                        onDelta.accept(delta);
+                    }, toolCalls);
+                    return null;
+                });
+        } catch (ResourceAccessException exception) {
+            throw new OllamaUnavailableException("Ollama is not reachable", exception);
+        }
+        log.info("Ollama chat tools model={} messages={} tools={} calls={} durationMs={}", config.chatModel(),
+            messages.size(), tools.size(), loggedToolNames(toolCalls, tools), millisSince(started));
+        return new ChatTurn(content.toString(), List.copyOf(toolCalls));
+    }
+
+    /** The model writes the call's name, so it may hold any text; only the names of offered tools are logged. */
+    static List<String> loggedToolNames(List<ToolCall> calls, List<ToolDefinition> tools) {
+        Set<String> offered = tools.stream().map(ToolDefinition::name).collect(Collectors.toSet());
+        return calls.stream().map(call -> offered.contains(call.name()) ? call.name() : "unknown").toList();
+    }
+
     private void readStream(BufferedReader reader, Consumer<String> onDelta) throws IOException {
+        readStream(reader, onDelta, new ArrayList<>());
+    }
+
+    private void readStream(BufferedReader reader, Consumer<String> onDelta, List<ToolCall> toolCalls)
+        throws IOException {
         String line;
         while ((line = reader.readLine()) != null) {
             if (line.isBlank()) {
@@ -125,10 +174,16 @@ public class OllamaClient {
             if (!delta.isEmpty()) {
                 onDelta.accept(delta);
             }
+            for (JsonNode call : event.path("message").path("tool_calls")) {
+                JsonNode function = call.path("function");
+                toolCalls.add(ToolCall.of(function.path("name").asText(""), function.path("arguments")));
+            }
             if (event.path("done").asBoolean(false)) {
                 return;
             }
         }
+        // A model runner that dies mid-answer closes the connection without a done line; the text is incomplete.
+        throw new OllamaException("Ollama closed the stream before its done line");
     }
 
     private List<float[]> embedBatch(List<String> batch) {
@@ -160,7 +215,15 @@ public class OllamaClient {
         return vectors;
     }
 
-    private Map<String, Object> chatBody(List<Message> messages, Options options, boolean stream) {
+    private static Map<String, Object> toolBody(ToolDefinition tool) {
+        Map<String, Object> function = new LinkedHashMap<>();
+        function.put("name", tool.name());
+        function.put("description", tool.description());
+        function.put("parameters", tool.parameters());
+        return Map.of("type", "function", "function", function);
+    }
+
+    private Map<String, Object> chatBody(List<?> messages, Options options, boolean stream) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", config.chatModel());
         body.put("messages", messages);

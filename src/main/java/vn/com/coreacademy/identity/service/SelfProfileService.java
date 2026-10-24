@@ -2,6 +2,7 @@ package vn.com.coreacademy.identity.service;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
@@ -34,6 +35,16 @@ public class SelfProfileService {
      */
     @Transactional
     public void update(ProfileUpdateRequest request) {
+        updateIfUnchanged(request, Map.of());
+    }
+
+    /**
+     * Như {@link #update}, nhưng chỉ sửa khi mỗi trường trong {@code expected} (fullName, email, positionName) vẫn
+     * mang đúng giá trị đó; chuỗi rỗng coi như không có giá trị. So sánh sau khi giữ khóa ghi, trong cùng transaction,
+     * nên không thay đổi nào chen vào giữa lúc so và lúc ghi. Trả false và không ghi gì khi có trường đã khác.
+     */
+    @Transactional
+    public boolean updateIfUnchanged(ProfileUpdateRequest request, Map<String, String> expected) {
         String actorId = SecurityContextUtils.getUserId();
         writeLock.acquire();
         var user = access.current(actorId);
@@ -43,6 +54,17 @@ public class SelfProfileService {
         }
         if (request.getSuppliedFields().isEmpty()) {
             throw BusinessException.validation("", "EMPTY_UPDATE", "Vui lòng cung cấp thông tin cần cập nhật.");
+        }
+        for (var entry : expected.entrySet()) {
+            String current = switch (entry.getKey()) {
+                case "fullName" -> user.getFullName();
+                case "email" -> user.getEmail();
+                case "positionName" -> user.getPositionName();
+                default -> throw new IllegalArgumentException("Not a profile field: " + entry.getKey());
+            };
+            if (!Objects.equals(blankToNull(current), blankToNull(entry.getValue()))) {
+                return false;
+            }
         }
 
         if (request.has("fullName")) {
@@ -58,6 +80,11 @@ public class SelfProfileService {
         users.save(user);
         audit.record(actorId, "USER_PROFILE_UPDATED", "USER", actorId, user.getOrgId(),
             Map.of("fields", request.getSuppliedFields()));
+        return true;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     /**
