@@ -9,7 +9,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -143,8 +145,14 @@ public class OllamaClient {
             throw new OllamaUnavailableException("Ollama is not reachable", exception);
         }
         log.info("Ollama chat tools model={} messages={} tools={} calls={} durationMs={}", config.chatModel(),
-            messages.size(), tools.size(), toolCalls.stream().map(ToolCall::name).toList(), millisSince(started));
+            messages.size(), tools.size(), loggedToolNames(toolCalls, tools), millisSince(started));
         return new ChatTurn(content.toString(), List.copyOf(toolCalls));
+    }
+
+    /** The model writes the call's name, so it may hold any text; only the names of offered tools are logged. */
+    static List<String> loggedToolNames(List<ToolCall> calls, List<ToolDefinition> tools) {
+        Set<String> offered = tools.stream().map(ToolDefinition::name).collect(Collectors.toSet());
+        return calls.stream().map(call -> offered.contains(call.name()) ? call.name() : "unknown").toList();
     }
 
     private void readStream(BufferedReader reader, Consumer<String> onDelta) throws IOException {

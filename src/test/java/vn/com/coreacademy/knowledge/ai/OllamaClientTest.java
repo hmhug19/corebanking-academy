@@ -254,6 +254,15 @@ class OllamaClientTest {
     }
 
     @Test
+    void onlyTheNamesOfOfferedToolsAreLoggedSoAnInventedNameCannotCarryText() {
+        ToolDefinition search = new ToolDefinition("search_documents", "d", json.createObjectNode());
+        List<ToolCall> calls = List.of(ToolCall.of("search_documents", json.createObjectNode()),
+            ToolCall.of("Nguyễn Văn A 0912345678", json.createObjectNode()));
+
+        assertThat(OllamaClient.loggedToolNames(calls, List.of(search))).containsExactly("search_documents", "unknown");
+    }
+
+    @Test
     void chatWithToolsMapsAnHttpErrorToAnOllamaException() {
         handler = exchange -> new Reply(500, "{\"error\":\"boom\"}");
 
