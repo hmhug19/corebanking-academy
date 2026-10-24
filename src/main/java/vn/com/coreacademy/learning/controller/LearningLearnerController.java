@@ -2,6 +2,8 @@ package vn.com.coreacademy.learning.controller;
 
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 
@@ -9,7 +11,9 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,11 +26,19 @@ import org.springframework.web.bind.annotation.RestController;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressEvent;
+import vn.com.coreacademy.learning.constants.LearningCodes.SearchMode;
 import vn.com.coreacademy.learning.dto.LearningDetails;
+import vn.com.coreacademy.learning.dto.LearningProgressOverview;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
+import vn.com.coreacademy.learning.dto.MediaRequests;
+import vn.com.coreacademy.learning.dto.MediaViews;
+import vn.com.coreacademy.learning.service.LearningMediaTokenService;
+import vn.com.coreacademy.learning.service.LearningProgressReportService;
 import vn.com.coreacademy.learning.service.LearningProgressService;
 import vn.com.coreacademy.learning.service.LearningSearchService;
+import vn.com.coreacademy.learning.service.LearningSessionService;
 
 @RestController
 @RequestMapping(value = "/api/v1/me/learning", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -35,6 +47,9 @@ import vn.com.coreacademy.learning.service.LearningSearchService;
 @Validated
 @RequiredArgsConstructor
 public class LearningLearnerController {
+    private final LearningSessionService sessions;
+    private final LearningMediaTokenService mediaTokens;
+    private final LearningProgressReportService reports;
     private final LearningProgressService progress;
     private final LearningSearchService search;
 
@@ -52,9 +67,10 @@ public class LearningLearnerController {
         @RequestParam(required = false) Long moduleId, @RequestParam(required = false) String level,
         @RequestParam(required = false) String requirement, @RequestParam(required = false) String learningStatus,
         @RequestParam(required = false) String state, @RequestParam(defaultValue = "0") int page,
-        @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort) {
-        return BaseResponse.ok(search.search("mine", q, fieldId, programId, moduleId, level, requirement,
-            learningStatus, state, page, size, sort));
+        @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort,
+        @RequestParam(required = false) Boolean overdue) {
+        return BaseResponse.ok(search.search(SearchMode.MINE, q, fieldId, programId, moduleId, level, requirement,
+            learningStatus, state, page, size, sort, overdue));
     }
 
     @GetMapping("/catalog")
@@ -72,7 +88,7 @@ public class LearningLearnerController {
         @RequestParam(required = false) String requirement, @RequestParam(required = false) String learningStatus,
         @RequestParam(required = false) String state, @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort) {
-        return BaseResponse.ok(search.search("catalog", q, fieldId, programId, moduleId, level, requirement,
+        return BaseResponse.ok(search.search(SearchMode.CATALOG, q, fieldId, programId, moduleId, level, requirement,
             learningStatus, state, page, size, sort));
     }
 
@@ -95,12 +111,18 @@ public class LearningLearnerController {
     @Operation(
         summary = "Ghi tương tác học và tổng hợp tiến độ",
         description = """
-            Gửi expectedVersion/sequence; backend tự tính tỷ lệ, kiểm tra trang PDF và khoảng xem video.
+            Gửi sessionId/sessionFence, assetId, eventType và expectedVersion/sequence của phiên đã cấp.
+            - Retry đúng event cuối không cộng tiến độ; SEEK không tính đoạn bị tua qua.
+            - CLOSE lưu checkpoint cuối và giải phóng phiên; chuyển thiết bị sẽ chặn event phiên cũ.
             """
     )
     public BaseResponse<LearningDetails.ProgressResult> progress(@PathVariable @Positive Long enrollmentId,
-        @PathVariable @Positive Long blockId, @Valid @RequestBody LearningRequests.ProgressRequest request) {
-        return BaseResponse.ok(progress.progress(enrollmentId, blockId, request));
+        @PathVariable @Positive Long blockId, @Valid @RequestBody LearningRequests.ProgressRequest request,
+        HttpServletRequest httpRequest, HttpServletResponse response) {
+        var result = progress.progress(enrollmentId, blockId, request);
+        mediaTokens.renew(request.sessionId(), request.sessionFence(), ProgressEvent.CLOSE.equals(request.eventType()),
+            httpRequest, response);
+        return BaseResponse.ok(result);
     }
 
     @GetMapping("/reminders")
@@ -127,6 +149,58 @@ public class LearningLearnerController {
     )
     public BaseResponse<LearningViews.LearningReminderView> read(@PathVariable @Positive Long reminderId) {
         return BaseResponse.ok(progress.dismissReminder(reminderId));
+    }
+
+    @PostMapping("/sessions")
+    @Operation(
+        summary = "Mở hoặc chuyển phiên học",
+        description = """
+            Cấp một phiên học hoạt động trên tài khoản, trả version và vị trí tiếp tục.
+            - Gửi previousSessionId/previousFence khi đổi bài hoặc khôi phục phiên đang giữ.
+            - takeover=true sau xác nhận chuyển thiết bị; response đặt cookie media HttpOnly.
+            """
+    )
+    public BaseResponse<MediaViews.Session> session(@Valid @RequestBody MediaRequests.Session request,
+                                                    HttpServletRequest httpRequest, HttpServletResponse response) {
+        var result = sessions.claim(request);
+        mediaTokens.cookie(result, httpRequest, response);
+        return BaseResponse.ok(result);
+    }
+
+    @GetMapping("/progress/summary")
+    @Operation(
+        summary = "Tổng quan kết quả học tập cá nhân",
+        description = """
+            Đếm toàn bộ khóa theo lần học hiện hành của caller, không phụ thuộc trang/tìm kiếm bảng.
+            - Activity, điểm kiểm tra và năng lực trả unavailable khi chưa có nguồn thực.
+            """
+    )
+    public BaseResponse<LearningProgressOverview> summary() {
+        return BaseResponse.ok(reports.summary());
+    }
+
+    @GetMapping(value = "/progress/export", produces = "text/csv")
+    @Operation(
+        summary = "Xuất tiến độ học tập ra CSV",
+        description = """
+            Xuất tối đa 10.000 dòng theo cùng bộ lọc và phạm vi với danh sách cá nhân.
+            - UTF-8 BOM, xử lý ký tự CSV/công thức bảng tính; không bọc BaseResponse khi thành công.
+            """
+    )
+    public ResponseEntity<byte[]> export(@RequestParam(required = false) String q,
+                                         @RequestParam(required = false) Long fieldId,
+                                         @RequestParam(required = false) Long programId,
+                                         @RequestParam(required = false) Long moduleId,
+                                         @RequestParam(required = false) String level,
+                                         @RequestParam(required = false) String requirement,
+                                         @RequestParam(required = false) String learningStatus,
+                                         @RequestParam(required = false) String state,
+                                         @RequestParam(required = false) Boolean overdue,
+                                         @RequestParam(defaultValue = "id,asc") String sort) {
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=learning-progress.csv")
+            .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
+            .body(reports.export(q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
+                overdue, sort));
     }
 
 }

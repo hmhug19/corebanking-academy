@@ -170,7 +170,7 @@ public class LearningCourseController {
     @Operation(
         summary = "Giao khóa học cho cá nhân/nhóm/đơn vị",
         description = """
-            Chốt người nhận khi giao, giới hạn 500 học viên/đợt và giữ idempotencyKey khi retry cùng payload.
+            Chốt người nhận theo giới hạn mỗi đợt giao; giữ idempotencyKey khi retry cùng payload.
             """
     )
     public BaseResponse<LearningDetails.AssignmentDetail> assign(@PathVariable @Positive Long courseId,

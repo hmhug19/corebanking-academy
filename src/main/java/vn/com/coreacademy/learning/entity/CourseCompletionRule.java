@@ -31,4 +31,7 @@ public class CourseCompletionRule extends LearningRecord {
 
     @Column(name = "reward_points", nullable = false)
     private Integer rewardPoints;
+
+    @Column(name = "require_all_required_quizzes", nullable = false)
+    private Boolean requireAllRequiredQuizzes = true;
 }

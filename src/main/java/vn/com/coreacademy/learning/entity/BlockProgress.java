@@ -55,4 +55,10 @@ public class BlockProgress extends LearningRecord {
 
     @Column(name = "last_event_sequence", nullable = false)
     private Long lastEventSequence;
+
+    @Column(name = "media_asset_id")
+    private Long mediaAssetId;
+
+    @Column(name = "watched_seconds", nullable = false)
+    private BigDecimal watchedSeconds = BigDecimal.ZERO;
 }

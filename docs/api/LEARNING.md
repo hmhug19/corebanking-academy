@@ -10,7 +10,7 @@ File upload mới được lưu trong AIStor/S3 private, không lưu local lâu 
 
 GET `/api/v1/learning-assets/{assetId}/content` giữ JWT/policy hiện có. Không Range trả 200; một Range dạng bytes=start-end, bytes=start- hoặc bytes=-suffix trả 206 với Content-Range/Content-Length/Accept-Ranges. Range sai, ngoài file hoặc nhiều range trả HTTP 416/CORE-RANGE_NOT_SATISFIABLE và Content-Range bytes */total. If-Range strong ETag khớp cho phép Range; không khớp hoặc dạng ngày trả toàn file. HEAD trả metadata/header mà không GET object.
 
-Lỗi S3/metadata không nhất quán là lỗi hệ thống 500, không đổi thành ASSET_INVALID. Lỗi trước khi stream theo BaseResponse; sau khi binary đã bắt đầu, kết nối có thể kết thúc thiếu byte, không chèn JSON. Row storageType=local trả HTTP 200/ERROR, mã LEARNING-ASSET_STORAGE_UNSUPPORTED, yêu cầu chuyển dữ liệu. FE player phải có cách gắn Bearer cho request media; thẻ video/iframe src đơn thuần chưa đủ, không đưa token vào URL.
+Lỗi S3/metadata không nhất quán là lỗi hệ thống 500, không đổi thành ASSET_INVALID. Lỗi trước khi stream theo BaseResponse; sau khi binary đã bắt đầu, kết nối có thể kết thúc thiếu byte, không chèn JSON. Row storageType=local trả HTTP 200/ERROR, mã LEARNING-ASSET_STORAGE_UNSUPPORTED, yêu cầu chuyển dữ liệu. Player học viên dùng media cookie sau khi claim session; xem contract dưới đây. Không đưa token vào URL.
 
 ## Sơ đồ quan hệ dữ liệu
 
@@ -55,7 +55,7 @@ nhưng chưa có API Quiz Engine hoạt động. Phần này không phải bằn
 ## Contract chung
 
 - Business API dưới /api/v1, JWT hiện có; envelope BaseResponse giữ SUCCESS/ERROR và messageCode. Validation/lỗi nghiệp vụ trả HTTP 200/ERROR, thiếu xác thực 401, thiếu quyền 403, lỗi hệ thống 500.
-- 36 operation mới, Swagger tại /swagger-ui.html. [Bộ cURL và thứ tự kiểm tra](LEARNING_CURL.md), [Postman collection](../postman/learning.postman_collection.json).
+- 46 operation công khai, Swagger tại /swagger-ui.html. [Bộ cURL và thứ tự kiểm tra](LEARNING_CURL.md), [Postman collection](../postman/learning.postman_collection.json).
 - Swagger khai báo HTTP 200 cùng schema DTO cho từng API JSON; kiểm tra `status=SUCCESS` hoặc `ERROR` trong body. Tải tài nguyên trả binary HTTP 200, hoặc 206 khi dùng Range hợp lệ, không bọc BaseResponse.
 - Phân trang page từ 0, size 1..100. Danh sách khóa hỗ trợ q, fieldId, programId, moduleId, level, requirement, learningStatus, state và sort=id/title/updateTime/dueAt,asc|desc. Scope được tính từ grant hiện tại và lọc trước pagination/count.
 - Read model entity scalar dùng id làm khóa hiển thị. expectedVersion lấy rowVersion của đúng bản ghi: nội dung dùng revision, đổi lifecycle dùng course, thay thành viên dùng group, tiến độ dùng block_progress (chưa có dòng: 0).
@@ -65,16 +65,266 @@ nhưng chưa có API Quiz Engine hoạt động. Phần này không phải bằn
 - Date/time trong JSON là ISO-8601 có offset hoặc Z. API nhận thời điểm đầy đủ; FE quy đổi ngày chọn sang cuối ngày Asia/Bangkok khi cần. Thời lượng lưu giây.
 - Nội dung text hiện hỗ trợ Markdown/plain, từ chối HTML. FE phải render an toàn và sanitize Markdown/link theo ngữ cảnh; API không cung cấp HTML đã sanitize.
 - Viewer/nội dung file chỉ mở khi khóa active, danh mục published và có nguồn học hợp lệ đã tới startAt (hoặc tự đăng ký còn quyền). Danh sách vẫn giữ metadata lịch sử khi khóa paused/archived; không dùng GET enrollment để bỏ qua lịch mở/thu hồi quyền học.
-- Upload vào bucket S3 private; file local chỉ dùng staging tạm và được dọn; file signature + extension và giới hạn byte được kiểm tra. Metadata thời lượng video/số trang PDF do giảng viên xác nhận; chưa có probe/transcode. Không trả storage key hoặc URL local. Download truyền stream S3 theo single byte range, học viên phải gửi enrollmentId và blockId.
+- Upload vào bucket S3 private; file local chỉ dùng staging tạm và được dọn; file signature + extension và giới hạn byte được kiểm tra. Thời lượng video/số trang PDF được BE kiểm bằng ffprobe/PDFBox; MP4 remux faststart, chưa transcode. Không trả storage key hoặc URL local. Download truyền stream S3 theo single byte range, học viên phải gửi enrollmentId và blockId.
 - Nhắc học là thông báo in-app đến thời điểm đã lên lịch, không tích hợp email/SMTP. reward_points chỉ cấu hình, chưa cộng sổ gamification.
 - Quiz Engine chưa triển khai: không cho lưu quiz lesson/cấu hình assessment có hiệu lực. course_assessments là bảng điểm nối dành cho bước phát triển sau, không phải API chấm thi.
 - Thao tác ghi Learning dùng chung advisory transaction lock với Identity để bảo vệ grain và tham chiếu xuyên module khi chưa có UNIQUE/FK. Xóa team bị chặn nếu còn course, target hoặc snapshot học tập tham chiếu. Đây là lựa chọn ban đầu cho correctness; chưa benchmark tải lớn. Không mở rộng thành nhiều khóa trước khi đo và thiết kế thứ tự khóa.
+
+<a id="my-learning-progress-design"></a>
+
+## API media và tiến độ cá nhân
+
+Đã triển khai theo `learning_hub_media_progress.sql` v2 rút gọn. Người vận hành xác nhận đã áp dụng SQL;
+ứng dụng vẫn `ddl-auto=validate`, Flyway off. Các API mới dưới đây cần schema extension trước khi khởi động.
+Không có job tự abort/xóa media S3 theo retention; hủy upload là yêu cầu trực tiếp qua API, xóa asset là xóa mềm.
+Phần Nginx cần cấu hình vận hành riêng, chưa tự triển khai lên server. Quiz Engine/activity/streak/năng lực chưa có nguồn thực.
+
+### API bổ sung
+
+Prefix `/api/v1`; endpoint nghiệp vụ dùng BaseResponse, lỗi logic HTTP 200/ERROR, xác thực 401, quyền 403, hệ thống 500.
+
+| API | Trách nhiệm |
+|---|---|
+| GET `/learning-assets` | Thư viện trong scope, q/mediaType/status, page/size/sort=id,name,createTime |
+| POST `/learning-assets/uploads` | Khởi tạo/retry theo requestId, trả uploadId/assetId/partSize/expiresAt |
+| GET `/learning-assets/uploads/{uploadId}` | Manifest phần đã ACK và trạng thái xuyên suốt upload/processing |
+| PUT `/learning-assets/uploads/{uploadId}/parts/{partNumber}` | Bytes phần + X-Part-SHA256, kiểm size/hash và retry idempotent |
+| POST `/learning-assets/uploads/{uploadId}/complete` | Kiểm manifest, đưa vào hàng đợi DB, chưa đồng nghĩa ready |
+| DELETE `/learning-assets/uploads/{uploadId}` | Caller chủ phiên yêu cầu abort multipart chưa complete, retry được |
+| DELETE `/learning-assets/{assetId}` | Xóa mềm asset chưa được tham chiếu, không tự xóa bytes S3 |
+| POST `/me/learning/sessions` | Claim/handoff/takeover một phiên học trên toàn tài khoản |
+| GET `/me/learning/progress/summary` | Counts theo cycle hiện hành của caller; chỉ trả chỉ số có nguồn thật |
+| GET `/me/learning/progress/export` | CSV cùng filter/scope/sort của courses, tối đa 10.000 dòng |
+
+Đã mở rộng GET `/me/learning/courses`: overdue=true/false, sort progressPercent/startedAt/lastAccessAt/completedAt;
+trả thêm cycleNo, startedAt, lastAccessAt, completedAt, lastLessonId/lastBlockId, completedRequiredLessonCount,
+requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds. Các field cũ được giữ.
+Các field resume hiện trả phẳng trong CourseCard; không dùng object minh họa từ bản thiết kế cũ làm contract.
+GET enrollment đã có cây revision + tiến độ từng block, dùng để khôi phục player; không cần API resume riêng.
+
+### Upload và kiểm file
+
+Init ví dụ (ID và hash chỉ minh họa, phải lấy theo file/đơn vị thực):
+
+```json
+{
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "ownerOrgId": 1,
+  "originalName": "demo.pdf",
+  "mimeType": "application/pdf",
+  "sizeBytes": 12345,
+  "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
+```
+
+- requestId UUID là khóa idempotency và trở thành uploadId; cùng actor/metadata trả lại asset cũ,
+  thay metadata hoặc tái dùng ID của người khác bị từ chối. UUID không thay kiểm quyền.
+- Phiên 24 giờ, phần 8 MiB, phần cuối đúng số byte còn lại. File gốc tối đa video 500.000.000 byte,
+  PDF 20.000.000 byte, ảnh 5.000.000 byte, Office attachment 10.000.000 byte. FE tính SHA-256 tăng dần,
+  không nạp cả video vào RAM. PUT part dùng application/octet-stream, không bọc JSON/form-data.
+- Mỗi part có hash/size bất biến. ACK sau S3 + commit manifest; retry không cộng uploadedBytes lần hai.
+  Part đang truyền có reservation; nếu BE chết, thử lại sau giới hạn timeout/reservation thay vì gửi song song cùng part.
+- GET upload trả parts đã ACK; reconnect chỉ gửi phần thiếu. Mở browser lại có thể phải chọn lại đúng file;
+  local storage chỉ giữ ID hỗ trợ tìm phiên, DB/S3 là nguồn chuẩn. UI hiển thị upload và processing riêng.
+- Complete chuyển `completing` → `processing` → `ready` hoặc `failed`. Worker một luồng, hàng đợi/lease trong DB,
+  retry hệ thống có giới hạn; mất ACK complete S3 được đối soát theo object key trước khi thử lại.
+  Đối soát provider với manifest DB, kiểm lại whole-file SHA-256; ETag không thay SHA-256.
+  Worker giữ lease 300 giây, gia hạn mỗi 60 giây; tối đa 3 lần thử lỗi hạ tầng trong một lượt xử lý.
+  Nếu failed với LEARNING-MEDIA_PROCESSING_UNAVAILABLE, caller có thể POST complete để thử lại bytes đã lưu.
+  Không áp dụng retry này cho checksum/codec/file không hợp lệ.
+- GET upload trả mimeType/durationSeconds/pageCount/mediaCheckedAt sau xác minh; FE không tự suy ready từ uploadedBytes.
+- PDFBox xác định số trang PDF, từ chối PDF mã hóa/lỗi; ffprobe xác định codec/duration.
+  MP4 hỗ trợ H.264/yuv420p + AAC (audio có thể không có); WebM VP8/VP9 + Opus/Vorbis.
+  MP4 được remux faststart, không transcode; file gốc và rendition có key/size/MIME/hash riêng.
+- POST upload một request cũ vẫn dùng được, nay kiểm file thật cùng pipeline đồng bộ; durationSeconds/pageCount
+  vẫn nhận để tương thích nhưng không dùng làm dữ liệu xác minh. Không còn đường bỏ qua kiểm codec/page count.
+- Cần `ffprobe`, `ffmpeg` trên PATH máy chạy BE hoặc cấu hình app.learning.media.ffprobe/ffmpeg.
+  Dockerfile đã cài ffmpeg; local chưa cài thì video không thể ready, PDF không cần công cụ này.
+  [FFprobe](https://ffmpeg.org/ffprobe.html), [MP4 faststart](https://ffmpeg.org/ffmpeg-formats.html#mov_002c-mp4_002c-ismv).
+- Chỉ asset ready, chưa xóa mềm, đúng quyền/đơn vị mới được attach. Dùng chung qua tham chiếu;
+  xóa block không xóa file. Asset còn được revision, attachment, cover hoặc tiến độ tham chiếu không được xóa mềm.
+  Tài nguyên/upload hết hạn vẫn giữ để vận hành đối soát; chưa có tự purge hoặc tự abort theo lịch.
+
+### Nguồn mã nghiệp vụ, giới hạn và cấu hình
+
+- `learning.constants.LearningCodes`: mã trạng thái/loại nội dung/sự kiện và allowlist/regex dùng chung.
+  Giá trị JSON/DB giữ nguyên; revision, catalog, assignment và upload có nhóm riêng.
+- `learning.constants.LearningLimits`: giới hạn số bài/khối/người nhận, dung lượng, kích thước part,
+  giới hạn CSV và quy tắc coverage. DTO/service/thông báo dùng cùng giá trị khi cùng ràng buộc.
+- `learning.config.LearningMediaProperties`: cấu hình dưới prefix `app.learning.media`.
+  Các mặc định bên dưới giữ hành vi hiện tại; không cần bổ sung `.env` khi không override.
+
+| Thuộc tính | Mặc định | Ý nghĩa |
+|---|---|---|
+| session-lease | 60s | Thời hạn quyền ghi tiến độ |
+| media-token-ttl | 5m | Hạn cookie, vẫn bị giới hạn bởi JWT gốc |
+| upload-ttl | 24h | Thời hạn upload mới; không đổi phiên đã lưu |
+| processing-lease | 5m | Lease worker, được gia hạn theo claim |
+| processing-heartbeat | 1m | Chu kỳ gia hạn claim worker |
+| retry-delay | 30s | Khoảng chờ giữa lần xử lý lỗi hạ tầng |
+| reservation-grace | 30s | Biên thời gian cộng sau timeout multipart thực tế |
+| max-event-gap | 30s | Khoảng checkpoint tối đa được dùng tính coverage |
+| probe-timeout | 120s | Timeout mỗi lệnh ffprobe/ffmpeg |
+| poll-ms | 3000 | Chu kỳ poll worker, đơn vị mili giây; giữ tên cấu hình cũ |
+| initial-delay | 15s | Chờ trước lần poll đầu |
+| max-processing-attempts | 3 | Số lần xử lý lỗi hạ tầng trong một lượt |
+| ffprobe / ffmpeg | ffprobe / ffmpeg | Tên lệnh hoặc đường dẫn executable |
+| gateway-key | rỗng | Key nội bộ; vẫn hỗ trợ MEDIA_GATEWAY_KEY, không công bố giá trị |
+
+Duration nhận đơn vị như `60s`, `5m`, `24h`; phải dương. Heartbeat phải nhỏ hơn processing-lease;
+max-event-gap phải nhỏ hơn session-lease. Cấu hình sai làm startup thất bại rõ ràng.
+Đổi timeout/lease cần cân đối với nhịp checkpoint FE và kiểm chứng trên topology thật.
+
+### Phiên học và checkpoint
+
+Claim sau khi lấy enrollment detail:
+
+```json
+{
+  "enrollmentId": 101,
+  "blockId": 401,
+  "takeover": false
+}
+```
+
+Response data có sessionId, sessionFence, leaseExpiresAt, lastAcceptedSequence, enrollmentId/blockId/assetId,
+expectedVersion và resume (BlockProgressView hoặc null). Cookie `academy_media` HttpOnly được đặt riêng cho player.
+Một learning lease trên user bao trùm mọi course/block, không giới hạn việc đọc dashboard hoặc mọi phiên login.
+
+- Thiết bị khác đang học: LEARNING-SESSION_IN_USE. FE hỏi xác nhận, sau đó gửi takeover=true để chuyển.
+- Đổi bài trong cùng player: gửi previousSessionId/previousFence đang giữ; server kiểm rồi cấp session/fence mới.
+  Không tự takeover khi render. Retry claim cùng cặp/session và cùng block trả phiên hiện hành.
+- Lease 60 giây. FE checkpoint khoảng 10 giây, khi pause/ended, đổi bài, PDF đổi trang và trước logout.
+  Chỉ báo đã lưu sau ACK; đóng browser/crash chỉ bảo đảm tới checkpoint đã commit, không hứa không mất byte cuối.
+- PUT progress giữ URL cũ, **bổ sung các field session bắt buộc**. FE phải claim trước, không còn ghi chỉ bằng
+  expectedVersion/sequence cũ. Sequence bắt đầu 1 trong phiên mới, không phải số tăng toàn đời một block.
+
+Ví dụ lưu trang PDF (expectedVersion lấy từ session hoặc response tiến độ gần nhất):
+
+```json
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440001",
+  "sessionFence": 1,
+  "expectedVersion": 0,
+  "sequence": 1,
+  "eventType": "PDF_PAGE",
+  "assetId": 501,
+  "playing": false,
+  "complete": false,
+  "pdfPage": 12
+}
+```
+
+- eventType: OPEN/PLAY/HEARTBEAT/PAUSE/SEEK/PDF_PAGE/COMPLETE/CLOSE. Video gửi videoPositionSeconds;
+  chỉ gửi watchedFromSeconds/watchedToSeconds cho đoạn phát từ checkpoint trước, không gửi cho SEEK/OPEN.
+  playing=true khi thực sự phát, false khi pause/close; backend kiểm sự kiện trước, vị trí và thời gian server.
+- Một request tiến độ đang chờ cho mỗi player; retry nguyên payload nếu mất response. Cùng sequence/hash cuối
+  được ACK lại không side effect, không gia hạn lease; cùng sequence khác payload hoặc sequence nhảy bị từ chối.
+  Sau xung đột lấy lại enrollment/session hiện hành; không sửa version rồi tự gửi lại vô hạn.
+- Response PUT progress có session receipt: sessionId/sessionFence/lastAcceptedSequence/leaseState/leaseExpiresAt.
+  FE dùng hạn tuyệt đối từ server; ACK trùng không có nghĩa lease vừa được gia hạn. data.block.rowVersion là
+  expectedVersion cho lần ghi tiếp theo; leaseState=released sau CLOSE.
+- CLOSE lưu checkpoint và release trong cùng transaction, retry CLOSE vẫn ACK tới lần claim mới.
+  Session/fence sai hoặc đã chuyển thiết bị không được ghi, kể cả gửi trực tiếp URL.
+- Resume có thể lùi khi tua/lật lại trang; coverage và kết quả đã hoàn thành không giảm.
+  Hợp khoảng video không cộng trùng khi xem lại; tua tới cuối không tính đoạn tua qua.
+  Credit tối đa theo 2x và đồng hồ server giữa heartbeat liên tiếp, gap trên 30 giây không được backfill coverage.
+- Video chạm ngưỡng thì block hoàn thành; PDF manual cần xác nhận, pdf_end chỉ chứng minh mở trang cuối.
+  Bài cần đủ các block required; khóa cần đủ bài required. Quiz Engine vẫn bị chặn, không tự coi quiz đã đạt.
+- Block mới gắn media_asset_id. Legacy dùng block_assets primary khi scalar còn NULL; nếu hai nguồn lệch thì báo
+  MEDIA_CHANGED, không chọn file tùy ý. Thay file tạo asset/revision mới, giữ tiến độ của enrollment revision cũ.
+
+### Media cho browser và gateway
+
+Player cùng origin qua dev/reverse proxy là hướng tích hợp khuyến nghị. POST sessions/PUT progress dùng Bearer như API khác;
+video/iframe src dùng cookie media, không đưa JWT vào URL. Cookie sống tối đa 5 phút, được làm mới sau checkpoint,
+không vượt hạn JWT gốc; lease thực 60 giây vẫn được kiểm trên mỗi request. HTTPS đặt Secure; proxy cần truyền đúng scheme.
+Media token chỉ được dùng trên GET/HEAD content hoặc gateway authorization, không cấp quyền gọi API ghi/auth/me.
+Học viên tải nội dung cần đúng enrollmentId/blockId, quyền còn hiệu lực và media token gắn session/fence hiện hành.
+CORS cho media/session/progress cho phép credentials với origin cấu hình cụ thể, không dùng wildcard.
+FE khác port nhưng cùng site cần credentials:include/withCredentials; SameSite=Strict không dành cho nhúng khác site.
+PDF content dùng X-Frame-Options=SAMEORIGIN; muốn iframe hoạt động hãy proxy FE/API về cùng origin.
+Author preview tiếp tục dùng Bearer và quyền biên soạn. Bytes đã buffer không thể bị thu hồi, đây không phải DRM.
+
+Gateway nội bộ (ẩn Swagger) GET `/learning-assets/{assetId}/gateway-authorization`:
+
+- Cần Bearer/cookie hợp lệ và header X-Media-Gateway-Key khớp MEDIA_GATEWAY_KEY tối thiểu 32 byte.
+  Mặc định key trống thì từ chối, không tự mở endpoint. X-Original-Method chỉ nhận GET/HEAD.
+- Query blockId/enrollmentId như content; response 200 có X-Media-S3-Url ký 60 giây, chỉ cho Nginx gọi nội bộ.
+  Không chuyển header/URL này cho FE. Mọi lỗi quyền/nghiệp vụ/tham số bị từ chối, hệ thống trả 5xx.
+- Nginx auth_request dùng 2xx cho phép, 401/403 từ chối; không đọc BaseResponse.status.
+  Nginx cần internal subrequest, forward auth/cookie tới BE, rồi proxy Range/HEAD tới URL S3 đã ký;
+  xóa Authorization/Cookie của người dùng trước khi chuyển sang S3, không bật shared cache bỏ qua auth.
+- Chưa tự deploy/kiểm chứng Nginx/AIStor Ubuntu trong thay đổi này. Mặc định content vẫn qua ObjectDownloadHandler
+  với Range/If-Range/HEAD như trước; chỉ nghiệm thu offload sau khi cấu hình proxy và thử player thật.
+
+### Summary, CSV và thông tin gửi FE
+
+Summary trả serverTime, timeZone=Asia/Ho_Chi_Minh và counts total/completed/inProgress/notStarted/overdue trên
+cycle hiện hành; không phụ thuộc trang/tìm kiếm bảng, không đếm lặp nhiều đợt giao cùng enrollment.
+activity/assessment/competency trả availability=unavailable; không tạo giờ học/streak/điểm/radar bằng số 0 giả.
+Demo nên dùng bốn KPI Hoàn thành/Đang học/Chưa bắt đầu/Đang quá hạn.
+
+Ngày bắt đầu khác ngày ghi danh; completedAt giữ khi xem lại. Deadline là trạng thái riêng: no_deadline,
+on_time_active, overdue_active, completed_on_time, completed_late. Hoàn thành muộn không còn trong KPI đang quá hạn.
+List/export cùng query/filter/sort/scope; CSV UTF-8 BOM, escape quote/newline và công thức bảng tính,
+vượt 10.000 dòng báo lỗi rõ thay vì cắt im lặng. API summary độc lập với filter của bảng.
+
+<a id="media-progress-scenarios"></a>
+
+### Đối chiếu tình huống demo và phần phát triển tiếp
+
+| ID | Xử lý hiện tại / giới hạn |
+|---|---|
+| M01 | Upload phần 8 MiB + hash, manifest DB; FE hiển thị byte ACK/ETA và bước xử lý riêng |
+| M02 | GET manifest để tiếp tục phần thiếu; mở browser lại chọn đúng file theo size/hash |
+| M03 | Probe codec/PDF trước ready; faststart cho MP4, chưa transcode codec khác |
+| M04 | Một asset nhiều liên kết; copy khóa giữ tham chiếu file |
+| M05 | Gỡ liên kết không xóa file; xóa asset đang có tham chiếu bị chặn, chưa tự purge |
+| M06 | BE Range/HEAD có sẵn; gateway backend đã có, Nginx offload cần cấu hình/đo trên topology thật |
+| M07 | Cookie media + enrollment/lease/role được kiểm từng request; link không tự cấp quyền |
+| M08 | Khuyến nghị giữ asset/revision bất biến; không migrate người đang học sang file mới tự động |
+| P01 | Checkpoint DB và resume, retry idempotent; chỉ cam kết dữ liệu đã ACK |
+| P02 | Resume đúng trang/asset cũ; file 8 trang mới không tự kế thừa trang 12/40 |
+| P03 | Seek không cộng coverage; video complete không lấy từ nút FE |
+| P04 | Hợp khoảng xem, không cộng trùng khi phát lại |
+| P05 | Một writer theo tài khoản; takeover/handoff tăng fence, phiên cũ bị chặn |
+| P06 | Ngưỡng 80% của 20 phút cần 16 phút hợp khoảng hợp lệ |
+| P07 | Cần đủ block required theo policy đã xuất bản |
+| P08 | Nội dung và kết quả quiz tách biệt; Quiz Engine chưa có, không bật assessment có hiệu lực |
+| P09 | completed_late tách overdue_active, giữ ngày hoàn thành thực |
+
+Sau demo: Quiz Engine thật; activity ledger/daily facts để tính giờ học/streak; taxonomy câu hỏi cho năng lực;
+transcode/ABR/HLS nếu có nhu cầu đo được; retention/cleanup vận hành có phê duyệt riêng.
+Không tự mở rộng sang gamification, offline learning hoặc tách microservices ở cụm API này.
+
+### Kiểm chứng và giới hạn nghiệm thu
+
+Đã chạy API thật qua Spring Security/JPA/JDBC với PostgreSQL WASM cô lập và S3 giả lập giao thức MinIO:
+201 xác nhận sau chuẩn hóa constants/config qua upload PDF hai phần, resume/hash/idempotency, quyền cookie/Range/HEAD, takeover,
+checkpoint/hoàn thành, CSV, gateway và giữ tiến độ sau restart BE. Video coverage dùng metadata/đồng hồ
+kiểm soát để xác minh policy; chưa phải thử ffprobe/ffmpeg hoặc phát video trên browser thật.
+Có kiểm tra thêm PDF hỏng, PDF mã hóa và ZIP Office hỏng trả lỗi file nghiệp vụ.
+Cấu hình media đã qua 14 xác nhận default/override và từ chối cấu hình không hợp lệ.
+Không dùng DB/credential/AIStor thật để chạy bộ kiểm tra này.
+
+Đóng gói JAR thành công với `mvn -DskipTests package`. `mvn clean verify` chạy 93 test, có 1 failure
+ở `PdfTextExtractorTest` (Knowledge, khác biệt xuống dòng Windows), 33 test cần Docker bị skip.
+Đây là giới hạn kiểm chứng còn lại, không coi build JAR là toàn bộ test đã pass.
+
+Cần nghiệm thu trên Ubuntu: codec/remux với file thật, CORS/cookie qua topology FE/proxy thực tế,
+Nginx offload nếu bật, khả năng phục hồi và tải đồng thời. Dữ liệu media cũ trước extension cần được
+rà soát metadata; không có job tự suy số trang/thời lượng hoặc di chuyển file lịch sử.
 
 ## SQL và triển khai
 
 Review [learning_hub_learning.sql](../sql/learning_hub_learning.sql), chạy một lần sau Identity trên môi trường được phép. File không tạo/xóa database, không seed/reset/cấp quyền và không tự chạy startup. Không chạy lại trên schema đã có các bảng này. Bảng Learning có created_by/updated_by/row_version/create_time/update_time và comment/index; không sửa 8 bảng Identity.
 
-Backup cả DB và kho file. Nếu đã ghi dữ liệu, rollback bằng restore/kế hoạch riêng; không có script DROP tự động. Giữ ddl-auto=validate/Flyway off. Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
+Sau baseline, áp dụng [extension media/progress v2](../sql/learning_hub_media_progress.sql) trước khi chạy source này.
+Entity/repository/API đã sử dụng các cột và bảng extension; file SQL không tự chạy lúc startup.
+Backup cả DB và kho file. Rollback dữ liệu đã ghi cần restore/kế hoạch riêng, không tự DROP bảng.
+Extension có thay CHECK/index có tên; xem [hướng dẫn SQL](../sql/README.md). Giữ ddl-auto=validate/Flyway off.
+Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 
 ## API mới
 

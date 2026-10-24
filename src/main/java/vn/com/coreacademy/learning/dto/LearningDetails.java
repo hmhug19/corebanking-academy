@@ -46,11 +46,14 @@ public final class LearningDetails {
                               String lifecycleStatus, long lessonCount, BigDecimal durationSeconds,
                               long assignedCount, Long enrollmentId, String learningStatus,
                               BigDecimal progressPercent, Instant dueAt, boolean assigned, boolean overdue,
-                              Instant updateTime) {
+                              Instant updateTime, Integer cycleNo, Instant startedAt, Instant lastAccessAt,
+                              Instant completedAt, Long lastLessonId, Long lastBlockId,
+                              Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
+                              Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds) {
     }
 
     public record ProgressResult(LearningViews.BlockProgressView block,
                                   LearningViews.LessonProgressView lesson,
-                                  LearningViews.CourseEnrollmentView enrollment) {
+                                  LearningViews.CourseEnrollmentView enrollment, MediaViews.Receipt session) {
     }
 }

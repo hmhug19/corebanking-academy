@@ -24,10 +24,19 @@ public class CorsConfig {
         config.setExposedHeaders(List.of(HttpHeaderNames.REQUEST_ID, HttpHeaders.CONTENT_RANGE,
             HttpHeaders.ACCEPT_RANGES, HttpHeaders.CONTENT_LENGTH, HttpHeaders.CONTENT_DISPOSITION, HttpHeaders.ETAG));
 
-        // Xác thực dùng Bearer header, không dùng cookie; frontend vẫn đọc được X-Request-Id để tra lỗi.
         config.setAllowCredentials(false);
 
+        // Chỉ các route media/session cần cookie; API ghi vẫn bắt buộc Bearer, không xác thực bằng cookie.
+        CorsConfiguration media = new CorsConfiguration(config);
+        if (media.getAllowedOrigins().contains("*")) {
+            throw new IllegalArgumentException("Media cookies require explicit CORS origins");
+        }
+        media.setAllowCredentials(true);
+        media.addAllowedHeader("X-Part-SHA256");
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/v1/learning-assets/**", media);
+        source.registerCorsConfiguration("/api/v1/me/learning/sessions", media);
+        source.registerCorsConfiguration("/api/v1/me/learning/enrollments/*/blocks/*/progress", media);
         source.registerCorsConfiguration("/**", config);
         return source;
     }

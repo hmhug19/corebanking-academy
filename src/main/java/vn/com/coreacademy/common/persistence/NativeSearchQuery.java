@@ -23,6 +23,7 @@ public final class NativeSearchQuery {
     private final String from;
     private final StringBuilder where = new StringBuilder("where 1 = 1\n");
     private final Map<String, Object> parameters = new LinkedHashMap<>();
+    private final Map<String, Object> projectionParameters = new LinkedHashMap<>();
 
     public NativeSearchQuery(String from) {
         this.from = from;
@@ -34,6 +35,11 @@ public final class NativeSearchQuery {
 
     public void bind(String name, Object value) {
         parameters.put(name, value);
+    }
+
+    /** Giá trị chỉ có trong SELECT không được bind vào COUNT dùng chung FROM/WHERE. */
+    public void bindProjection(String name, Object value) {
+        projectionParameters.put(name, value);
     }
 
     public void in(String column, String parameter, Collection<?> values) {
@@ -74,6 +80,7 @@ public final class NativeSearchQuery {
         String source = from + where;
         Query query = entityManager.createNativeQuery(select + source + "order by " + orderBy, type);
         parameters.forEach(query::setParameter);
+        projectionParameters.forEach(query::setParameter);
         query.setFirstResult((int) pageable.getOffset()).setMaxResults(pageable.getPageSize());
 
         List<?> rows = query.getResultList();

@@ -14,6 +14,8 @@ public enum OrganizationResponseCode implements ApiResponseCode {
         "Mã nhóm đã được sử dụng trong tổ chức này.", "Trùng mã nhóm"),
     TEAM_IN_USE(HttpStatus.OK, "ORGANIZATION-TEAM_IN_USE",
         "Không thể xóa nhóm còn thành viên, phân quyền hoặc dữ liệu học tập tham chiếu.", "Nhóm đang được sử dụng"),
+    IMPORT_INVALID(HttpStatus.OK, "ORGANIZATION-IMPORT_INVALID",
+        "Tệp nhập chưa hợp lệ. Vui lòng kiểm tra các lỗi chi tiết.", "Dữ liệu nhập chưa hợp lệ"),
     HIERARCHY_INVALID(HttpStatus.OK, "ORGANIZATION-HIERARCHY_INVALID",
         "Phòng phải trực thuộc đơn vị; tổ chức cha không được là phòng.", "Cấu trúc tổ chức chưa hợp lệ");
 

@@ -11,11 +11,25 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
+import vn.com.coreacademy.learning.constants.LearningCodes.AssetStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.AssetUsage;
+import vn.com.coreacademy.learning.constants.LearningCodes.AuditAction;
+import vn.com.coreacademy.learning.constants.LearningCodes.BlockType;
+import vn.com.coreacademy.learning.constants.LearningCodes.BodyFormat;
+import vn.com.coreacademy.learning.constants.LearningCodes.CatalogStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.CompletionMode;
+import vn.com.coreacademy.learning.constants.LearningCodes.CourseStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
+import vn.com.coreacademy.learning.constants.LearningCodes.MediaMime;
+import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
+import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
+import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningDetails;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
@@ -69,12 +83,12 @@ public class LearningContentService {
         course.setOwnerOrgId(request.ownerOrgId());
         course.setOwnerTeamId(request.ownerTeamId());
         course.setOwnerUserId(actor.person().id());
-        course.setLifecycleStatus("active");
+        course.setLifecycleStatus(CourseStatus.ACTIVE);
         repository.save(course, actor.person().id());
         CourseRevision revision = newRevision(course, request.title(), actor.person().id(), 1);
 
         // Bước 3: lưu audit cùng transaction; flush để trả đúng rowVersion do JPA sinh.
-        record(actor.person().id(), "LEARNING_COURSE_CREATED", course);
+        record(actor.person().id(), AuditAction.COURSE_CREATED, course);
         repository.flush();
         return detail(course, revision);
     }
@@ -105,13 +119,13 @@ public class LearningContentService {
         // Bước 2: kiểm tra tệp/quy tắc khối trước khi thay cây; lỗi bất kỳ rollback toàn bộ.
         if (request.coverAssetId() != null) {
             LearningAsset cover = usableAsset(course, request.coverAssetId());
-            if (!cover.getMimeType().startsWith("image/")) {
+            if (!cover.getMimeType().startsWith(MediaMime.IMAGE_PREFIX)) {
                 throw new BusinessException(LearningResponseCode.ASSET_INVALID);
             }
         }
         for (var chapter : request.chapters()) {
             for (var lesson : chapter.lessons()) {
-                if (!"content".equals(lesson.lessonType())) {
+                if (!LessonType.CONTENT.equals(lesson.lessonType())) {
                     throw new BusinessException(LearningResponseCode.QUIZ_UNAVAILABLE);
                 }
                 for (var block : lesson.blocks()) {
@@ -138,7 +152,7 @@ public class LearningContentService {
         repository.save(rule, actor.person().id());
 
         // Bước 4: audit và flush trong cùng transaction để caller nhận version mới dùng lần lưu sau.
-        record(actor.person().id(), "LEARNING_DRAFT_SAVED", course);
+        record(actor.person().id(), AuditAction.DRAFT_SAVED, course);
         repository.flush();
         repository.incrementVersion(revision);
         return detail(course, revision);
@@ -159,13 +173,13 @@ public class LearningContentService {
         requirePublishable(course, revision);
 
         // Bước 2: đóng băng bản nội dung và chuyển con trỏ; enrollment cũ giữ revision_id cũ.
-        revision.setState("published");
+        revision.setState(RevisionState.PUBLISHED);
         revision.setPublishedAt(Instant.now());
         revision.setPublishedBy(actor.person().id());
         course.setPublishedRevisionId(revision.getId());
         repository.save(revision, actor.person().id());
         repository.save(course, actor.person().id());
-        record(actor.person().id(), "LEARNING_COURSE_PUBLISHED", course);
+        record(actor.person().id(), AuditAction.COURSE_PUBLISHED, course);
         repository.flush();
         return detail(course, revision);
     }
@@ -179,7 +193,7 @@ public class LearningContentService {
         writeLock.acquire();
         repository.refresh(course);
         var revisions = repository.revisions(courseId);
-        var existing = revisions.stream().filter(r -> "draft".equals(r.getState())).findFirst();
+        var existing = revisions.stream().filter(r -> RevisionState.DRAFT.equals(r.getState())).findFirst();
         if (existing.isPresent()) {
             return detail(course, existing.get());
         }
@@ -189,7 +203,7 @@ public class LearningContentService {
         CourseRevision target = newRevision(course, source.getTitle(), actor.person().id(),
             revisions.stream().mapToInt(CourseRevision::getRevisionNo).max().orElse(0) + 1);
         cloneContent(course, source, target, actor.person().id());
-        record(actor.person().id(), "LEARNING_DRAFT_CREATED", course);
+        record(actor.person().id(), AuditAction.DRAFT_CREATED, course);
         repository.flush();
         return detail(course, target);
     }
@@ -211,13 +225,13 @@ public class LearningContentService {
         target.setOwnerOrgId(source.getOwnerOrgId());
         target.setOwnerTeamId(source.getOwnerTeamId());
         target.setOwnerUserId(actor.person().id());
-        target.setLifecycleStatus("active");
+        target.setLifecycleStatus(CourseStatus.ACTIVE);
         target.setCopiedFromCourseId(source.getId());
         repository.save(target, actor.person().id());
         CourseRevision sourceRevision = selectRevision(source, null);
         CourseRevision revision = newRevision(target, sourceRevision.getTitle(), actor.person().id(), 1);
         cloneContent(target, sourceRevision, revision, actor.person().id());
-        record(actor.person().id(), "LEARNING_COURSE_COPIED", target);
+        record(actor.person().id(), AuditAction.COURSE_COPIED, target);
         repository.flush();
         return detail(target, revision);
     }
@@ -232,7 +246,7 @@ public class LearningContentService {
         version(course, request.expectedVersion());
         course.setLifecycleStatus(request.status());
         repository.save(course, actor.person().id());
-        record(actor.person().id(), "LEARNING_COURSE_STATE_CHANGED", course);
+        record(actor.person().id(), AuditAction.COURSE_STATE_CHANGED, course);
         repository.flush();
         return mapper.view(course);
     }
@@ -295,8 +309,8 @@ public class LearningContentService {
     }
 
     private void requireDraft(Course course, CourseRevision revision) {
-        if (!course.getId().equals(revision.getCourseId()) || !"draft".equals(revision.getState())
-            || "archived".equals(course.getLifecycleStatus())) {
+        if (!course.getId().equals(revision.getCourseId()) || !RevisionState.DRAFT.equals(revision.getState())
+            || CourseStatus.ARCHIVED.equals(course.getLifecycleStatus())) {
             throw new BusinessException(LearningResponseCode.CONFLICT);
         }
     }
@@ -306,8 +320,8 @@ public class LearningContentService {
         revision.setCourseId(course.getId());
         revision.setRevisionNo(number);
         revision.setTitle(title);
-        revision.setState("draft");
-        revision.setDefaultRequirement("mandatory");
+        revision.setState(RevisionState.DRAFT);
+        revision.setDefaultRequirement(Requirement.MANDATORY);
         repository.save(revision, actor);
         CourseCompletionRule rule = new CourseCompletionRule();
         rule.setRevisionId(revision.getId());
@@ -328,13 +342,14 @@ public class LearningContentService {
         TrainingField field = repository.require(TrainingField.class, program.getFieldId());
         if (!program.getOwnerOrgId().equals(course.getOwnerOrgId())
             || !field.getOwnerOrgId().equals(course.getOwnerOrgId())
-            || (published && (!"published".equals(program.getStatus()) || !"published".equals(field.getStatus())))) {
+            || (published && (!CatalogStatus.PUBLISHED.equals(program.getStatus())
+                || !CatalogStatus.PUBLISHED.equals(field.getStatus())))) {
             throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
         }
         if (moduleId != null) {
             BusinessModule module = repository.require(BusinessModule.class, moduleId);
             if (!module.getFieldId().equals(program.getFieldId())
-                || (published && !"published".equals(module.getStatus()))) {
+                || (published && !CatalogStatus.PUBLISHED.equals(module.getStatus()))) {
                 throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
             }
         }
@@ -344,35 +359,42 @@ public class LearningContentService {
         long lessons = request.chapters().stream().mapToLong(c -> c.lessons().size()).sum();
         long blocks = request.chapters().stream().flatMap(c -> c.lessons().stream())
             .mapToLong(l -> l.blocks().size()).sum();
-        if (lessons > 500 || blocks > 2000) {
-            throw BusinessException.validation("chapters", "OUT_OF_RANGE", "Tối đa 500 bài và 2000 khối mỗi khóa.");
+        if (lessons > LearningLimits.MAX_LESSONS_PER_COURSE
+            || blocks > LearningLimits.MAX_BLOCKS_PER_COURSE) {
+            throw BusinessException.validation("chapters", "OUT_OF_RANGE",
+                "Tối đa %d bài và %d khối mỗi khóa.".formatted(
+                    LearningLimits.MAX_LESSONS_PER_COURSE, LearningLimits.MAX_BLOCKS_PER_COURSE));
         }
     }
 
     private void validateBlockInput(Course course, LearningRequests.BlockInput block) {
-        if (("video_coverage".equals(block.completionMode()) && !"video".equals(block.blockType()))
-            || ("pdf_end".equals(block.completionMode()) && !"pdf".equals(block.blockType()))
-            || (!"process".equals(block.blockType()) && !block.steps().isEmpty())
-            || ("video".equals(block.blockType()) && !"video_coverage".equals(block.completionMode()))
-            || ("text".equals(block.blockType()) && "html".equals(block.bodyFormat()))) {
+        if ((CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()) && !BlockType.VIDEO.equals(block.blockType()))
+            || (CompletionMode.PDF_END.equals(block.completionMode()) && !BlockType.PDF.equals(block.blockType()))
+            || (!BlockType.PROCESS.equals(block.blockType()) && !block.steps().isEmpty())
+            || (BlockType.VIDEO.equals(block.blockType())
+                && !CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()))
+            || (BlockType.TEXT.equals(block.blockType()) && BodyFormat.HTML.equals(block.bodyFormat()))) {
             throw BusinessException.validation("chapters", "INVALID_VALUE",
                 "Loại khối/cách hoàn thành chưa phù hợp; văn bản hiện hỗ trợ Markdown hoặc plain.");
         }
-        if ("video_coverage".equals(block.completionMode()) && block.completionThreshold() == null) {
+        if (CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()) && block.completionThreshold() == null) {
             throw BusinessException.validation("completionThreshold", "REQUIRED", "Vui lòng đặt tỷ lệ xem video.");
         }
         for (var link : block.assets()) {
             LearningAsset asset = usableAsset(course, link.assetId());
             boolean matches = switch (block.blockType()) {
-                case "video" -> "poster".equals(link.usage()) ? asset.getMimeType().startsWith("image/")
-                    : "primary".equals(link.usage()) && asset.getMimeType().startsWith("video/");
-                case "pdf" -> "primary".equals(link.usage()) && "application/pdf".equals(asset.getMimeType());
-                case "image" -> Set.of("image", "primary").contains(link.usage())
-                    && asset.getMimeType().startsWith("image/");
-                case "attachment" -> "attachment".equals(link.usage()) && asset.getSizeBytes() <= 10_000_000
-                    && ("application/pdf".equals(asset.getMimeType())
-                        || asset.getMimeType().startsWith("application/vnd.openxmlformats-officedocument."));
-                case "process" -> Set.of("attachment", "image").contains(link.usage());
+                case BlockType.VIDEO -> AssetUsage.POSTER.equals(link.usage()) ?
+                    asset.getMimeType().startsWith(MediaMime.IMAGE_PREFIX)
+                    : AssetUsage.PRIMARY.equals(link.usage()) && asset.getMimeType().startsWith(MediaMime.VIDEO_PREFIX);
+                case BlockType.PDF -> AssetUsage.PRIMARY.equals(link.usage()) &&
+                    MediaType.APPLICATION_PDF_VALUE.equals(asset.getMimeType());
+                case BlockType.IMAGE -> Set.of(AssetUsage.IMAGE, AssetUsage.PRIMARY).contains(link.usage())
+                    && asset.getMimeType().startsWith(MediaMime.IMAGE_PREFIX);
+                case BlockType.ATTACHMENT -> AssetUsage.ATTACHMENT.equals(link.usage()) &&
+                    asset.getSizeBytes() <= LearningLimits.MAX_ATTACHMENT_BYTES
+                    && (MediaType.APPLICATION_PDF_VALUE.equals(asset.getMimeType())
+                        || asset.getMimeType().startsWith(MediaMime.OFFICE_PREFIX));
+                case BlockType.PROCESS -> Set.of(AssetUsage.ATTACHMENT, AssetUsage.IMAGE).contains(link.usage());
                 default -> false;
             };
             if (!matches) {
@@ -383,14 +405,15 @@ public class LearningContentService {
 
     private LearningAsset usableAsset(Course course, Long id) {
         LearningAsset asset = repository.require(LearningAsset.class, id);
-        if (!course.getOwnerOrgId().equals(asset.getOwnerOrgId()) || !"ready".equals(asset.getStatus())) {
+        if (!course.getOwnerOrgId().equals(asset.getOwnerOrgId()) || !AssetStatus.READY.equals(asset.getStatus())
+            || Boolean.TRUE.equals(asset.getIsDeleted())) {
             throw new BusinessException(LearningResponseCode.ASSET_INVALID);
         }
         return asset;
     }
 
     private void requirePublishable(Course course, CourseRevision revision) {
-        if (!"active".equals(course.getLifecycleStatus()) || revision.getTitle() == null
+        if (!CourseStatus.ACTIVE.equals(course.getLifecycleStatus()) || revision.getTitle() == null
             || revision.getTitle().isBlank() || revision.getLevel() == null) {
             throw new BusinessException(LearningResponseCode.NOT_PUBLISHABLE);
         }
@@ -430,15 +453,15 @@ public class LearningContentService {
     private void validatePublishedBlock(LearningDetails.BlockDetail detail) {
         var block = detail.block();
         boolean valid = switch (block.blockType()) {
-            case "text" -> block.body() != null && !block.body().isBlank() && block.bodyFormat() != null;
-            case "process" -> !detail.steps().isEmpty();
-            case "video", "pdf" -> detail.assets().stream()
-                .filter(a -> "primary".equals(a.usage().usage())).count() == 1;
-            case "image", "attachment" -> !detail.assets().isEmpty();
+            case BlockType.TEXT -> block.body() != null && !block.body().isBlank() && block.bodyFormat() != null;
+            case BlockType.PROCESS -> !detail.steps().isEmpty();
+            case BlockType.VIDEO, BlockType.PDF -> detail.assets().stream()
+                .filter(a -> AssetUsage.PRIMARY.equals(a.usage().usage())).count() == 1;
+            case BlockType.IMAGE, BlockType.ATTACHMENT -> !detail.assets().isEmpty();
             default -> false;
         };
         if (!valid || detail.assets().stream()
-            .anyMatch(a -> a.asset() == null || !"ready".equals(a.asset().status()))) {
+            .anyMatch(a -> a.asset() == null || !AssetStatus.READY.equals(a.asset().status()))) {
             throw new BusinessException(LearningResponseCode.NOT_PUBLISHABLE);
         }
     }
@@ -495,6 +518,8 @@ public class LearningContentService {
         block.setCompletionThreshold(input.completionThreshold());
         block.setIsRequired(input.isRequired());
         block.setSortNo(sort);
+        block.setMediaAssetId(input.assets().stream().filter(a -> AssetUsage.PRIMARY.equals(a.usage()))
+            .map(LearningRequests.AssetUse::assetId).findFirst().orElse(null));
         repository.save(block, actor);
         for (int i = 0; i < input.assets().size(); i++) {
             var use = input.assets().get(i);

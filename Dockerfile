@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp clean verify
 
 FROM eclipse-temurin:21-jre-noble AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app

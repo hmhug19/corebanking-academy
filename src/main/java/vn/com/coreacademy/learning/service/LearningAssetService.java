@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.service;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Map;
 
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,8 @@ import org.springframework.web.multipart.MultipartFile;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
+import vn.com.coreacademy.learning.constants.LearningCodes.AssetStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.AuditAction;
 import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.entity.Course;
 import vn.com.coreacademy.learning.entity.CourseChapter;
@@ -32,6 +35,7 @@ import vn.com.coreacademy.storage.service.ObjectStorage;
 @RequiredArgsConstructor
 @Slf4j
 public class LearningAssetService {
+    private final LearningMediaTokenService mediaTokens;
     private final LearningAssetStore store;
     private final LearningRepository repository;
     private final LearningAccessPolicy access;
@@ -62,11 +66,18 @@ public class LearningAssetService {
                 asset.setMimeType(stored.mime());
                 asset.setSizeBytes(stored.size());
                 asset.setChecksumSha256(stored.checksum());
-                asset.setDurationSeconds(stored.mime().startsWith("video/") ? durationSeconds : null);
-                asset.setPageCount("application/pdf".equals(stored.mime()) ? pageCount : null);
-                asset.setStatus("ready");
+                asset.setDurationSeconds(stored.duration());
+                asset.setPageCount(stored.pages());
+                asset.setMediaType(LearningMediaProbe.type(stored.mime()));
+                asset.setMediaCheckedAt(Instant.now());
+                asset.setPageCountCheckedAt(stored.pages() == null ? null : Instant.now());
+                asset.setPlaybackKey(stored.playbackKey());
+                asset.setPlaybackSizeBytes(stored.playbackSize());
+                asset.setPlaybackChecksumSha256(stored.playbackChecksum());
+                asset.setPlaybackMimeType(stored.playbackKey() == null ? null : stored.mime());
+                asset.setStatus(AssetStatus.READY);
                 repository.save(asset, current.person().id());
-                audit.record(current.person().id(), "LEARNING_ASSET_UPLOADED", "asset", asset.getId().toString(),
+                audit.record(current.person().id(), AuditAction.ASSET_UPLOADED, "asset", asset.getId().toString(),
                     orgId, Map.of("mimeType", asset.getMimeType(), "sizeBytes", asset.getSizeBytes()));
                 repository.flush();
                 return mapper.view(asset);
@@ -75,6 +86,9 @@ public class LearningAssetService {
         } catch (RuntimeException | Error exception) {
             // Giữ lỗi gốc nếu dọn S3 thất bại; DB và object store không có transaction chung.
             try {
+                if (stored.playbackKey() != null) {
+                    store.discard(stored.playbackKey());
+                }
                 store.discard(stored.key());
             } catch (RuntimeException cleanup) {
                 log.error("S3 metadata rollback cleanup failed; reconcile objectKey={}", stored.key());
@@ -88,13 +102,17 @@ public class LearningAssetService {
     public ObjectDownload download(Long assetId, Long blockId, Long enrollmentId) {
         var actor = access.actor();
         LearningAsset asset = repository.require(LearningAsset.class, assetId);
-        boolean allowed = false;
+        boolean allowed = access.canManage(actor, asset.getOwnerOrgId(),
+            actor.person().id().equals(asset.getUploadedBy()) ? actor.person().teamId() : null,
+            asset.getUploadedBy());
         // Người học phải chứng minh asset được dùng trong đúng block/revision của enrollment của chính mình.
         if (blockId != null && enrollmentId != null) {
+            mediaTokens.require(enrollmentId, blockId);
             var enrollment = assignments.requireOwnEnrollment(actor, enrollmentId, true);
             var revision = revisionOf(blockId);
             allowed = enrollment.getRevisionId().equals(revision.getId())
-                && repository.assetUses(assetId).stream().anyMatch(use -> use.getBlockId().equals(blockId));
+                && (assetId.equals(repository.require(LessonBlock.class, blockId).getMediaAssetId())
+                    || repository.assetUses(assetId).stream().anyMatch(use -> use.getBlockId().equals(blockId)));
         } else {
             // Giảng viên chỉ tải khi có quyền sửa một khóa thực sự đang dùng file, hoặc chính người upload.
             if (asset.getUploadedBy().equals(actor.person().id())) {
@@ -112,14 +130,20 @@ public class LearningAssetService {
                     course.getOwnerUserId());
             }
         }
-        if (!allowed || !"ready".equals(asset.getStatus())) {
+        if (!allowed || !AssetStatus.READY.equals(asset.getStatus()) || Boolean.TRUE.equals(asset.getIsDeleted())) {
             throw new AccessDeniedException("Asset access denied");
         }
         if (!ObjectStorage.TYPE.equals(asset.getStorageType())) {
             throw new BusinessException(LearningResponseCode.ASSET_STORAGE_UNSUPPORTED);
         }
-        return new ObjectDownload(asset.getStorageKey(), asset.getMimeType(), asset.getOriginalName(),
-            asset.getSizeBytes());
+        if (asset.getStorageKey() == null || asset.getSizeBytes() == null || asset.getSizeBytes() <= 0
+            || (asset.getPlaybackKey() != null && (asset.getPlaybackSizeBytes() == null
+                || asset.getPlaybackSizeBytes() <= 0 || asset.getPlaybackMimeType() == null))) {
+            throw new IllegalStateException("Stored media metadata incomplete; review legacy asset");
+        }
+        return new ObjectDownload(asset.getPlaybackKey() == null ? asset.getStorageKey() : asset.getPlaybackKey(),
+            asset.getPlaybackKey() == null ? asset.getMimeType() : asset.getPlaybackMimeType(), asset.getOriginalName(),
+            asset.getPlaybackKey() == null ? asset.getSizeBytes() : asset.getPlaybackSizeBytes());
     }
 
     private CourseRevision revisionOf(Long blockId) {

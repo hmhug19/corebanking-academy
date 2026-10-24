@@ -131,6 +131,7 @@ public final class LearningViews {
         Boolean isRequired,
         Integer sortNo,
         Long sourceBlockId,
+        Long mediaAssetId,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {
@@ -161,6 +162,8 @@ public final class LearningViews {
         Integer width,
         Integer height,
         String status,
+        String mediaType,
+        Instant mediaCheckedAt,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {
@@ -348,6 +351,8 @@ public final class LearningViews {
         Instant lastAccessAt,
         Instant completedAt,
         Long lastEventSequence,
+        Long mediaAssetId,
+        BigDecimal watchedSeconds,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {
@@ -367,6 +372,7 @@ public final class LearningViews {
         Long id,
         Long revisionId,
         Boolean requireAllRequiredLessons,
+        Boolean requireAllRequiredQuizzes,
         Integer rewardPoints,
         Long rowVersion,
         Instant createTime,
