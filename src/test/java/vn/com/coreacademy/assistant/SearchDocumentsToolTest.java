@@ -37,7 +37,8 @@ class SearchDocumentsToolTest {
     private static final ChunkHit ECR = new ChunkHit(3, 44, "Quy-trinh-ECR.docx", null, 1, 4,
         "ECR là yêu cầu thay đổi.", 0.5);
     private static final String INSTRUCTION = "Chỉ trả lời từ các đoạn trên, ghi [n] sau mỗi ý. "
-        + "Nếu các đoạn không có câu trả lời, trả lời đúng một câu: \"Không tìm thấy thông tin này trong tài liệu.\"";
+        + "Nếu các đoạn không trả lời trực tiếp câu hỏi của người dùng, hãy trả lời CHÍNH XÁC một câu này, "
+        + "không thêm gì khác: \"Không tìm thấy thông tin này trong tài liệu.\"";
     private static final AgentContext CONTEXT = new AgentContext("000004", null, null);
 
     private final KnowledgeChatService knowledge = mock(KnowledgeChatService.class);
