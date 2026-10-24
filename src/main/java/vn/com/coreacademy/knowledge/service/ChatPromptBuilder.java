@@ -22,16 +22,23 @@ public class ChatPromptBuilder {
     public List<Message> build(String question, List<ChunkHit> hits) {
         StringBuilder user = new StringBuilder("NGỮ CẢNH:\n");
         for (int i = 0; i < hits.size(); i++) {
-            ChunkHit hit = hits.get(i);
-            user.append('[').append(i + 1).append("] (").append(hit.fileName());
-            if (hit.page() != null) {
-                user.append(", trang ").append(hit.page());
-            }
-            user.append(", dòng ").append(hit.lineStart()).append('–').append(hit.lineEnd()).append(")\n")
-                .append(hit.content()).append("\n\n");
+            user.append(formatChunk(i + 1, hits.get(i))).append("\n\n");
         }
         user.append("CÂU HỎI: ").append(question);
 
         return List.of(Message.system(SYSTEM), Message.user(user.toString()));
+    }
+
+    /** One numbered chunk as the model sees it: {@code [n] (file, trang p, dòng a–b)} then the text. */
+    public static String formatChunk(int n, ChunkHit hit) {
+        StringBuilder chunk = new StringBuilder();
+        chunk.append('[').append(n).append("] (").append(hit.fileName());
+        if (hit.page() != null) {
+            chunk.append(", trang ").append(hit.page());
+        }
+        chunk.append(", dòng ").append(hit.lineStart()).append('–').append(hit.lineEnd()).append(")\n")
+            .append(hit.content());
+
+        return chunk.toString();
     }
 }

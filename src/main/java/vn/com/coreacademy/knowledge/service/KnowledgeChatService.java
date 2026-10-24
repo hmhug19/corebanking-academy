@@ -8,8 +8,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.TreeSet;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -26,7 +24,6 @@ import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import vn.com.coreacademy.knowledge.dto.ChatStreamEvent;
 import vn.com.coreacademy.knowledge.dto.ChatViews.ChatAnswerView;
-import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 import vn.com.coreacademy.knowledge.exception.KnowledgeResponseCode;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
@@ -41,11 +38,8 @@ import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 @RequiredArgsConstructor
 public class KnowledgeChatService {
     private static final int MAX_QUESTION_LENGTH = 300;
-    private static final int SNIPPET_LENGTH = 280;
     // Re-uploaded files store the same text again, so search asks for more than top-k and keeps the distinct ones.
     private static final int CANDIDATE_FACTOR = 3;
-    // [1], [2][3] and [1, 2] all name chunks; anything else in brackets is ignored.
-    private static final Pattern MARKER = Pattern.compile("\\[(\\d+(?:\\s*,\\s*\\d+)*)]");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private final OllamaClient ollama;
@@ -135,17 +129,7 @@ public class KnowledgeChatService {
             return notFound();
         }
 
-        // Sources keep the numbers the model saw. Only the chunks it marked are shown; markers outside 1..size are
-        // ignored, and an answer with no usable marker shows every retrieved chunk rather than none.
-        Set<Integer> cited = citedNumbers(text, hits.size());
-        List<CitationView> citations = new ArrayList<>();
-        for (int n = 1; n <= hits.size(); n++) {
-            if (cited.isEmpty() || cited.contains(n)) {
-                citations.add(citation(n, hits.get(n - 1)));
-            }
-        }
-
-        return new ChatAnswerView(text, true, citations);
+        return new ChatAnswerView(text, true, CitationSelector.select(text, hits));
     }
 
     /** The best {@code limit} hits whose text differs, best first; a copy of a file already seen adds nothing. */
@@ -164,44 +148,8 @@ public class KnowledgeChatService {
         return kept;
     }
 
-    /** Chunk numbers named by [n] markers in the answer, limited to 1..size. */
-    static Set<Integer> citedNumbers(String text, int size) {
-        Set<Integer> numbers = new TreeSet<>();
-        Matcher matcher = MARKER.matcher(text);
-        while (matcher.find()) {
-            for (String part : matcher.group(1).split(",")) {
-                String digits = part.strip();
-                // More than 3 digits cannot be a chunk number (top-k is small) and could overflow parseInt.
-                if (digits.length() <= 3) {
-                    int n = Integer.parseInt(digits);
-                    if (n >= 1 && n <= size) {
-                        numbers.add(n);
-                    }
-                }
-            }
-        }
-
-        return numbers;
-    }
-
     private static ChatAnswerView notFound() {
         return new ChatAnswerView(NotFoundAnswer.TEXT, false, List.of());
-    }
-
-    private static CitationView citation(int n, ChunkHit hit) {
-        return new CitationView(n, hit.documentId(), hit.fileName(), hit.page(), hit.lineStart(), hit.lineEnd(),
-            snippet(hit.content()));
-    }
-
-    /** The first 280 characters, cut back to a word boundary. */
-    static String snippet(String content) {
-        if (content.length() <= SNIPPET_LENGTH) {
-            return content;
-        }
-        int cut = content.lastIndexOf(' ', SNIPPET_LENGTH);
-        int end = cut > 0 ? cut : SNIPPET_LENGTH;
-
-        return content.substring(0, end).stripTrailing() + "…";
     }
 
     private void write(OutputStream output, ChatStreamEvent event) {
