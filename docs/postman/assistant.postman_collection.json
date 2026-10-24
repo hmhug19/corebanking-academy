@@ -1,0 +1,116 @@
+{
+  "info": {
+    "name": "Corebanking Academy - Assistant agent APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Trợ lý nhanh (agent có công cụ). Đăng nhập bằng collection Identity để có accessToken (environment). Chi tiết: docs/api/ASSISTANT.md."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8019"
+    },
+    {
+      "key": "actionId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "01. Hỏi tài liệu (stream)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/x-ndjson, application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/assistant/agent/stream",
+        "description": "NDJSON: tool, delta..., done kèm citations. Cần Ollama chạy cục bộ.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"CIF là gì?\"\n    }\n  ]\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.eql(200));",
+              "const lines = pm.response.text().split('\\n').filter(l => l.trim());",
+              "const events = lines.map(l => JSON.parse(l));",
+              "pm.test('Mỗi dòng có type', () => events.forEach(e => pm.expect(e).to.have.property('type')));",
+              "pm.test('Dòng cuối là done hoặc error', () => pm.expect(['done','error']).to.include(events[events.length - 1].type));",
+              "const card = events.find(e => e.type === 'action_required');",
+              "if (card) { pm.collectionVariables.set('actionId', card.action.id); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. Xác nhận yêu cầu",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/assistant/agent/actions/{{actionId}}/confirm",
+        "description": "Chạy yêu cầu chờ xác nhận (actionId lấy từ sự kiện action_required). Mỗi yêu cầu chỉ chạy một lần."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Có status', () => pm.expect(response).to.have.property('status'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. Huỷ yêu cầu",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/assistant/agent/actions/{{actionId}}/cancel",
+        "description": "Bỏ yêu cầu chờ xác nhận mà không chạy."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Có status', () => pm.expect(response).to.have.property('status'));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

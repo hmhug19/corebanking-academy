@@ -16,6 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.dto.AgentMessage;
+import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.AgentStreamEvent;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.tool.AgentTool;
@@ -24,8 +26,6 @@ import vn.com.coreacademy.assistant.tool.ToolOutcome;
 import vn.com.coreacademy.assistant.tool.TurnState;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
-import vn.com.coreacademy.identity.dto.MeResponse;
-import vn.com.coreacademy.identity.dto.UserRights;
 import vn.com.coreacademy.identity.service.AuthService;
 import vn.com.coreacademy.knowledge.ai.ChatMessage;
 import vn.com.coreacademy.knowledge.ai.ChatTurn;
@@ -45,6 +45,9 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 @Service
 @RequiredArgsConstructor
 public class AgentService {
+    private static final int MAX_USER_LENGTH = 500;
+    private static final int MAX_ASSISTANT_LENGTH = 4000;
+
     static final String UNKNOWN_TOOL = "Công cụ không tồn tại.";
     static final String BAD_ARGUMENTS = "Tham số của công cụ không hợp lệ.";
     static final String STEP_CAP_ANSWER =
@@ -57,11 +60,55 @@ public class AgentService {
     private final ObjectMapper json;
 
     /**
+     * Validates the request, then streams the turn. Roles other than {@code user} and {@code assistant} are refused,
+     * so a client cannot inject tool calls or results; a long {@code assistant} text is cut, since it is the
+     * server's own earlier answer.
+     */
+    public StreamingResponseBody stream(AgentRequest request) {
+        return stream(history(request));
+    }
+
+    private List<ChatMessage> history(AgentRequest request) {
+        List<AgentMessage> messages = request.messages();
+        if (messages == null || messages.isEmpty() || messages.size() > properties.historyMessages()) {
+            throw BusinessException.validation("messages", "INVALID_LENGTH",
+                "Hội thoại phải có từ 1 đến " + properties.historyMessages() + " tin nhắn.");
+        }
+
+        List<ChatMessage> history = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            AgentMessage message = messages.get(i);
+            String field = "messages[" + i + "]";
+            String content = message == null || message.content() == null ? "" : message.content().strip();
+            String role = message == null ? null : message.role();
+            if ("user".equals(role)) {
+                if (content.isEmpty() || content.length() > MAX_USER_LENGTH) {
+                    throw BusinessException.validation(field + ".content", "OUT_OF_RANGE",
+                        "Tin nhắn phải từ 1 đến " + MAX_USER_LENGTH + " ký tự.");
+                }
+                history.add(ChatMessage.user(content));
+            } else if ("assistant".equals(role)) {
+                history.add(ChatMessage.assistant(content.length() > MAX_ASSISTANT_LENGTH
+                    ? content.substring(0, MAX_ASSISTANT_LENGTH) : content));
+            } else {
+                throw BusinessException.validation(field + ".role", "INVALID_VALUE",
+                    "Vai trò chỉ có thể là user hoặc assistant.");
+            }
+        }
+        if (!"user".equals(history.get(history.size() - 1).role())) {
+            throw BusinessException.validation("messages", "INVALID_VALUE",
+                "Tin nhắn cuối cùng phải của người dùng.");
+        }
+
+        return history;
+    }
+
+    /**
      * The context and the tool list are built now, on the request thread, so a refusal is still an ordinary envelope
      * and the stream body never needs the security context. {@code history} holds the request's text turns only.
      */
     public StreamingResponseBody stream(List<ChatMessage> history) {
-        AgentContext context = contextOf(auth.me());
+        AgentContext context = AgentContext.of(auth.me());
         if (!ollama.isAvailable()) {
             throw new BusinessException(AssistantResponseCode.AI_UNAVAILABLE);
         }
@@ -69,11 +116,6 @@ public class AgentService {
         List<AgentTool> tools = registry.availableTo(context);
         List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(context)).toList();
         return output -> run(output, history, context, tools, definitions);
-    }
-
-    private static AgentContext contextOf(MeResponse me) {
-        UserRights rights = new UserRights(me.roleGrants(), me.functionDetails(), me.functionScopes());
-        return new AgentContext(me.user().userId(), me.user(), rights);
     }
 
     private void run(OutputStream output, List<ChatMessage> history, AgentContext context, List<AgentTool> tools,

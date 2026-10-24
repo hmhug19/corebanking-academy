@@ -29,6 +29,7 @@ vn.com.coreacademy
 ├── audit                          # Ghi audit cùng transaction
 ├── learning                        # Danh mục, nội dung, giao học, tài nguyên và tiến độ
 ├── knowledge                       # Kho tri thức Trợ lý AI: tải lên, worker nền, RAG cục bộ (Ollama + pgvector)
+├── assistant                       # Trợ lý nhanh: vòng lặp agent có công cụ (Ollama), yêu cầu chờ xác nhận
 └── assessment / reporting / ...    # Phạm vi nghiệp vụ chưa triển khai
 ```
 
@@ -40,6 +41,10 @@ chưa triển khai; không suy chức năng đã có từ tên package hoặc b�
 Knowledge là kho tài liệu dùng chung (mọi vai trò): bảng `knowledge_documents` đồng thời là hàng đợi cho worker
 `@Scheduled` (trích xuất theo trang/dòng → chia đoạn → nhúng bge-m3 → pgvector). Chi tiết contract, cấu hình và
 luồng xử lý tại [KNOWLEDGE.md](api/KNOWLEDGE.md); chỉ gọi Ollama cục bộ, không gửi dữ liệu ra ngoài.
+
+Assistant chạy vòng lặp agent (`AgentService`) với các công cụ (`AgentTool`) mà người dùng được dùng. Công cụ chỉ đọc
+chạy ngay; công cụ thay đổi dữ liệu trở thành yêu cầu chờ trong bộ nhớ (`PendingActionStore`) và chỉ chạy khi người
+dùng xác nhận. Contract tại [ASSISTANT.md](api/ASSISTANT.md).
 
 ## Ranh giới xử lý
 
