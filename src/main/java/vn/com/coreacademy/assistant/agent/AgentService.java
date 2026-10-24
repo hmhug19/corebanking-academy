@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -66,6 +67,7 @@ public class AgentService {
     private final AuthService auth;
     private final ToolRegistry registry;
     private final AssistantProperties properties;
+    private final TurnLimiter limiter;
     private final ObjectMapper json;
 
     /**
@@ -138,7 +140,17 @@ public class AgentService {
 
         List<AgentTool> tools = registry.availableTo(context);
         List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(context)).toList();
-        return output -> run(output, history, context, tools, definitions);
+        return output -> {
+            Optional<TurnLimiter.Turn> started = limiter.tryStart(context.userId());
+            if (started.isEmpty()) {
+                write(output, AgentStreamEvent.error(AssistantResponseCode.BUSY.getCode(),
+                    AssistantResponseCode.BUSY.getMessage()));
+                return;
+            }
+            try (TurnLimiter.Turn ignored = started.get()) {
+                run(output, history, context, tools, definitions);
+            }
+        };
     }
 
     private void run(OutputStream output, List<ChatMessage> history, AgentContext context, List<AgentTool> tools,

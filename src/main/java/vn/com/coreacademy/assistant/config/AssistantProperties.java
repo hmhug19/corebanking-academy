@@ -14,5 +14,6 @@ import org.springframework.validation.annotation.Validated;
 public record AssistantProperties(
     @Min(1) int maxSteps,
     @Min(1) int historyMessages,
-    @NotNull Duration actionTtl) {
+    @NotNull Duration actionTtl,
+    @Min(1) int maxConcurrentTurns) {
 }

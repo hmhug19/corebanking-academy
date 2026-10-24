@@ -30,7 +30,7 @@ class PendingActionStoreTest {
 
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-24T09:00:00Z"));
     private final PendingActionStore store =
-        new PendingActionStore(new AssistantProperties(4, 20, TTL), clock);
+        new PendingActionStore(new AssistantProperties(4, 20, TTL, 4), clock);
 
     private PendingAction add(String userId) {
         return store.add(userId, "update_profile", new ObjectMapper().createObjectNode().put("positionName", "Mới"),

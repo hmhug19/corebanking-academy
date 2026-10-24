@@ -25,6 +25,7 @@ import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.agent.AgentPrompt;
 import vn.com.coreacademy.assistant.agent.AgentService;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
+import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.dto.AgentMessage;
 import vn.com.coreacademy.assistant.dto.AgentRequest;
@@ -69,6 +70,8 @@ class AgentServiceTest {
     private final AuthService auth = mock(AuthService.class);
     private final List<AgentTool> tools = new ArrayList<>();
     private final List<AgentContext> contexts = new ArrayList<>();
+    private final AssistantProperties properties = new AssistantProperties(4, 20, Duration.ofMinutes(10), 4);
+    private final TurnLimiter limiter = new TurnLimiter(properties);
 
     @BeforeEach
     void setUp() {
@@ -86,8 +89,7 @@ class AgentServiceTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<AgentTool> provider = mock(ObjectProvider.class);
         when(provider.orderedStream()).thenAnswer(invocation -> tools.stream());
-        return new AgentService(ollama, auth, new ToolRegistry(provider),
-            new AssistantProperties(4, 20, Duration.ofMinutes(10)), json);
+        return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, json);
     }
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
@@ -236,6 +238,26 @@ class AgentServiceTest {
         assertThat(history.get(0).role()).isEqualTo("user");
         assertThat(history.get(0).content()).isEqualTo("câu 6");
         assertThat(history.get(history.size() - 1).content()).isEqualTo("câu cuối");
+    }
+
+    @Test
+    void aSecondTurnOfTheSameUserWhileOneIsRunningEndsBusyWithoutCallingTheModel() throws IOException {
+        limiter.tryStart("000004").orElseThrow();
+
+        List<JsonNode> events = events(ask("Xin chào"));
+
+        assertThat(types(events)).containsExactly("error");
+        assertThat(events.get(0).path("messageCode").asText()).isEqualTo("ASSISTANT-BUSY");
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+    }
+
+    @Test
+    void aTurnFreesItsPlaceWhenItEndsEvenOnAFailure() throws IOException {
+        when(ollama.chatWithTools(anyList(), anyList(), any(), any())).thenThrow(new IllegalStateException("boom"));
+
+        events(ask("Xin chào"));
+
+        assertThat(limiter.tryStart("000004")).isPresent();
     }
 
     @Test

@@ -46,7 +46,7 @@ class UpdateProfileToolTest {
     private final AuthService auth = mock(AuthService.class);
     private final SelfProfileService profiles = mock(SelfProfileService.class);
     private final PendingActionStore store = new PendingActionStore(new AssistantProperties(4, 20,
-        Duration.ofMinutes(10)));
+        Duration.ofMinutes(10), 4));
     private final UpdateProfileTool tool = new UpdateProfileTool(store, auth, profiles, VALIDATOR);
 
     private static UserInfo user(String provider, boolean mustChangePassword, String fullName, String email,
