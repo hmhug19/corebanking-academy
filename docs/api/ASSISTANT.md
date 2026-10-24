@@ -169,7 +169,7 @@ mất mọi yêu cầu; app báo yêu cầu đã hết hạn khi xác nhận.
 
 ## Giới hạn đã biết
 
-- Câu hỏi ngoài tài liệu: mô hình nhỏ đôi khi diễn đạt lại câu "không tìm thấy" thay vì dùng đúng câu cố định. Câu diễn đạt
-  lại không có `[n]`, nên theo quy tắc của `kb-chat` (không có dấu `[n]` hợp lệ thì trả mọi đoạn đã truy xuất) nó mang theo
-  nguồn. Đổi quy tắc này nằm ngoài phạm vi của tính năng.
+- Câu trả lời của agent không có `[n]` mà câu đầu tiên nói bằng lời khác rằng tài liệu không có ("không được đề cập", "không
+  tìm thấy", "không có thông tin"…) được coi là câu không tìm thấy: `done.answer` là câu cố định và không có nguồn. Câu có `[n]`
+  vẫn giữ nguồn. Quy tắc này chỉ áp cho agent; `/knowledge/chat` giữ quy tắc cũ (không có `[n]` hợp lệ thì trả mọi đoạn).
 - Khi `open_screen` từ chối, mô hình đôi khi nhắc lại mã chức năng thay vì tên màn hình. Không có gì được mở.

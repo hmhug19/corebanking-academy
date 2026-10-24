@@ -40,7 +40,7 @@ public final class CitationSelector {
     }
 
     /** Chunk numbers named by [n] markers in the answer, limited to 1..size. */
-    static Set<Integer> citedNumbers(String text, int size) {
+    public static Set<Integer> citedNumbers(String text, int size) {
         Set<Integer> numbers = new TreeSet<>();
         Matcher matcher = MARKER.matcher(text);
         while (matcher.find()) {

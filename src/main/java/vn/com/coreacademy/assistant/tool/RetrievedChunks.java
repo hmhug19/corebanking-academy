@@ -41,13 +41,18 @@ final class RetrievedChunks {
 
     /**
      * Nothing retrieved in the whole turn, or the model saying so, is the fixed sentence with no sources whatever else
-     * the model wrote; otherwise the sources are the chunks the answer marks, from their metadata.
+     * the model wrote; so is an answer with no [n] marker that says it in its own words. Otherwise the sources are the
+     * chunks the answer marks, from their metadata.
      */
     FinishedAnswer finish(String answer) {
-        if (hits.isEmpty() || NotFoundAnswer.isNotFound(answer)) {
+        if (hits.isEmpty() || NotFoundAnswer.isNotFound(answer) || isRewordedNotFound(answer)) {
             return new FinishedAnswer(NotFoundAnswer.TEXT, List.of());
         }
 
         return new FinishedAnswer(answer, CitationSelector.select(answer, hits));
+    }
+
+    private boolean isRewordedNotFound(String answer) {
+        return CitationSelector.citedNumbers(answer, hits.size()).isEmpty() && NotFoundAnswer.saysNothingWasFound(answer);
     }
 }

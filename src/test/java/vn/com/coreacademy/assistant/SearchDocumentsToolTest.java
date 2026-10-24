@@ -133,6 +133,44 @@ class SearchDocumentsToolTest {
     }
 
     @Test
+    void aRewordedNotFoundWithoutAMarkerIsTheFixedSentenceWithNoCitations() {
+        retrieves(CIF, GL);
+        search("hạn mức chuyển khoản");
+
+        for (String reworded : List.of(
+            "Hạn mức chuyển khoản liên ngân hàng trong ngày không được đề cập trong tài liệu.",
+            "CIF không được đề cập trong tài liệu.",
+            "Tài liệu không có thông tin về hạn mức này. Bạn có thể hỏi bộ phận vận hành.",
+            "Mình không tìm thấy nội dung này trong các tài liệu.")) {
+            FinishedAnswer finished = finish(reworded);
+
+            assertThat(finished.answer()).as(reworded).isEqualTo(NotFoundAnswer.TEXT);
+            assertThat(finished.citations()).as(reworded).isEmpty();
+        }
+    }
+
+    @Test
+    void anAnswerThatMarksAChunkKeepsItsSourcesEvenIfItMentionsWhatIsMissing() {
+        retrieves(CIF, GL);
+        search("hoàn tiền");
+
+        FinishedAnswer finished = finish("Hoàn tiền không được đề cập. Tuy nhiên CIF là mã khách hàng [1].");
+
+        assertThat(finished.answer()).startsWith("Hoàn tiền không được đề cập.");
+        assertThat(finished.citations()).extracting(CitationView::n).containsExactly(1);
+    }
+
+    @Test
+    void aMarkerlessAnswerThatOnlyMentionsAMissingThingLaterStillCitesTheChunks() {
+        retrieves(CIF, GL);
+        search("quy trình");
+
+        FinishedAnswer finished = finish("CIF là mã khách hàng duy nhất. Phần phí không được đề cập.");
+
+        assertThat(finished.citations()).extracting(CitationView::n).containsExactly(1, 2);
+    }
+
+    @Test
     void onlyTheMarkedChunksAreCitedInNumberOrderFromMetadata() {
         retrieves(CIF, GL, ECR);
         search("quy trình");
