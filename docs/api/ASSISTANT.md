@@ -78,7 +78,8 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 ### Vòng lặp và giới hạn
 
 1. Backend dựng ngữ cảnh người dùng (quyền, hồ sơ) **trước** khi stream bắt đầu; công cụ chỉ đọc danh tính từ đó.
-2. Gọi mô hình với các công cụ mà người dùng được dùng. Nếu mô hình gọi công cụ: kết quả công cụ đọc được đưa lại cho mô
+2. Hội thoại trong request quá 16 000 ký tự thì backend bỏ các tin nhắn cũ nhất (bắt đầu lại từ một tin nhắn `user`) cho
+   tới khi vừa. Gọi mô hình với các công cụ mà người dùng được dùng; một bước chỉ chạy tối đa 3 lời gọi công cụ đầu tiên. Nếu mô hình gọi công cụ: kết quả công cụ đọc được đưa lại cho mô
    hình và vòng lặp tiếp tục (tối đa `max-steps` lần gọi). Công cụ không tồn tại hoặc tham số sai được trả lại cho mô hình
    dưới dạng văn bản.
 3. Văn bản tài liệu do người khác viết, nên có thể chứa chỉ dẫn cài sẵn. Từ khi `search_documents` đã chạy trong lượt,

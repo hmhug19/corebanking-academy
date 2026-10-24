@@ -49,6 +49,10 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 public class AgentService {
     private static final int MAX_USER_LENGTH = 500;
     private static final int MAX_ASSISTANT_LENGTH = 4000;
+    /** About 4k tokens of history, so the prompt, the tool definitions and the results still fit num_ctx 8192. */
+    public static final int MAX_HISTORY_CHARS = 16_000;
+    /** The calls of one model step that run; qwen3 sometimes repeats a call many times in one answer. */
+    public static final int MAX_CALLS_PER_STEP = 3;
 
     static final String UNKNOWN_TOOL = "Công cụ không tồn tại.";
     static final String BAD_ARGUMENTS = "Tham số của công cụ không hợp lệ.";
@@ -105,7 +109,21 @@ public class AgentService {
                 "Tin nhắn cuối cùng phải của người dùng.");
         }
 
-        return history;
+        return withinBudget(history);
+    }
+
+    /** Drops the oldest messages until the text fits {@link #MAX_HISTORY_CHARS}, so it starts with a user message. */
+    private static List<ChatMessage> withinBudget(List<ChatMessage> history) {
+        int total = history.stream().mapToInt(message -> message.content().length()).sum();
+        int first = 0;
+        while (total > MAX_HISTORY_CHARS && first < history.size() - 1) {
+            total -= history.get(first++).content().length();
+        }
+        while (!"user".equals(history.get(first).role())) {
+            first++;
+        }
+
+        return history.subList(first, history.size());
     }
 
     /**
@@ -141,8 +159,9 @@ public class AgentService {
                     return;
                 }
 
-                messages.add(ChatMessage.assistant(answer.content(), answer.toolCalls()));
-                for (ToolCall call : answer.toolCalls()) {
+                List<ToolCall> calls = answer.toolCalls().stream().limit(MAX_CALLS_PER_STEP).toList();
+                messages.add(ChatMessage.assistant(answer.content(), calls));
+                for (ToolCall call : calls) {
                     write(output, AgentStreamEvent.tool(call.name()));
                     AgentTool tool = find(tools, call.name());
                     ToolOutcome outcome = tool != null && tool.actsForUser() && readShared

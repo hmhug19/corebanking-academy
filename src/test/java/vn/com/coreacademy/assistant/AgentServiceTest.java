@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
@@ -25,6 +26,8 @@ import vn.com.coreacademy.assistant.agent.AgentPrompt;
 import vn.com.coreacademy.assistant.agent.AgentService;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.dto.AgentMessage;
+import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.PendingActionView.Change;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.tool.AgentTool;
@@ -194,6 +197,45 @@ class AgentServiceTest {
 
         assertThatThrownBy(() -> ask("Xin chào")).isInstanceOf(AccessDeniedException.class);
         verify(ollama, never()).isAvailable();
+    }
+
+    @Test
+    void atMostThreeToolCallsOfOneStepRunAndOnlyThoseGoBackToTheModel() throws IOException {
+        tool("search_documents", true, (arguments, turn) -> new ToolOutcome.Result("kết quả"));
+        modelAnswers(List.of(), Collections.nCopies(5, call("search_documents")), new ChatTurn("Xong.", List.of()));
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        assertThat(types(events)).containsExactly("tool", "tool", "tool", "delta", "done");
+        assertThat(contexts).hasSize(AgentService.MAX_CALLS_PER_STEP);
+        ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any());
+        List<ChatMessage> second = messages.getAllValues().get(1);
+        assertThat(second.get(2).toolCalls()).hasSize(AgentService.MAX_CALLS_PER_STEP);
+        assertThat(second).extracting(ChatMessage::role).containsExactly("system", "user", "assistant", "tool", "tool",
+            "tool");
+    }
+
+    @Test
+    void theOldestTurnsAreDroppedSoTheHistoryStaysWithinItsCharacterBudget() throws IOException {
+        modelAnswers(List.of("ok"), List.of());
+        List<AgentMessage> request = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            request.add(new AgentMessage("user", "câu " + i));
+            request.add(new AgentMessage("assistant", "x".repeat(4000)));
+        }
+        request.add(new AgentMessage("user", "câu cuối"));
+
+        events(service().stream(new AgentRequest(request)));
+
+        ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
+        verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any());
+        List<ChatMessage> history = messages.getValue().subList(1, messages.getValue().size());
+        assertThat(history.stream().mapToInt(message -> message.content().length()).sum())
+            .isLessThanOrEqualTo(AgentService.MAX_HISTORY_CHARS);
+        assertThat(history.get(0).role()).isEqualTo("user");
+        assertThat(history.get(0).content()).isEqualTo("câu 6");
+        assertThat(history.get(history.size() - 1).content()).isEqualTo("câu cuối");
     }
 
     @Test
