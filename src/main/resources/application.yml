@@ -21,6 +21,10 @@ spring:
     multipart:
       max-file-size: 500MB
       max-request-size: 501MB
+  mvc:
+    async:
+      # A streamed answer (agent or document chat) may make max-steps model calls, each up to the Ollama read-timeout.
+      request-timeout: ${ASSISTANT_STREAM_TIMEOUT:15m}
 management:
   endpoints:
     web:

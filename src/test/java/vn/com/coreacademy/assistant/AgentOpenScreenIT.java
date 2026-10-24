@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,10 +17,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.knowledge.ai.ChatTurn;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.ToolCall;
 import vn.com.coreacademy.knowledge.ai.ToolDefinition;
+import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import vn.com.coreacademy.knowledge.support.KnowledgeIntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,7 +50,13 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
     @Autowired
     private MockMvc mvc;
 
-    private List<JsonNode> turn(String userId) throws Exception {
+    @Autowired
+    private KnowledgeProperties knowledge;
+
+    @Autowired
+    private AssistantProperties assistant;
+
+    private MvcResult start(String userId) throws Exception {
         doReturn(true).when(ollama).isAvailable();
         int[] calls = {0};
         doAnswer(invocation -> calls[0]++ == 0
@@ -56,17 +65,29 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
             : new ChatTurn("Bạn không có quyền mở màn hình này.", List.of()))
             .when(ollama).chatWithTools(anyList(), anyList(), any(), any());
 
-        MvcResult started = mvc.perform(post("/api/v1/assistant/agent/stream").with(as(userId))
+        return mvc.perform(post("/api/v1/assistant/agent/stream").with(as(userId))
                 .accept(NDJSON, MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"messages\":[{\"role\":\"user\",\"content\":\"mở trang quản lý người dùng\"}]}"))
             .andExpect(request().asyncStarted()).andReturn();
-        MvcResult result = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn();
+    }
+
+    private List<JsonNode> turn(String userId) throws Exception {
+        MvcResult result = mvc.perform(asyncDispatch(start(userId))).andExpect(status().isOk()).andReturn();
 
         List<JsonNode> events = new ArrayList<>();
         for (String line : result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList()) {
             events.add(JSON.readTree(line));
         }
         return events;
+    }
+
+    @Test
+    void theStreamOutlivesATurnWhoseEveryModelCallTakesTheFullReadTimeout() throws Exception {
+        MvcResult started = start("000002");
+
+        Duration slowestTurn = knowledge.ollama().readTimeout().multipliedBy(assistant.maxSteps());
+        assertThat(started.getRequest().getAsyncContext().getTimeout()).isGreaterThanOrEqualTo(slowestTurn.toMillis());
+        mvc.perform(asyncDispatch(started)).andExpect(status().isOk());
     }
 
     @Test

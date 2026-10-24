@@ -18,6 +18,7 @@ thành một yêu cầu chờ và chỉ chạy khi người dùng xác nhận b�
 | `app.assistant.agent.max-steps`        | `4`      | Số lần gọi mô hình tối đa cho một lượt (`ASSISTANT_AGENT_MAX_STEPS`) |
 | `app.assistant.agent.history-messages` | `20`     | Số tin nhắn tối đa trong request (10 lượt)                       |
 | `app.assistant.agent.action-ttl`       | `10m`    | Thời hạn của một yêu cầu chờ xác nhận (`ASSISTANT_ACTION_TTL`)   |
+| `spring.mvc.async.request-timeout`     | `15m`    | Thời gian tối đa của một stream (`ASSISTANT_STREAM_TIMEOUT`); phải ≥ `max-steps` × `read-timeout` của Ollama |
 
 Mô hình, URL và timeout dùng chung cấu hình `app.knowledge.ollama.*` (xem [KNOWLEDGE.md](KNOWLEDGE.md)). Mỗi lần gọi
 mô hình dùng `think: false`, `temperature 0.1`, `num_ctx 8192`.
