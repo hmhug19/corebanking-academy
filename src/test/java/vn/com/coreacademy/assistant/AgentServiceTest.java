@@ -185,6 +185,32 @@ class AgentServiceTest {
     }
 
     @Test
+    void aBlankFinalAnswerIsReplacedWithTheFallbackSentence() throws IOException {
+        modelAnswers(List.of(), List.of());
+
+        List<JsonNode> events = events(ask("Xin chào"));
+
+        assertThat(types(events)).containsExactly("done");
+        assertThat(events.get(0).path("answer").asText()).isEqualTo(AgentService.EMPTY_ANSWER);
+    }
+
+    @Test
+    void aBlankAnswerAfterASearchWithSourcesIsTheFallbackWithNoCitations() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> {
+            turn.finishWith(answer -> new FinishedAnswer(answer, List.of(
+                new CitationView(1, 42L, "a.pdf", 1, 1, 2, "x"))));
+            return new ToolOutcome.Result("[1] tài liệu");
+        });
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("  ", List.of()));
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        JsonNode done = events.get(events.size() - 1);
+        assertThat(done.path("answer").asText()).isEqualTo(AgentService.EMPTY_ANSWER);
+        assertThat(done.path("citations").size()).isZero();
+    }
+
+    @Test
     void theSystemPromptAndTheHistoryAreSentInOrder() throws IOException {
         modelAnswers(List.of("ok"), List.of());
 

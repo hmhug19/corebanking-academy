@@ -89,7 +89,9 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
    thêm.
 5. Quá `max-steps` mà mô hình vẫn gọi công cụ: `done` với "Mình chưa xử lý được yêu cầu này. Bạn thử diễn đạt lại ngắn
    gọn hơn nhé."
-6. Ollama lỗi giữa chừng: `error` `ASSISTANT-AI_UNAVAILABLE`. Lỗi khác: `error` `CORE-INTERNAL_ERROR` với thông báo chung.
+6. Câu trả lời cuối rỗng (sau khi áp quy tắc của `search_documents`): `done` với "Mình chưa có câu trả lời cho yêu cầu
+   này. Bạn thử hỏi lại nhé." và `citations = []`.
+7. Ollama lỗi giữa chừng: `error` `ASSISTANT-AI_UNAVAILABLE`. Lỗi khác: `error` `CORE-INTERNAL_ERROR` với thông báo chung.
 
 Từ chối **trước** khi stream bắt đầu là envelope JSON `status: ERROR` (HTTP 200): `CORE-VALIDATION_FAILED` (request
 không hợp lệ), `ASSISTANT-AI_UNAVAILABLE` (Ollama không trả lời trong 2 giây); 401 khi thiếu token.

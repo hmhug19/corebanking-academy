@@ -54,6 +54,7 @@ public class AgentService {
     static final String BAD_ARGUMENTS = "Tham số của công cụ không hợp lệ.";
     public static final String ACTION_AFTER_DOCUMENTS = "Không thể mở màn hình hay đề xuất thay đổi trong lượt "
         + "đã đọc tài liệu. Hãy trả lời câu hỏi, người dùng có thể gửi yêu cầu đó riêng.";
+    public static final String EMPTY_ANSWER = "Mình chưa có câu trả lời cho yêu cầu này. Bạn thử hỏi lại nhé.";
     static final String STEP_CAP_ANSWER =
         "Mình chưa xử lý được yêu cầu này. Bạn thử diễn đạt lại ngắn gọn hơn nhé.";
 
@@ -225,6 +226,10 @@ public class AgentService {
     private void finish(OutputStream output, TurnState turn, String answer) {
         FinishedAnswer finished = turn.finisher().map(finisher -> finisher.finish(answer))
             .orElseGet(() -> new FinishedAnswer(answer, List.of()));
+        if (finished.answer().isBlank()) {
+            // qwen3 sometimes ends with nothing after a tool result; an empty bubble reads as a hang.
+            finished = new FinishedAnswer(EMPTY_ANSWER, List.of());
+        }
         write(output, AgentStreamEvent.done(finished.answer(), finished.citations()));
     }
 
