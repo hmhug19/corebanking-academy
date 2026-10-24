@@ -10,7 +10,18 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.common.persistence.NativeSearchQuery;
+import vn.com.coreacademy.learning.constants.LearningCodes.AssignmentStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.CatalogStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.CourseStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.DeadlineStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.RecipientStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
+import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
+import vn.com.coreacademy.learning.constants.LearningCodes.SearchMode;
+import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseCard;
+import vn.com.coreacademy.learning.dto.LearningProgressOverview.Counts;
 
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
@@ -23,9 +34,10 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
         NativeSearchQuery sql = new NativeSearchQuery("""
             from learning_hub.courses c
             left join lateral (
-                select x.enrollment_id, x.revision_id, x.status, x.progress_percent, x.enrollment_origin
+                select x.enrollment_id, x.revision_id, x.status, x.progress_percent, x.enrollment_origin,
+                       x.cycle_no, x.started_at, x.last_access_at, x.completed_at, x.last_lesson_id, x.last_block_id
                 from learning_hub.course_enrollments x
-                where x.course_id = c.course_id and x.user_id = :actor and x.status <> 'withdrawn'
+                where x.course_id = c.course_id and x.user_id = :actor and x.status <> :codeWithdrawn
                 order by x.cycle_no desc limit 1
             ) e on true
             join lateral (
@@ -33,7 +45,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                        x.state, x.update_time
                 from learning_hub.course_revisions x
                 where x.course_id = c.course_id
-                  and (:mode = 'manage' or x.revision_id = coalesce(e.revision_id, c.published_revision_id))
+                  and (:mode = :codeManage or x.revision_id = coalesce(e.revision_id, c.published_revision_id))
                 order by x.revision_no desc limit 1
             ) r on true
             left join learning_hub.training_programs p on p.program_id = r.program_id
@@ -43,46 +55,66 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                        then min(ar.effective_due_at) filter (where ar.effective_start_at <= current_timestamp)
                        else (array_agg(ar.effective_due_at order by ar.effective_start_at, ar.recipient_id)
                            filter (where ar.effective_start_at > current_timestamp))[1] end as due_at,
-                       bool_or(ar.requirement = 'mandatory' and ar.effective_start_at <= current_timestamp) as
+                       bool_or(ar.requirement = :codeMandatory and ar.effective_start_at <= current_timestamp) as
                        mandatory,
                        count(*) > 0 as assigned
                 from learning_hub.assignment_recipients ar
-                join learning_hub.course_assignments a on a.assignment_id = ar.assignment_id and a.status = 'active'
-                where ar.enrollment_id = e.enrollment_id and ar.status = 'active'
+                join learning_hub.course_assignments a on a.assignment_id = ar.assignment_id
+                    and a.status = :codeAssignmentActive
+                where ar.enrollment_id = e.enrollment_id and ar.status = :codeRecipientActive
             ) obligations on true
             left join lateral (
-                select count(*) as lesson_count, coalesce(sum(l.estimated_duration_seconds), 0) as duration
+                select count(*) as lesson_count, coalesce(sum(l.estimated_duration_seconds), 0) as duration,
+                       count(*) filter (where l.is_required) as required_count,
+                       count(*) filter (where l.is_required and exists (
+                           select 1 from learning_hub.lesson_progress lp
+                           where lp.enrollment_id = e.enrollment_id and lp.lesson_id = l.lesson_id
+                             and lp.status = :codeCompleted)) as completed_count
                 from learning_hub.course_chapters ch
                 join learning_hub.course_lessons l on l.chapter_id = ch.chapter_id
                 where ch.revision_id = r.revision_id
             ) stats on true
+            left join learning_hub.block_progress resume
+                on resume.enrollment_id = e.enrollment_id and resume.block_id = e.last_block_id
             left join lateral (
                 select count(distinct ar.user_id) as assigned_count
                 from learning_hub.course_assignments a
                 join learning_hub.assignment_recipients ar on ar.assignment_id = a.assignment_id
-                where a.course_id = c.course_id and a.status = 'active' and ar.status = 'active'
+                where a.course_id = c.course_id
+                  and a.status = :codeAssignmentActive and ar.status = :codeRecipientActive
             ) audience on true
             """);
         sql.bind("actor", filter.actorId());
+        sql.bind("codeWithdrawn", ProgressStatus.WITHDRAWN);
+        sql.bind("codeManage", SearchMode.MANAGE);
+        sql.bind("codeMandatory", Requirement.MANDATORY);
+        sql.bind("codeAssignmentActive", AssignmentStatus.ACTIVE);
+        sql.bind("codeRecipientActive", RecipientStatus.ACTIVE);
+        sql.bind("codeCompleted", ProgressStatus.COMPLETED);
+
         sql.bind("mode", filter.mode());
-        if ("manage".equals(filter.mode())) {
+        if (SearchMode.MANAGE.equals(filter.mode())) {
             applyManagementScope(sql, filter);
         } else {
             sql.and("""
                 e.enrollment_id is not null
-                or (c.lifecycle_status = 'active' and r.state = 'published'
-                    and p.status = 'published' and f.status = 'published' and (
+                or (c.lifecycle_status = :codeCourseActive and r.state = :codeRevisionPublished
+                    and p.status = :codeCatalogPublished and f.status = :codeCatalogPublished and (
                         c.owner_org_id = :actorOrg
                         or exists (
                             select 1 from learning_hub.course_shares s
-                            where s.course_id = c.course_id and s.status = 'active'
+                            where s.course_id = c.course_id and s.status = :codeShareActive
                               and (s.org_id = :actorOrg or (s.include_descendants and s.org_id in (:ancestors)))
                         )
                     ))
                 """);
+            sql.bind("codeCourseActive", CourseStatus.ACTIVE);
+            sql.bind("codeRevisionPublished", RevisionState.PUBLISHED);
+            sql.bind("codeCatalogPublished", CatalogStatus.PUBLISHED);
+            sql.bind("codeShareActive", ShareStatus.ACTIVE);
             sql.bind("actorOrg", filter.actorOrgId() == null ? -1L : filter.actorOrgId());
             sql.bind("ancestors", filter.ancestorIds().isEmpty() ? List.of(-1L) : filter.ancestorIds());
-            if ("mine".equals(filter.mode())) {
+            if (SearchMode.MINE.equals(filter.mode())) {
                 sql.and("e.enrollment_id is not null");
             }
         }
@@ -108,26 +140,85 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             sql.bind("level", filter.level());
         }
         if (filter.requirement() != null) {
-            sql.and("(case when obligations.mandatory then 'mandatory' else r.default_requirement end) = :req");
+            sql.and("(case when obligations.mandatory then :codeMandatory else r.default_requirement end) = :req");
             sql.bind("req", filter.requirement());
         }
         if (filter.learningStatus() != null) {
-            sql.and("coalesce(e.status, 'not_started') = :learningStatus");
+            sql.and("coalesce(e.status, :codeNotStarted) = :learningStatus");
             sql.bind("learningStatus", filter.learningStatus());
+            sql.bind("codeNotStarted", ProgressStatus.NOT_STARTED);
         }
         if (filter.publicationState() != null) {
             sql.and("r.state = :state");
             sql.bind("state", filter.publicationState());
         }
+        if (filter.overdue() != null) {
+            sql.and("""
+                coalesce(obligations.due_at < current_timestamp and e.status <> :codeCompleted, false) = :overdue
+                """);
+            sql.bind("overdue", filter.overdue());
+        }
+        if (filter.learningStatus() == null) {
+            sql.bindProjection("codeNotStarted", ProgressStatus.NOT_STARTED);
+        }
+        sql.bindProjection("codeNotActive", DeadlineStatus.NOT_ACTIVE);
+        sql.bindProjection("codeNoDeadline", DeadlineStatus.NO_DEADLINE);
+        sql.bindProjection("codeCompletedLate", DeadlineStatus.COMPLETED_LATE);
+        sql.bindProjection("codeCompletedOnTime", DeadlineStatus.COMPLETED_ON_TIME);
+        sql.bindProjection("codeOverdueActive", DeadlineStatus.OVERDUE_ACTIVE);
+        sql.bindProjection("codeOnTimeActive", DeadlineStatus.ON_TIME_ACTIVE);
         return sql.page(entityManager, """
             select c.course_id, r.revision_id, c.code, r.title, r.program_id, r.module_id, r.level,
-                   case when obligations.mandatory then 'mandatory' else r.default_requirement end,
+                   case when obligations.mandatory then :codeMandatory else r.default_requirement end,
                    r.state, c.lifecycle_status, stats.lesson_count, stats.duration,
-                   audience.assigned_count, e.enrollment_id, coalesce(e.status, 'not_started'),
+                   audience.assigned_count, e.enrollment_id, coalesce(e.status, :codeNotStarted),
                    coalesce(e.progress_percent, 0), obligations.due_at, coalesce(obligations.assigned, false),
-                   coalesce(obligations.due_at < current_timestamp and e.status <> 'completed', false), r.update_time
+                   coalesce(obligations.due_at < current_timestamp and e.status <> :codeCompleted, false),
+                   r.update_time,
+                   e.cycle_no, e.started_at, e.last_access_at, e.completed_at, e.last_lesson_id, e.last_block_id,
+                   stats.completed_count, stats.required_count,
+                   case when e.enrollment_id is null then :codeNotActive
+                        when obligations.due_at is null then :codeNoDeadline
+                        when e.completed_at > obligations.due_at then :codeCompletedLate
+                        when e.completed_at is not null then :codeCompletedOnTime
+                        when obligations.due_at < current_timestamp then :codeOverdueActive
+                        else :codeOnTimeActive end,
+                   resume.media_asset_id, resume.last_pdf_page, resume.last_video_position_seconds
             """, CourseCard.class, pageable, Map.of("id", "c.course_id", "title", "r.title",
-                "updateTime", "r.update_time", "dueAt", "obligations.due_at"));
+                "updateTime", "r.update_time", "dueAt", "obligations.due_at", "progressPercent", "e.progress_percent",
+                "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at", "completedAt", "e.completed_at"));
+    }
+
+    @Override
+    public Counts summary(String userId) {
+        return (Counts) entityManager.createNativeQuery("""
+            select count(*) as total, count(*) filter (where e.status = :codeCompleted) as completed,
+                   count(*) filter (where e.status = :codeInProgress) as in_progress,
+                   count(*) filter (where e.status = :codeNotStarted) as not_started,
+                   count(*) filter (where e.status <> :codeCompleted and due.due_at < current_timestamp) as overdue
+            from learning_hub.course_enrollments e
+            left join lateral (
+                select min(ar.effective_due_at) as due_at
+                from learning_hub.assignment_recipients ar
+                join learning_hub.course_assignments a on a.assignment_id = ar.assignment_id
+                    and a.status = :codeAssignmentActive
+                where ar.enrollment_id = e.enrollment_id and ar.status = :codeRecipientActive
+                  and ar.effective_start_at <= current_timestamp
+            ) due on true
+            where e.user_id = :user and e.status <> :codeWithdrawn
+              and not exists (
+                  select 1 from learning_hub.course_enrollments later
+                  where later.course_id = e.course_id and later.user_id = e.user_id
+                    and later.status <> :codeWithdrawn and later.cycle_no > e.cycle_no
+              )
+            """, Counts.class)
+            .setParameter("user", userId)
+            .setParameter("codeCompleted", ProgressStatus.COMPLETED)
+            .setParameter("codeInProgress", ProgressStatus.IN_PROGRESS)
+            .setParameter("codeNotStarted", ProgressStatus.NOT_STARTED)
+            .setParameter("codeWithdrawn", ProgressStatus.WITHDRAWN)
+            .setParameter("codeAssignmentActive", AssignmentStatus.ACTIVE)
+            .setParameter("codeRecipientActive", RecipientStatus.ACTIVE).getSingleResult();
     }
 
     private void applyManagementScope(NativeSearchQuery sql, CourseSearch filter) {

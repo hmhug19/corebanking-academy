@@ -7,10 +7,13 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import io.minio.GetObjectArgs;
+import io.minio.GetPresignedObjectUrlArgs;
+import io.minio.Http.Method;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.StatObjectArgs;
+import io.minio.errors.ErrorResponseException;
 import io.minio.errors.MinioException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -68,6 +71,32 @@ public class ObjectStorage {
             return response;
         } catch (MinioException | IOException exception) {
             throw new IllegalStateException("Object storage download failed", exception);
+        }
+    }
+
+    /** URL ký ngắn hạn chỉ trả cho gateway tin cậy, không trả qua API thư viện/player. */
+    public String gatewayUrl(String key, boolean head) {
+        validateKey(key);
+        try {
+            return client.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder().bucket(properties.bucket())
+                .object(key).method(head ? Method.HEAD : Method.GET).expiry(60).build());
+        } catch (MinioException exception) {
+            throw new IllegalStateException("Object storage signing failed", exception);
+        }
+    }
+
+    public boolean exists(String key) {
+        validateKey(key);
+        try {
+            client.statObject(StatObjectArgs.builder().bucket(properties.bucket()).object(key).build());
+            return true;
+        } catch (ErrorResponseException exception) {
+            if ("NoSuchKey".equals(exception.errorResponse().code())) {
+                return false;
+            }
+            throw new IllegalStateException("Object storage metadata read failed", exception);
+        } catch (MinioException exception) {
+            throw new IllegalStateException("Object storage metadata read failed", exception);
         }
     }
 

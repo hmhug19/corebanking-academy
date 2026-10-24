@@ -23,6 +23,7 @@ import vn.com.coreacademy.identity.service.IdentityWriteLock;
 import vn.com.coreacademy.organization.dto.CreateOrganizationRequest;
 import vn.com.coreacademy.organization.dto.OrganizationDetail;
 import vn.com.coreacademy.organization.dto.OrganizationInfo;
+import vn.com.coreacademy.organization.dto.OrganizationTreeNode;
 import vn.com.coreacademy.organization.dto.OrganizationUpdateRequest;
 import vn.com.coreacademy.organization.entity.Organization;
 import vn.com.coreacademy.organization.exception.OrganizationResponseCode;
@@ -88,6 +89,35 @@ public class OrganizationAdministrationService {
 
         return PageResponse.from(result.map(org -> mapper.toInfo(org,
             memberCounts.getOrDefault(org.getId(), 0L), teamCounts.getOrDefault(org.getId(), 0L))));
+    }
+
+    /**
+     * Tải một cấp cây theo scope, không đệ quy toàn bộ cây hoặc truy vấn con từng node. Không có parentId
+     * trả các gốc trong phạm vi; hasChildren được kiểm tra theo lô và cùng phạm vi quản lý.
+     */
+    public PageResponse<OrganizationTreeNode> tree(Long parentId, int page, int size) {
+        var boundary = access.boundary(SecurityContextUtils.getUserId());
+        if (parentId != null && (!boundary.contains(parentId) || !organizations.existsById(parentId))) {
+            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+
+        var filter = new OrganizationSearch(null, parentId, parentId == null, null, null,
+            boundary.global(), boundary.orgIds());
+        var result = organizations.searchOrganizations(filter,
+            PageQuery.of(page, size, "sortNo,asc", Set.of("sortNo")));
+        Set<Long> expandableIds;
+        if (result.isEmpty()) {
+            expandableIds = Set.of();
+        } else {
+            List<Long> ids = result.stream().map(Organization::getId).toList();
+            expandableIds = Set.copyOf(boundary.global()
+                ? organizations.findParentIdsWithChildren(ids)
+                : organizations.findParentIdsWithVisibleChildren(ids, boundary.orgIds()));
+        }
+
+        return PageResponse.from(result.map(org -> new OrganizationTreeNode(org.getId(), org.getParentId(),
+            org.getOrgType(), org.getCode(), org.getName(), org.getStatus(), org.getSortNo(),
+            expandableIds.contains(org.getId()))));
     }
 
     /**

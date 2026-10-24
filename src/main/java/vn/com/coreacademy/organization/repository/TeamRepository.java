@@ -24,5 +24,20 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
         """)
     List<IdCount> countTeamsByOrgIds(@Param("ids") Collection<Long> ids);
 
+    interface ExistingCode {
+        Long getOrgId();
+
+        String getCode();
+    }
+
+    @Query("""
+        select t.orgId as orgId, lower(t.code) as code
+        from Team t
+        where t.orgId in :orgIds
+            and lower(t.code) in :codes
+        """)
+    List<ExistingCode> findExistingCodes(@Param("orgIds") Collection<Long> orgIds,
+                                         @Param("codes") Collection<String> codes);
+
     boolean existsByOrgIdAndCodeIgnoreCaseAndIdNot(Long orgId, String code, Long id);
 }

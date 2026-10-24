@@ -14,6 +14,12 @@ public record S3Properties(@NotBlank String endpoint, @NotBlank String bucket, @
                            @Min(1) @Max(60) int connectTimeoutSeconds,
                            @Min(1) @Max(600) int readTimeoutSeconds,
                            @Min(1) @Max(3600) int callTimeoutSeconds) {
+    private static final int MAX_MULTIPART_CALL_SECONDS = 60;
+
+    public int multipartCallTimeoutSeconds() {
+        return Math.min(callTimeoutSeconds, MAX_MULTIPART_CALL_SECONDS);
+    }
+
     @Override
     public String toString() {
         return "S3Properties[credentials=<redacted>]";

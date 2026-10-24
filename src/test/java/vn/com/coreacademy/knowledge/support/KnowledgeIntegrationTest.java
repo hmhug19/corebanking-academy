@@ -9,8 +9,8 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 /**
- * Base for tests that need the real schema: one throwaway pgvector database per test JVM, initialised with the three
- * SQL scripts exactly as an operator runs them (identity, learning, knowledge). The properties override whatever a
+ * Base for tests that need the real schema: one throwaway pgvector database per test JVM, initialised with the four
+ * SQL scripts exactly as an operator runs them (identity, learning, media/progress, knowledge). The properties override whatever a
  * local .env says, so these tests never reach another database.
  *
  * <p>Without a Docker daemon (for example inside {@code docker build}) these classes are skipped rather than failed;
@@ -30,8 +30,10 @@ public abstract class KnowledgeIntegrationTest {
                     "/docker-entrypoint-initdb.d/01-identity.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_learning.sql"),
                     "/docker-entrypoint-initdb.d/02-learning.sql")
+                .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_media_progress.sql"),
+                    "/docker-entrypoint-initdb.d/03-media-progress.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_knowledge.sql"),
-                    "/docker-entrypoint-initdb.d/03-knowledge.sql");
+                    "/docker-entrypoint-initdb.d/04-knowledge.sql");
             postgres.start();
             return postgres;
         }

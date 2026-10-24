@@ -10,6 +10,7 @@ import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.PageQuery;
+import vn.com.coreacademy.learning.constants.LearningCodes.AuditAction;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.entity.BusinessModule;
@@ -81,7 +82,7 @@ public class LearningCatalogService {
         value.setStatus(request.status());
         value.setSortNo(request.sortNo());
         repository.save(value, actor.person().id());
-        audit.record(actor.person().id(), "LEARNING_FIELD_SAVED", "training_field", value.getId().toString(),
+        audit.record(actor.person().id(), AuditAction.FIELD_SAVED, "training_field", value.getId().toString(),
             value.getOwnerOrgId(), Map.of());
         repository.flush();
         return mapper.view(value);
@@ -115,7 +116,7 @@ public class LearningCatalogService {
         value.setStatus(request.status());
         value.setSortNo(request.sortNo());
         repository.save(value, actor.person().id());
-        audit.record(actor.person().id(), "LEARNING_PROGRAM_SAVED", "training_program", value.getId().toString(),
+        audit.record(actor.person().id(), AuditAction.PROGRAM_SAVED, "training_program", value.getId().toString(),
             value.getOwnerOrgId(), Map.of());
         repository.flush();
         return mapper.view(value);
@@ -145,7 +146,7 @@ public class LearningCatalogService {
         value.setStatus(request.status());
         value.setSortNo(request.sortNo());
         repository.save(value, actor.person().id());
-        audit.record(actor.person().id(), "LEARNING_MODULE_SAVED", "business_module", value.getId().toString(),
+        audit.record(actor.person().id(), AuditAction.MODULE_SAVED, "business_module", value.getId().toString(),
             field.getOwnerOrgId(), Map.of());
         repository.flush();
         return mapper.view(value);

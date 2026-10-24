@@ -26,6 +26,10 @@ public class UploadStaging {
 
     /** Bên gọi đóng input; StagedFile phải dùng try-with-resources để dọn file sau kiểm tra/upload. */
     public StagedFile stage(InputStream source) throws IOException {
+        return stage(source, Long.MAX_VALUE);
+    }
+
+    public StagedFile stage(InputStream source, long maxBytes) throws IOException {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -40,12 +44,27 @@ public class UploadStaging {
             // Không đóng source ở đây vì vòng đời input thuộc bên gọi.
             InputStream input = new DigestInputStream(source, digest);
             try (OutputStream output = Files.newOutputStream(path)) {
-                size = input.transferTo(output);
+                byte[] buffer = new byte[65536];
+                size = 0;
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    if (count > maxBytes - size) {
+                        throw new LimitExceededException();
+                    }
+                    output.write(buffer, 0, count);
+                    size += count;
+                }
             }
             return new StagedFile(path, size, HexFormat.of().formatHex(digest.digest()));
         } catch (IOException | RuntimeException | Error exception) {
             deleteTemporaryFile(path);
             throw exception;
+        }
+    }
+
+    public static final class LimitExceededException extends IOException {
+        public LimitExceededException() {
+            super("Upload exceeds staging limit");
         }
     }
 

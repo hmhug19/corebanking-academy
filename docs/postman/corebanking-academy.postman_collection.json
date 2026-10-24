@@ -3,7 +3,7 @@
     "_postman_id": "8976642c-9960-435e-83a1-05694c22bdd7",
     "name": "Corebanking Academy - Identity API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Bộ 21 API Identity/Organization theo source hiện tại.\n\n## Bắt đầu\n1. Import collection và một trong hai environment Local/Dev. Chọn environment tương ứng.\n2. Điền username (mã cán bộ hoặc username) và password của tài khoản đã được cấp. Mật khẩu/token trong file export được để trống.\n3. Gửi Login: accessToken tự lưu vào environment và được các request khác kế thừa qua Bearer auth. Login dùng No Auth.\n4. Gửi Me. Nếu mustChangePassword=true, thực hiện Đổi mật khẩu riêng, cập nhật password trong environment rồi Login lại trước khi gọi API quản trị.\n5. Gửi Danh mục vai trò để tự bind learnerRoleId/instructorRoleId/adminRoleId/reportViewerRoleId khi role tồn tại.\n\n## Thử CRUD\nTạo org -> tạo team -> tạo user -> cấp/thu hồi role. Response tạo mới tự bind orgId/teamId/targetUserId/grantId. Có thể điền ID tài nguyên được phép kiểm thử vào environment để gọi request riêng. Request list không tự chọn ID của bản ghi đầu tiên.\n\nĐây là bộ request dùng thủ công hoặc chạy từng folder phù hợp, không phải kịch bản cleanup toàn bộ dữ liệu. Đổi mật khẩu/logout thu hồi token. Nhóm còn user hoặc grant tham chiếu (kể cả grant đã thu hồi) không xóa được; cần dùng nhóm rỗng để kiểm tra DELETE thành công. Không có API hard-delete user/org.\n\n## Kết quả\nLuôn kiểm tra status. Validation/lỗi nghiệp vụ có thể trả HTTP 200 với status=ERROR; request kiểm thử thành công sẽ báo test fail để người chạy xem messageCode/errors. 401/403/500 giữ HTTP tương ứng. Filter tùy chọn mặc định disabled; bật khi cần. Không export lại environment có password/token thật để commit.\n"
+    "description": "Bộ 21 API core Identity/Organization cùng API cây/panel tổ chức và template/import Excel theo source hiện tại.\n\n## Bắt đầu\n1. Import collection và một trong hai environment Local/Dev. Chọn environment tương ứng.\n2. Điền username (mã cán bộ hoặc username) và password của tài khoản đã được cấp. Mật khẩu/token trong file export được để trống.\n3. Gửi Login: accessToken tự lưu vào environment và được các request khác kế thừa qua Bearer auth. Login dùng No Auth.\n4. Gửi Me. Nếu mustChangePassword=true, thực hiện Đổi mật khẩu riêng, cập nhật password trong environment rồi Login lại trước khi gọi API quản trị.\n5. Gửi Danh mục vai trò để tự bind learnerRoleId/instructorRoleId/adminRoleId/reportViewerRoleId khi role tồn tại.\n\n## Thử CRUD\nTạo org -> tạo team -> tạo user -> cấp/thu hồi role. Response tạo mới tự bind orgId/teamId/targetUserId/grantId. Có thể điền ID tài nguyên được phép kiểm thử vào environment để gọi request riêng. Request list không tự chọn ID của bản ghi đầu tiên.\n\nĐây là bộ request dùng thủ công hoặc chạy từng folder phù hợp, không phải kịch bản cleanup toàn bộ dữ liệu. Đổi mật khẩu/logout thu hồi token. Nhóm còn user hoặc grant tham chiếu (kể cả grant đã thu hồi) không xóa được; cần dùng nhóm rỗng để kiểm tra DELETE thành công. Không có API hard-delete user/org.\n\n## Kết quả\nLuôn kiểm tra status. Validation/lỗi nghiệp vụ có thể trả HTTP 200 với status=ERROR; request kiểm thử thành công sẽ báo test fail để người chạy xem messageCode/errors. 401/403/500 giữ HTTP tương ứng. Filter tùy chọn mặc định disabled; bật khi cần. Không export lại environment có password/token thật để commit.\n"
   },
   "auth": {
     "type": "bearer",
@@ -28,7 +28,10 @@
           "    [\"username\", \"password\", \"initialPassword\", \"newPassword\"].forEach(function (key) {",
           "        pm.variables.set(key + \"Json\", JSON.stringify(pm.environment.get(key) || \"\"));",
           "    });",
-          "    pm.request.headers.upsert({key: \"Accept\", value: \"application/json\"});",
+          "    const isTemplate = /\\/orgs\\/import-template(?:\\?|$)/.test(pm.request.url.toString());",
+          "    pm.request.headers.upsert({key: \"Accept\", value: isTemplate",
+          "        ? \"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json\"",
+          "        : \"application/json\"});",
           "    pm.request.headers.upsert({key: \"X-Request-Id\", value: pm.variables.replaceIn(\"pm-{{$guid}}\")});",
           "})();"
         ]
@@ -40,6 +43,8 @@
         "type": "text/javascript",
         "exec": [
           "(function () {",
+          "    const contentType = (pm.response.headers.get(\"Content-Type\") || \"\").toLowerCase();",
+          "    if (contentType.startsWith(\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\")) return;",
           "    let response;",
           "    pm.test(\"Response là JSON hợp lệ\", function () {",
           "        response = pm.response.json();",
@@ -490,6 +495,310 @@
                   "language": "json"
                 }
               }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cây tổ chức - tải gốc trong phạm vi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/tree?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "tree"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Mỗi node có hasChildren; tải đủ các trang của cấp hiện tại."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cây tổ chức - mở node",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/tree?parentId={{orgId}}&page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "tree"
+              ],
+              "query": [
+                {
+                  "key": "parentId",
+                  "value": "{{orgId}}"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Chỉ lấy con trực tiếp của orgId trong phạm vi quản lý."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dữ liệu trực thuộc node được chọn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/{{orgId}}/contents?page=0&size=6&sort=name,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "{{orgId}}",
+                "contents"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "6"
+                },
+                {
+                  "key": "sort",
+                  "value": "name,asc"
+                }
+              ]
+            },
+            "description": "Trả organization, administrators và teams phân trang. Không cộng phòng con; đổi node reset page=0."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tải mẫu Excel nhập tổ chức và nhóm",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/import-template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "import-template"
+              ]
+            },
+            "description": "Send and Download để lưu .xlsx. Header data trống; ví dụ nằm trong Instructions. Cần quyền admin."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Tải mẫu Excel thành công\", function () {",
+                  "  pm.expect(pm.response.code).to.eql(200);",
+                  "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"spreadsheetml.sheet\");",
+                  "  pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kiểm tra Excel trước khi nhập",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/import?dryRun=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "import"
+              ],
+              "query": [
+                {
+                  "key": "dryRun",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Chọn cùng tệp đã kiểm tra. Không tự đặt Content-Type/boundary. dryRun=false tạo mới và audit nguyên tử; chỉ chạy khi chủ động xác nhận dữ liệu cần nhập.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Chọn tệp .xlsx theo mẫu, tối đa 5 MiB."
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "    const response = pm.response.json();",
+                  "    pm.test(\"HTTP thành công\", function () { pm.expect(pm.response.code).to.eql(200); });",
+                  "    pm.test(\"Nghiệp vụ thành công\", function () {",
+                  "        pm.expect(response.status).to.eql(\"SUCCESS\");",
+                  "        pm.expect(response.messageCode).to.eql(\"CORE-SUCCESS\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xác nhận nhập Excel - có ghi dữ liệu",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orgs/import?dryRun=false",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orgs",
+                "import"
+              ],
+              "query": [
+                {
+                  "key": "dryRun",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Chọn cùng tệp đã kiểm tra. Không tự đặt Content-Type/boundary. dryRun=false tạo mới và audit nguyên tử; chỉ chạy khi chủ động xác nhận dữ liệu cần nhập.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Chọn tệp .xlsx theo mẫu, tối đa 5 MiB."
+                }
+              ]
             }
           },
           "response": [],

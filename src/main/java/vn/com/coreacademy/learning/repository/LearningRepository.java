@@ -9,6 +9,11 @@ import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.learning.constants.LearningCodes.AssignmentStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.RecipientStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ReminderStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.entity.AssignmentRecipient;
 import vn.com.coreacademy.learning.entity.AssignmentTarget;
 import vn.com.coreacademy.learning.entity.BlockAsset;
@@ -249,8 +254,8 @@ public class LearningRepository {
         return query("""
             select s
             from CourseShare s
-            where s.status = 'active'
-            """, CourseShare.class, Map.of());
+            where s.status = :status
+            """, CourseShare.class, Map.of("status", ShareStatus.ACTIVE));
     }
 
     public List<CourseAssignment> assignments(Long courseId) {
@@ -315,9 +320,10 @@ public class LearningRepository {
             from AssignmentRecipient r, CourseAssignment a
             where r.enrollmentId = :id
             and r.assignmentId = a.id
-            and r.status = 'active'
-            and a.status = 'active'
-            """, AssignmentRecipient.class, Map.of("id", enrollmentId));
+            and r.status = :recipientStatus
+            and a.status = :assignmentStatus
+            """, AssignmentRecipient.class, Map.of("id", enrollmentId,
+                "recipientStatus", RecipientStatus.ACTIVE, "assignmentStatus", AssignmentStatus.ACTIVE));
     }
 
     public List<LessonProgress> lessonProgress(Long enrollmentId) {
@@ -364,13 +370,17 @@ public class LearningRepository {
             and r.assignmentId = a.id
             and r.enrollmentId = e.id
             and r.userId = :user
-            and r.status = 'active'
-            and a.status = 'active'
-            and e.status <> 'completed'
-            and m.status = 'pending'
+            and r.status = :recipientStatus
+            and a.status = :assignmentStatus
+            and e.status <> :completed
+            and m.status = :pending
             and m.scheduledAt <= current_timestamp
             order by m.scheduledAt, m.id
-            """, LearningReminder.class).setParameter("user", userId).setMaxResults(100).getResultList();
+            """, LearningReminder.class).setParameter("user", userId)
+            .setParameter("recipientStatus", RecipientStatus.ACTIVE)
+            .setParameter("assignmentStatus", AssignmentStatus.ACTIVE)
+            .setParameter("completed", ProgressStatus.COMPLETED)
+            .setParameter("pending", ReminderStatus.PENDING).setMaxResults(100).getResultList();
     }
 
     public List<BlockAsset> assetUses(Long assetId) {
@@ -394,9 +404,9 @@ public class LearningRepository {
             select e
             from CourseEnrollment e
             where e.userId = :user
-            and e.status <> 'withdrawn'
+            and e.status <> :withdrawn
             order by e.id desc
-            """, CourseEnrollment.class, Map.of("user", userId));
+            """, CourseEnrollment.class, Map.of("user", userId, "withdrawn", ProgressStatus.WITHDRAWN));
     }
 
     public boolean courseCodeExists(String code) {

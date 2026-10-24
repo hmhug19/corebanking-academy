@@ -29,6 +29,21 @@ import vn.com.coreacademy.common.web.PageQuery;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Person;
+import vn.com.coreacademy.learning.constants.LearningCodes.AssignmentStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.AuditAction;
+import vn.com.coreacademy.learning.constants.LearningCodes.CourseStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.EnrollmentMode;
+import vn.com.coreacademy.learning.constants.LearningCodes.EnrollmentOrigin;
+import vn.com.coreacademy.learning.constants.LearningCodes.GroupStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.RecipientStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ReminderChannel;
+import vn.com.coreacademy.learning.constants.LearningCodes.ReminderStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
+import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
+import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.TargetType;
+import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningDetails;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
@@ -92,9 +107,10 @@ public class LearningAssignmentService {
         group.setCode(request.code().strip());
         group.setName(request.name().strip());
         group.setDescription(request.description());
-        group.setStatus("active");
+        group.setStatus(GroupStatus.ACTIVE);
         repository.save(group, actor.person().id());
-        audit.record(actor.person().id(), "LEARNING_GROUP_CREATED", "learning_group", group.getId().toString(),
+        audit.record(actor.person().id(), AuditAction.GROUP_CREATED, TargetType.LEARNING_GROUP,
+            group.getId().toString(),
             group.getOwnerOrgId(), Map.of());
         repository.flush();
         return groupDetail(group);
@@ -108,7 +124,7 @@ public class LearningAssignmentService {
         access.requireManage(actor, group.getOwnerOrgId(), null, null);
         LearningContentService.version(group, request.expectedVersion());
         Set<String> desired = Set.copyOf(request.userIds());
-        var selected = identity.learners("user", desired, Set.of(), null);
+        var selected = identity.learners(TargetType.USER, desired, Set.of(), null);
         if (selected.size() != desired.size()) {
             throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
         }
@@ -146,7 +162,7 @@ public class LearningAssignmentService {
         repository.flush();
         // Ép tăng version khi chỉ thay bảng con để expectedVersion vẫn bảo vệ lần thay thành viên tiếp theo.
         repository.incrementVersion(group);
-        audit.record(actor.person().id(), "LEARNING_GROUP_MEMBERS_CHANGED", "learning_group", id.toString(),
+        audit.record(actor.person().id(), AuditAction.GROUP_MEMBERS_CHANGED, TargetType.LEARNING_GROUP, id.toString(),
             group.getOwnerOrgId(), Map.of("memberCount", desired.size()));
         repository.flush();
         return groupDetail(group);
@@ -175,12 +191,12 @@ public class LearningAssignmentService {
         value.setIncludeDescendants(request.includeDescendants());
         value.setCanAssign(request.canAssign());
         value.setCanSelfEnroll(request.canSelfEnroll());
-        value.setStatus(request.active() ? "active" : "revoked");
+        value.setStatus(request.active() ? ShareStatus.ACTIVE : ShareStatus.REVOKED);
         value.setSharedBy(actor.person().id());
         value.setSharedAt(Instant.now());
         value.setRevokedAt(request.active() ? null : Instant.now());
         repository.save(value, actor.person().id());
-        audit.record(actor.person().id(), "LEARNING_COURSE_SHARED", "course", courseId.toString(),
+        audit.record(actor.person().id(), AuditAction.COURSE_SHARED, "course", courseId.toString(),
             course.getOwnerOrgId(), Map.of("targetOrgId", request.orgId(), "active", request.active()));
         repository.flush();
         return mapper.view(value);
@@ -235,7 +251,7 @@ public class LearningAssignmentService {
         assignment.setEnrollmentMode(request.enrollmentMode());
         assignment.setReminderEnabled(request.reminderEnabled());
         assignment.setReminderDaysBefore(request.reminderDaysBefore());
-        assignment.setStatus("active");
+        assignment.setStatus(AssignmentStatus.ACTIVE);
         assignment.setActivatedAt(Instant.now());
         assignment.setIdempotencyKey(request.idempotencyKey());
         assignment.setRequestHash(hash);
@@ -246,7 +262,7 @@ public class LearningAssignmentService {
         Map<String, List<Long>> sources = new LinkedHashMap<>();
         for (var input : request.targets()) {
             var resolved = resolveTarget(actor, request.assigningOrgId(), input, assignment.getId());
-            if (resolved.people().isEmpty() || resolved.people().size() > 500) {
+            if (resolved.people().isEmpty() || resolved.people().size() > LearningLimits.MAX_LEARNERS_PER_ASSIGNMENT) {
                 throw new BusinessException(LearningResponseCode.EMPTY_TARGET);
             }
             for (Person person : resolved.people()) {
@@ -258,14 +274,14 @@ public class LearningAssignmentService {
                 sources.computeIfAbsent(person.id(), key -> new ArrayList<>()).add(resolved.target().getId());
             }
         }
-        if (people.size() > 500) {
+        if (people.size() > LearningLimits.MAX_LEARNERS_PER_ASSIGNMENT) {
             throw new BusinessException(LearningResponseCode.EMPTY_TARGET);
         }
 
         // Bước 3: dùng chung lần học tương thích; giữ hạn/nghĩa vụ riêng tại từng người nhận.
         for (Person person : people.values()) {
             CourseEnrollment enrollment = enrollment(course, revision, person, request.enrollmentMode(),
-                "assigned", actor.person().id());
+                EnrollmentOrigin.ASSIGNED, actor.person().id());
             AssignmentRecipient recipient = new AssignmentRecipient();
             recipient.setAssignmentId(assignment.getId());
             recipient.setUserId(person.id());
@@ -276,7 +292,7 @@ public class LearningAssignmentService {
             recipient.setEffectiveStartAt(request.startAt());
             recipient.setEffectiveDueAt(request.dueAt());
             recipient.setRequirement(request.requirement());
-            recipient.setStatus("active");
+            recipient.setStatus(RecipientStatus.ACTIVE);
             repository.save(recipient, actor.person().id());
             for (Long targetId : sources.get(person.id())) {
                 RecipientTargetSource source = new RecipientTargetSource();
@@ -290,7 +306,7 @@ public class LearningAssignmentService {
         }
 
         // Bước 4: audit và commit snapshot; đổi thành viên nhóm sau đó không đổi người đã nhận.
-        audit.record(actor.person().id(), "LEARNING_COURSE_ASSIGNED", "course_assignment",
+        audit.record(actor.person().id(), AuditAction.COURSE_ASSIGNED, "course_assignment",
             assignment.getId().toString(), request.assigningOrgId(), Map.of("recipientCount", people.size()));
         repository.flush();
         return assignmentDetail(assignment);
@@ -303,19 +319,19 @@ public class LearningAssignmentService {
         AssignmentRecipient recipient = repository.require(AssignmentRecipient.class, recipientId);
         CourseAssignment assignment = repository.require(CourseAssignment.class, recipient.getAssignmentId());
         requireAssignmentManager(actor, assignment);
-        if ("revoked".equals(recipient.getStatus())) {
+        if (RecipientStatus.REVOKED.equals(recipient.getStatus())) {
             return mapper.view(recipient);
         }
         // Chỉ thu hồi nghĩa vụ này; không xóa enrollment khi còn nguồn giao khác hoặc tự đăng ký.
-        recipient.setStatus("revoked");
+        recipient.setStatus(RecipientStatus.REVOKED);
         recipient.setRevokedAt(Instant.now());
         recipient.setRevokeReason(request.reason());
         repository.save(recipient, actor.person().id());
         for (LearningReminder reminder : repository.reminders(recipientId)) {
-            reminder.setStatus("cancelled");
+            reminder.setStatus(ReminderStatus.CANCELLED);
             repository.save(reminder, actor.person().id());
         }
-        audit.record(actor.person().id(), "LEARNING_ASSIGNMENT_REVOKED", "assignment_recipient",
+        audit.record(actor.person().id(), AuditAction.ASSIGNMENT_REVOKED, "assignment_recipient",
             recipientId.toString(), assignment.getAssigningOrgId(), Map.of());
         repository.flush();
         return mapper.view(recipient);
@@ -332,17 +348,18 @@ public class LearningAssignmentService {
         }
         CourseRevision revision = repository.require(CourseRevision.class, course.getPublishedRevisionId());
         requirePublished(course, revision);
-        if (!"optional".equals(revision.getDefaultRequirement())) {
+        if (!Requirement.OPTIONAL.equals(revision.getDefaultRequirement())) {
             throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
         }
-        CourseEnrollment enrollment = enrollment(course, revision, actor.person(), "continue", "self",
+        CourseEnrollment enrollment = enrollment(course, revision, actor.person(), EnrollmentMode.CONTINUE,
+            EnrollmentOrigin.SELF,
             actor.person().id());
         // Nếu đã được giao rồi tự đăng ký hợp lệ, giữ cả quyền tự học khi nghĩa vụ giao được thu hồi.
         if (enrollment.getSelfEnrolledAt() == null) {
             enrollment.setSelfEnrolledAt(Instant.now());
         }
         repository.save(enrollment, actor.person().id());
-        audit.record(actor.person().id(), "LEARNING_SELF_ENROLLED", "course_enrollment",
+        audit.record(actor.person().id(), AuditAction.SELF_ENROLLED, "course_enrollment",
             enrollment.getId().toString(), actor.person().orgId(), Map.of());
         repository.flush();
         return mapper.view(enrollment);
@@ -352,7 +369,7 @@ public class LearningAssignmentService {
         if (Objects.equals(actor.person().orgId(), course.getOwnerOrgId())) {
             return true;
         }
-        return repository.shares(course.getId()).stream().anyMatch(s -> "active".equals(s.getStatus())
+        return repository.shares(course.getId()).stream().anyMatch(s -> ShareStatus.ACTIVE.equals(s.getStatus())
             && (!selfEnroll || s.getCanSelfEnroll())
             && (Objects.equals(s.getOrgId(), actor.person().orgId()) || (s.getIncludeDescendants()
                 && identity.activeAncestorIds(actor.person().orgId()).contains(s.getOrgId()))));
@@ -365,11 +382,11 @@ public class LearningAssignmentService {
             throw new AccessDeniedException("Enrollment owner denied");
         }
         Course course = repository.require(Course.class, enrollment.getCourseId());
-        if ("withdrawn".equals(enrollment.getStatus())) {
+        if (ProgressStatus.WITHDRAWN.equals(enrollment.getStatus())) {
             throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
         }
         if (studying) {
-            if (!"active".equals(course.getLifecycleStatus())) {
+            if (!CourseStatus.ACTIVE.equals(course.getLifecycleStatus())) {
                 throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
             }
             CourseRevision revision = repository.require(CourseRevision.class, enrollment.getRevisionId());
@@ -387,13 +404,15 @@ public class LearningAssignmentService {
     private CourseEnrollment enrollment(Course course, CourseRevision revision, Person person, String mode,
                                         String origin, String actor) {
         var history = repository.enrollmentHistory(course.getId(), person.id());
-        var open = history.stream().filter(e -> Set.of("not_started", "in_progress").contains(e.getStatus()))
+        var open = history.stream().filter(e -> Set.of(ProgressStatus.NOT_STARTED,
+            ProgressStatus.IN_PROGRESS).contains(e.getStatus()))
             .findFirst();
-        if (open.isPresent() && ("retake".equals(mode) || !revision.getId().equals(open.get().getRevisionId()))) {
+        if (open.isPresent() && (EnrollmentMode.RETAKE.equals(mode) ||
+            !revision.getId().equals(open.get().getRevisionId()))) {
             throw new BusinessException(LearningResponseCode.CONFLICT);
         }
-        if ("continue".equals(mode)) {
-            var matching = history.stream().filter(e -> !"withdrawn".equals(e.getStatus())
+        if (EnrollmentMode.CONTINUE.equals(mode)) {
+            var matching = history.stream().filter(e -> !ProgressStatus.WITHDRAWN.equals(e.getStatus())
                 && revision.getId().equals(e.getRevisionId())).findFirst();
             if (matching.isPresent()) {
                 return matching.get();
@@ -405,11 +424,11 @@ public class LearningAssignmentService {
         value.setUserId(person.id());
         value.setCycleNo(history.stream().mapToInt(CourseEnrollment::getCycleNo).max().orElse(0) + 1);
         value.setEnrollmentOrigin(origin);
-        value.setSelfEnrolledAt("self".equals(origin) ? Instant.now() : null);
+        value.setSelfEnrolledAt(EnrollmentOrigin.SELF.equals(origin) ? Instant.now() : null);
         value.setOrgIdSnapshot(person.orgId());
         value.setTeamIdSnapshot(person.teamId());
         value.setEnrolledAt(Instant.now());
-        value.setStatus("not_started");
+        value.setStatus(ProgressStatus.NOT_STARTED);
         value.setProgressPercent(BigDecimal.ZERO);
         repository.save(value, actor);
         return value;
@@ -422,14 +441,14 @@ public class LearningAssignmentService {
                                    Long assignmentId) {
         int count = (input.userId() == null ? 0 : 1) + (input.teamId() == null ? 0 : 1)
             + (input.orgId() == null ? 0 : 1) + (input.groupId() == null ? 0 : 1);
-        if (count != 1 || (!"org".equals(input.targetType()) && input.includeDescendants())) {
+        if (count != 1 || (!TargetType.ORG.equals(input.targetType()) && input.includeDescendants())) {
             throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
         }
         boolean correctColumn = switch (input.targetType()) {
-            case "user" -> input.userId() != null && !input.userId().isBlank();
-            case "team" -> input.teamId() != null;
-            case "org" -> input.orgId() != null;
-            case "learning_group" -> input.groupId() != null;
+            case TargetType.USER -> input.userId() != null && !input.userId().isBlank();
+            case TargetType.TEAM -> input.teamId() != null;
+            case TargetType.ORG -> input.orgId() != null;
+            case TargetType.LEARNING_GROUP -> input.groupId() != null;
             default -> false;
         };
         if (!correctColumn) {
@@ -445,35 +464,35 @@ public class LearningAssignmentService {
         target.setIncludeDescendants(input.includeDescendants());
         List<Person> people;
         switch (input.targetType()) {
-            case "user" -> {
+            case TargetType.USER -> {
                 Person person = identity.activePerson(input.userId());
                 access.requireRecipientScope(actor, person);
                 target.setTargetNameSnapshot(person.name());
-                people = identity.learners("user", List.of(person.id()), Set.of(), null);
+                people = identity.learners(TargetType.USER, List.of(person.id()), Set.of(), null);
             }
-            case "team" -> {
+            case TargetType.TEAM -> {
                 var team = identity.activeTeam(input.teamId());
                 access.requireManage(actor, team.orgId(), team.id(), null);
                 target.setTargetNameSnapshot(team.name());
-                people = identity.learners("team", List.of(), Set.of(team.orgId()), team.id());
+                people = identity.learners(TargetType.TEAM, List.of(), Set.of(team.orgId()), team.id());
             }
-            case "org" -> {
+            case TargetType.ORG -> {
                 var orgs = identity.activeOrgIds(input.orgId(), input.includeDescendants());
                 for (Long org : orgs) {
                     access.requireManage(actor, org, null, null);
                 }
                 target.setTargetNameSnapshot(identity.activeOrg(input.orgId()));
-                people = identity.learners("org", List.of(), orgs, null);
+                people = identity.learners(TargetType.ORG, List.of(), orgs, null);
             }
-            case "learning_group" -> {
+            case TargetType.LEARNING_GROUP -> {
                 LearningGroup group = repository.require(LearningGroup.class, input.groupId());
                 access.requireManage(actor, group.getOwnerOrgId(), null, null);
-                if (!"active".equals(group.getStatus()) || !identity.activeOrgIds(assigningOrgId, true)
+                if (!GroupStatus.ACTIVE.equals(group.getStatus()) || !identity.activeOrgIds(assigningOrgId, true)
                     .contains(group.getOwnerOrgId())) {
                     throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
                 }
                 target.setTargetNameSnapshot(group.getName());
-                people = identity.learners("user", repository.members(group.getId()).stream()
+                people = identity.learners(TargetType.USER, repository.members(group.getId()).stream()
                     .map(LearningGroupMember::getUserId).toList(), Set.of(), null);
             }
             default -> throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
@@ -484,14 +503,15 @@ public class LearningAssignmentService {
 
     private void requireAssignCourse(Actor actor, Course course, Long assigningOrgId) {
         access.requireManage(actor, assigningOrgId, actor.person().teamId(), actor.person().id());
-        if (!"active".equals(course.getLifecycleStatus())) {
+        if (!CourseStatus.ACTIVE.equals(course.getLifecycleStatus())) {
             throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
         }
         if (course.getOwnerOrgId().equals(assigningOrgId)) {
             access.requireManage(actor, course);
             return;
         }
-        boolean shared = repository.shares(course.getId()).stream().anyMatch(s -> "active".equals(s.getStatus())
+        boolean shared = repository.shares(course.getId()).stream().anyMatch(s ->
+            ShareStatus.ACTIVE.equals(s.getStatus())
             && s.getCanAssign() && (s.getOrgId().equals(assigningOrgId) || (s.getIncludeDescendants()
                 && identity.activeAncestorIds(assigningOrgId).contains(s.getOrgId()))));
         if (!shared) {
@@ -504,8 +524,8 @@ public class LearningAssignmentService {
     }
 
     private void requirePublished(Course course, CourseRevision revision) {
-        if (!course.getId().equals(revision.getCourseId()) || !"published".equals(revision.getState())
-            || !"active".equals(course.getLifecycleStatus())) {
+        if (!course.getId().equals(revision.getCourseId()) || !RevisionState.PUBLISHED.equals(revision.getState())
+            || !CourseStatus.ACTIVE.equals(course.getLifecycleStatus())) {
             throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
         }
         content.requireCatalogAvailable(revision);
@@ -518,8 +538,8 @@ public class LearningAssignmentService {
         reminder.setScheduledAt(scheduled.isBefore(recipient.getEffectiveStartAt())
             ? recipient.getEffectiveStartAt() : scheduled);
         reminder.setDueAtSnapshot(recipient.getEffectiveDueAt());
-        reminder.setChannel("in_app");
-        reminder.setStatus("pending");
+        reminder.setChannel(ReminderChannel.IN_APP);
+        reminder.setStatus(ReminderStatus.PENDING);
         reminder.setAttemptCount(0);
         reminder.setIdempotencyKey("recipient:" + recipient.getId() + ":due:" + recipient.getEffectiveDueAt());
         repository.save(reminder, actor);

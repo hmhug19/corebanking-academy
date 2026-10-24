@@ -26,7 +26,7 @@ vn.com.coreacademy
 │   ├── constants                  # RoleCodes
 │   ├── security                   # Account-aware adapters và PasswordPolicy
 │   └── bootstrap / converter / enums / exception
-├── organization                   # API, use case và persistence org/team
+├── organization                   # API, use case và persistence org/team, import Excel
 ├── audit                          # Ghi audit cùng transaction
 ├── learning                        # Danh mục, nội dung, giao học, tài nguyên và tiến độ
 ├── knowledge                       # Kho tri thức Trợ lý AI: tải lên, worker nền, RAG cục bộ (Ollama + pgvector)
@@ -52,6 +52,14 @@ HTTP → controller (request/validation/caller)
 ```
 
 Common chứa contract, exception, persistence base, mapper config, validation và web helpers dùng chung. Cấu hình hạ tầng ở root config; cấu hình riêng nghiệp vụ nằm trong module. Identity/Organization administration phối hợp repository trong transaction để giữ quan hệ logic, không có FK vật lý. Chưa có công cụ tự động cưỡng chế ranh giới module.
+
+Import tổ chức đi qua OrganizationImportController → OrganizationImportService. OrganizationImportWorkbook
+trong organization.importing đọc template từ classpath `templates/organization-import-template.xlsx`,
+dùng Apache POI đọc tệp nhập, giới hạn XLSX/ZIP/dòng và dùng UploadStaging để dọn file tạm.
+Service dùng constraint DTO tạo mới hiện có, tra mã/tham chiếu theo lô và sắp cha trước con. Parse nằm ngoài
+transaction/lock; dry-run chỉ đọc. Nhập thật dùng IdentityWriteLock, kiểm tra lại scope/trùng/tham chiếu và ghi
+org/team cùng audit nguyên tử. Không có job nền, lưu Excel trên S3, thay schema hoặc tự tạo role/membership.
+Chi tiết template và luồng FE ở [Identity import](api/IDENTITY.md#organization-import).
 
 ## Xác thực và phân quyền
 
@@ -84,7 +92,7 @@ IdentityAccessPolicy xác định phạm vi quản trị; AuthorizationService d
 - Tám bảng compact: users, orgs, teams, roles, functions, role_functions, user_roles, audit_log. Chi tiết timestamp/type/quan hệ tại [SQL README](sql/README.md) và schema.
 - Cụm Identity có một script khởi tạo learning_hub_identity.sql, gồm schema và seed demo với users.must_change_password. Script chỉ dùng cho database mới/tạo lại; hướng dẫn tại [SQL README](sql/README.md).
 - [API_CONTRACT.md](api/API_CONTRACT.md): envelope, request ID, validation và lỗi MVC/Security.
-- [Contract Identity](api/IDENTITY.md): 21 API xác thực, hồ sơ, quản trị tài khoản, org/team và role/scope.
+- [Contract Identity](api/IDENTITY.md): 21 API core xác thực, hồ sơ, quản trị tài khoản, org/team và role/scope, cùng 2 API đọc cây/panel tổ chức và template/import Excel.
 
 ## Request và caller context
 

@@ -2,7 +2,7 @@
 
 ## Bổ sung module Learning
 
-Backend hiện có thêm 36 API Learning và 26 bảng được định nghĩa tại
+Backend hiện có thêm 46 API Learning và 26 bảng được định nghĩa tại
 [learning_hub_learning.sql](learning_hub_learning.sql). Review và chạy file Learning **một lần sau Identity**
 trên môi trường được phép, trước khi chạy bản ứng dụng có entity Learning. File không có FK/REFERENCES,
 không seed/reset/cấp quyền và không sửa 8 bảng Identity. Không chạy lại trên schema đã có các bảng Learning;
@@ -11,6 +11,36 @@ nếu đã có dữ liệu cần kế hoạch nâng cấp riêng. Giữ ddl-auto
 Contract và hướng dẫn từng bảng: [LEARNING.md](../api/LEARNING.md).
 Request mẫu: [cURL](../api/LEARNING_CURL.md), [Postman](../postman/learning.postman_collection.json).
 SQL Identity dưới đây vẫn là nguồn khởi tạo duy nhất của **cụm Identity**, không thay bằng SQL Learning.
+
+## Extension media và tiến độ (v2 rút gọn)
+
+[learning_hub_media_progress.sql](learning_hub_media_progress.sql) chạy **sau Identity và Learning**,
+không chạy thay baseline. Thêm 2 bảng `asset_upload_parts` (manifest upload) và `learning_user_leases`
+(một phiên học được phép ghi cho mỗi tài khoản), cùng metadata media/probe/rendition, index/comment và view.
+Không tạo FK, không seed/reset dữ liệu, không DROP TABLE/COLUMN. Bản Design ngoài source đã được đồng bộ.
+Thiết kế và 17 tình huống demo: [LEARNING.md](../api/LEARNING.md#my-learning-progress-design).
+
+DB giữ PK/UNIQUE/NOT NULL và 14 CHECK số cơ bản: size/duration/fence/sequence không âm, part/page hợp lệ,
+phần trăm 0–100 và khoảng xem có end > start. Lifecycle ready/processing, checksum, giới hạn S3, loại/trạng thái,
+tổ hợp metadata/session/event và xóa mềm do backend kiểm trong use case. Các CHECK nghiệp vụ v1/v2 cũ được
+**DROP theo tên đã biết**, kể cả CHECK PostgreSQL tự đặt tên; không quét/xóa constraint tùy ý hoặc nới khóa chống trùng.
+Kích thước chunk ở DB chỉ cần dương; giới hạn part theo S3 và uploaded_bytes <= total do service kiểm.
+
+Đã kiểm chứng bằng PostgreSQL WASM/PGlite: baseline mới, nâng từ v1, nâng từ v2 cũ và rerun, giữ dữ liệu hiện hữu
+(346 assertions). Entity/API upload, session/progress và worker kiểm file đã được nối trong source; xem contract Learning.
+Nginx offload cần cấu hình vận hành riêng; Quiz Engine chưa triển khai. Chưa chạy SQL lên DB server của ứng dụng.
+Validation lifecycle/hash/session do service xử lý; khóa transaction/PK/UNIQUE vẫn cần để chống ghi đồng thời.
+
+Trước chạy DB thật: backup, review dữ liệu trùng grain, giới hạn số, status casing và mọi khác biệt schema tự chỉnh.
+Preflight casing chỉ chạy lúc thực thi script; không kiểm theo mỗi request, không sửa dữ liệu. CHECK/UNIQUE còn giữ
+sẽ từ chối dữ liệu không hợp lệ. IF NOT EXISTS không hòa giải mọi định nghĩa cột/index cũ.
+Script thay CHECK số có tên và partial index cleanup để sửa casing v1, có thể cần khóa/revalidate dữ liệu;
+lock_timeout 5 giây/statement_timeout 120 giây. Có lỗi thì ROLLBACK, không chạy lại baseline hoặc xóa dữ liệu để vượt kiểm tra.
+DB đã chạy v1/v2 có thể chạy toàn bộ bản rút gọn sau review; không chỉ copy phần CREATE TABLE vì sẽ còn CHECK cũ.
+
+Cột storage_provider/lease per block của v1 được giữ nhưng deprecated; không tự xóa/copy lại dữ liệu.
+Khi triển khai BE, map schema, đối soát primary asset/metadata đã kiểm chứng và chuyển mọi instance/đường ghi
+sang user lease cùng kế hoạch; không fallback lease cũ hoặc để bản BE cũ ghi song song. Giữ Flyway off, không tự chạy SQL startup.
 
 ## Bổ sung kho tri thức "Trợ lý AI"
 

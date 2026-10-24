@@ -28,8 +28,10 @@ import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.organization.dto.CreateOrganizationRequest;
 import vn.com.coreacademy.organization.dto.CreateTeamRequest;
+import vn.com.coreacademy.organization.dto.OrganizationContents;
 import vn.com.coreacademy.organization.dto.OrganizationDetail;
 import vn.com.coreacademy.organization.dto.OrganizationInfo;
+import vn.com.coreacademy.organization.dto.OrganizationTreeNode;
 import vn.com.coreacademy.organization.dto.OrganizationUpdateRequest;
 import vn.com.coreacademy.organization.dto.TeamInfo;
 import vn.com.coreacademy.organization.service.OrganizationAdministrationService;
@@ -78,6 +80,55 @@ public class OrganizationController {
         @RequestParam(defaultValue = "sortNo,asc") String sort) {
         return ResponseEntity.ok(BaseResponse.ok(organizations.list(
             q, parentId, rootOnly, orgType, status, page, size, sort)));
+    }
+
+    @GetMapping("/tree")
+    @Parameters({
+        @Parameter(name = "parentId", in = ParameterIn.QUERY,
+            description = "Bỏ qua để lấy các gốc trong scope; gửi ID node để lấy các con trực tiếp."),
+        @Parameter(name = "page", in = ParameterIn.QUERY, description = "Chỉ số trang, bắt đầu từ 0."),
+        @Parameter(name = "size", in = ParameterIn.QUERY,
+            description = "Số node mỗi trang, từ 1 đến 100; mặc định 20.")
+    })
+    @Operation(
+        summary = "Tải một cấp cây đơn vị và phòng",
+        description = """
+            Trả các node trong phạm vi quản lý, sắp theo sortNo và ID tăng dần.
+            - hasChildren cho biết node có con được phép xem; tải cấp tiếp theo bằng parentId.
+            - Mỗi cấp có phân trang; không trả toàn bộ cây hoặc các nhóm chuyên môn.
+            """
+    )
+    @ApiResponse(responseCode = "200", useReturnTypeSchema = true)
+    public ResponseEntity<BaseResponse<PageResponse<OrganizationTreeNode>>> tree(
+        @RequestParam(required = false) Long parentId, @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(BaseResponse.ok(organizations.tree(parentId, page, size)));
+    }
+
+    @GetMapping("/{orgId}/contents")
+    @Parameters({
+        @Parameter(name = "page", in = ParameterIn.QUERY, description = "Trang danh sách nhóm, bắt đầu từ 0."),
+        @Parameter(name = "size", in = ParameterIn.QUERY,
+            description = "Số nhóm mỗi trang, từ 1 đến 100; mặc định 6."),
+        @Parameter(name = "sort", in = ParameterIn.QUERY,
+            description = "Thứ tự nhóm: field,asc hoặc field,desc; field: id, code, name.")
+    })
+    @Operation(
+        summary = "Lấy dữ liệu trực thuộc node tổ chức",
+        description = """
+            Trả thông tin node được chọn, quản trị viên gán trực tiếp và một trang nhóm trực thuộc.
+            - Số thành viên/nhóm không cộng tổ chức con; mỗi nhóm có tối đa 5 thành viên xem trước.
+            - Quản trị viên gồm tối đa 20 ADMIN ORG gán tại node, không gộp GLOBAL hoặc quyền kế thừa.
+            """
+    )
+    @ApiResponse(responseCode = "200", useReturnTypeSchema = true)
+    public ResponseEntity<BaseResponse<OrganizationContents>> contents(@PathVariable Long orgId,
+        @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "6") int size,
+        @RequestParam(defaultValue = "name,asc") String sort) {
+        var detail = organizations.get(orgId);
+        var result = new OrganizationContents(detail.organization(), detail.administrators(),
+            teams.list(orgId, page, size, sort));
+        return ResponseEntity.ok(BaseResponse.ok(result));
     }
 
     @PostMapping

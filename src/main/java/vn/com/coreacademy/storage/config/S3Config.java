@@ -3,6 +3,7 @@ package vn.com.coreacademy.storage.config;
 import java.net.URI;
 import java.time.Duration;
 
+import io.minio.MinioAsyncClient;
 import io.minio.MinioClient;
 import okhttp3.OkHttpClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -29,6 +30,25 @@ public class S3Config {
             .callTimeout(Duration.ofSeconds(properties.callTimeoutSeconds()))
             .retryOnConnectionFailure(false).build();
         MinioClient client = MinioClient.builder().endpoint(properties.endpoint()).region(properties.region())
+            .credentials(properties.accessKey(), properties.secretKey()).httpClient(http, true).build();
+        if (properties.pathStyleAccess()) {
+            client.disableVirtualStyleEndpoint();
+        } else {
+            client.enableVirtualStyleEndpoint();
+        }
+        return client;
+    }
+
+    @Bean(destroyMethod = "close")
+    MinioAsyncClient multipartClient(S3Properties properties, MinioClient validatedClient) {
+        // validatedClient bảo đảm cấu hình origin đã được kiểm trước khi tạo client multipart.
+        var http = new OkHttpClient.Builder()
+            .connectTimeout(Duration.ofSeconds(properties.connectTimeoutSeconds()))
+            .readTimeout(Duration.ofSeconds(properties.readTimeoutSeconds()))
+            .writeTimeout(Duration.ofSeconds(properties.readTimeoutSeconds()))
+            .callTimeout(Duration.ofSeconds(properties.multipartCallTimeoutSeconds()))
+            .retryOnConnectionFailure(false).build();
+        var client = MinioAsyncClient.builder().endpoint(properties.endpoint()).region(properties.region())
             .credentials(properties.accessKey(), properties.secretKey()).httpClient(http, true).build();
         if (properties.pathStyleAccess()) {
             client.disableVirtualStyleEndpoint();

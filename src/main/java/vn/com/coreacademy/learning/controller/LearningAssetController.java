@@ -49,7 +49,8 @@ public class LearningAssetController {
         summary = "Upload tài nguyên học tập",
         description = """
             Kiểm tra scope, signature và dung lượng trước khi ghi metadata tài nguyên.
-            - Video cần durationSeconds, PDF cần pageCount do giảng viên xác nhận từ file gốc.
+            - Server kiểm codec, duration và số trang PDF; metadata client không thay bước kiểm file.
+            - Upload file lớn có thể dùng API uploads để chia phần và tiếp tục sau mất mạng.
             - Tệp thật ở S3 private, không trả storageKey hoặc credential cho frontend.
             """
     )
@@ -77,10 +78,9 @@ public class LearningAssetController {
             - Không trả BaseResponse khi tải file thành công; lỗi trước stream theo envelope chung.
             """
     )
-    public void content(@PathVariable @Positive Long assetId,
-                        @RequestParam(required = false) @Positive Long blockId,
-                        @RequestParam(required = false) @Positive Long enrollmentId,
-                        HttpServletRequest request, HttpServletResponse response) throws IOException {
+    public void content(@PathVariable @Positive Long assetId, @RequestParam(required = false) @Positive Long blockId,
+                        @RequestParam(required = false) @Positive Long enrollmentId, HttpServletRequest request,
+                        HttpServletResponse response) throws IOException {
         // Transaction kiểm tra quyền/metadata đã kết thúc trước khi mở stream S3.
         var value = assets.download(assetId, blockId, enrollmentId);
         downloads.write(value, request, response);

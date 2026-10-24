@@ -14,7 +14,7 @@ Source mapping 8 bảng compact trong schema `learning_hub` theo `docs/sql/learn
 
 **Starter, không phải sản phẩm LMS hoàn chỉnh.** Đã có: login bằng username hoặc mã cán bộ, `/me`, JWT HS256, multi-role, màn hình và scope và kiểm tra scope GLOBAL/ORG/TEAM/OWN theo context được cung cấp. Hash mật khẩu LOCAL nằm trong `users.password_hash`; SSO không đăng nhập bằng mật khẩu local.
 
-**Learning đã có API:** danh mục/nội dung khóa, giao học, tiến độ và upload/download tài nguyên qua S3; xem [LEARNING.md](docs/api/LEARNING.md). Chưa có question bank/quiz engine, reporting, UI/player Angular và refresh token/SSO integration. Phạm vi 21 API core Identity đã triển khai được mô tả trong [Contract Identity](docs/api/IDENTITY.md).
+**Learning đã có API:** danh mục/nội dung khóa, giao học, tiến độ và upload/download tài nguyên qua S3; xem [LEARNING.md](docs/api/LEARNING.md). Chưa có question bank/quiz engine, reporting, UI/player Angular và refresh token/SSO integration. Phạm vi 21 API core Identity cùng API cây/panel tổ chức và template/import Excel đã triển khai được mô tả trong [Contract Identity](docs/api/IDENTITY.md).
 
 ## Yêu cầu
 
@@ -125,5 +125,5 @@ Quy chuẩn request DTO, BaseResponse, request ID và lỗi: [API_CONTRACT.md](d
 
 ## Identity administration
 
-- [Contract Identity](docs/api/IDENTITY.md) — 21 API core, form và luồng lỗi.
+- [Contract Identity](docs/api/IDENTITY.md) — API core, cây/panel tổ chức, template/import Excel, form và luồng lỗi.
 - Database mới/tạo lại: chạy duy nhất [learning_hub_identity.sql](docs/sql/learning_hub_identity.sql), gồm schema và seed demo. Database có dữ liệu cần giữ phải có kế hoạch thay đổi riêng; không chạy đè script khởi tạo.

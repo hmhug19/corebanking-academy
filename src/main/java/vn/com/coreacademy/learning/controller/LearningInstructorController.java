@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.learning.constants.LearningCodes.SearchMode;
 import vn.com.coreacademy.learning.dto.LearningDetails;
 import vn.com.coreacademy.learning.service.LearningSearchService;
 
@@ -40,7 +41,7 @@ public class LearningInstructorController {
         @RequestParam(required = false) String requirement, @RequestParam(required = false) String learningStatus,
         @RequestParam(required = false) String state, @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort) {
-        return BaseResponse.ok(search.search("manage", q, fieldId, programId, moduleId, level, requirement,
+        return BaseResponse.ok(search.search(SearchMode.MANAGE, q, fieldId, programId, moduleId, level, requirement,
             learningStatus, state, page, size, sort));
     }
 

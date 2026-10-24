@@ -57,4 +57,7 @@ public class LessonBlock extends LearningRecord {
 
     @Column(name = "source_block_id")
     private Long sourceBlockId;
+
+    @Column(name = "media_asset_id")
+    private Long mediaAssetId;
 }

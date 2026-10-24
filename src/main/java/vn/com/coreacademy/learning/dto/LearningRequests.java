@@ -3,6 +3,7 @@ package vn.com.coreacademy.learning.dto;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
@@ -16,6 +17,20 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import vn.com.coreacademy.learning.constants.LearningCodes.AssetUsage;
+import vn.com.coreacademy.learning.constants.LearningCodes.BlockType;
+import vn.com.coreacademy.learning.constants.LearningCodes.BodyFormat;
+import vn.com.coreacademy.learning.constants.LearningCodes.CatalogStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.CompletionMode;
+import vn.com.coreacademy.learning.constants.LearningCodes.CourseStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.EnrollmentMode;
+import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
+import vn.com.coreacademy.learning.constants.LearningCodes.Level;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressEvent;
+import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
+import vn.com.coreacademy.learning.constants.LearningCodes.TargetType;
+import vn.com.coreacademy.learning.constants.LearningLimits;
+
 /** Payload chỉ chứa trường được phép sửa; actor và tổng tiến độ luôn do backend xác định. */
 public final class LearningRequests {
     private LearningRequests() {
@@ -27,7 +42,7 @@ public final class LearningRequests {
         @NotBlank @Size(max = 50) String code,
         @NotBlank @Size(max = 255) String name,
         @Size(max = 10000) String description,
-        @NotNull @Pattern(regexp = "draft|published|paused|archived") String status,
+        @NotNull @Pattern(regexp = CatalogStatus.PATTERN) String status,
         @Min(0) int sortNo) {
     }
 
@@ -45,7 +60,7 @@ public final class LearningRequests {
     }
 
     public record CourseState(@NotNull @Min(0) Long expectedVersion,
-                              @NotNull @Pattern(regexp = "active|paused|archived") String status) {
+                              @NotNull @Pattern(regexp = CourseStatus.PATTERN) String status) {
     }
 
     public record DraftRequest(
@@ -54,8 +69,8 @@ public final class LearningRequests {
         @Positive Long moduleId,
         @Size(max = 255) String title,
         @Size(max = 30000) String summary,
-        @Pattern(regexp = "basic|intermediate|advanced") String level,
-        @NotNull @Pattern(regexp = "mandatory|optional") String defaultRequirement,
+        @Pattern(regexp = Level.PATTERN) String level,
+        @NotNull @Pattern(regexp = Requirement.PATTERN) String defaultRequirement,
         @Positive Long coverAssetId,
         @Size(max = 50) String coverIcon,
         @Pattern(regexp = "#[0-9A-Fa-f]{6}") String coverColor,
@@ -70,18 +85,19 @@ public final class LearningRequests {
 
     public record LessonInput(
         @NotBlank @Size(max = 255) String title,
-        @NotNull @Pattern(regexp = "content|quiz") String lessonType,
-        @NotNull @DecimalMin("0") @DecimalMax("86400") BigDecimal estimatedDurationSeconds,
+        @NotNull @Pattern(regexp = LessonType.PATTERN) String lessonType,
+        @NotNull @DecimalMin("0") @DecimalMax(LearningLimits.MAX_MEDIA_DURATION_TEXT)
+        BigDecimal estimatedDurationSeconds,
         boolean isRequired,
         @NotNull @Size(max = 100) List<@Valid BlockInput> blocks) {
     }
 
     public record BlockInput(
-        @NotNull @Pattern(regexp = "video|pdf|text|process|image|attachment") String blockType,
+        @NotNull @Pattern(regexp = BlockType.PATTERN) String blockType,
         @NotBlank @Size(max = 255) String title,
         @Size(max = 100000) String body,
-        @Pattern(regexp = "markdown|html|plain") String bodyFormat,
-        @NotNull @Pattern(regexp = "manual|video_coverage|pdf_end|open") String completionMode,
+        @Pattern(regexp = BodyFormat.PATTERN) String bodyFormat,
+        @NotNull @Pattern(regexp = CompletionMode.PATTERN) String completionMode,
         @DecimalMin("1") @DecimalMax("100") BigDecimal completionThreshold,
         boolean isRequired,
         @NotNull @Size(max = 20) List<@Valid AssetUse> assets,
@@ -90,7 +106,7 @@ public final class LearningRequests {
 
     public record AssetUse(
         @NotNull @Positive Long assetId,
-        @NotNull @Pattern(regexp = "primary|attachment|image|poster") String usage,
+        @NotNull @Pattern(regexp = AssetUsage.PATTERN) String usage,
         @Size(max = 5000) String caption,
         @Size(max = 255) String altText) {
     }
@@ -107,7 +123,9 @@ public final class LearningRequests {
     }
 
     public record MembersRequest(@NotNull @Min(0) Long expectedVersion,
-                                  @NotNull @Size(max = 500) List<@NotBlank @Size(max = 20) String> userIds) {
+                                  @NotNull @Size(max =
+                                      LearningLimits.MAX_GROUP_MEMBERS) List<@NotBlank @Size(max =
+                                          20) String> userIds) {
     }
 
     public record ShareRequest(@NotNull @Positive Long orgId, boolean includeDescendants,
@@ -120,16 +138,16 @@ public final class LearningRequests {
         @Size(max = 255) String title,
         @NotNull Instant startAt,
         Instant dueAt,
-        @NotNull @Pattern(regexp = "mandatory|optional") String requirement,
-        @NotNull @Pattern(regexp = "continue|retake") String enrollmentMode,
+        @NotNull @Pattern(regexp = Requirement.PATTERN) String requirement,
+        @NotNull @Pattern(regexp = EnrollmentMode.PATTERN) String enrollmentMode,
         boolean reminderEnabled,
         @Min(0) @Max(365) int reminderDaysBefore,
         @NotBlank @Size(max = 100) String idempotencyKey,
-        @NotEmpty @Size(max = 100) List<@Valid TargetInput> targets) {
+        @NotEmpty @Size(max = LearningLimits.MAX_ASSIGNMENT_TARGETS) List<@Valid TargetInput> targets) {
     }
 
     public record TargetInput(
-        @NotNull @Pattern(regexp = "user|team|org|learning_group") String targetType,
+        @NotNull @Pattern(regexp = TargetType.PATTERN) String targetType,
         @Size(max = 20) String userId,
         @Positive Long teamId,
         @Positive Long orgId,
@@ -141,6 +159,12 @@ public final class LearningRequests {
     }
 
     public record ProgressRequest(
+        @NotNull UUID sessionId,
+        @NotNull @Min(1) Long sessionFence,
+        @NotNull @Pattern(regexp = ProgressEvent.PATTERN)
+        String eventType,
+        @Positive Long assetId,
+        boolean playing,
         @NotNull @Min(0) Long expectedVersion,
         @Min(1) long sequence,
         boolean complete,
