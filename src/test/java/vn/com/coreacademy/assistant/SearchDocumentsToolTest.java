@@ -161,13 +161,14 @@ class SearchDocumentsToolTest {
     }
 
     @Test
-    void aMarkerlessAnswerThatOnlyMentionsAMissingThingLaterStillCitesTheChunks() {
+    void aMarkerlessAnswerThatOnlyMentionsAMissingThingLaterKeepsItsTextWithNoCitations() {
         retrieves(CIF, GL);
         search("quy trình");
 
         FinishedAnswer finished = finish("CIF là mã khách hàng duy nhất. Phần phí không được đề cập.");
 
-        assertThat(finished.citations()).extracting(CitationView::n).containsExactly(1, 2);
+        assertThat(finished.answer()).isEqualTo("CIF là mã khách hàng duy nhất. Phần phí không được đề cập.");
+        assertThat(finished.citations()).isEmpty();
     }
 
     @Test
@@ -188,12 +189,12 @@ class SearchDocumentsToolTest {
     }
 
     @Test
-    void noUsableMarkerCitesEveryChunkOfTheTurnAndOutOfRangeMarkersAreIgnored() {
+    void noUsableMarkerCitesNothingAndOutOfRangeMarkersAreIgnored() {
         retrieves(CIF, GL);
         search("quy trình");
 
-        assertThat(finish("Có hai tài liệu.").citations()).extracting(CitationView::n).containsExactly(1, 2);
-        assertThat(finish("Xem [9] và [0].").citations()).extracting(CitationView::n).containsExactly(1, 2);
+        assertThat(finish("Có hai tài liệu.").citations()).isEmpty();
+        assertThat(finish("Xem [9] và [0].").citations()).isEmpty();
         assertThat(finish("CIF [1] và [7].").citations()).extracting(CitationView::n).containsExactly(1);
     }
 

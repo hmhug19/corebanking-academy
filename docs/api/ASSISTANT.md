@@ -123,8 +123,11 @@ lượt; đoạn đã gặp giữ số cũ và không lặp lại. Kết thúc l
 
 - không tìm được đoạn nào trong cả lượt, hoặc mô hình trả "Không tìm thấy thông tin này trong tài liệu.":
   `done.answer` là câu cố định, `citations = []`, dù mô hình viết gì khác;
-- ngược lại `citations` là các đoạn của lượt mà `answer` ghi `[n]`, theo thứ tự số, dựng từ metadata của đoạn; không có
-  `[n]` hợp lệ thì trả mọi đoạn của lượt; `[n]` ngoài khoảng bị bỏ qua.
+- câu trả lời không có `[n]` hợp lệ mà câu đầu tiên nói bằng lời khác rằng tài liệu không có: như trên;
+- câu trả lời không có `[n]` hợp lệ khác: giữ nguyên `answer`, `citations = []` (khác chat tài liệu, nơi câu không có `[n]`
+  trả mọi đoạn);
+- ngược lại `citations` là các đoạn của lượt mà `answer` ghi `[n]`, theo thứ tự số, dựng từ metadata của đoạn; `[n]` ngoài
+  khoảng bị bỏ qua.
 
 Ollama không phản hồi khi nhúng câu hỏi: sự kiện `error` `ASSISTANT-AI_UNAVAILABLE`.
 
@@ -171,5 +174,6 @@ mất mọi yêu cầu; app báo yêu cầu đã hết hạn khi xác nhận.
 
 - Câu trả lời của agent không có `[n]` mà câu đầu tiên nói bằng lời khác rằng tài liệu không có ("không được đề cập", "không
   tìm thấy", "không có thông tin"…) được coi là câu không tìm thấy: `done.answer` là câu cố định và không có nguồn. Câu có `[n]`
-  vẫn giữ nguồn. Quy tắc này chỉ áp cho agent; `/knowledge/chat` giữ quy tắc cũ (không có `[n]` hợp lệ thì trả mọi đoạn).
+  vẫn giữ nguồn. Câu trả lời không có `[n]` hợp lệ nào cũng không có nguồn. Hai quy tắc này chỉ áp cho agent;
+  `/knowledge/chat` giữ quy tắc cũ (không có `[n]` hợp lệ thì trả mọi đoạn).
 - Khi `open_screen` từ chối, mô hình đôi khi nhắc lại mã chức năng thay vì tên màn hình. Không có gì được mở.

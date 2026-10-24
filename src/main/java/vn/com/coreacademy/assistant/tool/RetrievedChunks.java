@@ -41,18 +41,19 @@ final class RetrievedChunks {
 
     /**
      * Nothing retrieved in the whole turn, or the model saying so, is the fixed sentence with no sources whatever else
-     * the model wrote; so is an answer with no [n] marker that says it in its own words. Otherwise the sources are the
-     * chunks the answer marks, from their metadata.
+     * the model wrote; so is an answer with no [n] marker that says it in its own words. Otherwise the sources are only
+     * the chunks the answer marks, from their metadata: unlike kb-chat, an answer with no usable marker cites nothing.
      */
     FinishedAnswer finish(String answer) {
-        if (hits.isEmpty() || NotFoundAnswer.isNotFound(answer) || isRewordedNotFound(answer)) {
+        Set<Integer> cited = CitationSelector.citedNumbers(answer, hits.size());
+        if (hits.isEmpty() || NotFoundAnswer.isNotFound(answer)
+            || cited.isEmpty() && NotFoundAnswer.saysNothingWasFound(answer)) {
             return new FinishedAnswer(NotFoundAnswer.TEXT, List.of());
+        }
+        if (cited.isEmpty()) {
+            return new FinishedAnswer(answer, List.of());
         }
 
         return new FinishedAnswer(answer, CitationSelector.select(answer, hits));
-    }
-
-    private boolean isRewordedNotFound(String answer) {
-        return CitationSelector.citedNumbers(answer, hits.size()).isEmpty() && NotFoundAnswer.saysNothingWasFound(answer);
     }
 }
