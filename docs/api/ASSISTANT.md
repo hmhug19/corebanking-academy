@@ -104,6 +104,53 @@ chạy một lần. Lời từ chối của service (validation, SSO, đang ph�
 
 Bỏ yêu cầu mà không chạy. Trả `BaseResponse<Void>`.
 
+## Công cụ
+
+| Công cụ            | Loại                         | Ai được dùng                                  | Kết quả                       |
+| ------------------ | ---------------------------- | --------------------------------------------- | ----------------------------- |
+| `search_documents` | đọc                          | mọi người dùng                                | văn bản cho mô hình + citations |
+| `open_screen`      | đọc, kết thúc lượt           | người dùng có ít nhất một màn hình mở được    | sự kiện `navigate`            |
+| `update_profile`   | đổi dữ liệu, kết thúc lượt   | tài khoản `LOCAL` không phải đổi mật khẩu tạm | sự kiện `action_required`     |
+
+Mọi tham số do mô hình gửi đều được backend kiểm tra lại; Ollama không ép `enum`. Danh tính và quyền chỉ lấy từ ngữ
+cảnh dựng trước khi stream, không bao giờ từ văn bản của mô hình.
+
+### `search_documents`
+
+Tham số `query` (1–300 ký tự). Dùng cùng bước tìm kiếm với chat tài liệu (nhúng, top-k, ngưỡng, bỏ đoạn trùng) và trả
+cho mô hình các đoạn đánh số `[n]` theo định dạng của chat tài liệu. Số `[n]` tiếp tục tăng qua nhiều lần tìm trong một
+lượt; đoạn đã gặp giữ số cũ và không lặp lại. Kết thúc lượt theo quy tắc của chat tài liệu:
+
+- không tìm được đoạn nào trong cả lượt, hoặc mô hình trả "Không tìm thấy thông tin này trong tài liệu.":
+  `done.answer` là câu cố định, `citations = []`, dù mô hình viết gì khác;
+- ngược lại `citations` là các đoạn của lượt mà `answer` ghi `[n]`, theo thứ tự số, dựng từ metadata của đoạn; không có
+  `[n]` hợp lệ thì trả mọi đoạn của lượt; `[n]` ngoài khoảng bị bỏ qua.
+
+Ollama không phản hồi khi nhúng câu hỏi: sự kiện `error` `ASSISTANT-AI_UNAVAILABLE`.
+
+### `open_screen`
+
+Tham số `functionCode`, chỉ nhận mã trong danh sách màn hình của chính người dùng: các chức năng được cấp có
+`routePattern` cố định (không có `:tham-số`), theo thứ tự menu, cùng nguồn với `functionDetails` của `/auth/me`. Danh sách này nằm
+trong mô tả và `enum` của công cụ mỗi request. Mã của vai trò khác hoặc mã bịa nhận lại văn bản từ chối "Bạn không có
+quyền mở màn hình này hoặc màn hình không tồn tại." (mô hình nói lại với người dùng) và không có `navigate`. Mã hợp lệ:
+`navigate` với `path` do **server** lấy từ chức năng, `done.answer` = "Đã mở trang <tên>.". App kiểm tra `path` với menu
+của người dùng trước khi chuyển; guard của route vẫn áp dụng.
+
+### `update_profile`
+
+Tham số tùy chọn `fullName`, `email`, `positionName` (chỉ gửi trường muốn đổi); thuộc tính khác bị bỏ qua. Mọi kiểm tra
+diễn ra **trước** khi có thẻ xác nhận, theo luật của `PATCH /auth/me`: họ tên 1–255 ký tự, email hợp lệ và tối đa 100
+ký tự, chức danh tối đa 255 ký tự; chuỗi rỗng ở email hoặc chức danh nghĩa là xoá. Lỗi trả lại mô hình dưới dạng văn
+bản tiếng Việt để hỏi lại người dùng. Trường có giá trị mới bằng giá trị hiện tại bị bỏ; không còn trường nào:
+"Hồ sơ đã có đúng giá trị này, không cần thay đổi.".
+
+Hợp lệ: lưu một yêu cầu chờ, ghi `action_required` (giá trị cũ `from` do server đọc từ hồ sơ, không tin mô hình), rồi
+`done` với "Vui lòng kiểm tra và xác nhận thay đổi bên dưới.". Khi người dùng xác nhận: backend nạp lại hồ sơ, nếu bất
+kỳ `from` nào khác giá trị hiện tại thì trả `ASSISTANT-ACTION_STALE`; nếu không gọi `SelfProfileService.update` chỉ với
+các trường đổi (kiểm tra, khóa ghi và audit `USER_PROFILE_UPDATED` giữ nguyên) và trả `ActionResultView` với
+`data` là `/auth/me` đã làm mới. Tài khoản SSO và tài khoản còn phải đổi mật khẩu không được cung cấp công cụ này.
+
 ## Yêu cầu chờ xác nhận
 
 Giữ trong bộ nhớ (không có bảng nào): hết hạn sau `action-ttl`, gắn với người đã gây ra nó, tối đa 20 yêu cầu mỗi người
