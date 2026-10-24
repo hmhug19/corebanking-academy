@@ -158,9 +158,9 @@ bản tiếng Việt để hỏi lại người dùng. Trường có giá trị 
 "Hồ sơ đã có đúng giá trị này, không cần thay đổi.".
 
 Hợp lệ: lưu một yêu cầu chờ, ghi `action_required` (giá trị cũ `from` do server đọc từ hồ sơ, không tin mô hình), rồi
-`done` với "Vui lòng kiểm tra và xác nhận thay đổi bên dưới.". Khi người dùng xác nhận: backend nạp lại hồ sơ, nếu bất
-kỳ `from` nào khác giá trị hiện tại thì trả `ASSISTANT-ACTION_STALE`; nếu không gọi `SelfProfileService.update` chỉ với
-các trường đổi (kiểm tra, khóa ghi và audit `USER_PROFILE_UPDATED` giữ nguyên) và trả `ActionResultView` với
+`done` với "Vui lòng kiểm tra và xác nhận thay đổi bên dưới.". Khi người dùng xác nhận: `SelfProfileService.updateIfUnchanged`
+giữ khóa ghi, so từng `from` với giá trị hiện tại trong cùng transaction sẽ ghi; có trường đã khác thì không ghi gì và trả
+`ASSISTANT-ACTION_STALE`; nếu không thì sửa chỉ các trường đổi (kiểm tra và audit `USER_PROFILE_UPDATED` như `PATCH /auth/me`) và trả `ActionResultView` với
 `data` là `/auth/me` đã làm mới. Tài khoản SSO và tài khoản còn phải đổi mật khẩu không được cung cấp công cụ này.
 
 ## Yêu cầu chờ xác nhận

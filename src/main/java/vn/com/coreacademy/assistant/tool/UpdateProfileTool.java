@@ -1,7 +1,9 @@
 package vn.com.coreacademy.assistant.tool;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import jakarta.validation.ConstraintViolation;
@@ -104,21 +106,23 @@ public class UpdateProfileTool implements AgentTool {
 
     /**
      * Runs after the user confirmed, on the request thread with their security context. Refuses when the profile no
-     * longer holds the values the card showed, so the user never confirms a change against stale data.
+     * longer holds the values the card showed, so the user never confirms a change against stale data; the profile
+     * service compares them under its write lock, in the transaction that writes.
      */
     @Override
     public ActionResultView execute(PendingAction action, AgentContext context) {
         ProfileUpdateRequest request = new ProfileUpdateRequest();
+        Map<String, String> shown = new HashMap<>();
         for (var change : action.changes()) {
             Field field = Field.of(change.field());
-            if (!Objects.equals(field.current(context.profile()), ProfileChange.blankToNull(change.from()))) {
-                throw new BusinessException(AssistantResponseCode.ACTION_STALE);
-            }
+            shown.put(field.json(), ProfileChange.blankToNull(change.from()));
             JsonNode value = action.arguments().path(change.field());
             field.apply(request, value.isNull() ? null : value.asText());
         }
 
-        profiles.update(request);
+        if (!profiles.updateIfUnchanged(request, shown)) {
+            throw new BusinessException(AssistantResponseCode.ACTION_STALE);
+        }
         return new ActionResultView(action.id(), name(), "Đã cập nhật hồ sơ.", auth.me());
     }
 

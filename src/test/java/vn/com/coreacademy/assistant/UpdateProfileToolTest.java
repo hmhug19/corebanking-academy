@@ -179,11 +179,15 @@ class UpdateProfileToolTest {
         MeResponse refreshed = new MeResponse(user("LOCAL", false, "Học viên Demo", null, "Trưởng nhóm"), List.of(),
             List.of(), List.of(), List.of(), Map.of());
         when(auth.me()).thenReturn(refreshed);
+        when(profiles.updateIfUnchanged(any(), any())).thenReturn(true);
 
         ActionResultView result = tool.execute(action, LEARNER);
 
         ArgumentCaptor<ProfileUpdateRequest> request = ArgumentCaptor.captor();
-        verify(profiles).update(request.capture());
+        ArgumentCaptor<Map<String, String>> expected = ArgumentCaptor.captor();
+        verify(profiles).updateIfUnchanged(request.capture(), expected.capture());
+        assertThat(expected.getValue()).containsExactlyInAnyOrderEntriesOf(
+            Map.of("positionName", "Chuyên viên", "email", "hv@example.test"));
         assertThat(request.getValue().getSuppliedFields()).containsExactlyInAnyOrder("positionName", "email");
         assertThat(request.getValue().getPositionName()).isEqualTo("Trưởng nhóm");
         assertThat(request.getValue().getEmail()).isNull();
@@ -194,14 +198,28 @@ class UpdateProfileToolTest {
     }
 
     @Test
-    void executeRefusesAProfileThatChangedSinceTheProposalAndUpdatesNothing() {
+    void executeRefusesWhenTheProfileServiceFindsTheCardsValuesChanged() {
         PendingAction action = new PendingAction("a1", "000004", "update_profile",
             args().put("positionName", "Trưởng nhóm"), "Cập nhật hồ sơ cá nhân",
-            List.of(new Change("positionName", "Chức danh", "Giám đốc", "Trưởng nhóm")), null, null);
+            List.of(new Change("positionName", "Chức danh", "Chuyên viên", "Trưởng nhóm")), null, null);
+        when(profiles.updateIfUnchanged(any(), any())).thenReturn(false);
 
         assertThatThrownBy(() -> tool.execute(action, LEARNER)).isInstanceOfSatisfying(BusinessException.class,
             exception -> assertThat(exception.getResponseCode()).isEqualTo(AssistantResponseCode.ACTION_STALE));
-        verify(profiles, never()).update(any());
+        verify(auth, never()).me();
+    }
+
+    @Test
+    void theStaleCheckIsLeftToTheProfileServiceNotTheProfileReadBeforeIt() {
+        // The context's profile was read before the confirm's transaction; the service compares under its lock.
+        PendingAction action = new PendingAction("a1", "000004", "update_profile",
+            args().put("positionName", "Trưởng nhóm"), "Cập nhật hồ sơ cá nhân",
+            List.of(new Change("positionName", "Chức danh", "Giám đốc", "Trưởng nhóm")), null, null);
+        when(profiles.updateIfUnchanged(any(), any())).thenReturn(true);
+
+        tool.execute(action, LEARNER);
+
+        verify(profiles).updateIfUnchanged(any(), org.mockito.ArgumentMatchers.eq(Map.of("positionName", "Giám đốc")));
     }
 
     @Test
@@ -209,7 +227,7 @@ class UpdateProfileToolTest {
         PendingAction action = new PendingAction("a1", "000004", "update_profile",
             args().put("positionName", "Trưởng nhóm"), "Cập nhật hồ sơ cá nhân",
             List.of(new Change("positionName", "Chức danh", "Chuyên viên", "Trưởng nhóm")), null, null);
-        org.mockito.Mockito.doThrow(new AccessDeniedException("SSO")).when(profiles).update(any());
+        org.mockito.Mockito.doThrow(new AccessDeniedException("SSO")).when(profiles).updateIfUnchanged(any(), any());
 
         assertThatThrownBy(() -> tool.execute(action, LEARNER)).isInstanceOf(AccessDeniedException.class);
     }
