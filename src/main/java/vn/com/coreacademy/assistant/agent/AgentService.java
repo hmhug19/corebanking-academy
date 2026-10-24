@@ -38,7 +38,9 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 /**
  * Runs one user turn: asks the local model with the tools this user may use, runs the tools it calls and streams the
  * answer. Read tools run inside the loop and their result goes back to the model; tools that navigate or propose a
- * data change end the turn, so nothing that changes data ever runs here. Messages, arguments and tool results are
+ * data change end the turn, so nothing that changes data ever runs here. Once a tool has put shared text (document
+ * chunks) into the turn, the tools that act for the user are no longer offered and are refused if called anyway, so
+ * an instruction planted in a document cannot open a screen or propose a change. Messages, arguments and tool results are
  * never logged: only tool names, counts and durations are.
  */
 @Slf4j
@@ -50,6 +52,8 @@ public class AgentService {
 
     static final String UNKNOWN_TOOL = "Công cụ không tồn tại.";
     static final String BAD_ARGUMENTS = "Tham số của công cụ không hợp lệ.";
+    public static final String ACTION_AFTER_DOCUMENTS = "Không thể mở màn hình hay đề xuất thay đổi trong lượt "
+        + "đã đọc tài liệu. Hãy trả lời câu hỏi, người dùng có thể gửi yêu cầu đó riêng.";
     static final String STEP_CAP_ANSWER =
         "Mình chưa xử lý được yêu cầu này. Bạn thử diễn đạt lại ngắn gọn hơn nhé.";
 
@@ -124,10 +128,12 @@ public class AgentService {
         messages.add(ChatMessage.system(AgentPrompt.SYSTEM));
         messages.addAll(history);
         TurnState turn = new TurnState();
+        List<ToolDefinition> offered = definitions;
+        boolean readShared = false;
 
         try {
             for (int step = 0; step < properties.maxSteps(); step++) {
-                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), definitions, OllamaClient.Options.AGENT,
+                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, OllamaClient.Options.AGENT,
                     delta -> write(output, AgentStreamEvent.delta(delta)));
                 if (answer.toolCalls().isEmpty()) {
                     finish(output, turn, answer.content().strip());
@@ -137,9 +143,16 @@ public class AgentService {
                 messages.add(ChatMessage.assistant(answer.content(), answer.toolCalls()));
                 for (ToolCall call : answer.toolCalls()) {
                     write(output, AgentStreamEvent.tool(call.name()));
-                    ToolOutcome outcome = runTool(call, context, tools, turn);
+                    AgentTool tool = find(tools, call.name());
+                    ToolOutcome outcome = tool != null && tool.actsForUser() && readShared
+                        ? new ToolOutcome.Result(ACTION_AFTER_DOCUMENTS)
+                        : runTool(call, tool, context, turn);
                     if (end(output, outcome)) {
                         return;
+                    }
+                    if (tool != null && tool.readsSharedContent() && !readShared) {
+                        readShared = true;
+                        offered = withoutActingTools(tools, definitions);
                     }
                     messages.add(ChatMessage.tool(call.name(), ((ToolOutcome.Result) outcome).text()));
                 }
@@ -160,9 +173,23 @@ public class AgentService {
         }
     }
 
-    private ToolOutcome runTool(ToolCall call, AgentContext context, List<AgentTool> tools, TurnState turn) {
-        AgentTool tool = tools.stream().filter(candidate -> candidate.name().equals(call.name())).findFirst()
-            .orElse(null);
+    private static AgentTool find(List<AgentTool> tools, String name) {
+        return tools.stream().filter(candidate -> candidate.name().equals(name)).findFirst().orElse(null);
+    }
+
+    /** The definitions of the tools that do not act for the user; {@code definitions} is in {@code tools} order. */
+    private static List<ToolDefinition> withoutActingTools(List<AgentTool> tools, List<ToolDefinition> definitions) {
+        List<ToolDefinition> kept = new ArrayList<>();
+        for (int i = 0; i < tools.size(); i++) {
+            if (!tools.get(i).actsForUser()) {
+                kept.add(definitions.get(i));
+            }
+        }
+
+        return kept;
+    }
+
+    private ToolOutcome runTool(ToolCall call, AgentTool tool, AgentContext context, TurnState turn) {
         if (tool == null) {
             return new ToolOutcome.Result(UNKNOWN_TOOL);
         }

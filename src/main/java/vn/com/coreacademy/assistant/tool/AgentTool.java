@@ -19,6 +19,19 @@ public interface AgentTool {
     /** Validates the model's arguments and either answers, navigates or proposes an action. */
     ToolOutcome run(JsonNode arguments, AgentContext context, TurnState turn);
 
+    /**
+     * Whether the result carries text other people wrote (document chunks). Once such text is in the turn, the model
+     * may be following instructions hidden in it, so tools that {@link #actsForUser() act for the user} are withdrawn.
+     */
+    default boolean readsSharedContent() {
+        return false;
+    }
+
+    /** Whether the tool does something in the user's name: opens a screen or proposes a data change. */
+    default boolean actsForUser() {
+        return false;
+    }
+
     /** Only tools that change data; runs after the user confirms, on the request thread. */
     default ActionResultView execute(PendingAction action, AgentContext context) {
         throw new UnsupportedOperationException(name() + " changes no data");

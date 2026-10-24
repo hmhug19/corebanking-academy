@@ -79,11 +79,16 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 2. Gọi mô hình với các công cụ mà người dùng được dùng. Nếu mô hình gọi công cụ: kết quả công cụ đọc được đưa lại cho mô
    hình và vòng lặp tiếp tục (tối đa `max-steps` lần gọi). Công cụ không tồn tại hoặc tham số sai được trả lại cho mô hình
    dưới dạng văn bản.
-3. `navigate` và `action_required` là kết thúc: backend ghi sự kiện, rồi `done` với một câu cố định, không gọi mô hình
+3. Văn bản tài liệu do người khác viết, nên có thể chứa chỉ dẫn cài sẵn. Từ khi `search_documents` đã chạy trong lượt,
+   các công cụ hành động thay người dùng (`open_screen`, `update_profile`) không còn được đưa cho mô hình; nếu mô hình vẫn
+   gọi (kể cả trong cùng bước với lần tìm), công cụ không chạy và mô hình nhận lại "Không thể mở màn hình hay đề xuất
+   thay đổi trong lượt đã đọc tài liệu. Hãy trả lời câu hỏi, người dùng có thể gửi yêu cầu đó riêng.". Kết quả tìm
+   kiếm cũng mở đầu bằng một câu nhắc rằng các đoạn chỉ là dữ liệu.
+4. `navigate` và `action_required` là kết thúc: backend ghi sự kiện, rồi `done` với một câu cố định, không gọi mô hình
    thêm.
-4. Quá `max-steps` mà mô hình vẫn gọi công cụ: `done` với "Mình chưa xử lý được yêu cầu này. Bạn thử diễn đạt lại ngắn
+5. Quá `max-steps` mà mô hình vẫn gọi công cụ: `done` với "Mình chưa xử lý được yêu cầu này. Bạn thử diễn đạt lại ngắn
    gọn hơn nhé."
-5. Ollama lỗi giữa chừng: `error` `ASSISTANT-AI_UNAVAILABLE`. Lỗi khác: `error` `CORE-INTERNAL_ERROR` với thông báo chung.
+6. Ollama lỗi giữa chừng: `error` `ASSISTANT-AI_UNAVAILABLE`. Lỗi khác: `error` `CORE-INTERNAL_ERROR` với thông báo chung.
 
 Từ chối **trước** khi stream bắt đầu là envelope JSON `status: ERROR` (HTTP 200): `CORE-VALIDATION_FAILED` (request
 không hợp lệ), `ASSISTANT-AI_UNAVAILABLE` (Ollama không trả lời trong 2 giây); 401 khi thiếu token.

@@ -223,4 +223,10 @@ class UpdateProfileToolTest {
 
         assertThat(action.changes().get(0).from()).isEqualTo("Chuyên viên");
     }
+
+    @Test
+    void proposingAChangeActsForTheUserAndReadsNoSharedContent() {
+        assertThat(tool.actsForUser()).isTrue();
+        assertThat(tool.readsSharedContent()).isFalse();
+    }
 }

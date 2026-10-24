@@ -108,4 +108,10 @@ class OpenScreenToolTest {
             .isFalse();
         assertThat(tool.availableTo(userWith(function(1, "PROFILE", "Hồ sơ cá nhân", "/profile", 10)))).isTrue();
     }
+
+    @Test
+    void openingAScreenActsForTheUserAndReadsNoSharedContent() {
+        assertThat(tool.actsForUser()).isTrue();
+        assertThat(tool.readsSharedContent()).isFalse();
+    }
 }

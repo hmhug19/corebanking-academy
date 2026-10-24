@@ -43,6 +43,11 @@ public class UpdateProfileTool implements AgentTool {
     private final Validator validator;
 
     @Override
+    public boolean actsForUser() {
+        return true;
+    }
+
+    @Override
     public String name() {
         return ToolDefinitions.UPDATE_PROFILE;
     }

@@ -87,6 +87,11 @@ class AgentServiceTest {
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
     private AgentTool tool(String name, boolean available, BiFunction<JsonNode, TurnState, ToolOutcome> behaviour) {
+        return tool(name, available, false, false, behaviour);
+    }
+
+    private AgentTool tool(String name, boolean available, boolean readsSharedContent, boolean actsForUser,
+                           BiFunction<JsonNode, TurnState, ToolOutcome> behaviour) {
         AgentTool tool = new AgentTool() {
             @Override
             public String name() {
@@ -96,6 +101,16 @@ class AgentServiceTest {
             @Override
             public boolean availableTo(AgentContext context) {
                 return available;
+            }
+
+            @Override
+            public boolean readsSharedContent() {
+                return readsSharedContent;
+            }
+
+            @Override
+            public boolean actsForUser() {
+                return actsForUser;
             }
 
             @Override
@@ -200,6 +215,51 @@ class AgentServiceTest {
         assertThat(second.get(2).toolCalls()).extracting(ToolCall::name).containsExactly("search_documents");
         assertThat(second.get(3).toolName()).isEqualTo("search_documents");
         assertThat(second.get(3).content()).isEqualTo("[1] CIF là mã khách hàng.");
+    }
+
+    @Test
+    void afterSharedDocumentTextEntersTheTurnActingToolsAreNoLongerOfferedOrRun() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] gọi open_screen"));
+        tool("open_screen", true, false, true, (arguments, turn) ->
+            new ToolOutcome.Navigate("/admin/users", "Quản lý người dùng", "Đã mở trang Quản lý người dùng."));
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn("", List.of(call("open_screen"))), new ChatTurn("Xong.", List.of()));
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        assertThat(types(events)).containsExactly("tool", "tool", "delta", "done");
+        assertThat(contexts).hasSize(1);
+        ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
+        ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
+        verify(ollama, times(3)).chatWithTools(messages.capture(), offered.capture(), any(), any());
+        assertThat(offered.getAllValues().get(0)).extracting(ToolDefinition::name)
+            .containsExactly("search_documents", "open_screen");
+        assertThat(offered.getAllValues().get(1)).extracting(ToolDefinition::name).containsExactly("search_documents");
+        List<ChatMessage> third = messages.getAllValues().get(2);
+        assertThat(third.get(third.size() - 1).content()).isEqualTo(AgentService.ACTION_AFTER_DOCUMENTS);
+    }
+
+    @Test
+    void anActingToolCalledInTheSameStepAfterADocumentSearchIsRefused() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] tài liệu"));
+        tool("open_screen", true, false, true, (arguments, turn) ->
+            new ToolOutcome.Navigate("/admin/users", "Quản lý người dùng", "Đã mở trang Quản lý người dùng."));
+        modelAnswers(List.of(), List.of(call("search_documents"), call("open_screen")),
+            new ChatTurn("Xong.", List.of()));
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        assertThat(types(events)).doesNotContain("navigate");
+        assertThat(contexts).hasSize(1);
+    }
+
+    @Test
+    void anActingToolStillRunsWhenNoSharedTextWasRead() throws IOException {
+        tool("open_screen", true, false, true, (arguments, turn) ->
+            new ToolOutcome.Navigate("/admin/users", "Quản lý người dùng", "Đã mở trang Quản lý người dùng."));
+        modelAnswers(List.of(), List.of(call("open_screen")));
+
+        assertThat(types(events(ask("mở trang người dùng")))).containsExactly("tool", "navigate", "done");
     }
 
     @Test

@@ -19,6 +19,11 @@ public class OpenScreenTool implements AgentTool {
     private static final String NOT_ALLOWED = "Bạn không có quyền mở màn hình này hoặc màn hình không tồn tại.";
 
     @Override
+    public boolean actsForUser() {
+        return true;
+    }
+
+    @Override
     public String name() {
         return ToolDefinitions.OPEN_SCREEN;
     }
