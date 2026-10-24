@@ -6,35 +6,32 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.DigestInputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.zip.ZipFile;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
+import vn.com.coreacademy.storage.service.ObjectStorage;
+import vn.com.coreacademy.storage.service.UploadStaging;
 
-/** Kho tệp local riêng, không public static; controller chỉ tải sau khi service kiểm tra quyền. */
+/** Kiểm tra tài nguyên Learning bằng file tạm, sau đó upload vào kho S3 private. */
 @Component
+@Slf4j
+@RequiredArgsConstructor
 public class LearningAssetStore {
-    private final Path root;
-
-    public LearningAssetStore(@Value("${app.learning.asset-dir:./data/learning-assets}") String directory) {
-        root = Path.of(directory).toAbsolutePath().normalize();
-    }
+    private final UploadStaging staging;
+    private final ObjectStorage storage;
 
     public record Stored(String key, String name, String mime, long size, String checksum) {
     }
 
-    /** Upload xong trước khi mở transaction metadata; tên đĩa là UUID, không dùng path do client gửi. */
+    /** Upload S3 xong trước transaction metadata; file staging được dọn dù upload thành công hay thất bại. */
     public Stored store(MultipartFile file, BigDecimal duration, Integer pageCount) throws IOException {
         if (file.isEmpty() || file.getSize() > 500_000_000) {
             throw new BusinessException(LearningResponseCode.ASSET_INVALID);
@@ -45,31 +42,32 @@ public class LearningAssetStore {
         if (name.isBlank() || name.length() > 255) {
             throw new BusinessException(LearningResponseCode.ASSET_INVALID);
         }
-        Files.createDirectories(root);
-        Path path = root.resolve(UUID.randomUUID().toString());
-        boolean retained = false;
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = new DigestInputStream(file.getInputStream(), digest)) {
-                Files.copy(input, path);
-            }
+        String key = "learning/" + UUID.randomUUID();
+        boolean attempted = false;
+        try (InputStream input = file.getInputStream(); var staged = staging.stage(input)) {
+            Path path = staged.path();
             String mime = detect(path, name);
             long limit = mime.startsWith("video/") ? 500_000_000 : mime.startsWith("image/") ? 5_000_000
                 : "application/pdf".equals(mime) ? 20_000_000 : 10_000_000;
-            if (Files.size(path) > limit || (mime.startsWith("video/")
+            if (staged.size() > limit || (mime.startsWith("video/")
                 && (duration == null || duration.signum() <= 0 || duration.compareTo(new BigDecimal("86400")) > 0))
                 || ("application/pdf".equals(mime) && (pageCount == null || pageCount < 1))) {
                 throw new BusinessException(LearningResponseCode.ASSET_INVALID);
             }
-            retained = true;
-            return new Stored(path.getFileName().toString(), name, mime, Files.size(path),
-                HexFormat.of().formatHex(digest.digest()));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
-        } finally {
-            if (!retained) {
-                Files.deleteIfExists(path);
+            attempted = true;
+            storage.put(key, path, mime, staged.checksum());
+            return new Stored(key, name, mime, staged.size(), staged.checksum());
+        } catch (IOException | RuntimeException exception) {
+            // PUT có thể đã tới server trước timeout; chỉ dọn key UUID của lượt upload này.
+            if (attempted) {
+                try {
+                    storage.delete(key);
+                } catch (RuntimeException cleanup) {
+                    log.error("S3 upload cleanup failed; reconcile objectKey={}", key);
+                    exception.addSuppressed(cleanup);
+                }
             }
+            throw exception;
         }
     }
 
@@ -119,26 +117,7 @@ public class LearningAssetStore {
         throw new BusinessException(LearningResponseCode.ASSET_INVALID);
     }
 
-    public Resource resource(String key) {
-        Path file = resolve(key);
-        if (!Files.isRegularFile(file)) {
-            throw new BusinessException(LearningResponseCode.NOT_FOUND);
-        }
-        return new FileSystemResource(file);
-    }
-
-    public void discard(String key) throws IOException {
-        Files.deleteIfExists(resolve(key));
-    }
-
-    private Path resolve(String key) {
-        if (key == null || !key.matches("[a-f0-9-]{36}")) {
-            throw new BusinessException(LearningResponseCode.ASSET_INVALID);
-        }
-        Path result = root.resolve(key).normalize();
-        if (!result.getParent().equals(root)) {
-            throw new BusinessException(LearningResponseCode.ASSET_INVALID);
-        }
-        return result;
+    public void discard(String key) {
+        storage.delete(key);
     }
 }

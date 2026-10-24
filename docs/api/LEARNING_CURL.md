@@ -5,7 +5,7 @@ Các ví dụ dùng Bash/Git Bash/WSL và cURL. Trên PowerShell có thể impor
 ## Chuẩn bị
 
 1. Review và áp dụng `docs/sql/learning_hub_learning.sql` một lần sau Identity trên môi trường được phép. Không tự chạy startup; không chạy lại file trên schema đã có các bảng Learning.
-2. Build/chạy ứng dụng với cấu hình hiện có, mặc định cổng 8019. Kho tệp mặc định `./data/learning-assets`, đổi bằng LEARNING_ASSET_DIR khi cần.
+2. Build/chạy ứng dụng với cấu hình hiện có, mặc định cổng 8019. Cấu hình S3_ENDPOINT/S3_BUCKET/S3_REGION/S3_PATH_STYLE_ACCESS/S3_ACCESS_KEY/S3_SECRET_KEY; local dùng AIStor Ubuntu qua SSH tunnel, xem DEPLOY_UBUNTU.md. Không còn kho file local.
 3. Dùng tài khoản giảng viên có scope phù hợp (ORG/GLOBAL cho luồng nhóm/đơn vị) và học viên LEARNER/OWN đang active, không cần đổi mật khẩu. Lấy token qua API login hiện có bằng thông tin đã được phép sử dụng; không cấp quyền/reset password để kiểm tra.
 4. Đặt các biến dưới đây bằng ID/token thật được phép. Không giả định org_id hoặc user_id theo ví dụ. Mỗi response nghiệp vụ cần kiểm tra `status`, không chỉ HTTP 200.
 

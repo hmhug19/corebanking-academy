@@ -2,6 +2,16 @@
 
 Triển khai backend cho danh mục, tạo/sửa/sao chép/xuất bản khóa học, khối nội dung, tài nguyên, nhóm học, chia sẻ, giao học, tự đăng ký và tiến độ. Các quan hệ chỉ là cột ID scalar, không có FK/REFERENCES/cascade vật lý. Service kiểm tra tồn tại, sở hữu, quyền và vòng đời.
 
+## Trạng thái kho tài nguyên
+
+File upload mới được lưu trong AIStor/S3 private, không lưu local lâu dài và không fallback khi S3 lỗi. BE local dùng endpoint AIStor Ubuntu truy cập được từ máy chạy BE; endpoint phải được người vận hành công bố hoặc cấp đường kết nối phù hợp. API upload/content giữ nguyên; không trả key/credential/public URL. Cấu hình, staging disk và nghiệm thu thật xem [triển khai AIStor](../operations/DEPLOY_UBUNTU.md#aistor-integration). Chưa deploy hoặc migrate dữ liệu server trong thay đổi source này.
+
+### Contract tải tài nguyên
+
+GET `/api/v1/learning-assets/{assetId}/content` giữ JWT/policy hiện có. Không Range trả 200; một Range dạng bytes=start-end, bytes=start- hoặc bytes=-suffix trả 206 với Content-Range/Content-Length/Accept-Ranges. Range sai, ngoài file hoặc nhiều range trả HTTP 416/CORE-RANGE_NOT_SATISFIABLE và Content-Range bytes */total. If-Range strong ETag khớp cho phép Range; không khớp hoặc dạng ngày trả toàn file. HEAD trả metadata/header mà không GET object.
+
+Lỗi S3/metadata không nhất quán là lỗi hệ thống 500, không đổi thành ASSET_INVALID. Lỗi trước khi stream theo BaseResponse; sau khi binary đã bắt đầu, kết nối có thể kết thúc thiếu byte, không chèn JSON. Row storageType=local trả HTTP 200/ERROR, mã LEARNING-ASSET_STORAGE_UNSUPPORTED, yêu cầu chuyển dữ liệu. FE player phải có cách gắn Bearer cho request media; thẻ video/iframe src đơn thuần chưa đủ, không đưa token vào URL.
+
 ## Sơ đồ quan hệ dữ liệu
 
 Ba ảnh dưới đây mô tả các bảng và cột chính để đọc cùng [hướng dẫn từng bảng](#hướng-dẫn-sử-dụng-từng-bảng).
@@ -55,7 +65,7 @@ nhưng chưa có API Quiz Engine hoạt động. Phần này không phải bằn
 - Date/time trong JSON là ISO-8601 có offset hoặc Z. API nhận thời điểm đầy đủ; FE quy đổi ngày chọn sang cuối ngày Asia/Bangkok khi cần. Thời lượng lưu giây.
 - Nội dung text hiện hỗ trợ Markdown/plain, từ chối HTML. FE phải render an toàn và sanitize Markdown/link theo ngữ cảnh; API không cung cấp HTML đã sanitize.
 - Viewer/nội dung file chỉ mở khi khóa active, danh mục published và có nguồn học hợp lệ đã tới startAt (hoặc tự đăng ký còn quyền). Danh sách vẫn giữ metadata lịch sử khi khóa paused/archived; không dùng GET enrollment để bỏ qua lịch mở/thu hồi quyền học.
-- Upload local private theo LEARNING_ASSET_DIR; file signature + extension và giới hạn byte được kiểm tra. Metadata thời lượng video/số trang PDF do giảng viên xác nhận; chưa có probe/transcode. Không trả storage key hoặc URL local. Download hỗ trợ Resource/Range qua Spring, học viên phải gửi enrollmentId và blockId.
+- Upload vào bucket S3 private; file local chỉ dùng staging tạm và được dọn; file signature + extension và giới hạn byte được kiểm tra. Metadata thời lượng video/số trang PDF do giảng viên xác nhận; chưa có probe/transcode. Không trả storage key hoặc URL local. Download truyền stream S3 theo single byte range, học viên phải gửi enrollmentId và blockId.
 - Nhắc học là thông báo in-app đến thời điểm đã lên lịch, không tích hợp email/SMTP. reward_points chỉ cấu hình, chưa cộng sổ gamification.
 - Quiz Engine chưa triển khai: không cho lưu quiz lesson/cấu hình assessment có hiệu lực. course_assessments là bảng điểm nối dành cho bước phát triển sau, không phải API chấm thi.
 - Thao tác ghi Learning dùng chung advisory transaction lock với Identity để bảo vệ grain và tham chiếu xuyên module khi chưa có UNIQUE/FK. Xóa team bị chặn nếu còn course, target hoặc snapshot học tập tham chiếu. Đây là lựa chọn ban đầu cho correctness; chưa benchmark tải lớn. Không mở rộng thành nhiều khóa trước khi đo và thiết kế thứ tự khóa.

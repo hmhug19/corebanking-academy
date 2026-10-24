@@ -21,6 +21,8 @@ public enum LearningResponseCode implements ApiResponseCode {
         "Đối tượng chưa hợp lệ"),
     QUIZ_UNAVAILABLE("LEARNING-QUIZ_UNAVAILABLE", "Module kiểm tra chưa được triển khai; chưa thể cấu hình bài quiz.",
         "Chưa hỗ trợ kiểm tra"),
+    ASSET_STORAGE_UNSUPPORTED("LEARNING-ASSET_STORAGE_UNSUPPORTED",
+        "Tài nguyên chưa được chuyển sang kho S3. Vui lòng liên hệ quản trị viên.", "Tài nguyên chưa sẵn sàng"),
     ASSET_INVALID("LEARNING-ASSET_INVALID", "Tệp không hợp lệ, sai loại, vượt dung lượng hoặc thiếu metadata.",
         "Tài nguyên chưa hợp lệ");
 

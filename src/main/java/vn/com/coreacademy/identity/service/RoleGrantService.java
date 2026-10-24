@@ -98,7 +98,8 @@ public class RoleGrantService {
         }
 
         var role = roles.findById(request.roleId()).filter(r -> r.isActive())
-            .orElseThrow(() -> new BusinessException(IdentityResponseCode.INVALID_SCOPE));
+            .orElseThrow(() -> BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "roleId", "INVALID_VALUE",
+                "Vai trò không tồn tại hoặc đã ngừng hoạt động. Vui lòng chọn vai trò khác."));
         access.requireGrant(actorId, role.getCode(), request);
 
         // TEAM được định danh bởi teamId; gửi hoặc bỏ orgId không tạo ra hai phân quyền khác nhau.
@@ -106,7 +107,8 @@ public class RoleGrantService {
             g.getRole().getId().equals(role.getId()) && g.getScopeType() == request.scope()
                 && (request.scope() == ScopeType.TEAM || Objects.equals(g.getOrgId(), request.orgId()))
                 && Objects.equals(g.getTeamId(), request.teamId()))) {
-            throw new BusinessException(IdentityResponseCode.DUPLICATE_GRANT);
+            throw BusinessException.field(IdentityResponseCode.DUPLICATE_GRANT, "roleId", "ALREADY_EXISTS",
+                "Vai trò đã được gán với phạm vi và tổ chức/nhóm này.");
         }
 
         RoleAssignment grant = new RoleAssignment();

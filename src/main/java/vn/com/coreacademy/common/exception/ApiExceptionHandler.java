@@ -3,6 +3,7 @@ package vn.com.coreacademy.common.exception;
 import java.util.Arrays;
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 
 import com.fasterxml.jackson.core.JsonParseException;
@@ -42,7 +43,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<BaseResponse<Void>> unauthorized(AuthenticationException exception) {
         if (exception instanceof AuthenticationServiceException) {
-            return unexpected(exception);
+            return internalError(exception);
         }
         return error(ResponseCode.UNAUTHORIZED);
     }
@@ -151,7 +152,22 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<BaseResponse<Void>> unexpected(Exception exception) {
+    public ResponseEntity<BaseResponse<Void>> unexpected(Exception exception, HttpServletResponse response) {
+        if (response.isCommitted()) {
+            // Không ghép JSON lỗi vào binary đã bắt đầu; Content-Length cho client nhận biết tải chưa đủ.
+            log.warn("Response stream interrupted; exceptionType={}", exception.getClass().getName());
+            return null;
+        }
+        response.resetBuffer();
+        response.setHeader(HttpHeaders.CONTENT_LENGTH, null);
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, null);
+        response.setHeader(HttpHeaders.CONTENT_RANGE, null);
+        response.setHeader(HttpHeaders.ACCEPT_RANGES, null);
+        response.setHeader(HttpHeaders.ETAG, null);
+        return internalError(exception);
+    }
+
+    private ResponseEntity<BaseResponse<Void>> internalError(Exception exception) {
         // Message/cause có thể chứa dữ liệu request; chỉ log loại exception và vị trí lỗi.
         log.error("Unhandled API exception type={} stack={}", exception.getClass().getName(),
             Arrays.toString(exception.getStackTrace()));

@@ -18,10 +18,11 @@ public class CorsConfig {
     CorsConfigurationSource corsConfigurationSource(@Value("${app.cors.origins}") String origins) {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(Arrays.stream(origins.split(",")).map(String::trim).toList());
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE,
-            HttpHeaderNames.REQUEST_ID));
-        config.setExposedHeaders(List.of(HttpHeaderNames.REQUEST_ID));
+            HttpHeaderNames.REQUEST_ID, HttpHeaders.RANGE, HttpHeaders.IF_RANGE));
+        config.setExposedHeaders(List.of(HttpHeaderNames.REQUEST_ID, HttpHeaders.CONTENT_RANGE,
+            HttpHeaders.ACCEPT_RANGES, HttpHeaders.CONTENT_LENGTH, HttpHeaders.CONTENT_DISPOSITION, HttpHeaders.ETAG));
 
         // Xác thực dùng Bearer header, không dùng cookie; frontend vẫn đọc được X-Request-Id để tra lỗi.
         config.setAllowCredentials(false);
