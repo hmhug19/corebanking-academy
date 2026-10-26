@@ -28,6 +28,13 @@ services:
       APP_BOOTSTRAP_ADMIN_ID: ${APP_BOOTSTRAP_ADMIN_ID:-}
       APP_BOOTSTRAP_ADMIN_USER: ${APP_BOOTSTRAP_ADMIN_USER:-}
       APP_BOOTSTRAP_ADMIN_PASSWORD: ${APP_BOOTSTRAP_ADMIN_PASSWORD:-}
+      KNOWLEDGE_STORAGE_DIR: /app/data/knowledge
+      KNOWLEDGE_MAX_FILE_SIZE: ${KNOWLEDGE_MAX_FILE_SIZE:-20MB}
+      KNOWLEDGE_WORKER_POLL: ${KNOWLEDGE_WORKER_POLL:-2s}
+      KNOWLEDGE_WORKER_CONCURRENCY: ${KNOWLEDGE_WORKER_CONCURRENCY:-1}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:8b}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=65.0 -XX:+ExitOnOutOfMemoryError}
     ports:
       - '${BIND_IP:-0.0.0.0}:${HOST_PORT:-8019}:8019'
@@ -35,6 +42,7 @@ services:
     volumes:
       - backend_logs:/app/logs
       - backend_upload_tmp:/app/uploads-tmp
+      - backend_knowledge:/app/data/knowledge
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=128m,mode=1777
@@ -59,3 +67,4 @@ networks:
 volumes:
   backend_logs:
   backend_upload_tmp:
+  backend_knowledge:

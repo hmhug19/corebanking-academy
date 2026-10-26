@@ -80,6 +80,9 @@ nano .env.ubuntu
 | BIND_IP / HOST_PORT | Mặc định `127.0.0.1:8019`, truy cập qua reverse proxy trên host |
 | APP_MEMORY_LIMIT | Giới hạn RAM container, mặc định `768m` |
 | APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD | Để trống cả ba hoặc điền đủ cả ba để khởi tạo admin |
+| OLLAMA_BASE_URL | Địa chỉ Ollama nhìn từ container, ví dụ `http://100.x.y.z:11434` qua Tailscale; mặc định `localhost` là chính container nên tính năng AI không chạy |
+| OLLAMA_CHAT_MODEL / OLLAMA_EMBED_MODEL | Mặc định `qwen3:8b` và `bge-m3`; chỉ đặt khi khác |
+| KNOWLEDGE_MAX_FILE_SIZE / KNOWLEDGE_WORKER_POLL / KNOWLEDGE_WORKER_CONCURRENCY | Mặc định `20MB`, `2s`, `1`; tài liệu tải lên được lưu trong volume `backend_knowledge` (`/app/data/knowledge`) |
 
 Sinh JWT secret mới bằng lệnh sau, rồi paste giá trị vào `.env.ubuntu`:
 

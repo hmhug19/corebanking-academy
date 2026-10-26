@@ -226,9 +226,9 @@ OLLAMA_BASE_URL=http://100.x.y.z:11434
 # OLLAMA_EMBED_MODEL=bge-m3
 ```
 
-> **Trạng thái hiện tại:** `compose.ubuntu.yaml` chưa truyền `OLLAMA_*` vào container, nên giá trị trong `.env.ubuntu` chưa có tác dụng; container sẽ gọi `localhost:11434` của chính nó. Cần bổ sung các biến này vào `services.backend.environment` (và volume ghi được cho `KNOWLEDGE_STORAGE_DIR`, vì container chạy `read_only`) trong một thay đổi riêng trước khi bật tính năng AI trên server.
+`compose.ubuntu.yaml` và `deploy/ci/compose.ci.yaml` truyền `OLLAMA_*` và `KNOWLEDGE_*` vào container; tài liệu tải lên được lưu trong volume `backend_knowledge` vì container chạy `read_only`. Server deploy bằng CI đọc bản cài ở `/etc/core-academy-ci/compose.yaml`, nên cần cài lại `deploy/ci/compose.ci.yaml` vào đó (xem [CICD.md](CICD.md)) trước khi biến trong `.env.ubuntu` có tác dụng.
 
-Sau khi compose đã được cập nhật, recreate container và xem log khi gọi chat:
+Recreate container và xem log khi gọi chat:
 
 ```bash
 docker compose --env-file .env.ubuntu -f compose.ubuntu.yaml up -d
