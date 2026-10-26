@@ -12,6 +12,51 @@ Contract và hướng dẫn từng bảng: [LEARNING.md](../api/LEARNING.md).
 Request mẫu: [cURL](../api/LEARNING_CURL.md), [Postman](../postman/learning.postman_collection.json).
 SQL Identity dưới đây vẫn là nguồn khởi tạo duy nhất của **cụm Identity**, không thay bằng SQL Learning.
 
+## Dữ liệu Learning mẫu cho FE
+
+[learning_hub_learning_demo.sql](learning_hub_learning_demo.sql) là script INSERT **tùy chọn**, chạy thủ công
+trên database dev/test sau **Identity → Learning → media/progress → Learning demo**. Không tự chạy lúc startup.
+Script sử dụng org `BIDV110B803` và ba tài khoản `giangvien`, `hocvien`, `hocvien.tichhop` của bộ Identity demo;
+kiểm tra active, đã đổi mật khẩu và grant cần thiết trước khi ghi. Không tạo/sửa tài khoản, password hoặc cấp quyền.
+Trên DB dùng Identity khác, cần điều chỉnh phần resolve Identity và review trước khi chạy.
+
+Ví dụ chạy bằng psql, dùng cơ chế kết nối/mật khẩu của môi trường dev hiện tại:
+
+```bash
+psql -h <dev-host> -U <dev-user> -d <dev-database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_learning_demo.sql
+```
+
+Chạy **toàn bộ file một lần**, không chọn riêng từng INSERT vì các ID được nối bằng biến trong khối DO.
+Mã có prefix `FE-DEMO-`; ID số do DB sinh, không hardcode ID org/team hoặc chỉnh sequence. Toàn bộ INSERT/UPDATE
+trong một transaction; dữ liệu demo đã tồn tại thì báo lỗi trước khi ghi, không upsert/ghi đè dữ liệu FE đã sửa.
+Nếu SQL client báo transaction aborted, thực hiện ROLLBACK; không chạy lại baseline hoặc xóa dữ liệu để vượt lỗi.
+
+| Dữ liệu / tài khoản | Kịch bản FE |
+|---|---|
+| 3 lĩnh vực, 4 chương trình, 6 phân hệ published | Dropdown, bộ lọc và tạo khóa |
+| `FE-DEMO-C1` — Tổng quan | Được giao, đang học 50%, hạn sau 2 ngày |
+| `FE-DEMO-C2` — Quản lý thay đổi | Được giao, chưa bắt đầu, hạn sau 14 ngày |
+| `FE-DEMO-C3` — EOD/COB | Chưa bắt đầu, quá hạn 1 ngày |
+| `FE-DEMO-C4` — Hội nhập | Hoàn thành 100% trước hạn |
+| `FE-DEMO-C5` — Tiền gửi | Tự chọn, đã tự đăng ký, chưa bắt đầu, không có hạn |
+| `FE-DEMO-C6` — An toàn thông tin | Nháp của giảng viên; không xuất hiện ở catalog học viên |
+| `giangvien` | Quản lý 6 khóa và nhóm; có thêm LEARNER OWN để thử màn học |
+| `hocvien`, `hocvien.tichhop` | Mỗi người có 5 enrollment với các trạng thái trên |
+
+Có 9 chương, 15 bài, 31 khối (text/process/video lỗi), 45 bước quy trình, 1 nhóm/3 thành viên,
+4 đợt giao, 12 recipient, 15 enrollment, 12 lesson progress, 24 block progress và 12 lịch nhắc.
+Ngày hạn tính tương đối tại lúc chạy, không dịch chuyển mỗi lần mở ứng dụng. GET reminders ban đầu có thông báo
+gần hạn/quá hạn; nhắc của khóa hoàn thành đã cancelled. Các SELECT cuối file trả ID thực tế để điền vào Postman/cURL.
+Các key `FE-DEMO-ASSIGN-*` dành riêng cho fixture SQL, không dùng làm idempotencyKey khi POST giao học qua API.
+
+**23/26 bảng ban đầu có dữ liệu mẫu.** Ba bảng giữ trống có chủ đích: `course_shares` cần đơn vị nhận khác
+đơn vị sở hữu (Identity demo hiện chỉ có một đơn vị), `video_watch_ranges` cần video thật và heartbeat hợp lệ,
+`course_assessments` cần Quiz Engine chưa triển khai. Không chèn ID tham chiếu giả để đủ số bảng.
+Hai bảng extension `asset_upload_parts`/`learning_user_leases` cũng không seed phiên upload/học đang hoạt động.
+Khóa published dùng chữ/quy trình, có thể thử hoàn thành qua API mà không cần S3. Một asset failed và block video
+tương ứng chỉ nằm ở khóa nháp để thử UI lỗi upload; không có file thật và không tải/phát được. Muốn thử video,
+PDF, ảnh hoặc tệp đính kèm, upload qua API media và chờ worker kiểm tra xong; không đổi metadata giả thành ready.
+
 ## Extension media và tiến độ (v2 rút gọn)
 
 [learning_hub_media_progress.sql](learning_hub_media_progress.sql) chạy **sau Identity và Learning**,
