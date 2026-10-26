@@ -5,7 +5,7 @@ Các ví dụ dùng Bash/Git Bash/WSL và cURL. Trên PowerShell có thể impor
 ## Chuẩn bị
 
 1. Review và áp dụng `docs/sql/learning_hub_learning.sql` một lần sau Identity trên môi trường được phép. Không tự chạy startup; không chạy lại file trên schema đã có các bảng Learning.
-2. Build/chạy ứng dụng với cấu hình hiện có, mặc định cổng 8019. Kho tệp mặc định `./data/learning-assets`, đổi bằng LEARNING_ASSET_DIR khi cần.
+2. Build/chạy ứng dụng với cấu hình hiện có, mặc định cổng 8019. Cấu hình S3_ENDPOINT/S3_BUCKET/S3_REGION/S3_PATH_STYLE_ACCESS/S3_ACCESS_KEY/S3_SECRET_KEY; local dùng endpoint AIStor Ubuntu truy cập được từ máy BE, xem DEPLOY_UBUNTU.md. Không còn kho file local.
 3. Dùng tài khoản giảng viên có scope phù hợp (ORG/GLOBAL cho luồng nhóm/đơn vị) và học viên LEARNER/OWN đang active, không cần đổi mật khẩu. Lấy token qua API login hiện có bằng thông tin đã được phép sử dụng; không cấp quyền/reset password để kiểm tra.
 4. Đặt các biến dưới đây bằng ID/token thật được phép. Không giả định org_id hoặc user_id theo ví dụ. Mỗi response nghiệp vụ cần kiểm tra `status`, không chỉ HTTP 200.
 
@@ -22,6 +22,9 @@ COURSE_VERSION=0
 GROUP_VERSION=0
 PROGRESS_VERSION=0
 PROGRESS_SEQUENCE=1
+SESSION_ID='UUID_PHIEN_DO_BE_CAP'
+SESSION_FENCE=1
+PROGRESS_ASSET_ID=null       # ID asset với PDF/video; null với khối không có media chính
 # FIELD_ID, PROGRAM_ID, MODULE_ID, COURSE_ID, REVISION_ID, GROUP_ID,
 # ASSIGNMENT_ID, RECIPIENT_ID, ENROLLMENT_ID, BLOCK_ID, ASSET_ID, REMINDER_ID:
 # lấy từ response của request trước, tuyệt đối không giả định luôn bằng 1.
@@ -31,7 +34,7 @@ Sau tạo danh mục: lấy `data.id`. Sau tạo/lưu khóa: lấy `data.course.
 
 ## Luồng tối thiểu nên chạy trước
 
-Tạo field → program → module → course → PUT nội dung draft → publish → tạo assignment cá nhân → GET khóa của tôi bằng token học viên → GET enrollment → PUT progress cho từng khối bắt buộc → GET enrollment kiểm tra hoàn thành.
+Tạo field → program → module → course → PUT draft → publish → assignment → GET khóa của tôi → GET enrollment → POST sessions → PUT progress cho từng khối bắt buộc → GET enrollment kiểm tra kết quả.
 
 Ví dụ PUT nội dung có một bài với hai khối bắt buộc (text và process), nên phải cập nhật tiến độ cả hai khối mới hoàn thành bài/khóa. Khi chuyển sang block chưa có tiến độ, đặt lại PROGRESS_VERSION=0 và PROGRESS_SEQUENCE=1 cho block đó. Khi tạo group rồi thay members, có thể đổi target assignment thành `learning_group` với groupId và userId=null. Muốn kiểm tra giao trùng, thêm target cá nhân cùng người vào cùng đợt; dùng idempotencyKey mới nếu đổi payload.
 
@@ -593,6 +596,11 @@ curl --silent --show-error --request PUT "${BASE_URL}/api/v1/me/learning/enrollm
   --header "Content-Type: application/json" \
   --data-binary @- <<JSON
 {
+  "sessionId": "${SESSION_ID}",
+  "sessionFence": ${SESSION_FENCE},
+  "assetId": ${PROGRESS_ASSET_ID},
+  "eventType": "COMPLETE",
+  "playing": false,
   "expectedVersion": ${PROGRESS_VERSION},
   "sequence": ${PROGRESS_SEQUENCE},
   "complete": true,
@@ -624,21 +632,21 @@ curl --silent --show-error --request POST "${BASE_URL}/api/v1/me/learning/remind
 
 ## 35. Upload tài nguyên
 
-Video cần durationSeconds; PDF cần pageCount.
+BE xác định thời lượng/số trang từ file; không cần gửi durationSeconds/pageCount.
 
 ```bash
-curl --silent --show-error --request POST "${BASE_URL}/api/v1/learning-assets?ownerOrgId=${ORG_ID}&pageCount=1" \
+curl --silent --show-error --request POST "${BASE_URL}/api/v1/learning-assets?ownerOrgId=${ORG_ID}" \
   --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
   --form "file=@/duong-dan/tai-lieu.pdf"
 ```
 
 ## 36. Tải tài nguyên
 
-Học viên gửi blockId và enrollmentId; giảng viên có thể tải file mình quản lý.
+Học viên claim session trước để có cookie media, gửi blockId và enrollmentId; giảng viên preview dùng Bearer.
 
 ```bash
 curl --silent --show-error --request GET "${BASE_URL}/api/v1/learning-assets/${ASSET_ID}/content?blockId=${BLOCK_ID}&enrollmentId=${ENROLLMENT_ID}" \
-  --header "Authorization: Bearer ${LEARNER_TOKEN}" \
+  --cookie media-cookie.txt \
   --output tai-lieu-tai-ve.pdf
 ```
 
@@ -655,20 +663,64 @@ curl --silent --show-error --request GET "${BASE_URL}/api/v1/learning-assets/${A
 
 ## Video và PDF
 
-Upload video đổi file sang MP4/WEBM và query `durationSeconds=<số giây>`; bỏ pageCount. Upload PDF cần pageCount. Metadata này do giảng viên xác nhận từ tệp gốc; phiên bản hiện tại chưa có bộ probe/transcode hoặc parser đếm trang tự động.
+Upload MP4/WebM hoặc PDF; BE xác minh codec/thời lượng bằng ffprobe và đếm trang bằng PDFBox. MP4 được remux faststart bằng ffmpeg. Không tin metadata do client gửi; chờ status=ready trước khi gắn file vào bài.
 
 Để dùng file trong draft, thêm asset vào `blocks[].assets`: `{"assetId":ASSET_ID,"usage":"primary","caption":null,"altText":null}`. Video dùng blockType=video, completionMode=video_coverage, completionThreshold=90; PDF dùng blockType=pdf và manual/pdf_end. Mỗi video/PDF là một khối riêng. Sau PUT phải lấy lại blockId vì cây draft được thay thế.
 
-Heartbeat video đầu tiên gửi vị trí nhưng không gửi khoảng đã xem. Sau đó chờ đúng thời gian xem, tăng sequence và dùng rowVersion mới nhất. Chỉ gửi khoảng từ vị trí heartbeat trước tới vị trí hiện tại; backend giới hạn thời lượng theo đồng hồ server, tốc độ tối đa 2x. Tua đến cuối chỉ thay vị trí tiếp tục, không tăng coverage.
+Heartbeat video đầu tiên gửi vị trí nhưng không gửi khoảng đã xem. Sau đó chờ đúng thời gian xem, tăng sequence và dùng data.block.rowVersion mới nhất và receipt hạn phiên trong response. Sequence bắt đầu lại từ 1 khi claim/handoff phiên mới. Chỉ gửi khoảng từ vị trí heartbeat trước tới vị trí hiện tại; backend giới hạn thời lượng theo đồng hồ server, tốc độ tối đa 2x. Tua đến cuối chỉ thay vị trí tiếp tục, không tăng coverage.
 
 ```json
-{"expectedVersion":0,"sequence":1,"complete":false,"videoPositionSeconds":0}
+{"sessionId":"<SESSION_ID>","sessionFence":1,"assetId":501,"expectedVersion":0,"sequence":1,"eventType":"PLAY","playing":true,"complete":false,"videoPositionSeconds":0}
 ```
 
 Sau khoảng 10 giây, gửi (version lấy từ response, không mặc định luôn 0):
 
 ```json
-{"expectedVersion":0,"sequence":2,"complete":false,"videoPositionSeconds":10,"watchedFromSeconds":0,"watchedToSeconds":10}
+{"sessionId":"<SESSION_ID>","sessionFence":1,"assetId":501,"expectedVersion":1,"sequence":2,"eventType":"HEARTBEAT","playing":true,"complete":false,"videoPositionSeconds":10,"watchedFromSeconds":0,"watchedToSeconds":10}
 ```
 
 PDF gửi pdfPage trong 1..pageCount; không gửi thông tin video. Text/process/manual gửi complete=true. Backend không nhận progressPercent, passed hoặc score do client tự đặt.
+
+## Media/tiến độ bổ sung (37–46)
+
+Contract chi tiết và giới hạn: [LEARNING.md](LEARNING.md#my-learning-progress-design).
+Collection Postman đã thêm 10 request mới, request 32 bắt buộc claim session qua request 44 trước.
+Khi đổi block, handoff phiên với previousSessionId/previousFence rồi lấy version/sequence/assetId mới.
+
+Khởi tạo upload: đặt UPLOAD_REQUEST_ID UUID, FILE_NAME/MIME/SIZE và FILE_SHA256 đúng file trước khi chạy:
+
+```bash
+curl --request POST "${BASE_URL}/api/v1/learning-assets/uploads" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
+  --header 'Content-Type: application/json' \
+  --data "{\"requestId\":\"${UPLOAD_REQUEST_ID}\",\"ownerOrgId\":${ORG_ID},\"originalName\":\"${FILE_NAME}\",\"mimeType\":\"${FILE_MIME}\",\"sizeBytes\":${FILE_SIZE},\"checksumSha256\":\"${FILE_SHA256}\"}"
+```
+
+Gửi từng part, GET manifest để resume rồi complete; UPLOAD_ID lấy từ response init, PART_SHA256 theo đúng part:
+
+```bash
+curl --request PUT "${BASE_URL}/api/v1/learning-assets/uploads/${UPLOAD_ID}/parts/1" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
+  --header 'Content-Type: application/octet-stream' \
+  --header "X-Part-SHA256: ${PART_SHA256}" --data-binary @file.part001
+curl --request POST "${BASE_URL}/api/v1/learning-assets/uploads/${UPLOAD_ID}/complete" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}"
+curl "${BASE_URL}/api/v1/learning-assets/uploads/${UPLOAD_ID}" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}"
+```
+
+Mở session lưu cookie để thử player; không đặt Bearer token vào URL:
+
+```bash
+curl --cookie-jar media-cookie.txt --request POST "${BASE_URL}/api/v1/me/learning/sessions" \
+  --header "Authorization: Bearer ${LEARNER_TOKEN}" --header 'Content-Type: application/json' \
+  --data "{\"enrollmentId\":${ENROLLMENT_ID},\"blockId\":${BLOCK_ID},\"takeover\":false}"
+curl --cookie media-cookie.txt --header 'Range: bytes=0-99' \
+  "${BASE_URL}/api/v1/learning-assets/${ASSET_ID}/content?enrollmentId=${ENROLLMENT_ID}&blockId=${BLOCK_ID}"
+curl "${BASE_URL}/api/v1/me/learning/progress/summary" --header "Authorization: Bearer ${LEARNER_TOKEN}"
+curl --output learning-progress.csv "${BASE_URL}/api/v1/me/learning/progress/export?sort=id,asc" \
+  --header "Authorization: Bearer ${LEARNER_TOKEN}"
+```
+
+Cookie jar chứa token ngắn hạn, giữ local và không commit. File video cần ffprobe/ffmpeg trên máy BE;
+Docker runtime đã cài công cụ này. Mọi request phải kiểm status/messageCode hoặc HTTP/header khi trả binary/CSV.

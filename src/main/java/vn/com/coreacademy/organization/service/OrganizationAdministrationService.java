@@ -23,6 +23,7 @@ import vn.com.coreacademy.identity.service.IdentityWriteLock;
 import vn.com.coreacademy.organization.dto.CreateOrganizationRequest;
 import vn.com.coreacademy.organization.dto.OrganizationDetail;
 import vn.com.coreacademy.organization.dto.OrganizationInfo;
+import vn.com.coreacademy.organization.dto.OrganizationTreeNode;
 import vn.com.coreacademy.organization.dto.OrganizationUpdateRequest;
 import vn.com.coreacademy.organization.entity.Organization;
 import vn.com.coreacademy.organization.exception.OrganizationResponseCode;
@@ -91,6 +92,35 @@ public class OrganizationAdministrationService {
     }
 
     /**
+     * Tải một cấp cây theo scope, không đệ quy toàn bộ cây hoặc truy vấn con từng node. Không có parentId
+     * trả các gốc trong phạm vi; hasChildren được kiểm tra theo lô và cùng phạm vi quản lý.
+     */
+    public PageResponse<OrganizationTreeNode> tree(Long parentId, int page, int size) {
+        var boundary = access.boundary(SecurityContextUtils.getUserId());
+        if (parentId != null && (!boundary.contains(parentId) || !organizations.existsById(parentId))) {
+            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+
+        var filter = new OrganizationSearch(null, parentId, parentId == null, null, null,
+            boundary.global(), boundary.orgIds());
+        var result = organizations.searchOrganizations(filter,
+            PageQuery.of(page, size, "sortNo,asc", Set.of("sortNo")));
+        Set<Long> expandableIds;
+        if (result.isEmpty()) {
+            expandableIds = Set.of();
+        } else {
+            List<Long> ids = result.stream().map(Organization::getId).toList();
+            expandableIds = Set.copyOf(boundary.global()
+                ? organizations.findParentIdsWithChildren(ids)
+                : organizations.findParentIdsWithVisibleChildren(ids, boundary.orgIds()));
+        }
+
+        return PageResponse.from(result.map(org -> new OrganizationTreeNode(org.getId(), org.getParentId(),
+            org.getOrgType(), org.getCode(), org.getName(), org.getStatus(), org.getSortNo(),
+            expandableIds.contains(org.getId()))));
+    }
+
+    /**
      * Trả tổ chức được phép xem và tối đa 20 quản trị viên ADMIN ORG gán trực tiếp. Không cộng quyền quản trị
      * kế thừa hoặc quản trị viên GLOBAL vào danh sách tóm tắt.
      */
@@ -118,7 +148,7 @@ public class OrganizationAdministrationService {
             throw new BusinessException(OrganizationResponseCode.HIERARCHY_INVALID);
         }
         if (request.parentId() != null) {
-            access.requireActiveOrg(request.parentId());
+            access.requireActiveOrg(request.parentId(), "parentId");
             Organization parent = organizations.findById(request.parentId()).orElseThrow();
             if ("DEPARTMENT".equals(parent.getOrgType())) {
                 throw new BusinessException(OrganizationResponseCode.HIERARCHY_INVALID);
@@ -208,7 +238,8 @@ public class OrganizationAdministrationService {
 
     private void uniqueCode(String code, Long exceptId) {
         if (organizations.existsByCodeIgnoreCaseAndIdNot(code, exceptId)) {
-            throw new BusinessException(OrganizationResponseCode.ORG_CODE_EXISTS);
+            throw BusinessException.field(OrganizationResponseCode.ORG_CODE_EXISTS, "code", "ALREADY_EXISTS",
+                "Mã tổ chức đã được sử dụng.");
         }
     }
 }

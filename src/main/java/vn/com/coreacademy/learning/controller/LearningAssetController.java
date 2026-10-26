@@ -2,8 +2,9 @@ package vn.com.coreacademy.learning.controller;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
@@ -15,11 +16,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.Resource;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +30,7 @@ import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.service.LearningAssetService;
+import vn.com.coreacademy.storage.web.ObjectDownloadHandler;
 
 @RestController
 @RequestMapping("/api/v1/learning-assets")
@@ -42,6 +40,7 @@ import vn.com.coreacademy.learning.service.LearningAssetService;
 @RequiredArgsConstructor
 public class LearningAssetController {
     private final LearningAssetService assets;
+    private final ObjectDownloadHandler downloads;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @ApiResponse(responseCode = "200",
@@ -50,8 +49,9 @@ public class LearningAssetController {
         summary = "Upload tài nguyên học tập",
         description = """
             Kiểm tra scope, signature và dung lượng trước khi ghi metadata tài nguyên.
-            - Video cần durationSeconds, PDF cần pageCount do giảng viên xác nhận từ file gốc.
-            - Tệp thật ở kho riêng, không trả storageKey hoặc đường dẫn local cho frontend.
+            - Server kiểm codec, duration và số trang PDF; metadata client không thay bước kiểm file.
+            - Upload file lớn có thể dùng API uploads để chia phần và tiếp tục sau mất mạng.
+            - Tệp thật ở S3 private, không trả storageKey hoặc credential cho frontend.
             """
     )
     public BaseResponse<LearningViews.LearningAssetView> upload(@RequestParam @Positive Long ownerOrgId,
@@ -68,21 +68,21 @@ public class LearningAssetController {
     @ApiResponse(responseCode = "206", description = "Một phần nội dung tệp khi gửi Range hợp lệ.",
         content = @Content(mediaType = MediaType.APPLICATION_OCTET_STREAM_VALUE,
             schema = @Schema(type = "string", format = "binary")))
+    @ApiResponse(responseCode = "416", description = "Range không được hỗ trợ; Content-Range trả tổng byte của tệp.")
     @Operation(
         summary = "Mở/tải tài nguyên có kiểm soát quyền",
         description = """
-            Trả file/stream trực tiếp sau khi kiểm tra quyền, hỗ trợ Range của Spring cho video/PDF.
+            Truyền file từ S3 sau khi kiểm tra quyền; hỗ trợ một byte range cho video/PDF.
             - Học viên gửi cả blockId và enrollmentId đúng hồ sơ của mình.
-            - Không trả BaseResponse khi tải file thành công; lỗi vẫn theo envelope chung.
+            - Range sai, không thỏa mãn hoặc nhiều range trả HTTP 416; If-Range không khớp trả toàn file.
+            - Không trả BaseResponse khi tải file thành công; lỗi trước stream theo envelope chung.
             """
     )
-    public ResponseEntity<Resource> content(@PathVariable @Positive Long assetId,
-                                            @RequestParam(required = false) @Positive Long blockId,
-                                            @RequestParam(required = false) @Positive Long enrollmentId) {
+    public void content(@PathVariable @Positive Long assetId, @RequestParam(required = false) @Positive Long blockId,
+                        @RequestParam(required = false) @Positive Long enrollmentId, HttpServletRequest request,
+                        HttpServletResponse response) throws IOException {
+        // Transaction kiểm tra quyền/metadata đã kết thúc trước khi mở stream S3.
         var value = assets.download(assetId, blockId, enrollmentId);
-        return ResponseEntity.ok().contentType(MediaType.parseMediaType(value.mimeType()))
-            .header(HttpHeaders.CONTENT_DISPOSITION,
-                ContentDisposition.inline().filename(value.name(), StandardCharsets.UTF_8).build().toString())
-            .body(value.resource());
+        downloads.write(value, request, response);
     }
 }

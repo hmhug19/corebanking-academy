@@ -46,7 +46,9 @@ public record BaseResponse<T>(
 
     private static <T> BaseResponse<T> create(ResponseStatus status, ApiResponseCode code, T data,
                                               List<FieldViolation> errors) {
+        // Một lỗi cụ thể có thể hiển thị trực tiếp; nhiều lỗi giữ thông báo tổng quát theo mã nghiệp vụ.
+        String message = errors != null && errors.size() == 1 ? errors.get(0).message() : code.getMessage();
         return new BaseResponse<>(RequestIdContext.currentOrNew(), Instant.now(), status,
-            code.getCode(), code.getMessage(), code.getTitle(), data, errors);
+            code.getCode(), message, code.getTitle(), data, errors);
     }
 }

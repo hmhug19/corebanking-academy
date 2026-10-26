@@ -1,8 +1,10 @@
 package vn.com.coreacademy.learning.mapper;
 
 import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 import vn.com.coreacademy.common.mapper.CentralMapperConfig;
 import vn.com.coreacademy.learning.dto.LearningViews;
+import vn.com.coreacademy.learning.dto.MediaViews;
 import vn.com.coreacademy.learning.entity.AssignmentRecipient;
 import vn.com.coreacademy.learning.entity.AssignmentTarget;
 import vn.com.coreacademy.learning.entity.BlockAsset;
@@ -22,6 +24,7 @@ import vn.com.coreacademy.learning.entity.LearningAsset;
 import vn.com.coreacademy.learning.entity.LearningGroup;
 import vn.com.coreacademy.learning.entity.LearningGroupMember;
 import vn.com.coreacademy.learning.entity.LearningReminder;
+import vn.com.coreacademy.learning.entity.LearningUserLease;
 import vn.com.coreacademy.learning.entity.LessonBlock;
 import vn.com.coreacademy.learning.entity.LessonProgress;
 import vn.com.coreacademy.learning.entity.ProcessStep;
@@ -83,5 +86,9 @@ public interface LearningMapper {
     LearningViews.CourseCompletionRuleView view(CourseCompletionRule value);
 
     LearningViews.CourseAssessmentView view(CourseAssessment value);
+
+    @Mapping(target = "lastAcceptedSequence", source = "lastEventSequence")
+    @Mapping(target = "leaseExpiresAt", source = "expiresAt")
+    MediaViews.Receipt receipt(LearningUserLease value);
 
 }

@@ -24,7 +24,22 @@ public class BusinessException extends RuntimeException {
         this.errors = List.copyOf(errors);
     }
 
+    public static BusinessException field(ApiResponseCode responseCode, String field, String code, String message) {
+        return new BusinessException(responseCode, List.of(new FieldViolation(field, code, message)));
+    }
+
     public static BusinessException validation(String field, String code, String message) {
-        return new BusinessException(ResponseCode.VALIDATION_FAILED, List.of(new FieldViolation(field, code, message)));
+        return field(ResponseCode.VALIDATION_FAILED, field, code, message);
+    }
+
+    /** Giữ mã nghiệp vụ khi gắn lỗi của đối tượng con vào đúng phần tử request cha. */
+    public BusinessException withFieldPrefix(String prefix) {
+        if (errors.isEmpty()) {
+            return this;
+        }
+        List<FieldViolation> nested = errors.stream()
+            .map(error -> new FieldViolation(error.field().isEmpty() ? prefix : prefix + "." + error.field(),
+                error.code(), error.message())).toList();
+        return new BusinessException(responseCode, nested);
     }
 }

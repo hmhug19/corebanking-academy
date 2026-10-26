@@ -14,7 +14,7 @@ Source mapping 8 bảng compact trong schema `learning_hub` theo `docs/sql/learn
 
 **Starter, không phải sản phẩm LMS hoàn chỉnh.** Đã có: login bằng username hoặc mã cán bộ, `/me`, JWT HS256, multi-role, màn hình và scope và kiểm tra scope GLOBAL/ORG/TEAM/OWN theo context được cung cấp. Hash mật khẩu LOCAL nằm trong `users.password_hash`; SSO không đăng nhập bằng mật khẩu local.
 
-**Chưa có:** course API và hierarchy, question bank/quiz engine, tiến độ học, content upload/player, reporting, UI Angular và refresh token/SSO integration. Phạm vi 21 API core Identity đã triển khai được mô tả trong [Contract Identity](docs/api/IDENTITY.md).
+**Learning đã có API:** danh mục/nội dung khóa, giao học, tiến độ và upload/download tài nguyên qua S3; xem [LEARNING.md](docs/api/LEARNING.md). Chưa có question bank/quiz engine, reporting, UI/player Angular và refresh token/SSO integration. Phạm vi 21 API core Identity cùng API cây/panel tổ chức và template/import Excel đã triển khai được mô tả trong [Contract Identity](docs/api/IDENTITY.md).
 
 ## Yêu cầu
 
@@ -28,6 +28,8 @@ Triển khai backend bằng Docker trên Ubuntu: xem [hướng dẫn build/deplo
 IntelliJ: chọn **Project SDK = JDK 21**, Language level 21 và Maven Runner JRE = Project SDK/JDK 21, rồi Reload Maven. Khi chạy terminal, đặt JAVA_HOME tới JDK 21 và kiểm tra `java -version`, `mvn -version`. File `.java-version` ghi phiên bản chuẩn; file này không tự cài hoặc cấu hình JDK cho IntelliJ.
 
 ## Chạy local
+
+S3 là bắt buộc: bổ sung S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY vào .env hiện tại; bucket mặc định academy-media, region us-east-1, path-style true. Local mở SSH tunnel rồi dùng http://localhost:9000; BE Docker Ubuntu dùng http://aistor:9000. Xem [cấu hình storage](docs/operations/DEPLOY_UBUNTU.md#aistor-integration). Không tự fallback lưu local khi S3 lỗi.
 
 ```bash
 # Cấu hình DB_URL/DB_USER/DB_PASSWORD, JWT_SECRET. Để trống bộ APP_BOOTSTRAP_ADMIN_* khi dùng seed demo.
@@ -54,7 +56,7 @@ curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8019/api/v1/auth/me
 # Trường username cũng nhận mã cán bộ; JWT subject và /me.user.userId giữ nguyên chuỗi, kể cả số 0 đầu.
 ```
 
-Script duy nhất [learning_hub_identity.sql](docs/sql/learning_hub_identity.sql) tạo đủ schema và dữ liệu demo, gồm super.admin (000001), quantri và các vai trò nghiệp vụ. Mật khẩu tạm Demo@123, bắt buộc đổi sau đăng nhập đầu; xem [danh sách tài khoản và cách chạy](docs/sql/README.md). Không cần APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD khi dùng bộ seed này. Bootstrap Java vẫn giữ cho trường hợp khởi tạo có chủ đích, không reset hoặc cấp lại quyền cho user đã tồn tại.
+Script duy nhất [learning_hub_identity.sql](docs/sql/learning_hub_identity.sql) tạo đủ schema và dữ liệu demo, gồm super.admin (000001), quantri và các vai trò nghiệp vụ. Mật khẩu demo Demo@123, tài khoản seed không bắt buộc đổi mật khẩu; xem [danh sách tài khoản và cách chạy](docs/sql/README.md). Không cần APP_BOOTSTRAP_ADMIN_ID/USER/PASSWORD khi dùng bộ seed này. Bootstrap Java vẫn giữ cho trường hợp khởi tạo có chủ đích, không reset hoặc cấp lại quyền cho user đã tồn tại.
 
 ## API có sẵn
 
@@ -118,9 +120,10 @@ Quy chuẩn request DTO, BaseResponse, request ID và lỗi: [API_CONTRACT.md](d
 - Quy tắc phát triển: [DEVELOPMENT_GUIDELINES.md](DEVELOPMENT_GUIDELINES.md); AGENTS.md/CLAUDE.md là điểm vào cho agent.
 - Thiết kế và thư viện hiện có: [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Triển khai tự động: [CI/CD](docs/operations/CICD.md).
+- AIStor: [bàn giao Ubuntu, phần BE cần tích hợp và kế hoạch test](docs/operations/DEPLOY_UBUNTU.md#aistor-integration). Source đã tích hợp S3 private qua module storage; cần cấp S3_* trước khi chạy/deploy.
 - Chỉ commit tài liệu dùng chung trong docs/api, docs/operations, docs/sql và kiến trúc. Ghi chú/nhật ký cá nhân để docs/local; mockup để docs/uiux. Hai thư mục này bị Git ignore.
 
 ## Identity administration
 
-- [Contract Identity](docs/api/IDENTITY.md) — 21 API core, form và luồng lỗi.
+- [Contract Identity](docs/api/IDENTITY.md) — API core, cây/panel tổ chức, template/import Excel, form và luồng lỗi.
 - Database mới/tạo lại: chạy duy nhất [learning_hub_identity.sql](docs/sql/learning_hub_identity.sql), gồm schema và seed demo. Database có dữ liệu cần giữ phải có kế hoạch thay đổi riêng; không chạy đè script khởi tạo.

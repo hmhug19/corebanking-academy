@@ -100,6 +100,50 @@
     {
       "key": "catalogVersion",
       "value": "0"
+    },
+    {
+      "key": "uploadRequestId",
+      "value": ""
+    },
+    {
+      "key": "uploadId",
+      "value": ""
+    },
+    {
+      "key": "uploadFileName",
+      "value": "demo.pdf"
+    },
+    {
+      "key": "uploadMimeType",
+      "value": "application/pdf"
+    },
+    {
+      "key": "uploadFileSizeBytes",
+      "value": "0"
+    },
+    {
+      "key": "uploadFileSha256",
+      "value": "REPLACE_WITH_FILE_SHA256"
+    },
+    {
+      "key": "partNumber",
+      "value": "1"
+    },
+    {
+      "key": "partSha256",
+      "value": "REPLACE_WITH_PART_SHA256"
+    },
+    {
+      "key": "sessionId",
+      "value": ""
+    },
+    {
+      "key": "sessionFence",
+      "value": "1"
+    },
+    {
+      "key": "progressAssetId",
+      "value": "null"
     }
   ],
   "item": [
@@ -1299,10 +1343,10 @@
           }
         ],
         "url": "{{baseUrl}}/api/v1/me/learning/enrollments/{{enrollmentId}}/blocks/{{blockId}}/progress",
-        "description": "Gửi expectedVersion/sequence; backend tự tính tỷ lệ, kiểm tra trang PDF và khoảng xem video.",
+        "description": "Claim session trước. Mẫu này hoàn thành khối manual; video/PDF gửi vị trí/coverage theo contract LEARNING.md. Retry phải giữ nguyên payload.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"expectedVersion\": {{progressVersion}},\n  \"sequence\": {{progressSequence}},\n  \"complete\": true,\n  \"videoPositionSeconds\": null,\n  \"watchedFromSeconds\": null,\n  \"watchedToSeconds\": null,\n  \"pdfPage\": null\n}",
+          "raw": "{\n  \"sessionId\": \"{{sessionId}}\",\n  \"sessionFence\": {{sessionFence}},\n  \"assetId\": {{progressAssetId}},\n  \"eventType\": \"COMPLETE\",\n  \"playing\": false,\n  \"expectedVersion\": {{progressVersion}},\n  \"sequence\": {{progressSequence}},\n  \"complete\": true,\n  \"videoPositionSeconds\": null,\n  \"watchedFromSeconds\": null,\n  \"watchedToSeconds\": null,\n  \"pdfPage\": null\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -1322,7 +1366,8 @@
               "const d = response.data;",
               "if (response.status === 'SUCCESS' && d) {",
               "pm.collectionVariables.set('progressVersion', d.block.rowVersion);",
-              "pm.collectionVariables.set('progressSequence', Number(d.block.lastEventSequence)+1);",
+              "pm.collectionVariables.set('progressSequence', Number(d.session.lastAcceptedSequence)+1);",
+              "pm.collectionVariables.set('leaseExpiresAt', d.session.leaseExpiresAt);",
               "}"
             ]
           }
@@ -1399,8 +1444,8 @@
             "value": "Bearer {{instructorToken}}"
           }
         ],
-        "url": "{{baseUrl}}/api/v1/learning-assets?ownerOrgId={{orgId}}&pageCount=1",
-        "description": "Video cần durationSeconds; PDF cần pageCount.",
+        "url": "{{baseUrl}}/api/v1/learning-assets?ownerOrgId={{orgId}}",
+        "description": "Upload một request; server tự kiểm codec/duration/pageCount. Dùng uploads cho chia phần/resume.",
         "body": {
           "mode": "formdata",
           "formdata": [
@@ -1434,14 +1479,12 @@
       "name": "36. Tải tài nguyên",
       "request": {
         "method": "GET",
-        "header": [
-          {
-            "key": "Authorization",
-            "value": "Bearer {{learnerToken}}"
-          }
-        ],
-        "url": "{{baseUrl}}/api/v1/learning-assets/{{assetId}}/content?blockId={{blockId}}&enrollmentId={{enrollmentId}}",
-        "description": "Học viên gửi blockId và enrollmentId; giảng viên có thể tải file mình quản lý."
+        "header": [],
+        "url": "{{baseUrl}}/api/v1/learning-assets/{{progressAssetId}}/content?blockId={{blockId}}&enrollmentId={{enrollmentId}}",
+        "description": "Chạy request 44 với block video/PDF để Postman nhận cookie academy_media. Không gửi Bearer thông thường cho player học viên. Giảng viên preview riêng có thể dùng Bearer instructorToken và assetId thuộc scope.",
+        "auth": {
+          "type": "noauth"
+        }
       },
       "event": [
         {
@@ -1450,6 +1493,315 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "37. Thư viện tài nguyên",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets?page=0&size=20&sort=id,desc"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "38. Khởi tạo upload chia phần",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets/uploads",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"requestId\": \"{{uploadRequestId}}\",\n  \"ownerOrgId\": {{orgId}},\n  \"originalName\": \"{{uploadFileName}}\",\n  \"mimeType\": \"{{uploadMimeType}}\",\n  \"sizeBytes\": {{uploadFileSizeBytes}},\n  \"checksumSha256\": \"{{uploadFileSha256}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Nhập tên, MIME, byte count và SHA-256 thực. Retry giữ requestId; chọn file khác cần xóa uploadRequestId để tạo ID mới."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('uploadRequestId')) pm.collectionVariables.set('uploadRequestId', pm.variables.replaceIn('{{$guid}}'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));",
+              "if (r.status === 'SUCCESS') pm.collectionVariables.set('uploadId', r.data.uploadId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "39. Xem manifest và processing",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets/uploads/{{uploadId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "40. Upload một phần (binary)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/octet-stream"
+          },
+          {
+            "key": "X-Part-SHA256",
+            "value": "{{partSha256}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets/uploads/{{uploadId}}/parts/{{partNumber}}",
+        "body": {
+          "mode": "file",
+          "file": {
+            "src": []
+          }
+        },
+        "description": "Chọn file part đã chia 8 MiB (phần cuối nhỏ hơn). PDF <=8 MiB có thể chọn toàn file và partNumber=1."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "41. Complete và kiểm file",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets/uploads/{{uploadId}}/complete"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "42. Hủy upload chưa complete",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets/uploads/{{uploadId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "43. Xóa mềm tài nguyên chưa sử dụng",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assets/{{assetId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "44. Mở phiên học (trước request 32)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/sessions",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enrollmentId\": {{enrollmentId}},\n  \"blockId\": {{blockId}},\n  \"takeover\": false\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Postman giữ cookie academy_media. Đổi bài gửi previousSessionId/previousFence; takeover=true chỉ sau xác nhận chuyển thiết bị."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));",
+              "if (r.status === 'SUCCESS') {",
+              "  pm.collectionVariables.set('sessionId', r.data.sessionId);",
+              "  pm.collectionVariables.set('sessionFence', r.data.sessionFence);",
+              "  pm.collectionVariables.set('progressVersion', r.data.expectedVersion);",
+              "  pm.collectionVariables.set('progressSequence', Number(r.data.lastAcceptedSequence) + 1);",
+              "  pm.collectionVariables.set('progressAssetId', r.data.assetId === null ? 'null' : String(r.data.assetId));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "45. Tổng quan tiến độ",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/progress/summary"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(r.status).to.eql('SUCCESS'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "46. Xuất CSV tiến độ",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{learnerToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/me/learning/progress/export?sort=id,asc"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200 CSV', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'); });"
             ]
           }
         }

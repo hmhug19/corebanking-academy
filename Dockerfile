@@ -13,13 +13,14 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp clean verify
 
 FROM eclipse-temurin:21-jre-noble AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
 
 WORKDIR /app
-RUN mkdir -p /app/logs /app/data/knowledge && chown -R 10001:10001 /app/logs /app/data
+RUN mkdir -p /app/logs /app/uploads-tmp /app/data/knowledge \
+    && chown -R 10001:10001 /app/logs /app/uploads-tmp /app/data
 COPY --from=build --chown=10001:10001 /build/target/corebanking-academy-*.jar ./app.jar
 
 ENV SERVER_PORT=8019

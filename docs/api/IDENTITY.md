@@ -57,6 +57,10 @@ Cờ bắt buộc đổi mật khẩu được bật khi tạo user LOCAL qua AP
 
 `POST /auth/logout` không cần body, yêu cầu token còn hiệu lực và thu hồi mọi phiên của tài khoản qua auth_ver. FE xóa token/cache khi thành công hoặc nhận 401. Request đang xử lý trước thời điểm thu hồi có thể hoàn tất; token mới phát sau khi thu hồi vẫn hợp lệ. Chưa có thao tác kết thúc phiên trên hệ thống SSO bên ngoài.
 
+### Hiển thị lỗi nghiệp vụ trên form
+
+Trùng mã cán bộ/username, mã tổ chức, mã nhóm và lỗi membership/role/scope có errors theo field. FE hiển thị errors[].message tại ô nhập/selector tương ứng; field lồng nhau có dạng initialRoleGrants[0].teamId. Một lỗi thì message ngoài giống thông báo chi tiết, nhiều lỗi thì message ngoài tổng quát. Không cần tách messageCode cho từng field hoặc gọi API kiểm tra trùng riêng; xem bảng ánh xạ trong [API_CONTRACT](API_CONTRACT.md#chi-tiết-lỗi-nghiệp-vụ-theo-field). Các mã nghiệp vụ và HTTP status giữ nguyên.
+
 ### Cấu trúc dữ liệu FE cần phân biệt
 
 Các cấu trúc dưới đây nằm trong `data` của BaseResponse; `errors` chỉ xuất hiện khi có chi tiết lỗi. Dùng `status` để xác định kết quả, `messageCode` để chọn cách xử lý; không so sánh chuỗi `message`/`messageTitle`.
@@ -120,15 +124,146 @@ Chuyển membership: FE cảnh báo **mọi grant khác OWN của target sẽ b�
 - `orgs` gồm UNIT (đơn vị) và DEPARTMENT (phòng). UNIT có thể là root hoặc dưới UNIT; DEPARTMENT bắt buộc có parent UNIT. Không bắt buộc đơn vị phải có phòng trung gian.
 - `teams` là nhóm chuyên môn thuộc một node org, ví dụ tiền gửi/tiền vay/core/tích hợp. Không dùng teams làm phòng ban. Team của user phải có `team.orgId == user.orgId`.
 - Không suy cây từ BRN/BRCD/CRA; đó là thông tin nguồn trên hồ sơ.
-- Tree tải gốc trong scope bằng `/orgs?rootOnly=true`; mở node bằng `/orgs?parentId=<id>`. Mỗi cấp có phân trang; FE cần tải tiếp khi còn trang, không coi 20 dòng đầu là toàn bộ cây.
-- Selector dùng cùng `/orgs`, không thêm endpoint tree/department riêng. Search trả danh sách phẳng có parentId; không tự tải các ancestor ngoài scope.
+- Tree dùng `GET /orgs/tree` để tải gốc trong scope; mở node bằng `/orgs/tree?parentId=<id>`. Trả PageResponse<OrganizationTreeNode>, mỗi node có `id,parentId,orgType,code,name,status,sortNo,hasChildren`. Mỗi cấp có phân trang, sortNo rồi ID tăng dần; FE tải tiếp khi còn trang. hasChildren chỉ xét con trong scope, không tải trước toàn bộ cây. Global admin xem cả node inactive; ADMIN ORG chỉ thấy nhánh active được cấp. Node gốc trong scope có thể có parentId ở ngoài scope, FE không tự tải cha đó.
+- Selector/search tiếp tục dùng `/orgs`; kết quả tìm kiếm là danh sách phẳng có parentId. API `/orgs/tree` phục vụ cây lazy-load và hasChildren; không thêm API departments riêng hoặc lấy ancestor ngoài scope.
 - Tạo/sửa gồm code,name,orgType,parentId,sortNo theo API; orgType/parentId chỉ có khi tạo. Code org duy nhất không phân biệt hoa/thường ở service. Code team tùy chọn, không trùng trong cùng org.
 - Demo chỉ global admin tạo org và đổi status org; ADMIN ORG sửa code/name/sortNo trong scope. Chưa hỗ trợ chuyển node, đổi loại node hoặc xóa org.
 - ORG scope gồm node được gán và **cây con active**. Node inactive, ancestor inactive hoặc đường cha bị hỏng không cấp quyền quản trị ORG. Vô hiệu hóa org không tự sửa trạng thái từng user; global admin vẫn thấy node và có thể kích hoạt lại.
 - Counts `memberCount`, `teamCount` tại `/orgs` là số lượng trực tiếp của node, không phải cộng toàn cây. `/users?orgId=...` lọc node và cây con active; dùng teamId khi xem thành viên nhóm.
 - `/orgs/{id}` trả `{organization: OrganizationInfo, administrators:[...]}`. Administrators là tối đa 20 ADMIN ORG gán trực tiếp tại node, không gộp global admin hoặc quyền kế thừa. Quản trị chi tiết qua user/role-grants.
+- Khi chọn Ban/Phòng, gọi `GET /orgs/{id}/contents?page=0&size=6&sort=name,asc`: trả `{organization, administrators, teams}`. organization/administrators giữ cùng cấu trúc với GET chi tiết; teams là PageResponse<TeamInfo> gồm đúng nhóm có orgId=node được chọn, tối đa 5 thành viên xem trước mỗi nhóm. Không cộng nhóm/thành viên từ phòng con và không tự mở rộng xuống cây con. Danh sách nhân sự không nằm trong response này; `/users?orgId=...` hiện có ngữ nghĩa cả cây con active, không dùng thay danh sách nhân sự trực tiếp. Nhóm và thống kê có thể thay đổi giữa các request; không coi preview là danh sách đầy đủ.
 - TeamInfo: `{id,orgId,code,name,description,status,memberCount,memberPreview:[{userId,fullName}]}`; preview tối đa 5, nút “Xem tất cả” dùng `/users?teamId=...`.
 - Form team có code/name/description. Không chuyển org hoặc đổi trạng thái team trong demo. Xóa chỉ khi không có member, role grant hoặc dữ liệu Learning tham chiếu, kể cả grant đã thu hồi và snapshot học tập (HTTP 200/ERROR, mã ORGANIZATION-TEAM_IN_USE nếu còn tham chiếu lịch sử). Không tự xóa user/grant/tiến độ theo cascade.
+
+### Luồng cây và panel tổ chức
+
+```http
+GET /api/v1/orgs/tree?page=0&size=20
+GET /api/v1/orgs/tree?parentId=1&page=0&size=20
+GET /api/v1/orgs/1/contents?page=0&size=6&sort=name,asc
+```
+
+Ví dụ data của API contents (các ID/số lượng chỉ minh họa):
+
+```json
+{
+  "organization": {
+    "id": 1,
+    "parentId": null,
+    "orgType": "UNIT",
+    "code": "DEMO_BAN",
+    "name": "Ban Core Banking",
+    "status": "active",
+    "sortNo": 0,
+    "memberCount": 7,
+    "teamCount": 1
+  },
+  "administrators": [],
+  "teams": {
+    "items": [
+      {
+        "id": 10,
+        "orgId": 1,
+        "code": "DEP",
+        "name": "Nhóm tiền gửi",
+        "description": null,
+        "status": "active",
+        "memberCount": 0,
+        "memberPreview": []
+      }
+    ],
+    "page": 0,
+    "size": 6,
+    "totalElements": 1,
+    "totalPages": 1
+  }
+}
+```
+
+Đổi node phải reset trang nhóm về 0. Node không tồn tại/ngoài scope trả cùng CORE-RESOURCE_NOT_FOUND,
+status=ERROR theo envelope chung; chưa đăng nhập trả 401, không có quyền quản trị trả 403.
+Các API list/detail/teams cũ vẫn giữ contract, không bắt buộc FE đổi các màn khác.
+
+<a id="organization-import"></a>
+
+### Nhập đơn vị/phòng và nhóm bằng Excel
+
+Trong hộp thoại **Nhập từ tệp**, thêm nút **Tải mẫu Excel**. Mẫu V1 lưu tại
+`src/main/resources/templates/organization-import-template.xlsx`, được đóng gói cùng ứng dụng. API đọc resource
+bằng stream, hoạt động trong JAR/Docker; không sinh lại mẫu hoặc tải mẫu từ S3. Download cần Bearer token
+và quyền quản trị. Import đọc Excel bằng Apache POI (`poi-ooxml`, `XSSFWorkbook`).
+
+Có thể chỉnh hướng dẫn, độ rộng cột và style trực tiếp bằng Excel. Phải giữ tên sheet/header, mã dạng text,
+dropdown và hai sheet dữ liệu trống; ví dụ chỉ đặt ở Instructions. Khi đổi cấu trúc cột cần sửa parser,
+contract và kiểm tra lại import cùng thay đổi. Rebuild/redeploy để cập nhật mẫu được đóng gói.
+
+```http
+GET /api/v1/orgs/import-template
+POST /api/v1/orgs/import?dryRun=true
+POST /api/v1/orgs/import?dryRun=false
+```
+
+POST dùng multipart/form-data, part `file`; dryRun là query param, mặc định true. Không tự điền boundary.
+GET thành công trả binary .xlsx với Content-Disposition attachment, không bọc BaseResponse; lỗi theo envelope chung.
+
+| Sheet | Cột theo đúng thứ tự | Quy tắc |
+|---|---|---|
+| Instructions | Hướng dẫn và ví dụ bằng tiếng Việt | Không xử lý thành dữ liệu nhập |
+| Organizations | orgType, code, name, parentCode, sortNo | orgType/code/name bắt buộc; code <=50, name <=255; sortNo nguyên 0..2147483647, trống = 0 |
+| Teams | orgCode, code, name, description | orgCode/code/name bắt buộc; orgCode/code <=50, name <=255; description <=4000 ký tự |
+
+Giữ nguyên tên sheet và header; hai sheet dữ liệu bắt buộc có mặt, được để trống một sheet.
+Mẫu có header tô màu, cố định hàng đầu, định dạng text cho mã và dropdown UNIT/DEPARTMENT.
+Ví dụ chỉ nằm trong Instructions để tránh nhập nhầm vào DB. Không dùng ID database, cột trạng thái,
+user/password, thành viên hoặc role/grant trong tệp này. Tổ chức/nhóm tạo mới luôn active.
+
+- UNIT được bỏ trống parentCode; DEPARTMENT phải có cha UNIT. Cha có thể có sẵn trong DB hoặc trong cùng tệp,
+  kể cả nằm sau con. Không chấp nhận chu trình, tham chiếu đứt hoặc đường cha có node inactive.
+- orgCode của Teams trỏ tới tổ chức đang hoạt động hoặc tổ chức mới của cùng tệp. Nhóm được tạo sau tổ chức.
+  Nếu Ban/Phòng đã có, không khai báo lại trong Organizations; dùng mã đó làm parentCode/orgCode. Chỉ nhập nhóm thì để Organizations trống.
+- Mã so sánh không phân biệt hoa/thường, được trim; mã phải là text để giữ số 0 đầu.
+- Chỉ tạo mới: mã tổ chức trùng DB/tệp hoặc mã nhóm trùng trong cùng tổ chức đều báo lỗi; không ghi đè/bỏ qua im lặng.
+  API tạo nhóm đơn lẻ vẫn cho phép code rỗng, riêng import bắt buộc code để kiểm tra trùng rõ ràng.
+- Global admin nhập cả Organizations/Teams. ADMIN ORG chỉ nhập Teams trong nhánh active của scope;
+  Organizations phải trống. Dòng tham chiếu ngoài scope không làm lộ thông tin tổ chức ngoài quyền.
+- Tối đa 5 MiB nén, 20 MiB nội dung ZIP, 100 ZIP entries, 1000 dòng dữ liệu tổng cộng; không đặt dữ liệu
+  sau dòng Excel 1001 của mỗi sheet. Không nhận .xls/.xlsm, công thức, ô lỗi, ô gộp, sheet/cột lạ.
+  Dòng trống bỏ qua, dòng ẩn vẫn xử lý. File staging được dọn sau xử lý; không lưu tệp nhập lâu dài.
+
+Ví dụ data thành công của kiểm tra trước:
+
+```json
+{
+  "dryRun": true,
+  "organizationCount": 2,
+  "teamCount": 3,
+  "createdOrganizations": 0,
+  "createdTeams": 0
+}
+```
+
+Khi nhập thật thành công, dryRun=false và createdOrganizations/createdTeams bằng số dòng tương ứng.
+Có lỗi: HTTP 200, status=ERROR, messageCode=ORGANIZATION-IMPORT_INVALID, data=null, không ghi dòng nào.
+Tối đa 200 errors; field dùng `Sheet[dòng Excel].tênCột` với số dòng bắt đầu từ 1, header là dòng 1.
+Lỗi file/header/giới hạn dùng field=file. Ví dụ phần errors:
+
+```json
+[
+  {"field":"Organizations[3].code","code":"ALREADY_EXISTS","message":"Mã tổ chức đã được sử dụng."},
+  {"field":"Teams[5].orgCode","code":"INVALID_REFERENCE","message":"Không tìm thấy tổ chức đang hoạt động trong phạm vi quản lý."}
+]
+```
+
+Thiếu quyền trả 403/CORE-ACCESS_DENIED; không đăng nhập trả 401 như quy ước chung.
+Lỗi DB/audit ngoài dự kiến vẫn là 500, không chuyển thành thông báo Excel sai; toàn bộ lô rollback.
+Dry-run không khóa/ghi DB hoặc audit. Nhập thật parse file trước khi giữ lock; sau đó kiểm tra lại quyền,
+tham chiếu và mã trùng dưới IdentityWriteLock, ghi dữ liệu và audit từng tổ chức/nhóm trong cùng transaction.
+Kiểm tra trước thành công không giữ chỗ cho mã; nếu dữ liệu đổi, nhập thật có thể báo trùng/tham chiếu lại.
+
+Luồng FE: tải mẫu → chọn tệp → kiểm tra → hiện số dòng/lỗi → xác nhận nhập. Đổi tệp phải xóa kết quả kiểm tra cũ;
+khóa nút xác nhận khi đang gửi để tránh double-submit. Hiển thị mã node đang chọn để người dùng copy vào orgCode;
+không tự thay mã tổ chức của các dòng trong tệp. Thành công tải lại tree và panel node đang chọn.
+Import không tự tạo quyền quản trị hay gán nhân sự; các luồng đó dùng API Identity hiện có.
 
 ## 4. Bảng role/scope
 
@@ -154,7 +289,7 @@ SUPER_ADMIN GLOBAL là quản trị gốc, quản lý cả nghiệp vụ toàn h
 - `functions` là danh mục màn hình từ DB; `capabilities` chỉ mô tả các action quản trị mà role có thể có, còn phụ thuộc scope, target và field-level policy. ADMIN GLOBAL có thể tạo org/đổi status; ADMIN ORG không có hai thao tác này. SUPER_ADMIN có thêm capability ADMIN_ROLE_GRANT; ADMIN không có capability này. Không coi functions là quyền CREATE/UPDATE/DELETE.
 - `/auth/me` giữ contract hiện tại `user,roles,functions,roleGrants,functionDetails,functionScopes`. Những scope trong roleGrants/functionScopes dùng field `type`; body POST role-grants dùng field `scope`.
 
-## 5. Danh sách 21 API core
+## 5. Danh sách API: 21 core, 2 API đọc tổ chức và 2 API template/import
 
 | # | Method và path dưới /api/v1 | Body/filter chính | data thành công |
 |---|---|---|---|
@@ -179,6 +314,10 @@ SUPER_ADMIN GLOBAL là quản trị gốc, quản lý cả nghiệp vụ toàn h
 | 19 | POST /orgs/{orgId}/teams | code?,name,description? | TeamInfo, 201 |
 | 20 | PATCH /teams/{teamId} | code,name,description | TeamInfo, 200 |
 | 21 | DELETE /teams/{teamId} | Không body | null, 200 |
+| O1 | GET /orgs/tree | parentId?,page,size (mặc định 20) | PageResponse<OrganizationTreeNode>, 200 |
+| O2 | GET /orgs/{orgId}/contents | page,size (mặc định 6),sort | OrganizationContents, 200 |
+| O3 | GET /orgs/import-template | Không body | Tệp .xlsx binary, 200 |
+| O4 | POST /orgs/import | multipart file; query dryRun (mặc định true) | OrganizationImportResult, 200 |
 
 Sort whitelist: users `id/username/fullName/createTime`; orgs `id/code/name/sortNo`; teams `id/code/name`. `q` tối đa 100 ký tự, tìm chuỗi literal không coi `%`/`_` là wildcard của người dùng. User query tìm userId/username/fullName/email; org query tìm code/name. Filters không được phép không mở rộng scope.
 
@@ -191,7 +330,7 @@ Không thêm `/members`, `/membership`, `/admins`, `/departments`, `/functions`,
 3. Profile: phân biệt field tự sửa với thông tin tổ chức/quyền và metadata nguồn readonly. LOCAL/SSO hiển thị theo authProvider.
 4. User list/detail: ba trạng thái canonical; thao tác tạm dừng/kích hoạt riêng với khóa/mở. Không có hard-delete user. Role tab nhiều grant và nhãn scope rõ ràng.
 5. Membership editor: cảnh báo thu hồi scoped grants khi chuyển; tải lại detail sau lưu; actor không tự chuyển hoặc tự sửa role.
-6. Org screen: phân biệt node UNIT/DEPARTMENT với team; tree lazy-load có phân trang và scoped roots. Disable thao tác global-only đối với ADMIN ORG.
+6. Org screen: tải cây bằng `/orgs/tree`, khi mở node truyền parentId; dùng hasChildren để hiện nút mở rộng và totalPages để tải tiếp. Khi chọn node, gọi `/orgs/{id}/contents` để cập nhật panel và phân trang nhóm. Phân biệt node UNIT/DEPARTMENT với team; disable thao tác global-only đối với ADMIN ORG. Hiển thị loading/empty và bỏ qua response cũ nếu người dùng đã chuyển node khác.
 7. Team card: preview 5 người + số lượng thật, “Xem tất cả” mở list `/users?teamId=...`; hiển thị lỗi ORGANIZATION-TEAM_IN_USE khi xóa nhóm còn tham chiếu.
 8. Quyền: dựng selector theo assignableScopes, không single-role/adminScope; không cho UI tự đoán quyền theo positionName hoặc org của actor.
 9. Xử lý loading/empty, HTTP 200/ERROR, validation và lỗi HTTP bảo mật/giao thức; hiển thị responseId để hỗ trợ tra cứu. Đổi role/status/membership/password có thể làm phiên target hết hiệu lực.
@@ -209,6 +348,6 @@ Swagger `/swagger-ui/index.html` là nguồn schema request/response chi tiết.
 - File này: luồng tích hợp, phạm vi nghiệp vụ, form và quy tắc hiển thị.
 - [API_CONTRACT.md](API_CONTRACT.md): BaseResponse, HTTP status, mã lỗi và validation dùng chung; đây là nguồn danh mục lỗi, không sao chép toàn bộ sang tài liệu Identity.
 - Swagger `/swagger-ui/index.html` và OpenAPI `/v3/api-docs`: schema request/response chi tiết từ phiên bản backend đang triển khai.
-- [Postman collection](../postman/corebanking-academy.postman_collection.json), [Local environment](../postman/local.postman_environment.json), [Dev environment](../postman/dev.postman_environment.json): mẫu đủ 21 API, login tự bind accessToken vào environment đang chọn. Local dùng `http://localhost:8019`, Dev dùng `http://103.121.90.119:8019`; tự nhập mật khẩu vào environment, không commit credential/token đã điền.
+- [Postman collection](../postman/corebanking-academy.postman_collection.json), [Local environment](../postman/local.postman_environment.json), [Dev environment](../postman/dev.postman_environment.json): mẫu 21 API core, 2 API đọc tổ chức và template/import, login tự bind accessToken vào environment đang chọn. Local dùng `http://localhost:8019`, Dev dùng `http://103.121.90.119:8019`; tự nhập mật khẩu vào environment, không commit credential/token đã điền.
 
 Test theo từng luồng và chọn ID dữ liệu phù hợp; không chạy toàn collection như một kịch bản tự động dọn dữ liệu. Đổi mật khẩu/đăng xuất làm token cũ hết hiệu lực; xóa nhóm còn thành viên, grant hoặc tham chiếu Learning sẽ trả lỗi nghiệp vụ. Xem hướng dẫn Postman trong API_CONTRACT trước khi chạy.

@@ -167,7 +167,8 @@ public class TeamAdministrationService {
     private void uniqueCode(Long orgId, String code, Long exceptId) {
         if (code != null && !code.isBlank()
             && teams.existsByOrgIdAndCodeIgnoreCaseAndIdNot(orgId, code.trim(), exceptId)) {
-            throw new BusinessException(OrganizationResponseCode.TEAM_CODE_EXISTS);
+            throw BusinessException.field(OrganizationResponseCode.TEAM_CODE_EXISTS, "code", "ALREADY_EXISTS",
+                "Mã nhóm đã được sử dụng trong tổ chức này.");
         }
     }
 }

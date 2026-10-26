@@ -214,32 +214,68 @@ public class IdentityAccessPolicy {
 
         switch (request.scope()) {
             case GLOBAL, OWN -> {
-                if (request.orgId() != null || request.teamId() != null) {
-                    throw new BusinessException(IdentityResponseCode.INVALID_SCOPE);
+                if (request.orgId() != null) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "orgId", "NOT_ALLOWED",
+                        "Phạm vi GLOBAL hoặc OWN không được chọn tổ chức.");
+                }
+                if (request.teamId() != null) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "teamId", "NOT_ALLOWED",
+                        "Phạm vi GLOBAL hoặc OWN không được chọn nhóm.");
                 }
             }
             case ORG -> {
-                if (request.orgId() == null || request.teamId() != null) {
-                    throw new BusinessException(IdentityResponseCode.INVALID_SCOPE);
+                if (request.orgId() == null) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "orgId", "REQUIRED",
+                        "Vui lòng chọn tổ chức cho phạm vi ORG.");
+                }
+                if (request.teamId() != null) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "teamId", "NOT_ALLOWED",
+                        "Phạm vi ORG không được chọn nhóm.");
                 }
                 requireOrg(boundary, request.orgId());
                 requireActiveOrg(request.orgId());
             }
             case TEAM -> {
-                var team = request.teamId() == null ? null : teams.findById(request.teamId()).orElse(null);
-                if (team == null || !"active".equals(team.getStatus())
-                    || (request.orgId() != null && !Objects.equals(request.orgId(), team.getOrgId()))) {
-                    throw new BusinessException(IdentityResponseCode.INVALID_SCOPE);
+                if (request.teamId() == null) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "teamId", "REQUIRED",
+                        "Vui lòng chọn nhóm cho phạm vi TEAM.");
+                }
+                var team = teams.findById(request.teamId()).orElse(null);
+                if (team == null) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "teamId", "NOT_FOUND",
+                        "Nhóm được chọn không còn tồn tại. Vui lòng chọn lại nhóm.");
+                }
+                if (!"active".equals(team.getStatus())) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "teamId", "INACTIVE",
+                        "Nhóm được chọn đã ngừng hoạt động. Vui lòng chọn nhóm khác.");
+                }
+                if (request.orgId() != null && !Objects.equals(request.orgId(), team.getOrgId())) {
+                    throw BusinessException.field(IdentityResponseCode.INVALID_SCOPE, "teamId", "MISMATCH",
+                        "Nhóm không thuộc tổ chức đã chọn. Vui lòng chọn lại nhóm.");
                 }
                 requireOrg(boundary, team.getOrgId());
-                requireActiveOrg(team.getOrgId());
+                requireActiveOrg(team.getOrgId(), request.orgId() == null ? "teamId" : "orgId");
             }
         }
     }
 
     public void requireActiveOrg(Long orgId) {
-        if (orgId == null || !organizations.hasActiveAncestry(orgId)) {
-            throw new BusinessException(IdentityResponseCode.INVALID_MEMBERSHIP);
+        requireActiveOrg(orgId, "orgId");
+    }
+
+    /** Field phụ thuộc ngữ cảnh: tổ chức hồ sơ, tổ chức cha hoặc tổ chức của nhóm được chọn. */
+    public void requireActiveOrg(Long orgId, String field) {
+        if (orgId == null) {
+            throw BusinessException.field(IdentityResponseCode.INVALID_MEMBERSHIP, field, "REQUIRED",
+                "Vui lòng chọn tổ chức.");
+        }
+        if (!organizations.hasActiveAncestry(orgId)) {
+            if (!organizations.existsById(orgId)) {
+                throw BusinessException.field(IdentityResponseCode.INVALID_MEMBERSHIP, field, "NOT_FOUND",
+                    "Tổ chức được chọn không còn tồn tại. Vui lòng chọn lại.");
+            }
+            throw BusinessException.field(IdentityResponseCode.INVALID_MEMBERSHIP, field, "INVALID_VALUE",
+                "Tổ chức được chọn hoặc cấp cha đã ngừng hoạt động, hoặc cây tổ chức không hợp lệ.");
         }
     }
 
@@ -253,9 +289,22 @@ public class IdentityAccessPolicy {
         }
 
         if (teamId != null) {
+            if (orgId == null) {
+                throw BusinessException.field(IdentityResponseCode.INVALID_MEMBERSHIP, "orgId", "REQUIRED",
+                    "Vui lòng chọn tổ chức trước khi gán nhóm.");
+            }
             var team = teams.findById(teamId).orElse(null);
-            if (team == null || !"active".equals(team.getStatus()) || !Objects.equals(orgId, team.getOrgId())) {
-                throw new BusinessException(IdentityResponseCode.INVALID_MEMBERSHIP);
+            if (team == null) {
+                throw BusinessException.field(IdentityResponseCode.INVALID_MEMBERSHIP, "teamId", "NOT_FOUND",
+                    "Nhóm được chọn không còn tồn tại. Vui lòng chọn lại nhóm.");
+            }
+            if (!"active".equals(team.getStatus())) {
+                throw BusinessException.field(IdentityResponseCode.INVALID_MEMBERSHIP, "teamId", "INACTIVE",
+                    "Nhóm được chọn đã ngừng hoạt động. Vui lòng chọn nhóm khác.");
+            }
+            if (!Objects.equals(orgId, team.getOrgId())) {
+                throw BusinessException.field(IdentityResponseCode.INVALID_MEMBERSHIP, "teamId", "MISMATCH",
+                    "Nhóm không thuộc tổ chức đã chọn. Vui lòng chọn lại nhóm.");
             }
         }
     }
