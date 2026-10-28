@@ -58,6 +58,20 @@ public class LearningIdentityService {
         return names;
     }
 
+    /** Tên đơn vị theo lô cho báo cáo; giữ cả đơn vị đã ngưng vì dữ liệu lịch sử vẫn tham chiếu. */
+    public Map<Long, String> orgNames(Collection<Long> ids) {
+        Map<Long, String> names = new HashMap<>();
+        organizations.findAllById(ids).forEach(org -> names.put(org.getId(), org.getName()));
+        return names;
+    }
+
+    /** Tên nhóm theo lô cho báo cáo; giữ cả nhóm đã ngưng vì dữ liệu lịch sử vẫn tham chiếu. */
+    public Map<Long, String> teamNames(Collection<Long> ids) {
+        Map<Long, String> names = new HashMap<>();
+        teams.findAllById(ids).forEach(team -> names.put(team.getId(), team.getName()));
+        return names;
+    }
+
     public String activeOrg(Long id) {
         policy.requireActiveOrg(id);
         return organizations.findById(id).orElseThrow().getName();

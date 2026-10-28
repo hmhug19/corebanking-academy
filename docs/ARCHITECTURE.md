@@ -31,7 +31,8 @@ vn.com.coreacademy
 ├── learning                        # Danh mục, nội dung, giao học, tài nguyên và tiến độ
 ├── knowledge                       # Kho tri thức Trợ lý AI: tải lên, worker nền, RAG cục bộ (Ollama + pgvector)
 ├── assistant                       # Trợ lý nhanh: vòng lặp agent có công cụ (Ollama), yêu cầu chờ xác nhận
-└── assessment / reporting / ...    # Phạm vi nghiệp vụ chưa triển khai
+├── assessment                      # Quiz Engine P0: câu hỏi, cấu hình đề, lượt thi, chấm và job tự nộp
+└── reporting / ...                 # Phạm vi nghiệp vụ chưa triển khai
 ```
 
 Identity có controller/service/repository/entity/dto/mapper/security; Organization có API org/team; Audit ghi

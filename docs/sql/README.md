@@ -119,6 +119,13 @@ nếu đã có dữ liệu cần kế hoạch nâng cấp riêng. Giữ ddl-auto
 
 Contract và hướng dẫn từng bảng: [LEARNING.md](../api/LEARNING.md).
 Request mẫu: [cURL](../api/LEARNING_CURL.md), [Postman](../postman/learning.postman_collection.json).
+
+## Bổ sung Quiz Engine (Assessment P0)
+
+[learning_hub_assessment.sql](learning_hub_assessment.sql) tạo 10 bảng ngân hàng câu hỏi, cấu hình bài thi, lượt thi, lịch sử chấm lại,
+snapshot đề, đáp án và cấp thêm lượt. Chạy **một lần sau Identity và Learning**, trước khi chạy bản ứng dụng có entity
+Assessment (ddl-auto=validate sẽ từ chối khởi động nếu thiếu bảng). Không FK/REFERENCES, không DROP, không seed; nhóm
+năng lực tạo qua API. Chưa chạy SQL lên DB server của ứng dụng. Contract: [ASSESSMENT.md](../api/ASSESSMENT.md).
 SQL Identity dưới đây vẫn là nguồn khởi tạo duy nhất của **cụm Identity**, không thay bằng SQL Learning.
 
 ## Dữ liệu Learning mẫu cho FE

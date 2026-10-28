@@ -1,0 +1,233 @@
+# API Quiz Engine (Assessment)
+
+Phạm vi P0: danh mục năng lực, ngân hàng câu hỏi, cấu hình bài thi và luồng làm bài của học viên (bắt đầu/tiếp
+tục, lưu đáp án, nộp, chấm, xem kết quả) cùng job tự nộp khi hết giờ. P1: quản trị lượt thi (tra cứu, chi tiết,
+hủy lượt, nộp hộ), cấp/thu hồi lượt thêm, đổi trạng thái/xóa câu hỏi hàng loạt, đóng/xóa/xem thử đề, xóa nhóm
+năng lực, lịch sử và xuất CSV lượt thi của học viên, nhập/xuất Excel câu hỏi, báo cáo thi và chấm lại. Gắn bài thi
+vào điều kiện hoàn thành khóa học **chưa** triển khai.
+
+Envelope, mã lỗi chung và phân trang theo [API_CONTRACT.md](API_CONTRACT.md). Mọi API yêu cầu đăng nhập.
+
+## Dữ liệu
+
+[learning_hub_assessment.sql](../sql/learning_hub_assessment.sql): 10 bảng `competencies`, `questions`,
+`question_options`, `quizzes`, `quiz_questions`, `quiz_attempts`, `attempt_questions`, `attempt_answers`,
+`quiz_attempt_grants`, `attempt_regrades`. Không FK; service kiểm tra tham chiếu. Thiết kế dựa trên `assessment_schema.sql` và điều
+chỉnh theo quy ước repository:
+
+| Điểm điều chỉnh | Lý do |
+|---|---|
+| Schema `learning_hub`, tên bảng số nhiều, PK `<entity>_id`, cột `create_time/update_time/row_version` | Thống nhất với Identity/Learning |
+| `user_id`, `created_by`, `granted_by`… là `varchar(20)` | `users.user_id` là mã cán bộ dạng chuỗi |
+| `quiz_attempts.enrollment_id` thay `assignment_id` | Quyền thi xét theo lần học (`course_enrollments`) của Learning |
+| `questions.content_version` thay `version` | Tránh nhầm với `row_version` (optimistic lock) |
+| `quizzes.row_version` | Chống hai người sửa cấu hình/pool cùng lúc |
+| `quiz_attempts.grace_seconds` (snapshot) | Job tự nộp dùng ân hạn của chính lượt, không đọc cấu hình đề hiện tại |
+| `quiz_questions.quiz_question_id` | PK đơn cho JPA; vẫn UNIQUE (quiz_id, question_id) |
+| Không tạo 3 view báo cáo | Báo cáo chưa thuộc P0; tổng hợp lượt tính trong service |
+
+Mã trạng thái/loại dùng IN HOA (`ACTIVE`, `DRAFT`, `IN_PROGRESS`…) theo thiết kế gốc.
+
+## Quyền
+
+| Nhóm API | Điều kiện |
+|---|---|
+| Đọc nhóm năng lực | Tài khoản đã đăng nhập |
+| Ghi nhóm năng lực | SUPER_ADMIN hoặc ADMIN phạm vi GLOBAL |
+| Câu hỏi, bài thi | Quyền quản lý khóa học theo `LearningAccessPolicy` (cùng quy tắc biên soạn khóa); `courseId` bắt buộc khi liệt kê |
+| `/me/**` | Vai trò LEARNER/OWN và lần học hợp lệ của khóa (khóa active, nguồn giao/tự đăng ký còn hiệu lực); lượt của người khác trả `ASSESSMENT-NOT_FOUND` |
+
+Module Assessment truy cập Learning qua adapter công khai `LearningAssessmentAccess`, không dùng repository Learning.
+
+## Danh sách API
+
+| STT | Method / đường dẫn | Mục đích |
+|---|---|---|
+| 1 | GET `/api/v1/competencies?status` | Danh sách nhóm năng lực (phẳng, có parentId) |
+| 2 | POST `/api/v1/competencies` | Tạo nhóm năng lực |
+| 3 | PUT `/api/v1/competencies/{id}?expectedVersion` | Cập nhật nhóm năng lực |
+| 4 | GET `/api/v1/questions?courseId&q&lessonId&competencyId&questionType&difficulty&status&page&size&sort` | Danh sách câu hỏi của khóa; sort `id/code/updateTime` |
+| 5 | GET `/api/v1/questions/{id}` | Chi tiết câu, phương án, đáp án đúng, đề đang dùng |
+| 6 | POST `/api/v1/questions` | Tạo câu hỏi |
+| 7 | PUT `/api/v1/questions/{id}?expectedVersion` | Cập nhật câu hỏi và toàn bộ phương án |
+| 8 | GET `/api/v1/quizzes?courseId&q&status&quizType&page&size&sort` | Danh sách đề của khóa kèm số lượt chấm/đạt; sort `id/title/updateTime` |
+| 9 | GET `/api/v1/quizzes/{id}` | Cấu hình đề và pool câu hỏi |
+| 10 | POST `/api/v1/quizzes` | Tạo đề DRAFT |
+| 11 | PUT `/api/v1/quizzes/{id}?expectedVersion` | Cập nhật cấu hình đề |
+| 12 | PUT `/api/v1/quizzes/{id}/questions?expectedVersion` | Thay pool câu hỏi |
+| 13 | POST `/api/v1/quizzes/{id}/publish` | Xuất bản (body `expectedVersion`) |
+| 14 | GET `/api/v1/me/quizzes/{quizId}` | Màn giới thiệu: cấu hình, lượt còn lại, lượt dở, lý do chặn |
+| 15 | POST `/api/v1/me/quizzes/{quizId}/attempts` | Bắt đầu hoặc tiếp tục lượt |
+| 16 | GET `/api/v1/me/quizzes/{quizId}/attempts` | Lịch sử thi của tôi theo đề |
+| 17 | GET `/api/v1/me/quiz-attempts/{attemptId}` | Tải lại lượt đang làm (F5/đổi máy) |
+| 18 | PATCH `/api/v1/me/quiz-attempts/{attemptId}/questions/{attemptQuestionId}` | Lưu đáp án/cờ xem lại một câu |
+| 19 | POST `/api/v1/me/quiz-attempts/{attemptId}/submit` | Nộp bài, chấm, trả kết quả |
+| 20 | GET `/api/v1/me/quiz-attempts/{attemptId}/result` | Kết quả lượt đã chấm |
+| 21 | POST `/api/v1/questions/bulk-status` | Đổi ACTIVE/INACTIVE tối đa 100 câu |
+| 22 | POST `/api/v1/questions/bulk-delete` | Xóa mềm tối đa 100 câu không nằm trong đề nào |
+| 23 | GET `/api/v1/quizzes/{quizId}/attempts?userId&status&passed&from&to&page&size&sort` | Lượt thi của đề cho quản trị; sort `id/startedAt/submittedAt/scorePercent` |
+| 24 | GET `/api/v1/quiz-attempts/{attemptId}` | Chi tiết bài làm, đáp án đúng, IP/thiết bị, số lần đổi đáp án |
+| 25 | POST `/api/v1/quiz-attempts/{attemptId}/void` | Hủy lượt (body `reason`) |
+| 26 | GET `/api/v1/quizzes/{quizId}/grants?userId` | Lịch sử cấp thêm lượt, gồm lần đã thu hồi |
+| 27 | POST `/api/v1/quizzes/{quizId}/grants` | Cấp thêm lượt (`userId`, `extraAttempts` 1–10, `reason`) |
+| 28 | POST `/api/v1/quiz-attempt-grants/{grantId}/revoke` | Thu hồi lượt cấp nhầm |
+
+| 29 | DELETE `/api/v1/competencies/{id}?expectedVersion` | Xóa mềm nhóm năng lực không còn câu hỏi/nhóm con gắn vào |
+| 30 | POST `/api/v1/quizzes/{id}/close` | Đóng đề (body `expectedVersion`), tự nộp lượt đang làm |
+| 31 | DELETE `/api/v1/quizzes/{id}?expectedVersion` | Xóa mềm đề chưa từng có lượt thi |
+| 32 | GET `/api/v1/quizzes/{id}/preview` | Bốc thử một đề kèm đáp án; không tạo lượt |
+| 33 | POST `/api/v1/quiz-attempts/{attemptId}/force-submit` | Quản trị nộp hộ lượt đang làm |
+| 34 | GET `/api/v1/me/quiz-attempts?quizId&status&page&size&sort` | Mọi lượt thi của tôi; sort `id/startedAt/submittedAt` |
+| 35 | GET `/api/v1/me/quiz-attempts/export?quizId&status&sort` | Xuất CSV lượt thi của tôi, tối đa 10.000 dòng |
+
+| 36 | GET `/api/v1/questions/import-template` | Tải mẫu Excel nhập câu hỏi |
+| 37 | POST `/api/v1/questions/import?courseId&dryRun&overwrite` | Kiểm tra (dryRun=true, mặc định) hoặc nhập câu hỏi từ .xlsx (part `file`) |
+| 38 | GET `/api/v1/questions/export?courseId&q&competencyId&questionType&difficulty&status` | Xuất ngân hàng câu hỏi ra .xlsx cùng định dạng tệp nhập |
+| 39 | POST `/api/v1/quizzes/{id}/regrade` | Chấm lại sau khi sửa đáp án (`questionId`, `reason`, `dryRun` mặc định true) |
+| 40 | GET `/api/v1/reports/assessment/overview` | Tổng quan: lượt chấm, học viên, đạt, tỷ lệ đạt, điểm TB; theo đề và theo đơn vị |
+| 41 | GET `/api/v1/reports/assessment/results` | Từng lượt thi kèm tên học viên, đơn vị/nhóm lúc thi; sort `id/startedAt/submittedAt/scorePercent` |
+| 42 | GET `/api/v1/reports/assessment/learners?quizId` | Học viên được giao theo đề, gồm cả người chưa thi; sort `userId/finalScore/lastSubmittedAt` |
+| 43 | GET `/api/v1/reports/assessment/competency?groupBy=user\|org` | Năng lực theo học viên hoặc đơn vị lúc thi |
+| 44 | GET `/api/v1/reports/assessment/questions` | Phân tích câu hỏi theo phiên bản, câu sai nhiều nhất trước |
+| 45 | GET `/api/v1/reports/assessment/{type}/export` | CSV cho `results/learners/competency/questions`, tối đa 10.000 dòng |
+| 46 | GET `/api/v1/me/competency?courseId` | Năng lực của chính học viên |
+
+API 21–28, 30–33, 37–39 yêu cầu quyền quản lý khóa chứa câu hỏi/đề; API 36 cần vai trò giảng viên/quản trị; bulk cần
+quyền trên mọi khóa trong lô. API 29 chỉ dành cho quản trị GLOBAL; API 34–35, 46 chỉ trả dữ liệu của caller. API 40–45
+theo phạm vi báo cáo bên dưới. Báo cáo nhận chung `orgId` (gồm đơn vị con), `teamId`, `courseId`, `quizId`, `from`/`to`
+(thời điểm nộp, ISO-8601; learners không áp dụng from/to).
+
+`expectedVersion` là `rowVersion` vừa đọc; lệch trả `ASSESSMENT-CONFLICT`.
+
+## Quy tắc chính
+
+**Câu hỏi.** Từ 2 tới 10 phương án; SINGLE đúng 1 đáp án đúng, MULTIPLE ít nhất 2. Mã để trống thì sinh `Q<ID>`.
+PUT gửi danh sách phương án đầy đủ: có `id` thì sửa tại chỗ, không `id` là phương án mới, phương án cũ vắng mặt
+bị xóa mềm (ID đã chụp vào đề không bị tái sử dụng). Câu đã từng phát đề mà đổi nội dung/giải thích/loại/phương
+án/đáp án thì `contentVersion` tăng; lượt cũ **không** tự chấm lại.
+
+**Đề.** Tạo ở DRAFT; mỗi khóa tối đa một FINAL_EXAM. Xuất bản khi số câu ACTIVE trong pool ≥ `questionCount` và
+`closeAt` (nếu có) ở tương lai. Đề đã xuất bản vẫn sửa được nhưng phải còn đủ câu ACTIVE; thay đổi chỉ áp dụng cho
+lượt mới vì lượt đã chụp `timeLimitMinutes`, `passPercent`, `scoringMode`, `graceSeconds`, `maxScore` và đề.
+
+**Bắt đầu lượt.** Khóa advisory theo (đề, học viên) và unique index `IN_PROGRESS` chặn tạo hai lượt. Lượt dở còn
+hạn được trả lại; lượt dở đã quá hạn được tự nộp trước. Thứ tự chặn (`blockReason`): `CLOSED`, `NOT_OPEN`,
+`NOT_READY`, `LESSONS_REQUIRED`, `PASSED` (khi không cho thi nâng điểm), `NO_ATTEMPTS`, `WAIT`. Lượt tính ngay khi
+bắt đầu, trừ VOIDED; lượt còn lại = `maxAttempts` + lượt được cấp − lượt đã dùng. `deadlineAt` =
+min(bắt đầu + thời lượng, `closeAt`). Đề trả về không có đáp án đúng/giải thích.
+
+**Lưu đáp án.** PATCH chỉ nhận `selectedOptionIds` và/hoặc `flagged` (bỏ qua = giữ nguyên, `[]` = bỏ chọn, field
+khác bị từ chối). ID phải thuộc đề đã phát; SINGLE tối đa 1. Chặn khi lượt không còn IN_PROGRESS hoặc quá
+`deadlineAt + graceSeconds`. Lưu, nộp và job cùng khóa dòng lượt thi.
+
+**Chấm.** Chỉ đọc snapshot. ALL_OR_NOTHING (và mọi câu SINGLE): đúng đủ mới có điểm. PARTIAL (câu MULTIPLE):
+`points × max(0, đúng − sai) / số đáp án đúng`. Đạt khi `rawScore × 100 ≥ passPercent × maxScore` (so trên giá trị
+chưa làm tròn); `scorePercent` cắt xuống 2 chữ số. Nộp sau hạn được ghi `AUTO_SUBMITTED` với giờ nộp = `deadlineAt`,
+`submitType` = `TIMEOUT` hoặc `QUIZ_CLOSED` nếu bị cắt bởi giờ đóng đề.
+
+**Tổng hợp.** `bestScore`, `lastScore` luôn có; `finalScore` và `passed` theo `scoreMethod`: BEST = điểm cao nhất /
+từng đạt, LAST = lượt chấm gần nhất. `everPassed` dùng cho chặn thi lại và `reviewPolicy=AFTER_PASS`.
+
+**Xem lại.** `review` có khi `AFTER_SUBMIT`; `AFTER_PASS` khi đã từng đạt; `AFTER_CLOSE` khi đề CLOSED hoặc quá
+`closeAt`; `NEVER` không trả.
+
+**Quản trị lượt thi.** Hủy lượt chuyển sang VOIDED với lý do, người và giờ hủy; lượt không tính vào số lượt đã dùng
+và điểm nhưng bài làm được giữ. Hủy lượt đang làm giải phóng chỗ cho lượt mới; hủy lại lượt đã VOIDED trả
+`ASSESSMENT-CONFLICT`. Cấp thêm lượt chỉ cho học viên có lần học của khóa; thu hồi giữ dòng lịch sử, lượt đã dùng
+không bị hủy và số lượt còn lại không âm.
+
+**Đóng, xóa, xem thử đề.** Đóng chỉ áp dụng cho đề PUBLISHED (đề DRAFT trả `ASSESSMENT-CONFLICT`, gọi lại khi đã
+CLOSED trả cấu hình hiện tại). Khi đóng, mọi lượt đang làm được chấm ngay với đáp án đã lưu (`AUTO_SUBMITTED`,
+`QUIZ_CLOSED`, giờ nộp không vượt deadline); mở lại bằng publish. Xóa chỉ cho đề chưa có lượt nào kể cả VOIDED
+(`ASSESSMENT-QUIZ_IN_USE`). Xem thử dùng đúng quy tắc bốc đề của lượt thật nên mỗi lần gọi có thể khác nhau.
+
+**Nộp hộ.** Chỉ lượt IN_PROGRESS; ghi `SUBMITTED`/`ADMIN`, giờ nộp không vượt deadline của lượt.
+
+**Câu hỏi hàng loạt.** Cả lô thành công hoặc thất bại cùng nhau. Ngưng sử dụng bị chặn (`ASSESSMENT-QUIZ_NOT_READY`)
+nếu làm đề đã xuất bản thiếu câu ACTIVE; xóa bị chặn (`ASSESSMENT-QUESTION_IN_USE`) khi câu còn trong pool đề chưa xóa.
+
+**Nhập/xuất Excel câu hỏi.** Theo khuôn import tổ chức: .xlsx tối đa 5 MiB/20 MiB giải nén/100 entry ZIP, tối đa
+1000 dòng, chỉ sheet `Instructions` và `Questions`, không công thức/ô gộp/cột lạ. Cột theo thứ tự:
+
+| Cột | Quy tắc |
+|---|---|
+| ma | Văn bản ≤ 50; trống = sinh `Q<ID>`. Trùng mã trong tệp hoặc câu đã có là lỗi; `overwrite=true` ghi đè câu cùng mã trong cùng khóa (không chuyển khóa) |
+| noi_dung | Bắt buộc |
+| loai | `SINGLE`/`MULTIPLE` (chấp nhận `mot`/`nhieu`) |
+| phuong_an | 2–10 phương án, phân tách `\|`; nội dung phương án không chứa `\|` |
+| dap_an_dung | Chữ cái theo thứ tự phương án, phân tách `\|` (vd `A\|C`); SINGLE đúng 1, MULTIPLE ≥ 2 |
+| giai_thich | Tùy chọn |
+| do_kho | `EASY/MEDIUM/HARD` (chấp nhận Dễ/Trung bình/Khó); trống = MEDIUM |
+| nhom_kien_thuc | **Mã** nhóm năng lực ACTIVE |
+| diem | Số dương ≤ 9999.99, tối đa 2 chữ số thập phân; trống = 1 |
+| trang_thai | `ACTIVE/INACTIVE`; trống = ACTIVE |
+
+Mỗi dòng đi qua đúng validation của API tạo câu. Có lỗi: `ASSESSMENT-IMPORT_INVALID`, không ghi dòng nào,
+`errors.field` = `Questions[dòng Excel].cột` (header là dòng 1, tối đa 200 lỗi); lỗi cấp tệp dùng field `file`.
+dryRun không khóa/ghi; nhập thật kiểm tra lại dưới write lock và ghi audit từng câu cùng một bản tổng hợp
+`ASSESSMENT_QUESTIONS_IMPORTED`. Ghi đè thay toàn bộ phương án (ID mới); câu đã phát đề tăng `contentVersion`.
+Xuất trả tối đa 10.000 câu theo bộ lọc danh sách; tệp xuất nhập lại được ngay với `overwrite=true`.
+Endpoint tải tệp (mẫu, xuất Excel, xuất CSV lượt thi) khai báo cả JSON để lỗi vẫn trả envelope chung.
+
+**Phạm vi báo cáo.** SUPER_ADMIN/ADMIN/INSTRUCTOR/REPORT_VIEWER, xét role và scope trên cùng grant: GLOBAL = toàn hệ
+thống, ORG = đơn vị và cây con active, TEAM = đúng nhóm; chỉ đọc. Không có grant phù hợp (vd chỉ LEARNER) trả 403.
+Dữ liệu lọc theo đơn vị/nhóm **lúc thi** (`quiz_attempts.org_id/team_id`), riêng learners theo snapshot lúc ghi danh;
+chuyển đơn vị không đổi báo cáo quá khứ. Bộ lọc orgId/teamId chỉ thu hẹp trong phạm vi. Giảng viên xem theo đơn vị
+học viên, không theo khóa sở hữu. Đạt/điểm cuối mỗi học viên theo `scoreMethod` của từng đề; passRate =
+học viên đạt / học viên có lượt chấm. Năng lực tính trên mọi lượt đã chấm. learnerStatus: `NOT_STARTED`,
+`IN_PROGRESS`, `FAILED`, `PASSED`; attemptsLeft gồm lượt cấp thêm.
+
+**Chấm lại.** Đáp án mới = phương án đúng hiện tại của `questionId` (phải thuộc khóa của đề), khớp theo ID phương án
+trong snapshot từng lượt đã chấm (SUBMITTED/AUTO_SUBMITTED; lượt đang làm/VOIDED không đụng tới). Kết quả mỗi lượt:
+`INCREASED` (chỉ loại này được áp dụng khi dryRun=false), `DECREASED` (chỉ báo, không hạ điểm học viên), `UNCHANGED`,
+`SKIPPED_OPTIONS_CHANGED` (phương án đổi ID, vd ghi đè bằng Excel), `SKIPPED_TYPE_CHANGED`. Áp dụng: khóa từng lượt,
+cập nhật snapshot đáp án, điểm câu và tổng điểm/đạt, ghi `attempt_regrades` (trước/sau, lý do, người chấm, batchId) và
+một audit `ASSESSMENT_ATTEMPTS_REGRADED`; chạy lại không ghi trùng. Lịch sử hiển thị ở `regrades` của API 24.
+
+**Job tự nộp.** Mỗi `app.assessment.auto-submit-interval` (mặc định 1 phút) quét tối đa 100 lượt quá
+`deadlineAt + graceSeconds`, mỗi lượt một transaction có khóa dòng; chạy lại hoặc nhiều instance không chấm trùng.
+
+## Mã lỗi
+
+| messageCode | Khi nào |
+|---|---|
+| ASSESSMENT-NOT_FOUND | Không tồn tại, đã xóa, đề DRAFT với học viên, hoặc lượt của người khác |
+| ASSESSMENT-CONFLICT | `expectedVersion` lệch hoặc ghi đè đồng thời |
+| ASSESSMENT-DUPLICATE | Trùng mã câu hỏi/nhóm năng lực, khóa đã có FINAL_EXAM |
+| ASSESSMENT-INVALID_REFERENCE | Bài học/nhóm năng lực/câu hỏi trong pool không hợp lệ |
+| ASSESSMENT-QUIZ_NOT_READY | Pool không đủ câu ACTIVE |
+| ASSESSMENT-QUIZ_NOT_OPEN / QUIZ_CLOSED | Ngoài khoảng mở đề |
+| ASSESSMENT-LESSONS_REQUIRED | Đề yêu cầu hoàn thành bài bắt buộc |
+| ASSESSMENT-ALREADY_PASSED / NO_ATTEMPTS_LEFT / RETAKE_WAIT | Không được bắt đầu lượt mới |
+| ASSESSMENT-ATTEMPT_CLOSED | Lưu đáp án khi lượt đã nộp/hết giờ |
+| ASSESSMENT-ATTEMPT_IN_PROGRESS | Xem kết quả khi lượt chưa nộp |
+| ASSESSMENT-QUESTION_IN_USE | Xóa câu hỏi còn nằm trong pool của đề |
+| ASSESSMENT-QUIZ_IN_USE | Xóa đề đã có lượt thi |
+| ASSESSMENT-COMPETENCY_IN_USE | Xóa nhóm năng lực còn câu hỏi hoặc nhóm con |
+| ASSESSMENT-EXPORT_TOO_LARGE | Xuất CSV/Excel vượt 10.000 dòng |
+| ASSESSMENT-IMPORT_INVALID | Tệp nhập câu hỏi có lỗi tệp hoặc lỗi dòng |
+
+Thiếu lần học hợp lệ trả mã Learning `LEARNING-NOT_AVAILABLE`; thiếu quyền quản lý khóa trả HTTP 403.
+
+## Kiểm thử
+
+Integration test tại `src/test/java/vn/com/coreacademy/assessment` (51 test, 8 lớp) gọi API qua MockMvc với JWT của
+tài khoản seed, dựng khóa học bằng chính API Learning (danh mục → khóa → xuất bản → giao học) rồi kiểm tra envelope
+BaseResponse, field JSON FE dùng, mã lỗi/field path, phân quyền 401/403, cách ly dữ liệu giữa học viên, không lộ đáp án
+khi đang thi, hết giờ/job tự nộp, đóng đề, chấm PARTIAL, BEST/LAST, snapshot khi sửa câu, bắt đầu đồng thời và đủ 46
+operation trên `/v3/api-docs`, nhập/xuất Excel, báo cáo (số liệu tính tay, phạm vi GLOBAL/ORG/TEAM) và chấm lại (chỉ áp dụng tăng điểm).
+
+- Có Docker: `mvn clean verify` (Testcontainers pgvector, giống test Knowledge).
+- Không có Docker: chỉ định PostgreSQL 14+ được phép tạo/xóa database tạm
+  `mvn clean verify -Dit.postgres.url=jdbc:postgresql://localhost:5432/postgres [-Dit.postgres.user=… -Dit.postgres.password=…]`.
+  Test tạo lại database `coreacademy_assessment_it` và chạy 5 file SQL; không dùng database ứng dụng.
+- Không có cả hai: các test này bị bỏ qua (skipped), không fail.
+
+Mọi mốc thời gian của lượt thi được cắt về micro giây trước khi lưu để response ngay sau khi ghi khớp giá trị đọc lại.
+
+## Chưa làm / cần chốt
+
+- Gắn đề vào `course_assessments` và điều kiện hoàn thành khóa: Learning vẫn chặn bài QUIZ (`LEARNING-QUIZ_UNAVAILABLE`);
+  đạt bài thi chưa cập nhật tiến độ khóa.
+- Chưa có `quiz_revision`: lượt mới của học viên khóa cũ dùng cấu hình đề hiện tại.
+- Chấm lại chưa áp dụng cho lượt đang làm (lượt đó chấm theo snapshot khi nộp; chạy lại chấm lại sau khi nộp).
