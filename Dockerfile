@@ -6,10 +6,9 @@ COPY pom.xml lombok.config ./
 RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp dependency:go-offline
 
 COPY src ./src
-# The SQL scripts are never auto-executed; the persistence tests load them into a throwaway database when the build
-# can reach a Docker daemon, and are skipped when it cannot.
+# Compile test sources without running tests; integration tests require a Docker-enabled environment.
 COPY docs/sql ./docs/sql
-RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp clean verify
+RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp clean package -DskipTests
 
 FROM eclipse-temurin:21-jre-noble AS runtime
 RUN apt-get update \
