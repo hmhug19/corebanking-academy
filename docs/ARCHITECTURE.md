@@ -47,6 +47,14 @@ Assistant chạy vòng lặp agent (`AgentService`) với các công cụ (`Agen
 chạy ngay; công cụ thay đổi dữ liệu trở thành yêu cầu chờ trong bộ nhớ (`PendingActionStore`) và chỉ chạy khi người
 dùng xác nhận. Contract tại [ASSISTANT.md](api/ASSISTANT.md).
 
+Community đã có source C01–C138, hiện bật 135 API và tạm comment controller AI C126–C128:
+[DB Community](api/COMMUNITY_DATABASE.md).
+Tài liệu gồm 51 bảng cho toàn bộ Q&A, Blog/video, Guild/Wiki/Radar, review kiến trúc, digest, đóng góp/huy hiệu, thống kê, Learning links và AI có nguồn;
+quan hệ scalar ID không có FK vật lý. Contract toàn bộ phạm vi, ma trận quyền/vòng đời, upload và checklist nghiệm thu
+tại [COMMUNITY.md](api/COMMUNITY.md). Đã có baseline SQL/mapping 51 bảng, 138 route và các worker;
+trạng thái từng nhóm nằm ở đầu contract, cách gọi tại [COMMUNITY_CURL.md](api/COMMUNITY_CURL.md).
+Baseline chưa được chạy trên server.
+
 ## Ranh giới xử lý
 
 ```text

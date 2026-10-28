@@ -16,7 +16,6 @@ import io.minio.AbortMultipartUploadArgs;
 import io.minio.CompleteMultipartUploadArgs;
 import io.minio.CreateMultipartUploadArgs;
 import io.minio.Http;
-import io.minio.ListPartsArgs;
 import io.minio.MinioAsyncClient;
 import io.minio.UploadPartArgs;
 import io.minio.errors.ErrorResponseException;
@@ -61,19 +60,23 @@ public class MultipartObjectStorage {
 
     public void complete(String key, String uploadId, List<CommittedPart> parts) {
         validate(key);
+        if (parts == null || parts.isEmpty()) {
+            throw new IllegalArgumentException("Multipart manifest is empty");
+        }
+        Part[] committed = new Part[parts.size()];
+        for (int index = 0; index < parts.size(); index++) {
+            var part = parts.get(index);
+            if (part.number() != index + 1 || part.size() <= 0 || part.etag() == null || part.etag().isBlank()) {
+                throw new IllegalArgumentException("Multipart manifest is invalid");
+            }
+            committed[index] = new Part(part.number(), part.etag());
+        }
         try {
-            var actual = client.listParts(partsRequest(key, uploadId)).join().result();
-            if (actual.isTruncated() || actual.parts().size() != parts.size()) {
-                throw new IllegalStateException("Multipart provider manifest differs");
-            }
-            for (int index = 0; index < parts.size(); index++) {
-                if (actual.parts().get(index).partNumber() != parts.get(index).number()
-                    || actual.parts().get(index).partSize() != parts.get(index).size()) {
-                    throw new IllegalStateException("Multipart provider part differs");
-                }
-            }
+            // Complete gửi đúng ETag đã ACK khi upload; provider từ chối part thiếu/sai ETag.
+            // Không phụ thuộc XML ListParts chứa Initiator/Owner khác nhau giữa các S3 provider.
+            // Worker vẫn kiểm tổng byte và SHA-256 toàn object trước khi chuyển asset sang ready.
             client.completeMultipartUpload(CompleteMultipartUploadArgs.builder().bucket(properties.bucket())
-                .object(key).uploadId(uploadId).parts(actual.parts().toArray(Part[]::new)).build()).join();
+                .object(key).uploadId(uploadId).parts(committed).build()).join();
         } catch (CompletionException exception) {
             throw storageFailure(exception);
         }
@@ -108,32 +111,6 @@ public class MultipartObjectStorage {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("S3 transport checksum unavailable", exception);
         }
-    }
-
-    private ListPartsArgs partsRequest(String key, String uploadId) {
-        // SDK 9.0.3 dùng BucketArgs.Builder cho ListPartsArgs, thiếu setter object.
-        // Cô lập tương thích ở adapter; không reflection hoặc đổi SDK toàn ứng dụng.
-        return new ListPartsArgs() {
-            @Override
-            public String bucket() {
-                return properties.bucket();
-            }
-
-            @Override
-            public String object() {
-                return key;
-            }
-
-            @Override
-            public String uploadId() {
-                return uploadId;
-            }
-
-            @Override
-            public Integer maxParts() {
-                return 1000;
-            }
-        };
     }
 
     private IllegalStateException storageFailure(CompletionException exception) {
