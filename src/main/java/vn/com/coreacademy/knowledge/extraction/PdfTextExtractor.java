@@ -21,6 +21,8 @@ public class PdfTextExtractor {
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);
             stripper.setLineSeparator("\n");
+            // PDFBox dùng separator riêng ở cuối trang; chuẩn hóa cả hai để Windows không giữ CR trong dòng cuối.
+            stripper.setPageEnd("\n");
 
             int pageCount = document.getNumberOfPages();
             List<TextLine> lines = new ArrayList<>();

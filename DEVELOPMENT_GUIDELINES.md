@@ -441,6 +441,7 @@ Lưu ý / rủi ro còn lại:
 | Envelope/validation/lỗi | [API_CONTRACT.md](docs/api/API_CONTRACT.md) |
 | Xác thực, hồ sơ, user, org/team và role/scope | [Contract Identity](docs/api/IDENTITY.md) |
 | Schema và seed Identity | [SQL README](docs/sql/README.md), [schema](docs/sql/learning_hub_identity.sql) |
+| Community: toàn bộ phạm vi và trạng thái source | [Contract](docs/api/COMMUNITY.md), [DB](docs/api/COMMUNITY_DATABASE.md), [cURL/test](docs/api/COMMUNITY_CURL.md) |
 | Logging | [LOGGING.md](docs/operations/LOGGING.md) |
 | Deploy và CI/CD | [DEPLOY_UBUNTU.md](docs/operations/DEPLOY_UBUNTU.md), [CICD.md](docs/operations/CICD.md) |
 | Ollama trên Mac qua Tailscale | [TAILSCALE_OLLAMA.md](docs/operations/TAILSCALE_OLLAMA.md) |

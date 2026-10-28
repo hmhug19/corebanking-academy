@@ -15,6 +15,11 @@ import vn.com.coreacademy.audit.repository.AuditLogRepository;
 public class IdentityAuditService {
     private final AuditLogRepository logs;
 
+    @Transactional(readOnly = true)
+    public boolean hasAction(String actor, String entityType, String entityId, String action) {
+        return logs.existsByActorIdAndEntityTypeAndEntityIdAndAction(actor, entityType, entityId, action);
+    }
+
     /**
      * Ghi audit trong transaction nghiệp vụ hiện có để cùng commit hoặc rollback với dữ liệu thay đổi. changes
      * chỉ chứa trường đã chọn lọc, không đưa mật khẩu/hash/token hoặc toàn bộ payload vào audit; orgId được bổ

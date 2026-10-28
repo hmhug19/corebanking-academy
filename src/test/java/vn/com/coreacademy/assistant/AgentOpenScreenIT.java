@@ -119,7 +119,7 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
         assertThat(openScreen.description()).contains("PROFILE").doesNotContain("USER_MANAGEMENT")
             .doesNotContain("SYSTEM_AUDIT");
         assertThat(offered.getAllValues().get(0)).extracting(ToolDefinition::name)
-            .containsExactlyInAnyOrder("search_documents", "open_screen", "update_profile");
+            .containsExactlyInAnyOrder("search_documents", "search_community", "open_screen", "update_profile");
     }
 
     private static RequestPostProcessor as(String userId) {

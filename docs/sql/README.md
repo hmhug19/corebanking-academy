@@ -1,5 +1,114 @@
 # Khởi tạo Identity / Organization / RBAC
 
+## Bổ sung Community
+
+[learning_hub_community.sql](learning_hub_community.sql) là baseline thủ công **51 bảng**, chạy một lần sau
+Identity → Learning → media/progress → Knowledge (pgvector), trước khi chạy ứng dụng có entity Community.
+Giữ `ddl-auto=validate`, Flyway tắt; không tự chạy script lúc startup. Không có FK/REFERENCES/cascade vật lý,
+không UNIQUE nghiệp vụ, không seed user/password/moderator. Không chạy lại trên DB đã có bảng Community.
+Script dùng cùng schema pgvector của Knowledge (`learning_hub` hoặc schema có trong search_path đã cấu hình).
+
+```bash
+psql -h <dev-host> -U <dev-user> -d <dev-database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_community.sql
+```
+
+DB hiện hữu cần review migration riêng; không DROP dữ liệu để chạy lại baseline. Script được bọc transaction:
+lỗi tạo bảng/index thì rollback toàn bộ. Khi đã có dữ liệu, rollback ứng dụng cần kế hoạch phù hợp,
+không dùng lệnh xóa schema. Giữ backup/quy trình triển khai của môi trường hiện tại.
+
+Source có 138 route thiết kế Community, hiện bật 135 route và tạm dừng 3 route AI C126–C128; các bảng vẫn giữ nguyên.
+Cần cấu hình hạ tầng/actor và nghiệm thu tích hợp trước bật worker trên môi trường thật.
+Contract/trạng thái: [COMMUNITY.md](../api/COMMUNITY.md), [cURL](../api/COMMUNITY_CURL.md),
+[từ điển cột và sơ đồ](../api/COMMUNITY_DATABASE.md).
+
+### SQL Community: tạo bảng, danh mục và demo FE
+
+| File | Mục đích | Khi chạy |
+|---|---|---|
+| [learning_hub_community.sql](learning_hub_community.sql) | Tạo 51 bảng/670 cột và 21 index, comment từng cột; không FK/UNIQUE nghiệp vụ | Một lần trên DB chưa có Community, sau các baseline phụ thuộc |
+| [learning_hub_community_catalog.sql](learning_hub_community_catalog.sql) | 12 tag, 6 alias, 3 luật huy hiệu; không tạo award/điểm | Khởi tạo danh mục sau khi DBA chọn đúng org/actor và duyệt nội dung |
+| [learning_hub_community_demo.sql](learning_hub_community_demo.sql) | Nội dung và quan hệ tổng hợp để FE kiểm thử | **Chỉ dev/test/staging**, chạy một lần sau catalog |
+| [learning_hub_community_verify.sql](learning_hub_community_verify.sql) | Chỉ đọc: kiểm 51 bảng/670 cột, 142 tham chiếu logic, pointer revision/accept/thread, XOR và các grain chính; thống kê số dòng | Sau DDL/seed/migration; dữ liệu lớn nên chạy ngoài giờ cao điểm |
+
+Kiểm chứng mới nhất: **235 test pass, 0 skipped**, gồm 35 test Community; đã chạy 49 test từng bị bỏ qua.
+DDL gốc đã chạy trên PostgreSQL/pgvector thật. S3 multipart/Range, FFmpeg, transcript, scheduler/digest/ledger/cleanup
+và phục hồi lease sau hard crash đã được kiểm thực tế trên hạ tầng local riêng.
+Chi tiết và giới hạn tại [Community](../api/COMMUNITY.md#kết-quả-kiểm-thử-tích-hợp-ngày-28102026).
+3 API AI vẫn tạm dừng. Chưa kiểm chứng cấu hình AIStor/TLS/network hoặc tải của production; bộ SQL không thay thế
+smoke test triển khai và kế hoạch backup/migration của môi trường đích.
+
+**Thứ tự chạy trên DB mới**: Identity → Learning → media/progress → Knowledge → Community → catalog → verify.
+Knowledge cài pgvector; runtime DB role cần quyền schema/table/sequence theo tài liệu triển khai.
+AI C126–C128 tạm dừng **không bỏ yêu cầu có kiểu vector của schema** vì entity vẫn tồn tại.
+Đối với DB đã có Community, không chạy lại baseline; cần migration theo diff schema thực tế và kế hoạch backup/rollback.
+Không gộp demo vào baseline hoặc tự chạy các file này lúc ứng dụng khởi động.
+
+Ví dụ psql, dùng cơ chế xác thực của môi trường hiện tại, không đưa mật khẩu vào command:
+
+```bash
+# DB mới: các baseline Identity/Learning/media/Knowledge phải được chạy trước.
+psql -h <host> -U <db-user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_community.sql
+# Sửa v_org_code và v_actor_name ở đầu khối DO của catalog trước khi chạy.
+psql -h <host> -U <db-user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_community_catalog.sql
+psql -h <host> -U <db-user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_community_verify.sql
+
+# Chỉ dev/test/staging: chọn đúng DB trước khi chạy demo, sau đó kiểm tra lại.
+psql -h <test-host> -U <test-user> -d <test-database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_community_demo.sql
+psql -h <test-host> -U <test-user> -d <test-database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_community_verify.sql
+```
+
+Catalog mặc định resolve org code `BIDV110B803`, actor username `quantri.ban`; phải thay cho môi trường khác.
+Actor cần active, đã đổi mật khẩu và có ADMIN đúng scope, SUPER_ADMIN GLOBAL hoặc moderator hiện hữu của org.
+Script không tự cấp quyền. Catalog chạy lại chỉ INSERT mục còn thiếu, giữ nguyên mục đã sửa/retire/merge và ghi audit
+chỉ khi thực sự thêm dữ liệu; nếu có tag slug/badge code trùng grain trong org thì dừng để DBA xử lý.
+Catalog là gợi ý tag và luật huy hiệu, không phải quyết định thư viện nào được phép sử dụng trong ngân hàng.
+
+Demo dùng ba tài khoản tổng hợp `giangvien`, `hocvien`, `hocvien.tichhop` cùng org `BIDV110B803` đã tồn tại và active,
+`must_change_password=false`; không tạo/sửa Identity hoặc moderator. Với Identity khác phải sửa phần resolve và review
+script trước. ID lấy bằng `RETURNING`, không hardcode ID số hoặc sửa sequence. UUID/request_hash trong seed dành riêng
+cho fixture SQL, không dùng để retry một request tạo nội dung qua API. FE tạo mới phải dùng UUID mới từ client.
+
+Sau demo có:
+
+- 3 Guild, 9 membership: owner/member active, yêu cầu join pending và lời mời private Guild invited.
+- 15 nội dung đủ 9 kind, 16 revision: 3 question solved/unanswered/answered, 2 answer, 3 article organization/guild/restricted,
+  2 Wiki nháp có cây cha/con, 1 Radar nháp, 1 review mở, 1 bài học sự cố, 1 yêu cầu tài liệu, 1 recording nháp chờ video.
+  Một article có đồng thời published và draft để thử cập nhật version.
+- Comment/reply, review invitation đã accept và thread có root comment, vote, content link, help request,
+  expertise, subscription, preferences, 2 collection và grant chia sẻ, 1 report open.
+- 15 event outbox **pending** đúng nguồn published/accept/vote. Chỉ khi bật worker bằng actor được cấu hình thì mới
+  phát sinh notifications/index/ledger/award theo logic thật. Không có event giả đã processed hoặc dữ liệu gửi ra ngoài.
+
+`giangvien` xem được bản nháp ở C11 `/me/contents`; Wiki/Radar cần submit và moderator độc lập duyệt qua API để xuất bản.
+`hocvien` đang được mời vào DevOps private Guild nên chưa xem bài trong đó; `hocvien.tichhop` là active member và xem được.
+Bài restricted được grant read cho `hocvien`; `hocvien.tichhop` không được xem. Collection chia sẻ cho người này chỉ hiện
+bài còn quyền, không lộ mục restricted hoặc ghi chú của mục bị lọc. Collection demo không phải bookmark mặc định `Đã lưu`.
+Recording không thể phát/publish trước khi upload video thật; API AI vẫn trả 404.
+
+Giữ trống các bảng cần thao tác/hạ tầng thật: asset/part/revision_asset/transcript, search chunk, AI,
+moderator/approval/action/maintenance, notification/digest, ledger/award, Learning link, mention, question link và content view.
+Điểm tổng hợp đọc có thể đã phản ánh vote/accept; ledger/award chỉ xuất hiện sau worker reconcile hợp lệ.
+Không seed số liệu giả để làm UI trông như đã chạy các luồng này.
+Nếu tài khoản đã có expertise với `available_for_help=false`, demo giữ lựa chọn cũ và chỉ tạo help request khi người
+nhận hiện có ít nhất một expertise đang cho phép trợ giúp.
+
+Chạy **toàn bộ file** bằng SQL client có stop-on-error; transaction bảo đảm không có bộ dữ liệu nửa chừng.
+Demo có marker audit và prefix `FE-DEMO`/`fe-demo-`, lần hai báo lỗi và rollback thay vì sửa dữ liệu FE đã thao tác.
+Nếu lỗi không xóa schema để chạy lại. Dùng DB test mới hoặc xử lý theo kế hoạch dọn dữ liệu được duyệt.
+
+Kiểm chứng bộ SQL ngày 28/10/2026 trên PostgreSQL 16 local riêng:
+
+- Catalog thêm 21 dòng lần đầu, lần hai thêm 0; actor không có quyền bị từ chối trước khi ghi.
+- Demo tạo 15 content/16 revision/3 Guild; chạy lại bị chặn và số dòng không tăng.
+- Cố ý gây lỗi ở audit cuối script: toàn bộ content/Guild/outbox của lần seed lỗi rollback về 0; sau đó chạy file chuẩn thành công.
+- Script chỉ đọc kiểm tra 51 bảng/670 cột, 142 tham chiếu, pointer và grain đã pass.
+- 8 nhóm kiểm tra qua HTTP thật với tài khoản demo đã pass: danh mục, Q&A/accept, draft/revision, quyền restricted/private Guild,
+  collection lọc mục không có quyền, các màn hình đọc khác và API AI vẫn 404.
+
+Đợt xác minh bổ sung đã chạy **DDL nguyên bản** trên PostgreSQL 16.15/pgvector 0.8.0, giữ `vector(1024)` và index HNSW
+của Knowledge. Catalog/demo/verify nguyên bản cũng pass trên DB này. Không còn dùng bản sao `real[]` làm bằng chứng
+cho kiểm chứng vector. Hạ tầng S3/video/worker/crash đã kiểm local; model inference và cấu hình production chưa được chạy.
+
 ## Bổ sung module Learning
 
 Backend hiện có thêm 46 API Learning và 26 bảng được định nghĩa tại

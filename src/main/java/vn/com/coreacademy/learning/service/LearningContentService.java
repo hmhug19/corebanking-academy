@@ -61,6 +61,7 @@ public class LearningContentService {
     private final LearningWriteLock writeLock;
     private final LearningMapper mapper;
     private final IdentityAuditService audit;
+    private final List<LearningResourceExtension> resourceExtensions;
 
     /** Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload. */
     @Transactional
@@ -171,6 +172,7 @@ public class LearningContentService {
         requireDraft(course, revision);
         version(revision, request.expectedVersion());
         requirePublishable(course, revision);
+        resourceExtensions.forEach(extension -> extension.validateBeforePublish(revisionId));
 
         // Bước 2: đóng băng bản nội dung và chuyển con trỏ; enrollment cũ giữ revision_id cũ.
         revision.setState(RevisionState.PUBLISHED);
@@ -571,6 +573,14 @@ public class LearningContentService {
             original.objectives().stream().map(LearningViews.CourseObjectiveView::description).toList(), chapters,
             original.completionRule().rewardPoints());
         writeTree(target, payload, actor);
+        repository.flush();
+        var sourceLessons = repository.lessons(source.getId());
+        var targetLessons = repository.lessons(target.getId());
+        Map<Long, Long> lessonIds = new HashMap<>();
+        for (int index = 0; index < sourceLessons.size(); index++) {
+            lessonIds.put(sourceLessons.get(index).getId(), targetLessons.get(index).getId());
+        }
+        resourceExtensions.forEach(extension -> extension.cloneResources(source.getId(), target.getId(), lessonIds));
         var rule = repository.rules(target.getId()).get(0);
         rule.setRewardPoints(payload.rewardPoints());
         repository.save(rule, actor);
