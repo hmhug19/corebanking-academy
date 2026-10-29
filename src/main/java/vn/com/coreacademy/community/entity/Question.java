@@ -17,7 +17,7 @@ import org.hibernate.type.SqlTypes;
 @Getter
 @Setter
 @NoArgsConstructor
-@Entity
+@Entity(name = "CommunityQuestion")
 @Table(name = "community_questions", schema = "learning_hub")
 public class Question extends CommunityRecord {
     @Id
