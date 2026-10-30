@@ -22,6 +22,7 @@ import vn.com.coreacademy.community.entity.CommunityOutboxEvent;
 import vn.com.coreacademy.community.entity.Question;
 import vn.com.coreacademy.community.entity.ReviewProposal;
 import vn.com.coreacademy.community.exception.CommunityResponseCode;
+import vn.com.coreacademy.community.repository.CommunityManagementRepository;
 import vn.com.coreacademy.community.repository.CommunityRelations;
 import vn.com.coreacademy.community.repository.CommunityRepository;
 import vn.com.coreacademy.identity.service.IdentityWriteLock;
@@ -31,6 +32,7 @@ import vn.com.coreacademy.identity.service.IdentityWriteLock;
 public class CommunityLifecycleService {
     private final CommunityRepository repository;
     private final CommunityRelations relations;
+    private final CommunityManagementRepository management;
     private final CommunityContentService contents;
     private final CommunityPolicy policy;
     private final IdentityWriteLock writeLock;
@@ -71,6 +73,8 @@ public class CommunityLifecycleService {
                     throw new AccessDeniedException("Moderator case required to reopen");
                 }
                 content.setLifecycleStatus(CommunityCodes.ACTIVE);
+                // Mở lại nghĩa là câu hỏi không còn được coi là trùng lặp.
+                management.duplicateLinks(contentId).forEach(repository::remove);
             }
             case "archive" -> {
                 if (!Set.of(CommunityCodes.ACTIVE, CommunityCodes.CLOSED).contains(previous)) {
@@ -114,7 +118,8 @@ public class CommunityLifecycleService {
         if (content.getDeletedAt() != null) {
             // Tombstone không chứa body, tag, tác giả hoặc file của nội dung đã xóa.
             return new ContentDetail(contentId, content.getKind(), null, null, null, "deleted", null, null,
-                content.getRowVersion(), null, null, List.of(), null, null, null, null, false, 0, 0, 0);
+                content.getRowVersion(), null, null, List.of(), null, null, null, null, false, 0, 0, 0, false, null,
+                false, null, null, null);
         }
         return contents.detail(content, actor, false);
     }

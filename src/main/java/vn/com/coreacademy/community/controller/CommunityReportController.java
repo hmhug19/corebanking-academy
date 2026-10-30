@@ -54,6 +54,15 @@ public class CommunityReportController {
         return BaseResponse.ok(reports.list(status, assignedToMe, page, size));
     }
 
+    @GetMapping("/moderation/reports/{reportId}")
+    @ApiResponse(responseCode = "200", description = """
+        Case trong đơn vị; người báo cáo, mô tả và lịch sử xử lý chỉ trả cho moderator đang được giao.""",
+        useReturnTypeSchema = true)
+    @Operation(summary = "Chi tiết report")
+    public BaseResponse<ReportView> detail(@PathVariable @Positive Long reportId) {
+        return BaseResponse.ok(reports.detail(reportId));
+    }
+
     @PostMapping("/moderation/reports/{reportId}/assign")
     @ApiResponse(responseCode = "200", description = "Report được giao xử lý.", useReturnTypeSchema = true)
     @Operation(summary = "Giao case cho moderator")

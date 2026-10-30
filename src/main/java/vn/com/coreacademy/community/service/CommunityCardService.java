@@ -44,7 +44,7 @@ public class CommunityCardService {
                 active && published && question, active && published,
                 active && published && !author && CommunityCodes.VOTABLE_KINDS.contains(card.kind()),
                 published && author && question && List.of("active", "closed").contains(card.lifecycleStatus()),
-                active && author && !"answer".equals(card.kind()), published);
+                active && author && !"answer".equals(card.kind()), published, false, false, false, false, false);
             ContentRef duplicate = row[11] == null ? null : new ContentRef(number(row[11]), row[12].toString(),
                 number(row[13]), row[14].toString(), "/community/contents/" + row[11]);
             return new ContentCard(card.contentId(), card.kind(), card.title(), card.summary(), card.authorUserId(),
@@ -56,7 +56,8 @@ public class CommunityCardService {
                 row[3] == null ? null : row[3].toString(), number(row[6]), nullable(row[4]),
                     Boolean.TRUE.equals(row[10]),
                 duplicate, nullable(row[7]), card.publishedRevisionId(), Boolean.TRUE.equals(row[8]), nullable(row[5]),
-                Boolean.TRUE.equals(row[9]));
+                Boolean.TRUE.equals(row[9]), editable && Boolean.TRUE.equals(row[19]),
+                row[20] == null ? null : row[20].toString());
         }).toList();
     }
 

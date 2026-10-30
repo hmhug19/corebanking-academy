@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.community.constants.CommunityCodes;
 import vn.com.coreacademy.community.dto.ContentViews.PersonRef;
 import vn.com.coreacademy.community.dto.ModerationRequests.AssignReport;
 import vn.com.coreacademy.community.dto.ModerationRequests.CreateReport;
@@ -25,7 +27,9 @@ import vn.com.coreacademy.community.dto.ModerationViews.CommentEvidence;
 import vn.com.coreacademy.community.dto.ModerationViews.EvidenceView;
 import vn.com.coreacademy.community.dto.ModerationViews.ReportCapabilities;
 import vn.com.coreacademy.community.dto.ModerationViews.ReportCard;
+import vn.com.coreacademy.community.dto.ModerationViews.ReportTarget;
 import vn.com.coreacademy.community.dto.ModerationViews.ReportView;
+import vn.com.coreacademy.community.entity.Answer;
 import vn.com.coreacademy.community.entity.CommunityComment;
 import vn.com.coreacademy.community.entity.CommunityContent;
 import vn.com.coreacademy.community.entity.CommunityRecord;
@@ -92,11 +96,66 @@ public class CommunityReportService {
         if (status != null && !Set.of("open", "in_review", "resolved", "dismissed").contains(status)) {
             throw BusinessException.validation("status", "INVALID_VALUE", "Trạng thái report chưa hợp lệ.");
         }
-        return PageResponse.from(reports.list(actor, status, assigned, page, size).map(report ->
-            new ReportCard(report.getReportId(), report.getReasonCode(), report.getReportStatus(),
-                report.getCreateTime(),
-                person(report.getAssignedModeratorUserId()), report.getRowVersion(), report.getCreateTime(),
-                report.getUpdateTime())));
+        var rows = reports.list(actor, status, assigned, page, size);
+        preloadTargets(rows.getContent());
+        Map<String, String> names = identity.fullNames(rows.getContent().stream()
+            .map(CommunityReport::getAssignedModeratorUserId).filter(Objects::nonNull).collect(Collectors.toSet()));
+        return PageResponse.from(rows.map(report -> {
+            String moderator = report.getAssignedModeratorUserId();
+            return new ReportCard(report.getReportId(), report.getReasonCode(), report.getReportStatus(),
+                report.getCreateTime(), moderator == null ? null : new PersonRef(moderator, names.get(moderator)),
+                report.getRowVersion(), report.getCreateTime(), report.getUpdateTime(), target(report, actor));
+        }));
+    }
+
+    /**
+     * Nạp sẵn bình luận, nội dung, câu hỏi cha của câu trả lời và bản đã đăng của cả trang vào persistence
+     * context, để target() của từng thẻ đọc lại từ đó thay vì vài truy vấn mỗi thẻ.
+     */
+    private void preloadTargets(List<CommunityReport> rows) {
+        Set<Long> commentIds = rows.stream().map(CommunityReport::getCommentId).filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (!commentIds.isEmpty()) {
+            repository.list("select c from CommunityComment c where c.commentId in :ids", CommunityComment.class,
+                Map.of("ids", commentIds));
+        }
+        Set<Long> contentIds = rows.stream().map(report -> report.getContentId() != null ? report.getContentId()
+            : repository.require(CommunityComment.class, report.getCommentId()).getContentId())
+            .collect(Collectors.toSet());
+        List<CommunityContent> contents = contentIds.isEmpty() ? List.of() : repository.list(
+            "select c from CommunityContent c where c.contentId in :ids", CommunityContent.class,
+            Map.of("ids", contentIds));
+        Set<Long> answerIds = contents.stream().filter(c -> CommunityCodes.ANSWER.equals(c.getKind()))
+            .map(CommunityContent::getContentId).collect(Collectors.toSet());
+        if (!answerIds.isEmpty()) {
+            Set<Long> questionIds = repository.list("select a from Answer a where a.contentId in :ids", Answer.class,
+                Map.of("ids", answerIds)).stream().map(Answer::getQuestionContentId).collect(Collectors.toSet());
+            repository.list("select c from CommunityContent c where c.contentId in :ids", CommunityContent.class,
+                Map.of("ids", questionIds));
+        }
+        Set<Long> revisionIds = contents.stream().map(CommunityContent::getCurrentPublishedRevisionId)
+            .filter(Objects::nonNull).collect(Collectors.toSet());
+        if (!revisionIds.isEmpty()) {
+            repository.list("select r from ContentRevision r where r.revisionId in :ids", ContentRevision.class,
+                Map.of("ids", revisionIds));
+        }
+    }
+
+    /**
+     * Moderator chưa được giao chỉ nhận metadata như hàng đợi cùng loại và ID đích; mô tả, người báo cáo và lịch
+     * sử xử lý có thể chứa trích dẫn riêng tư nên chỉ trả cho moderator đang xử lý case.
+     */
+    @Transactional(readOnly = true)
+    public ReportView detail(Long id) {
+        var actor = policy.actor();
+        policy.requireModerator(actor);
+        ReportView view = view(scoped(id, actor), actor);
+        if (view.capabilities().canReadEvidence()) {
+            return view;
+        }
+        return new ReportView(view.reportId(), view.reasonCode(), view.status(), view.reportedAt(),
+            view.assignedModerator(), view.version(), view.createTime(), view.updateTime(), view.targetType(),
+            view.targetId(), null, null, List.of(), view.capabilities(), view.target());
     }
 
     @Transactional
@@ -218,6 +277,7 @@ public class CommunityReportService {
         outcome.putArray("recipientUserIds").add(comment == null ? content.getAuthorUserId()
             : comment.getAuthorUserId());
         outcome.put("reportId", id);
+        outcome.put("action", action);
         contents.event(content, "content_moderated", actor.person().id(), outcome);
         repository.flush();
         return view(report, actor);
@@ -305,6 +365,18 @@ public class CommunityReportService {
             report.getContentId() != null ? "content" : "comment",
             report.getContentId() != null ? report.getContentId() : report.getCommentId(), report.getDescription(),
             person(report.getReporterUserId()), actions(report), new ReportCapabilities(
-                access.moderator(actor.person().id(), actor.person().orgId()), assigned, assigned));
+                access.moderator(actor.person().id(), actor.person().orgId()), assigned, assigned),
+            target(report, actor));
+    }
+
+    /** Tiêu đề chỉ trả khi moderator đọc được nội dung theo ACL thường; role moderator không mở bài private. */
+    private ReportTarget target(CommunityReport report, Actor actor) {
+        CommunityContent content = root(report);
+        String title = null;
+        if (policy.canRead(content, actor) && content.getCurrentPublishedRevisionId() != null) {
+            title = repository.require(ContentRevision.class, content.getCurrentPublishedRevisionId()).getTitle();
+        }
+        return new ReportTarget(report.getCommentId() != null ? "comment" : content.getKind(),
+            content.getContentId(), title);
     }
 }

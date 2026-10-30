@@ -404,6 +404,6 @@ public class CommunityDocumentService {
             "published".equals(reviewed.getRevisionStatus()) ? revision : null,
             "published".equals(reviewed.getRevisionStatus()) ? null : revision,
                 contents.tagViews(content.getContentId()),
-            new Capabilities(false, false, false, false, false, false, false, false), null, null, null, false, 0, 0, 0);
+            Capabilities.NONE, null, null, null, false, 0, 0, 0, false, null, false, null, null, null);
     }
 }

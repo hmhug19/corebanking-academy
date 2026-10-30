@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Community API — 135 active operations; C126–C128 paused",
+    "title": "Community API — 138 active operations; C126–C128 paused",
     "description": "API hệ thống đào tạo nội bộ, quản lý tài khoản, tổ chức và phân quyền. Đăng nhập bằng tên đăng nhập hoặc mã cán bộ, sau đó nhập accessToken vào Authorize để gọi API cần xác thực. Request nhận trực tiếp dữ liệu theo schema, không bọc trong data. Response có dạng BaseResponse: luôn kiểm tra status=SUCCESS hoặc ERROR, kể cả HTTP 200. Validation/lỗi nghiệp vụ trả HTTP 200; lỗi xác thực 401, phân quyền 403, hệ thống 500. Lỗi giao thức giữ HTTP tương ứng. messageCode có dạng PREFIX-REASON, không chứa HTTP status; message/messageTitle bằng tiếng Việt, errors chứa chi tiết theo field. Dùng responseId khi cần hỗ trợ tra cứu.",
     "version": "v1"
   },
@@ -11782,6 +11782,286 @@
           }
         }
       }
+    },
+    "/api/v1/community/moderation/moderators": {
+      "get": {
+        "tags": [
+          "Community moderation"
+        ],
+        "summary": "Danh sách org moderator",
+        "description": "ADMIN đúng scope, SUPER_ADMIN hoặc moderator còn hiệu lực của chính đơn vị.\n- status active (mặc định) hoặc revoked; version từng dòng dùng cho PUT cấp lại hoặc thu hồi.\n",
+        "operationId": "list_14",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "exclusiveMinimum": 0
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "active"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Moderator của đơn vị theo trạng thái.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponsePageResponseModeratorView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nội dung yêu cầu bị thiếu hoặc JSON không đúng cú pháp.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Xác thực không thành công, thiếu token hoặc token không còn hiệu lực.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Không có quyền thực hiện thao tác hoặc truy cập dữ liệu trong phạm vi yêu cầu.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Lỗi hệ thống; cung cấp responseId để hỗ trợ tra cứu.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/community/moderation/reports/{reportId}": {
+      "get": {
+        "tags": [
+          "Community reports"
+        ],
+        "summary": "Chi tiết report",
+        "operationId": "detail_2",
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "exclusiveMinimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Case trong đơn vị; người báo cáo, mô tả và lịch sử xử lý chỉ trả cho moderator đang được giao.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponseReportView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nội dung yêu cầu bị thiếu hoặc JSON không đúng cú pháp.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Xác thực không thành công, thiếu token hoặc token không còn hiệu lực.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Không có quyền thực hiện thao tác hoặc truy cập dữ liệu trong phạm vi yêu cầu.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Lỗi hệ thống; cung cấp responseId để hỗ trợ tra cứu.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/community/moderation/candidates": {
+      "get": {
+        "tags": [
+          "Community moderation"
+        ],
+        "summary": "Nhân sự để chọn moderator hoặc người duy trì",
+        "description": "Cùng phạm vi như danh sách moderator: ADMIN đúng scope, SUPER_ADMIN hoặc moderator còn hiệu lực của đơn vị.\n- q lọc theo họ tên; chỉ trả userId và displayName.\n",
+        "operationId": "candidates",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "exclusiveMinimum": 0
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 0
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Nhân sự đang hoạt động của đơn vị.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponsePageResponsePersonRef"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nội dung yêu cầu bị thiếu hoặc JSON không đúng cú pháp.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Xác thực không thành công, thiếu token hoặc token không còn hiệu lực.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Không có quyền thực hiện thao tác hoặc truy cập dữ liệu trong phạm vi yêu cầu.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Lỗi hệ thống; cung cấp responseId để hỗ trợ tra cứu.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12049,6 +12329,25 @@
           "myVote": {
             "type": "integer",
             "format": "int32"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "subscriptionMode": {
+            "type": "string"
+          },
+          "isDuplicate": {
+            "type": "boolean"
+          },
+          "duplicateTarget": {
+            "$ref": "#/components/schemas/ContentRef"
+          },
+          "closure": {
+            "$ref": "#/components/schemas/Closure"
+          },
+          "questionId": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -15070,6 +15369,21 @@
           },
           "canReport": {
             "type": "boolean"
+          },
+          "canClose": {
+            "type": "boolean"
+          },
+          "canReopen": {
+            "type": "boolean"
+          },
+          "canArchive": {
+            "type": "boolean"
+          },
+          "canDelete": {
+            "type": "boolean"
+          },
+          "canMarkDuplicate": {
+            "type": "boolean"
           }
         }
       },
@@ -15487,6 +15801,12 @@
           },
           "acceptedRevisionIsCurrent": {
             "type": "boolean"
+          },
+          "hasDraft": {
+            "type": "boolean"
+          },
+          "occurredOn": {
+            "type": "string"
           }
         }
       },
@@ -15564,6 +15884,25 @@
           "myVote": {
             "type": "integer",
             "format": "int32"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "subscriptionMode": {
+            "type": "string"
+          },
+          "isDuplicate": {
+            "type": "boolean"
+          },
+          "duplicateTarget": {
+            "$ref": "#/components/schemas/ContentRef"
+          },
+          "closure": {
+            "$ref": "#/components/schemas/Closure"
+          },
+          "questionId": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -17169,6 +17508,12 @@
           "acceptedRevisionIsCurrent": {
             "type": "boolean"
           },
+          "hasDraft": {
+            "type": "boolean"
+          },
+          "occurredOn": {
+            "type": "string"
+          },
           "requestStatus": {
             "type": "string"
           },
@@ -17259,6 +17604,21 @@
           "myVote": {
             "type": "integer",
             "format": "int32"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "subscriptionMode": {
+            "type": "string"
+          },
+          "isDuplicate": {
+            "type": "boolean"
+          },
+          "duplicateTarget": {
+            "$ref": "#/components/schemas/ContentRef"
+          },
+          "closure": {
+            "$ref": "#/components/schemas/Closure"
           },
           "requestStatus": {
             "type": "string"
@@ -18826,6 +19186,12 @@
           "acceptedRevisionIsCurrent": {
             "type": "boolean"
           },
+          "hasDraft": {
+            "type": "boolean"
+          },
+          "occurredOn": {
+            "type": "string"
+          },
           "guildId": {
             "type": "integer",
             "format": "int64"
@@ -18982,6 +19348,12 @@
           "acceptedRevisionIsCurrent": {
             "type": "boolean"
           },
+          "hasDraft": {
+            "type": "boolean"
+          },
+          "occurredOn": {
+            "type": "string"
+          },
           "heldAt": {
             "type": "string",
             "format": "date-time"
@@ -19073,6 +19445,9 @@
           "updateTime": {
             "type": "string",
             "format": "date-time"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ReportTarget"
           }
         }
       },
@@ -19129,6 +19504,9 @@
           },
           "capabilities": {
             "$ref": "#/components/schemas/ReportCapabilities"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ReportTarget"
           }
         }
       },
@@ -19343,6 +19721,12 @@
           "acceptedRevisionIsCurrent": {
             "type": "boolean"
           },
+          "hasDraft": {
+            "type": "boolean"
+          },
+          "occurredOn": {
+            "type": "string"
+          },
           "reviewStatus": {
             "type": "string"
           },
@@ -19455,6 +19839,21 @@
           "myVote": {
             "type": "integer",
             "format": "int32"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "subscriptionMode": {
+            "type": "string"
+          },
+          "isDuplicate": {
+            "type": "boolean"
+          },
+          "duplicateTarget": {
+            "$ref": "#/components/schemas/ContentRef"
+          },
+          "closure": {
+            "$ref": "#/components/schemas/Closure"
           },
           "reviewStatus": {
             "type": "string"
@@ -19628,6 +20027,16 @@
             "items": {
               "$ref": "#/components/schemas/RevisionAssetView"
             }
+          },
+          "changeNote": {
+            "type": "string"
+          },
+          "editor": {
+            "$ref": "#/components/schemas/PersonRef"
+          },
+          "updateTime": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -19669,6 +20078,11 @@
             },
             "maxItems": 20,
             "minItems": 0
+          },
+          "changeNote": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 0
           }
         },
         "required": [
@@ -20660,6 +21074,12 @@
           "acceptedRevisionIsCurrent": {
             "type": "boolean"
           },
+          "hasDraft": {
+            "type": "boolean"
+          },
+          "occurredOn": {
+            "type": "string"
+          },
           "guildId": {
             "type": "integer",
             "format": "int64"
@@ -20762,6 +21182,21 @@
             "type": "integer",
             "format": "int32"
           },
+          "saved": {
+            "type": "boolean"
+          },
+          "subscriptionMode": {
+            "type": "string"
+          },
+          "isDuplicate": {
+            "type": "boolean"
+          },
+          "duplicateTarget": {
+            "$ref": "#/components/schemas/ContentRef"
+          },
+          "closure": {
+            "$ref": "#/components/schemas/Closure"
+          },
           "guildId": {
             "type": "integer",
             "format": "int64"
@@ -20783,6 +21218,169 @@
           },
           "isOutdated": {
             "type": "boolean"
+          }
+        }
+      },
+      "BaseResponsePageResponseModeratorView": {
+        "type": "object",
+        "properties": {
+          "responseId": {
+            "type": "string",
+            "description": "ID đối chiếu log, khớp X-Request-Id khi đi qua RequestIdFilter."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "ERROR"
+            ]
+          },
+          "messageCode": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "messageTitle": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResponseModeratorView"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldViolation"
+            }
+          }
+        }
+      },
+      "PageResponseModeratorView": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModeratorView"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalElements": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "Closure": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/PersonRef"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReportTarget": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "contentId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "BaseResponsePageResponsePersonRef": {
+        "type": "object",
+        "properties": {
+          "responseId": {
+            "type": "string",
+            "description": "ID đối chiếu log, khớp X-Request-Id khi đi qua RequestIdFilter."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "ERROR"
+            ]
+          },
+          "messageCode": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "messageTitle": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResponsePersonRef"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldViolation"
+            }
+          }
+        }
+      },
+      "PageResponsePersonRef": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonRef"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalElements": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalPages": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       }

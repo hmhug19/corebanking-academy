@@ -18,7 +18,10 @@ public class CommunityCardRepository {
     private final EntityManager entityManager;
     private final CommunityDirectorySource directory;
 
-    /** Một query bổ sung cho cả trang: tags, vote, accept, duplicate và khả năng thao tác, không query từng card. */
+    /**
+     * Một query bổ sung cho cả trang: tags, vote, accept, duplicate, khả năng thao tác, bản nháp đang chờ và ngày sự
+     * cố của bài học, không query từng card.
+     */
     public Map<Long, Object[]> extras(List<Long> ids, Actor actor) {
         if (ids.isEmpty()) {
             return Map.of();
@@ -62,7 +65,10 @@ public class CommunityCardRepository {
                 and coalesce(kr.request_status,'open')<>'closed'
                 and (g.guild_id is null or (g.status='active' and exists (
                   select 1 from people p where p.user_id=g.owner_user_id)))),
-              (c.author_user_id=:visibleUser or c.maintainer_user_id=:visibleUser)
+              (c.author_user_id=:visibleUser or c.maintainer_user_id=:visibleUser),
+              c.current_draft_revision_id is not null,
+              (select r.context_json->'lessonLearned'->>'occurredOn' from learning_hub.community_content_revisions r
+                where r.revision_id=c.current_published_revision_id)
             from learning_hub.community_contents c
             left join learning_hub.community_answers a on a.content_id=c.content_id
             left join learning_hub.community_contents parent on parent.content_id=a.question_content_id

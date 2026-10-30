@@ -29,6 +29,14 @@ public class CommunityPreferenceRepository {
             """, CommunitySubscription.class, Map.of("user", userId));
     }
 
+    public CommunitySubscription subscription(String userId, Long contentId) {
+        var values = repository.list("""
+            select s from CommunitySubscription s where s.userId = :user and s.contentId = :content
+            order by s.subscriptionId
+            """, CommunitySubscription.class, Map.of("user", userId, "content", contentId));
+        return values.isEmpty() ? null : values.get(0);
+    }
+
     public List<UserExpertise> expertise(String userId) {
         return repository.list("""
             select e from UserExpertise e where e.userId = :user order by e.tagId, e.expertiseId

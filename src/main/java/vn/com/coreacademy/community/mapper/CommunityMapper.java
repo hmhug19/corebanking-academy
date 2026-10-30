@@ -25,6 +25,7 @@ public interface CommunityMapper {
 
     @Mapping(target = "context", source = "revision.contextJson")
     @Mapping(target = "revisionVersion", source = "revision.rowVersion")
+    @Mapping(target = "editor", ignore = true)
     RevisionDetail revision(ContentRevision revision, Long contentVersion, List<RevisionAssetView> assets);
 
     RevisionAssetView asset(RevisionAsset asset);
@@ -58,5 +59,7 @@ public interface CommunityMapper {
     @Mapping(target = "isAccepted", ignore = true)
     @Mapping(target = "acceptedRevisionId", ignore = true)
     @Mapping(target = "acceptedRevisionIsCurrent", ignore = true)
+    @Mapping(target = "hasDraft", ignore = true)
+    @Mapping(target = "occurredOn", ignore = true)
     ContentCard card(CommunityContent content, ContentRevision revision);
 }

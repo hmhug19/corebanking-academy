@@ -31,10 +31,12 @@ public class AuthorizationService {
     private final TeamRepository teams;
     private final OrganizationRepository organizations;
     private final IdentityAccessPolicy access;
+    private final List<FunctionGrantSource> grantSources;
 
     /**
-     * Tổng hợp các vai trò, chức năng và scope còn hiệu lực từ database. Tài khoản phải đổi mật khẩu tạm nhận
-     * quyền rỗng; chức năng chỉ được gộp để hiển thị, không thay kiểm tra quyền hành động.
+     * Tổng hợp các vai trò, chức năng và scope còn hiệu lực từ database, cộng chức năng do module khác cấp qua
+     * FunctionGrantSource. Tài khoản phải đổi mật khẩu tạm nhận quyền rỗng; chức năng chỉ được gộp để hiển thị,
+     * không thay kiểm tra quyền hành động.
      */
     public UserRights rights(String userId) {
         var current = access.current(userId);
@@ -57,6 +59,27 @@ public class AuthorizationService {
                 screens.putIfAbsent(f.getId(), new FunctionInfo(f.getId(), f.getCode(), f.getName(),
                     f.getRoutePattern(), f.getParentFunctionId(), f.getSortNo()));
                 scoped.computeIfAbsent(f.getCode(), key -> new ArrayList<>()).add(scope);
+            }
+        }
+
+        if (current.getOrgId() != null) {
+            for (var source : grantSources) {
+                for (var grant : source.grants(userId, current.getOrgId())) {
+                    // Chức năng đã có từ vai trò thì chỉ thêm scope (không lặp), khỏi tra lại bảng chức năng.
+                    boolean present = screens.values().stream()
+                        .anyMatch(f -> f.code().equals(grant.functionCode()))
+                        || functions.findByCodeAndActiveTrue(grant.functionCode()).map(f -> {
+                            screens.putIfAbsent(f.getId(), new FunctionInfo(f.getId(), f.getCode(), f.getName(),
+                                f.getRoutePattern(), f.getParentFunctionId(), f.getSortNo()));
+                            return true;
+                        }).orElse(false);
+                    if (present) {
+                        List<Scope> scopes = scoped.computeIfAbsent(grant.functionCode(), key -> new ArrayList<>());
+                        if (!scopes.contains(grant.scope())) {
+                            scopes.add(grant.scope());
+                        }
+                    }
+                }
             }
         }
 
