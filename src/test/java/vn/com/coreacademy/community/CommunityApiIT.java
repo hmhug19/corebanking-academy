@@ -110,7 +110,8 @@ class CommunityApiIT {
         } else {
             PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
                 DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
-            List<String> scripts = List.of("identity", "learning", "media_progress", "knowledge", "community");
+            List<String> scripts = List.of("identity", "learning", "media_progress", "knowledge", "assessment",
+                "community", "community_functions");
             for (int i = 0; i < scripts.size(); i++) {
                 postgres.withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_"
                     + scripts.get(i) + ".sql"), "/docker-entrypoint-initdb.d/0" + i + ".sql");
@@ -232,6 +233,7 @@ class CommunityApiIT {
             .content(json.writeValueAsString(answerBody)), "000004");
         long aid = answer.path("contentId").asLong();
         answer = publish(aid, answer, "000004");
+        assertThat(answer.path("questionId").asLong()).isEqualTo(qid);
         long revision = answer.path("publishedRevision").path("revisionId").asLong();
         question = success(put(API + "/questions/" + qid + "/accepted-answer").content(json.writeValueAsString(
             Map.of("expectedContentVersion", question.path("contentVersion").asLong(),
@@ -361,6 +363,229 @@ class CommunityApiIT {
         success(put(API + "/moderation/moderators/000005").content(body), "000003");
         mvc.perform(put(API + "/moderation/moderators/000003").with(jwt().jwt(token -> token.subject("000003")))
             .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void reportDetailHidesReporterNoteUntilAssignedAndModeratorsAreListedInScope() throws Exception {
+        moderator("000005");
+        moderator("000006");
+        JsonNode article = create("000004", "articles", "organization", List.of());
+        long content = article.path("contentId").asLong();
+        publish(content, article, "000004");
+        long id = success(post(API + "/reports").content(json.writeValueAsString(Map.of(
+            "contentId", content, "reasonCode", "sensitive", "description", "Synthetic private note"))), "000004")
+            .path("reportId").asLong();
+        JsonNode unassigned = success(get(API + "/moderation/reports/" + id), "000006");
+        assertThat(unassigned.path("targetId").asLong()).isEqualTo(content);
+        assertThat(unassigned.hasNonNull("description") || unassigned.hasNonNull("reporter")).isFalse();
+        success(post(API + "/moderation/reports/" + id + "/assign").content(json.writeValueAsString(Map.of(
+            "expectedVersion", unassigned.path("version").asLong(), "moderatorUserId", "000006"))), "000006");
+        assertThat(success(get(API + "/moderation/reports/" + id), "000006").path("description").asText())
+            .isEqualTo("Synthetic private note");
+        assertThat(success(get(API + "/moderation/reports/" + id), "000005").hasNonNull("description")).isFalse();
+        mvc.perform(get(API + "/moderation/reports/" + id).with(jwt().jwt(token -> token.subject("000004"))))
+            .andExpect(status().isForbidden());
+
+        String org = jdbc.queryForObject("select org_id::text from learning_hub.users where user_id = '000006'",
+            String.class);
+        JsonNode admin = success(get(API + "/moderation/moderators").param("orgId", org), "000003");
+        assertThat(admin.path("items").findValuesAsText("userId")).contains("000005", "000006");
+        assertThat(success(get(API + "/moderation/moderators").param("orgId", org), "000006")
+            .path("totalElements").asLong()).isEqualTo(admin.path("totalElements").asLong());
+        mvc.perform(get(API + "/moderation/moderators").param("orgId", org)
+            .with(jwt().jwt(token -> token.subject("000004")))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void detailCarriesSavedFollowDuplicateClosureAndLifecycleFlags() throws Exception {
+        Long tagId = jdbc.queryForObject("select max(tag_id) from learning_hub.community_tags", Long.class);
+        JsonNode original = create("000005", "questions", "organization", List.of(tagId));
+        long originalId = original.path("contentId").asLong();
+        publish(originalId, original, "000005");
+        JsonNode created = create("000004", "questions", "organization", List.of(tagId));
+        long id = created.path("contentId").asLong();
+        JsonNode published = publish(id, created, "000004");
+        assertThat(published.path("capabilities").path("canClose").asBoolean()).isTrue();
+        assertThat(published.path("capabilities").path("canMarkDuplicate").asBoolean()).isTrue();
+        assertThat(published.path("capabilities").path("canDelete").asBoolean()).isTrue();
+        assertThat(published.path("capabilities").path("canReopen").asBoolean()).isFalse();
+
+        JsonNode reader = success(get(API + "/contents/" + id), "000005");
+        JsonNode flags = reader.path("capabilities");
+        assertThat(flags.path("canClose").asBoolean() || flags.path("canArchive").asBoolean()
+            || flags.path("canDelete").asBoolean() || flags.path("canMarkDuplicate").asBoolean()).isFalse();
+        assertThat(reader.path("saved").asBoolean()).isFalse();
+        assertThat(reader.hasNonNull("subscriptionMode")).isFalse();
+        success(put(API + "/me/bookmarks/" + id).content(json.writeValueAsString(Map.of("saved", true))), "000005");
+        success(put(API + "/me/subscriptions").content(json.writeValueAsString(Map.of(
+            "contentId", id, "mode", "instant"))), "000005");
+        reader = success(get(API + "/contents/" + id), "000005");
+        assertThat(reader.path("saved").asBoolean()).isTrue();
+        assertThat(reader.path("subscriptionMode").asText()).isEqualTo("instant");
+
+        JsonNode closed = success(put(API + "/questions/" + id + "/duplicate").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", published.path("contentVersion").asLong(), "targetQuestionId", originalId,
+            "reason", "Synthetic duplicate reason"))), "000004");
+        assertThat(closed.path("isDuplicate").asBoolean()).isTrue();
+        assertThat(closed.path("duplicateTarget").path("contentId").asLong()).isEqualTo(originalId);
+        assertThat(closed.path("closure").path("action").asText()).isEqualTo("duplicate");
+        assertThat(closed.path("closure").path("reason").asText()).isEqualTo("Synthetic duplicate reason");
+        assertThat(closed.path("closure").path("actor").path("userId").asText()).isEqualTo("000004");
+        assertThat(closed.path("capabilities").path("canReopen").asBoolean()).isTrue();
+        assertThat(closed.path("capabilities").path("canClose").asBoolean()).isFalse();
+    }
+
+    @Test
+    void reopenDropsTheDuplicateMarkAndClosureFollowsTheClosingEvent() throws Exception {
+        Long tagId = jdbc.queryForObject("select max(tag_id) from learning_hub.community_tags", Long.class);
+        JsonNode original = create("000005", "questions", "organization", List.of(tagId));
+        publish(original.path("contentId").asLong(), original, "000005");
+        JsonNode created = create("000004", "questions", "organization", List.of(tagId));
+        long id = created.path("contentId").asLong();
+        JsonNode question = publish(id, created, "000004");
+        question = success(put(API + "/questions/" + id + "/duplicate").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", question.path("contentVersion").asLong(),
+            "targetQuestionId", original.path("contentId").asLong(), "reason", "Synthetic duplicate reason"))),
+            "000004");
+
+        question = success(post(API + "/contents/" + id + "/lifecycle").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", question.path("contentVersion").asLong(), "action", "reopen",
+            "reason", "Synthetic reopen reason"))), "000004");
+        assertThat(question.path("lifecycleStatus").asText()).isEqualTo("active");
+        assertThat(question.path("isDuplicate").asBoolean()).isFalse();
+        assertThat(question.hasNonNull("duplicateTarget")).isFalse();
+
+        // Bỏ đánh dấu, archive hay mở lại sau lần đóng không được thành "lần đóng".
+        question = success(post(API + "/contents/" + id + "/lifecycle").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", question.path("contentVersion").asLong(), "action", "close",
+            "reason", "Synthetic plain close"))), "000004");
+        question = success(post(API + "/contents/" + id + "/lifecycle").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", question.path("contentVersion").asLong(), "action", "archive",
+            "reason", "Synthetic archive"))), "000004");
+        success(post(API + "/contents/" + id + "/lifecycle").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", question.path("contentVersion").asLong(), "action", "unarchive",
+            "reason", "Synthetic unarchive"))), "000004");
+        JsonNode closure = success(get(API + "/contents/" + id), "000005").path("closure");
+        assertThat(closure.path("action").asText()).isEqualTo("close");
+        assertThat(closure.path("reason").asText()).isEqualTo("Synthetic plain close");
+        assertThat(closure.path("actor").path("userId").asText()).isEqualTo("000004");
+        assertThat(closure.hasNonNull("occurredAt")).isTrue();
+    }
+
+    @Test
+    void moderatorClosureNamesNoModeratorAndNoCaseReason() throws Exception {
+        moderator("000006");
+        Long tagId = jdbc.queryForObject("select max(tag_id) from learning_hub.community_tags", Long.class);
+        JsonNode created = create("000004", "questions", "organization", List.of(tagId));
+        long id = created.path("contentId").asLong();
+        publish(id, created, "000004");
+        JsonNode report = success(post(API + "/reports").content(json.writeValueAsString(Map.of(
+            "contentId", id, "reasonCode", "outdated", "description", "Synthetic moderation case"))), "000005");
+        long reportId = report.path("reportId").asLong();
+        report = success(post(API + "/moderation/reports/" + reportId + "/assign").content(json.writeValueAsString(
+            Map.of("expectedVersion", report.path("version").asLong(), "moderatorUserId", "000006"))), "000006");
+        JsonNode evidence = success(get(API + "/moderation/reports/" + reportId + "/evidence"), "000006");
+        success(post(API + "/moderation/reports/" + reportId + "/actions").content(json.writeValueAsString(Map.of(
+            "expectedReportVersion", report.path("version").asLong(),
+            "expectedTargetVersion", evidence.path("targetVersion").asLong(),
+            "action", "close", "reason", "Synthetic wording from the report case"))), "000006");
+
+        for (String reader : List.of("000004", "000005")) {
+            JsonNode detail = success(get(API + "/contents/" + id), reader);
+            assertThat(detail.path("closure").path("action").asText()).isEqualTo("moderated");
+            assertThat(detail.path("closure").hasNonNull("actor")).isFalse();
+            assertThat(detail.path("closure").hasNonNull("reason")).isFalse();
+        }
+        assertThat(success(get(API + "/contents/" + id), "000004").path("capabilities").path("canReopen")
+            .asBoolean()).isFalse();
+    }
+
+    @Test
+    void revokedModeratorIsGrantedAgainWithTheRevokedGrantVersion() throws Exception {
+        Long org = jdbc.queryForObject("select org_id from learning_hub.users where user_id = '000002'", Long.class);
+        JsonNode granted = success(put(API + "/moderation/moderators/000002").content(json.writeValueAsString(Map.of(
+            "orgId", org, "active", true, "expectedVersion", 0, "reason", "Synthetic regrant fixture"))), "000003");
+        JsonNode revoked = success(put(API + "/moderation/moderators/000002").content(json.writeValueAsString(Map.of(
+            "orgId", org, "active", false, "expectedVersion", granted.path("version").asLong(),
+            "reason", "Synthetic revoke"))), "000003");
+        JsonNode listed = success(get(API + "/moderation/moderators").param("orgId", org.toString())
+            .param("status", "revoked").param("size", "100"), "000003").path("items").findParents("userId").stream()
+            .filter(item -> "000002".equals(item.path("userId").asText())).findFirst().orElseThrow();
+        assertThat(listed.path("version").asLong()).isEqualTo(revoked.path("version").asLong());
+
+        assertThat(response(put(API + "/moderation/moderators/000002").content(json.writeValueAsString(Map.of(
+            "orgId", org, "active", true, "expectedVersion", 0, "reason", "Synthetic stale regrant"))), "000003")
+            .path("messageCode").asText()).isEqualTo("COMMUNITY-CONFLICT");
+        JsonNode again = success(put(API + "/moderation/moderators/000002").content(json.writeValueAsString(Map.of(
+            "orgId", org, "active", true, "expectedVersion", listed.path("version").asLong(),
+            "reason", "Synthetic regrant"))), "000003");
+        assertThat(again.path("status").asText()).isEqualTo("active");
+    }
+
+    @Test
+    void moderatorMenuComesFromTheGrantOnceAndCandidatesStayInTheOwnUnit() throws Exception {
+        moderator("000006");
+        JsonNode me = success(get("/api/v1/auth/me"), "000006");
+        assertThat(me.path("functionDetails").findValuesAsText("code")).contains("COMMUNITY_MODERATION");
+        assertThat(me.path("functionScopes").path("COMMUNITY_MODERATION")).hasSize(1);
+
+        // ADMIN của Ban vừa có chức năng theo vai trò vừa là người điều phối: scope ORG chỉ xuất hiện một lần.
+        moderatorBy("000003", "000001");
+        assertThat(success(get("/api/v1/auth/me"), "000003").path("functionScopes")
+            .path("COMMUNITY_MODERATION")).hasSize(1);
+
+        jdbc.update("""
+            insert into learning_hub.orgs(parent_id, org_type, code, name, status, sort_no)
+            values (null, 'UNIT', ?, 'Synthetic other unit', 'active', 99)
+            """, "SYN-" + UUID.randomUUID().toString().substring(0, 8));
+        String other = jdbc.queryForObject("select max(org_id)::text from learning_hub.orgs", String.class);
+        mvc.perform(get(API + "/moderation/candidates").param("orgId", other)
+            .with(jwt().jwt(token -> token.subject("000006")))).andExpect(status().isForbidden());
+    }
+
+    private void moderatorBy(String userId, String admin) throws Exception {
+        Long org = jdbc.queryForObject("select org_id from learning_hub.users where user_id = ?", Long.class, userId);
+        success(put(API + "/moderation/moderators/" + userId).content(json.writeValueAsString(Map.of(
+            "orgId", org, "active", true, "expectedVersion", 0, "reason", "Synthetic API test fixture"))), admin);
+    }
+
+    @Test
+    void draftChangeNotePendingDraftReportTargetAndCandidates() throws Exception {
+        JsonNode article = create("000005", "articles", "organization", List.of());
+        long id = article.path("contentId").asLong();
+        JsonNode published = publish(id, article, "000005");
+        JsonNode draft = success(post(API + "/contents/" + id + "/draft").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", published.path("contentVersion").asLong()))), "000005");
+        JsonNode saved = success(put(API + "/contents/" + id + "/draft").content(json.writeValueAsString(Map.of(
+            "expectedContentVersion", draft.path("contentVersion").asLong(),
+            "expectedRevisionVersion", draft.path("revisionVersion").asLong(), "title", "Synthetic second revision",
+            "bodyMarkdown", "Second revision body for the change note check.", "assets", List.of(),
+            "changeNote", "Fix the timeout value"))), "000005");
+        assertThat(saved.path("changeNote").asText()).isEqualTo("Fix the timeout value");
+        assertThat(saved.path("editor").path("userId").asText()).isEqualTo("000005");
+        JsonNode mine = success(get(API + "/me/contents").param("kind", "article").param("size", "100"), "000005");
+        assertThat(mine.path("items").findParents("contentId").stream()
+            .filter(item -> item.path("contentId").asLong() == id).findFirst().orElseThrow()
+            .path("hasDraft").asBoolean()).isTrue();
+
+        moderator("000006");
+        success(post(API + "/reports").content(json.writeValueAsString(Map.of(
+            "contentId", id, "reasonCode", "outdated"))), "000004");
+        JsonNode queue = success(get(API + "/moderation/reports").param("size", "100"), "000006");
+        JsonNode target = queue.path("items").findParents("target").stream()
+            .map(item -> item.path("target")).filter(value -> value.path("contentId").asLong() == id)
+            .findFirst().orElseThrow();
+        assertThat(target.path("kind").asText()).isEqualTo("article");
+        assertThat(target.path("title").asText()).isEqualTo("Synthetic test article");
+
+        String org = jdbc.queryForObject("select org_id::text from learning_hub.users where user_id = '000006'",
+            String.class);
+        assertThat(success(get(API + "/moderation/candidates").param("orgId", org), "000003")
+            .path("items").findValuesAsText("userId")).contains("000004", "000006");
+        assertThat(success(get(API + "/moderation/candidates").param("orgId", org), "000006")
+            .path("totalElements").asLong()).isPositive();
+        mvc.perform(get(API + "/moderation/candidates").param("orgId", org)
+            .with(jwt().jwt(token -> token.subject("000004")))).andExpect(status().isForbidden());
     }
 
     @Test
@@ -913,7 +1138,7 @@ class CommunityApiIT {
                 });
             }
         });
-        assertThat(routeCount.get()).isEqualTo(135);
+        assertThat(routeCount.get()).isEqualTo(138);
         doc.path("paths").fieldNames().forEachRemaining(path ->
             assertThat(path).doesNotStartWith(API + "/ai/"));
     }

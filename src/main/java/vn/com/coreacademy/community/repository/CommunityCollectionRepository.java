@@ -62,6 +62,15 @@ public class CommunityCollectionRepository {
             """, CollectionAccessGrant.class, Map.of("collection", collectionId, "active", "active"));
     }
 
+    /** Nội dung có trong bộ sưu tập "Đã lưu" của người dùng không; một truy vấn thay cho collection rồi item. */
+    public boolean saved(String owner, Long contentId) {
+        return repository.one("""
+            select count(i) from CollectionItem i, CommunityCollection k
+            where k.collectionId = i.collectionId and k.ownerUserId = :owner and k.name = :name
+              and i.contentId = :content
+            """, Long.class, Map.of("owner", owner, "name", "Đã lưu", "content", contentId)) > 0;
+    }
+
     public CollectionItem item(Long collectionId, Long contentId) {
         var items = repository.list("""
             select i from CollectionItem i where i.collectionId = :collection and i.contentId = :content

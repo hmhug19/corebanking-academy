@@ -1,6 +1,6 @@
 # Thiết kế DB Community — thiết kế toàn bộ phạm vi trước code
 
-Trạng thái source: **đã có baseline SQL, mapping 51 bảng và C01–C138**; giới hạn kiểm chứng ở tài liệu API.
+Trạng thái source: **đã có baseline SQL, mapping 51 bảng và C01–C141**; giới hạn kiểm chứng ở tài liệu API.
 Baseline thủ công tại [learning_hub_community.sql](../sql/learning_hub_community.sql), trạng thái API tại
 [COMMUNITY.md](COMMUNITY.md). Chưa tạo bảng hoặc sửa dữ liệu trên server.
 Phạm vi đầy đủ gồm **51 bảng mới**; thứ tự xây dựng theo phụ thuộc kỹ thuật. Không sửa 26 bảng Learning hoặc dữ liệu

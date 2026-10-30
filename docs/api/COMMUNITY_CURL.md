@@ -198,7 +198,7 @@ khi chưa transfer. Private Guild cần joinPolicy=invite; lời mời chưa acc
 
 Kết quả cuối ngày 28/10/2026: `clean verify` **235 test, 0 failure/error, 0 skipped**, gồm 35 test Community.
 49 test từng bị bỏ qua vì thiếu Docker đã được chạy lại với PostgreSQL 16.15 và pgvector 0.8.0 thật.
-Schema được khởi tạo bằng file SQL nguyên bản, không thay vector bằng real[]. Swagger còn 135 operation đang bật,
+Schema được khởi tạo bằng file SQL nguyên bản, không thay vector bằng real[]. Swagger còn 138 operation đang bật,
 C126–C128 vắng mặt và gọi trả 404. Ba unit test storage mới kiểm ETag đã ACK, manifest sai và lỗi provider.
 
 Bộ HTTP thật riêng đã pass 6 nhóm media, 5 nhóm scheduler/worker và 1 ca hard crash/restart: MP4 21 MB qua 3 part,
@@ -299,9 +299,9 @@ không đổi chúng thành câu trả lời thành công trên UI. Sau feedback
 Mẫu cURL từng route bên dưới minh họa schema, không phải chuỗi workflow tự chạy: các ID, metadata từng kind và
 version cần thay bằng dữ liệu hợp lệ như các bước trên.
 
-## 8. cURL đầy đủ C01–C138
+## 8. cURL đầy đủ C01–C141
 
-**135 API đang hoạt động. C126–C128 tạm dừng**, không đưa vào các lệnh gọi dưới đây.
+**138 API đang hoạt động. C126–C128 tạm dừng**, không đưa vào các lệnh gọi dưới đây.
 
 Các lệnh dưới đây dùng **Bash/Git Bash/WSL**. Với PowerShell, dùng `curl.exe` và chuyển biến/continuation theo cú pháp PowerShell.
 
@@ -1406,6 +1406,27 @@ curl --request POST "${BASE_URL}/api/v1/community/me/digests/${BATCH_ID}/retry" 
 
 ```bash
 curl --request GET "${BASE_URL}/api/v1/community/me/assets" \
+  --header "Authorization: Bearer ${TOKEN}"
+```
+
+### C139 — Chi tiết report
+
+```bash
+curl --request GET "${BASE_URL}/api/v1/community/moderation/reports/${REPORT_ID}" \
+  --header "Authorization: Bearer ${TOKEN}"
+```
+
+### C140 — Danh sách org moderator
+
+```bash
+curl --request GET "${BASE_URL}/api/v1/community/moderation/moderators?orgId=1&status=active" \
+  --header "Authorization: Bearer ${TOKEN}"
+```
+
+### C141 — Nhân sự để chọn moderator hoặc người duy trì
+
+```bash
+curl --request GET "${BASE_URL}/api/v1/community/moderation/candidates?orgId=1&q=Nguyen" \
   --header "Authorization: Bearer ${TOKEN}"
 ```
 

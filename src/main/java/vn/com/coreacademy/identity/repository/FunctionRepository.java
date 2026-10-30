@@ -1,6 +1,7 @@
 package vn.com.coreacademy.identity.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -16,4 +17,6 @@ public interface FunctionRepository extends JpaRepository<Function, Long> {
         order by f.sortNo, f.id
         """)
     List<Function> findActiveForRole(@Param("roleId") Long roleId);
+
+    Optional<Function> findByCodeAndActiveTrue(String code);
 }

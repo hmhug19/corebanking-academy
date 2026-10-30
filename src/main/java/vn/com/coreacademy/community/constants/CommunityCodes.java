@@ -4,6 +4,7 @@ import java.util.Set;
 
 public final class CommunityCodes {
     public static final String ACTIVE = "active";
+    public static final String REVOKED = "revoked";
     public static final String DRAFT = "draft";
     public static final String PUBLISHED = "published";
     public static final String SUPERSEDED = "superseded";
@@ -28,6 +29,8 @@ public final class CommunityCodes {
     public static final Set<String> VISIBILITIES = Set.of(ORGANIZATION, GUILD, RESTRICTED);
     public static final Set<String> VOTABLE_KINDS = Set.of(QUESTION, ANSWER, ARTICLE, "recording", "lesson_learned");
     public static final Set<String> REVIEWED_KINDS = Set.of("wiki", "radar");
+    /** Chức năng menu màn điều phối: ADMIN nhận theo vai trò, người điều phối còn hiệu lực nhận qua module này. */
+    public static final String MODERATION_FUNCTION = "COMMUNITY_MODERATION";
 
     private CommunityCodes() {
     }

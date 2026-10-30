@@ -20,7 +20,8 @@ public final class ContentViews {
     public record RevisionDetail(Long revisionId, Long contentId, Integer revisionNo, String title,
                                  String bodyMarkdown, String summary, JsonNode context, String revisionStatus,
                                  Instant publishedAt, Long revisionVersion, Long contentVersion,
-                                 List<RevisionAssetView> assets) {
+                                 List<RevisionAssetView> assets, String changeNote, PersonRef editor,
+                                 Instant updateTime) {
     }
 
     public record ContentCard(Long contentId, String kind, String title, String summary, String authorUserId,
@@ -29,7 +30,8 @@ public final class ContentViews {
                               PersonRef author, List<TagView> tags, long score, int myVote, Capabilities capabilities,
                               String resolutionStatus, long answerCount, Long acceptedAnswerId, boolean isDuplicate,
                               ContentRef duplicateTarget, Long questionId, Long revisionId, boolean isAccepted,
-                              Long acceptedRevisionId, boolean acceptedRevisionIsCurrent) {
+                              Long acceptedRevisionId, boolean acceptedRevisionIsCurrent, boolean hasDraft,
+                              String occurredOn) {
     }
 
     public record ContentDetail(Long contentId, String kind, Long ownerOrgId, PersonRef author, PersonRef maintainer,
@@ -37,14 +39,28 @@ public final class ContentViews {
                                 RevisionDetail publishedRevision, RevisionDetail draftRevision,
                                 List<TagView> tags, Capabilities capabilities, String resolutionStatus,
                                 Long acceptedAnswerId, Long acceptedRevisionId, boolean acceptedRevisionIsCurrent,
-                                long answerCount, long score, int myVote) {
+                                long answerCount, long score, int myVote, boolean saved, String subscriptionMode,
+                                boolean isDuplicate, ContentRef duplicateTarget, Closure closure,
+                                Long questionId) {
+    }
+
+    /**
+     * Lần đóng làm câu hỏi đang đóng: action là close, duplicate hoặc moderated. Với moderated (điều phối
+     * viên xử lý qua hồ sơ báo cáo), reason và actor luôn null.
+     */
+    public record Closure(String action, String reason, PersonRef actor, Instant occurredAt) {
     }
 
     public record PersonRef(String userId, String displayName) {
     }
 
+    /** Các cờ vòng đời (canClose..canMarkDuplicate) chỉ tính ở chi tiết; card trong danh sách luôn trả false. */
     public record Capabilities(boolean canEditDraft, boolean canPublish, boolean canAnswer, boolean canComment,
-                               boolean canVote, boolean canAccept, boolean canManageAccess, boolean canReport) {
+                               boolean canVote, boolean canAccept, boolean canManageAccess, boolean canReport,
+                               boolean canClose, boolean canReopen, boolean canArchive, boolean canDelete,
+                               boolean canMarkDuplicate) {
+        public static final Capabilities NONE = new Capabilities(false, false, false, false, false, false, false,
+            false, false, false, false, false, false);
     }
 
     public record VoteView(Long contentId, long score, long upvotes, long downvotes, int myVote) {

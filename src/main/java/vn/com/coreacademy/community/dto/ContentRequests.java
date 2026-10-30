@@ -47,7 +47,8 @@ public final class ContentRequests {
         @NotNull @Size(max = CommunityLimits.BODY) String bodyMarkdown,
         @Size(max = CommunityLimits.SUMMARY) String summary,
         JsonNode context,
-        @Valid @Size(max = CommunityLimits.ASSETS) List<AssetInput> assets) {
+        @Valid @Size(max = CommunityLimits.ASSETS) List<AssetInput> assets,
+        @Size(max = CommunityLimits.CHANGE_NOTE) String changeNote) {
     }
 
     public record ContentVersion(@NotNull @Min(0) Long expectedContentVersion) {

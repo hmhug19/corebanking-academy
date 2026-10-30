@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -133,7 +134,13 @@ public class CommunityManagementService {
             repository.save(question, actor.person().id());
         }
         repository.incrementVersion(content, actor.person().id());
-        contents.event(content, "question_duplicate_changed", actor.person().id());
+        var change = JsonNodeFactory.instance.objectNode();
+        if (request.targetQuestionId() == null) {
+            change.putNull("targetQuestionId");
+        } else {
+            change.put("targetQuestionId", request.targetQuestionId());
+        }
+        contents.event(content, "question_duplicate_changed", actor.person().id(), change);
         repository.flush();
         return contents.detail(content, actor, false);
     }

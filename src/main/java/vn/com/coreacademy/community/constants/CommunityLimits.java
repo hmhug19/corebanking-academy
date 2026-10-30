@@ -6,6 +6,7 @@ public final class CommunityLimits {
     public static final int SUMMARY = 2_000;
     public static final int COMMENT = 10_000;
     public static final int REASON = 3_000;
+    public static final int CHANGE_NOTE = 500;
     public static final int TAGS = 10;
     public static final int ASSETS = 20;
     public static final int GRANTS = 100;

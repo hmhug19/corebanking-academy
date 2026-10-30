@@ -1,7 +1,7 @@
 # Community — contract toàn bộ phạm vi và trạng thái triển khai
 
-Trạng thái source ngày 28/10/2026: **đã triển khai C01–C138 và mapping 51 bảng**.
-**Đang hoạt động: 135 API. Tạm dừng C126–C128** bằng comment `@RestController` và import tương ứng trong
+Trạng thái source ngày 28/10/2026: **đã triển khai C01–C141 và mapping 51 bảng**.
+**Đang hoạt động: 138 API. Tạm dừng C126–C128** bằng comment `@RestController` và import tương ứng trong
 `CommunityAiController`: 3 route `/api/v1/community/ai/**` không đăng ký, không xuất hiện trên Swagger và trả 404.
 Giữ service/DTO/bảng AI để bật lại sau, không xóa dữ liệu hoặc đổi schema. Contract AI bên dưới là đặc tả lưu lại,
 chưa sử dụng ở thời điểm này. Tìm kiếm thường, index, job và Assistant hiện có không thay đổi.
@@ -20,7 +20,7 @@ Thiết kế và cột tại [COMMUNITY_DATABASE.md](COMMUNITY_DATABASE.md). Env
 | Media và worker | Multipart/reservation/manifest/retry/abort, GET/HEAD/Range, probe/cleanup, transcript; outbox/index/fanout/digest/ledger/badge | Worker mặc định tắt; phải cấu hình actor kỹ thuật và hạ tầng bên dưới |
 | Persistence | Baseline SQL/mapping 51 bảng, scalar ID, audit/version, không FK/UNIQUE nghiệp vụ | Chưa chạy DDL hoặc seed trên server; DB hiện hữu cần migration được review riêng |
 
-Schema thực tế để FE import: [community-openapi.json](../postman/community-openapi.json); Swagger kiểm tra đủ 135 operation đang bật,
+Schema thực tế để FE import: [community-openapi.json](../postman/community-openapi.json); Swagger kiểm tra đủ 138 operation đang bật,
 response thành công 200 và schema JSON/binary phù hợp. Có route không có nghĩa mọi tích hợp ngoài đã được nghiệm thu.
 Kiểm chứng mới nhất dùng PostgreSQL 16.15 với **pgvector 0.8.0 thật**, DDL gốc không thay kiểu cột:
 `clean verify` **235 test pass, 0 failure/error, 0 skipped**; đã chạy cả 49 test từng bị bỏ qua vì thiếu Docker.
@@ -172,6 +172,11 @@ R = người đọc có ACL; A = tác giả; M = maintainer; E = editor được
 
 Moderator ẩn/đóng/khôi phục có lý do, không sửa body người khác. SUPER_ADMIN giữ policy quản trị gốc, nhưng đọc nội dung riêng phải qua đường điều phối/audit rõ ràng, không tự trở thành tác giả/approver hoặc bypass cấm tự duyệt. Guild role không cấp quyền quản trị Identity.
 
+Menu: chức năng Identity `COMMUNITY` cấp cho mọi vai trò; `COMMUNITY_MODERATION` cấp cho ADMIN/SUPER_ADMIN theo vai trò
+và cho moderator active của đúng org hiện tại qua `FunctionGrantSource` (`CommunityModeratorFunctions`, scope ORG).
+Chức năng chỉ để hiển thị: ADMIN chưa là moderator vẫn bị C38–C41/C139 từ chối, chỉ dùng C42/C140/C141.
+SQL: [learning_hub_community_functions.sql](../sql/learning_hub_community_functions.sql).
+
 ### Mất quyền và chống lộ dữ liệu
 
 1. Organization chỉ cùng owner_org_id hiện tại; restricted gồm A/M và grant reader/editor active chưa hết hạn; Guild cần membership active của primary_guild_id. Author của answer phải qua question ACL trước; comment/thread/file kế thừa nội dung cha.
@@ -317,7 +322,7 @@ Accept và bỏ accept (C07):
 {"expectedContentVersion":3,"answerContentId":null,"answerRevisionId":null}
 ```
 
-ContentDetail có contentId,kind,ownerOrgId,author(userId,displayName),maintainer,visibility,lifecycleStatus,contentVersion,publishedRevision,draftRevision? và capabilities(canEditDraft,canPublish,canAnswer,canComment,canVote,canAccept,canManageAccess,canReport). RevisionDetail gồm revisionId,revisionNo,revisionVersion,title,bodyMarkdown,summary,context,revisionStatus,publishedAt,assets[]. Q bổ sung resolutionStatus,acceptedAnswerId,acceptedRevisionId,acceptedRevisionIsCurrent,answerCount,score,myVote,tags. AssetView có assetId,revisionAssetId,originalName,mimeType,sizeBytes,mediaType,status,durationSeconds/pageCount đã kiểm; không key/provider ID/hash request. Capabilities chỉ gợi ý UI, backend kiểm lại mỗi ghi.
+ContentDetail có contentId,kind,ownerOrgId,author(userId,displayName),maintainer,visibility,lifecycleStatus,contentVersion,publishedRevision,draftRevision? và capabilities(canEditDraft,canPublish,canAnswer,canComment,canVote,canAccept,canManageAccess,canReport,canClose,canReopen,canArchive,canDelete,canMarkDuplicate); ContentDetail còn có saved (dấu trang của người gọi), subscriptionMode? (instant/digest/muted), isDuplicate, duplicateTarget? (ContentRef, chỉ khi đọc được câu gốc) và closure? {action close/duplicate/moderated, reason, actor, occurredAt} cho câu hỏi đang đóng (lấy từ sự kiện thật sự đóng câu hỏi; moderated = điều phối viên đóng hoặc gắn trùng lặp qua hồ sơ báo cáo, khi đó reason và actor luôn null); mở lại câu hỏi xóa liên kết trùng lặp; câu trả lời có questionId (câu hỏi chứa nó). Năm cờ vòng đời tính theo đúng điều kiện C17/C136; ContentCard trong danh sách luôn trả false cho chúng, còn có hasDraft (người sửa được và đang có bản nháp) và occurredOn? (bài học sự cố). RevisionDetail gồm revisionId,revisionNo,revisionVersion,title,bodyMarkdown,summary,context,revisionStatus,publishedAt,assets[],changeNote?,editor? (người mở bản đó),updateTime; SaveDraft nhận changeNote? ≤500. ReportCard/ReportView có target {kind (loại nội dung hoặc comment), contentId (nội dung chứa comment), title? (chỉ khi người gọi đọc được)}. Q bổ sung resolutionStatus,acceptedAnswerId,acceptedRevisionId,acceptedRevisionIsCurrent,answerCount,score,myVote,tags. AssetView có assetId,revisionAssetId,originalName,mimeType,sizeBytes,mediaType,status,durationSeconds/pageCount đã kiểm; không key/provider ID/hash request. Capabilities chỉ gợi ý UI, backend kiểm lại mỗi ghi.
 
 Envelope C07 minh họa với data rút gọn (response thực trả Q đầy đủ):
 
@@ -517,6 +522,9 @@ Tất cả dưới cùng prefix, cùng envelope/validation/quyền ở phần n�
 | C136 | PUT `/questions/{questionId}/duplicate` | expectedContentVersion,targetQuestionId hoặc null,reason,reportId? | Q; A tự đánh dấu hoặc moderator case hợp lệ |
 | C137 | POST `/me/digests/{batchId}/retry` | expectedVersion | DigestView; failed mở lượt retry có audit, delivered trả hiện tại |
 | C138 | GET `/me/assets` | status,mediaType,page,size | `P<UploadSummaryView>` uploader sở hữu, sau attach còn phải có parent ACL |
+| C139 | GET `/moderation/reports/{reportId}` | Không; moderator cùng org | ReportView; description/reporter/actions chỉ cho moderator đang được giao, người khác nhận null/[] |
+| C140 | GET `/moderation/moderators` | orgId,status active/revoked (mặc định active),page,size; ADMIN đúng scope/SUPER_ADMIN hoặc moderator active của chính org | `P<ModeratorView>` sắp grantedAt desc,id desc; version dùng cho C42 |
+| C141 | GET `/moderation/candidates` | orgId,q?(≤300, lọc họ tên),page,size; cùng phạm vi C140 | `P<ActorRef>` nhân sự active của org, sắp họ tên,userId; ô chọn bổ nhiệm (C42) và người duy trì (C41 assign_maintainer) |
 
 ## DTO và hành vi của toàn bộ phạm vi
 
@@ -729,7 +737,7 @@ AC01–AC42 ở trên vẫn áp dụng. AC43–AC80 dưới đây cũng nằm tr
 | Tìm kiếm chung/feed | tags,aliases,contents,search_chunks + module adapters | C97–C98, không mở ACL |
 | Follow/mentions/in-app/digest | subscriptions,mentions,outbox,notifications,digest_batches/items | C31–C34,C99–C110 |
 | Dấu trang/bộ sưu tập chia sẻ | collections,collection_items,collection_access_grants | C29–C30,C102–C107 |
-| Điều phối/phân quyền | moderators,reports,moderation_actions,access_grants | C18,C37–C42,C134 |
+| Điều phối/phân quyền | moderators,reports,moderation_actions,access_grants | C18,C37–C42,C134,C139–C141 |
 | Đóng góp/huy hiệu/thống kê | contribution_events,badges,badge_awards,content_views | C111–C122 |
 | Liên kết với đào tạo | learning_links + Learning public policy | C123–C125 |
 | AI có nguồn và phản hồi | search_chunks,ai_turns,ai_turn_sources,ai_feedback | C126–C130 + Assistant read tool dưới policy |
@@ -737,7 +745,7 @@ AC01–AC42 ở trên vẫn áp dụng. AC43–AC80 dưới đây cũng nằm tr
 ## Thứ tự kỹ thuật và giới hạn kiểm chứng
 
 1. Review DDL của **51 bảng**, từ điển cột và dependency Identity/Learning/Knowledge/pgvector. Không tự chạy server, thêm FK/UNIQUE hoặc seed quyền; giữ ddl-auto=validate/Flyway off.
-2. Xây public policy/search/media adapter và các use case theo phụ thuộc. Thứ tự code không biến chức năng còn lại thành tùy chọn hoặc giới hạn một nhóm chức năng; tiêu chí giao hàng gồm toàn bộ C01–C138 và AC01–AC80.
+2. Xây public policy/search/media adapter và các use case theo phụ thuộc. Thứ tự code không biến chức năng còn lại thành tùy chọn hoặc giới hạn một nhóm chức năng; tiêu chí giao hàng gồm toàn bộ C01–C141 và AC01–AC80.
 3. Cập nhật Swagger request/response schema/examples theo DTO; kiểm OpenAPI sinh thực tế đủ 200/schema, binary 206/HEAD và lỗi thống nhất. Source changes cần build/regression thích hợp; chưa sinh source test khi người dùng chưa yêu cầu.
 4. Nghiệm thu bằng dữ liệu/tài khoản được phép, worker crash/retry và ACL race thật; phân biệt kiểm tài liệu với test API. S3/probe/Ollama/pgvector/scheduler/cleanup cần cấu hình vận hành được review; không coi đặc tả là bằng chứng đã chạy prod.
 

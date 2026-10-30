@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -30,7 +31,9 @@ import vn.com.coreacademy.community.dto.ContentRequests.PublishRequest;
 import vn.com.coreacademy.community.dto.ContentRequests.SaveDraft;
 import vn.com.coreacademy.community.dto.ContentRequests.TagsRequest;
 import vn.com.coreacademy.community.dto.ContentViews.AccessView;
+import vn.com.coreacademy.community.dto.CollectionDtos.ContentRef;
 import vn.com.coreacademy.community.dto.ContentViews.Capabilities;
+import vn.com.coreacademy.community.dto.ContentViews.Closure;
 import vn.com.coreacademy.community.dto.ContentViews.ContentCard;
 import vn.com.coreacademy.community.dto.ContentViews.ContentDetail;
 import vn.com.coreacademy.community.dto.ContentViews.PersonRef;
@@ -41,6 +44,7 @@ import vn.com.coreacademy.community.entity.Answer;
 import vn.com.coreacademy.community.entity.CommunityAsset;
 import vn.com.coreacademy.community.entity.CommunityContent;
 import vn.com.coreacademy.community.entity.CommunityOutboxEvent;
+import vn.com.coreacademy.community.entity.CommunitySubscription;
 import vn.com.coreacademy.community.entity.CommunityTag;
 import vn.com.coreacademy.community.entity.CommunityVote;
 import vn.com.coreacademy.community.entity.ContentAccessGrant;
@@ -48,11 +52,15 @@ import vn.com.coreacademy.community.entity.ContentRevision;
 import vn.com.coreacademy.community.entity.ContentTag;
 import vn.com.coreacademy.community.entity.Guild;
 import vn.com.coreacademy.community.entity.Question;
+import vn.com.coreacademy.community.entity.QuestionLink;
 import vn.com.coreacademy.community.entity.RevisionAsset;
 import vn.com.coreacademy.community.entity.TagAlias;
 import vn.com.coreacademy.community.exception.CommunityResponseCode;
 import vn.com.coreacademy.community.mapper.CommunityMapper;
+import vn.com.coreacademy.community.repository.CommunityCollectionRepository;
+import vn.com.coreacademy.community.repository.CommunityManagementRepository;
 import vn.com.coreacademy.community.repository.CommunityMediaRepository;
+import vn.com.coreacademy.community.repository.CommunityPreferenceRepository;
 import vn.com.coreacademy.community.repository.CommunityRelations;
 import vn.com.coreacademy.community.repository.CommunityRepository;
 import vn.com.coreacademy.community.repository.CommunityTagReadRepository;
@@ -79,6 +87,9 @@ public class CommunityContentService {
     private final CommunityTagReadRepository tagRead;
     private final CommunityMediaRepository media;
     private final CommunityProperties mediaProperties;
+    private final CommunityCollectionRepository collections;
+    private final CommunityPreferenceRepository preferences;
+    private final CommunityManagementRepository management;
 
     public PageResponse<ContentCard> list(ContentRepository.Search search) {
         return list(search, false);
@@ -274,6 +285,7 @@ public class CommunityContentService {
         draft.setBodyMarkdown(request.bodyMarkdown());
         draft.setSummary(request.summary());
         draft.setContextJson(payload.context(request.context(), content.getKind()));
+        draft.setChangeNote(request.changeNote());
         replaceAssets(content, draft, request.assets(), actor);
         repository.save(draft, actor.person().id());
         // Chỉ sửa liên kết asset cũng phải thay version của content và draft để FE phát hiện stale write.
@@ -558,11 +570,11 @@ public class CommunityContentService {
             || content.getCurrentPublishedRevisionId() == null && !policy.canEdit(content, actor)) {
             throw new BusinessException(CommunityResponseCode.NOT_FOUND);
         }
-        RevisionDetail published = content.getCurrentPublishedRevisionId() == null ? null
-            : revision(repository.require(ContentRevision.class, content.getCurrentPublishedRevisionId()), content);
-        RevisionDetail draft = includeDraft && policy.canEdit(content, actor)
+        ContentRevision publishedRow = content.getCurrentPublishedRevisionId() == null ? null
+            : repository.require(ContentRevision.class, content.getCurrentPublishedRevisionId());
+        ContentRevision draftRow = includeDraft && policy.canEdit(content, actor)
             && content.getCurrentDraftRevisionId() != null
-            ? revision(repository.require(ContentRevision.class, content.getCurrentDraftRevisionId()), content) : null;
+            ? repository.require(ContentRevision.class, content.getCurrentDraftRevisionId()) : null;
         Question question = null;
         boolean current = false;
         if (CommunityCodes.QUESTION.equals(content.getKind())) {
@@ -571,7 +583,26 @@ public class CommunityContentService {
             current = answer != null && Objects.equals(answer.getCurrentPublishedRevisionId(),
                 question.getAcceptedAnswerRevisionId());
         }
-        boolean active = CommunityCodes.ACTIVE.equals(content.getLifecycleStatus());
+        String status = content.getLifecycleStatus();
+        boolean closed = question != null && CommunityCodes.CLOSED.equals(status);
+        boolean moderatorClosed = closed && relations.moderatorClosed(content.getContentId());
+        List<QuestionLink> links = question == null ? List.of() : management.duplicateLinks(content.getContentId());
+        Closure closure = closed ? closure(content, question, !links.isEmpty(), moderatorClosed) : null;
+        // Một lần tra tên cho tác giả, người phụ trách, người viết từng bản và người đóng.
+        Set<String> people = new HashSet<>();
+        Stream.of(content.getAuthorUserId(), content.getMaintainerUserId(),
+                publishedRow == null ? null : publishedRow.getCreatedBy(),
+                draftRow == null ? null : draftRow.getCreatedBy(),
+                closure == null || closure.actor() == null ? null : closure.actor().userId())
+            .filter(Objects::nonNull).forEach(people::add);
+        Map<String, String> names = identity.fullNames(people);
+        RevisionDetail published = publishedRow == null ? null : revision(publishedRow, content, names);
+        RevisionDetail draft = draftRow == null ? null : revision(draftRow, content, names);
+        if (closure != null && closure.actor() != null) {
+            closure = new Closure(closure.action(), closure.reason(),
+                new PersonRef(closure.actor().userId(), names.get(closure.actor().userId())), closure.occurredAt());
+        }
+        boolean active = CommunityCodes.ACTIVE.equals(status);
         try {
             policy.requireInteractive(content, actor);
         } catch (BusinessException exception) {
@@ -579,35 +610,114 @@ public class CommunityContentService {
         }
         boolean author = Objects.equals(content.getAuthorUserId(), actor.person().id());
         boolean editable = policy.canEdit(content, actor);
+        boolean owner = policy.isAuthorOrMaintainer(content, actor);
         boolean hasPublished = published != null;
+        boolean openOrClosed = Set.of(CommunityCodes.ACTIVE, CommunityCodes.CLOSED).contains(status);
+        // Cùng điều kiện mà C17/C136 kiểm tra; UI chỉ hiển thị cờ, không tự suy luận quyền.
         Capabilities capabilities = new Capabilities(active && editable,
-            active && policy.isAuthorOrMaintainer(content, actor)
-                && !CommunityCodes.REVIEWED_KINDS.contains(content.getKind()),
+            active && owner && !CommunityCodes.REVIEWED_KINDS.contains(content.getKind()),
             active && hasPublished && question != null, active && hasPublished,
             active && hasPublished && !author && CommunityCodes.VOTABLE_KINDS.contains(content.getKind()),
-            hasPublished && author && question != null
-                && Set.of(CommunityCodes.ACTIVE, CommunityCodes.CLOSED).contains(content.getLifecycleStatus()),
-            active && author && !CommunityCodes.ANSWER.equals(content.getKind()), hasPublished);
-        Map<String, String> names = identity.fullNames(Set.copyOf(List.of(content.getAuthorUserId(),
-            content.getMaintainerUserId())));
+            hasPublished && author && question != null && openOrClosed,
+            active && author && !CommunityCodes.ANSWER.equals(content.getKind()), hasPublished,
+            owner && question != null && CommunityCodes.ACTIVE.equals(status),
+            owner && closed && !moderatorClosed,
+            owner && openOrClosed,
+            owner && (question == null || relations.otherAnswers(content.getContentId(), actor.person().id()) == 0),
+            author && question != null && hasPublished && openOrClosed);
         Object[] totals = relations.voteTotals(content.getContentId());
         var ownVotes = relations.ownVotes(content.getContentId(), actor.person().id());
+        ContentRef duplicate = duplicateTarget(links, actor);
+        boolean isDuplicate = !links.isEmpty();
         return new ContentDetail(content.getContentId(), content.getKind(), content.getOwnerOrgId(),
             new PersonRef(content.getAuthorUserId(), names.get(content.getAuthorUserId())),
             new PersonRef(content.getMaintainerUserId(), names.get(content.getMaintainerUserId())),
-            content.getLifecycleStatus(), content.getVisibility(), content.getPrimaryGuildId(), content.getRowVersion(),
+            status, content.getVisibility(), content.getPrimaryGuildId(), content.getRowVersion(),
             published, draft, tagViews(content.getContentId()), capabilities,
             question == null ? null : question.getResolutionStatus(),
             question == null ? null : question.getAcceptedAnswerContentId(),
             question == null ? null : question.getAcceptedAnswerRevisionId(), current,
             question == null ? 0 : relations.visibleAnswerCount(content.getContentId()),
             ((Number) totals[0]).longValue(),
-            ownVotes.isEmpty() ? 0 : ownVotes.get(0).getValue());
+            ownVotes.isEmpty() ? 0 : ownVotes.get(0).getValue(),
+            saved(content.getContentId(), actor), subscriptionMode(content.getContentId(), actor),
+            isDuplicate, duplicate, closure,
+            CommunityCodes.ANSWER.equals(content.getKind())
+                ? repository.require(Answer.class, content.getContentId()).getQuestionContentId() : null);
+    }
+
+    private boolean saved(Long contentId, Actor actor) {
+        return collections.saved(actor.person().id(), contentId);
+    }
+
+    private String subscriptionMode(Long contentId, Actor actor) {
+        CommunitySubscription subscription = preferences.subscription(actor.person().id(), contentId);
+        return subscription == null ? null : subscription.getDeliveryMode();
+    }
+
+    /** Chỉ trả câu hỏi gốc khi người gọi đọc được; không lộ tiêu đề bài private qua liên kết trùng lặp. */
+    private ContentRef duplicateTarget(List<QuestionLink> links, Actor actor) {
+        for (var link : links) {
+            var target = repository.find(CommunityContent.class, link.getTargetQuestionId());
+            if (target != null && target.getCurrentPublishedRevisionId() != null && policy.canRead(target, actor)) {
+                var revision = repository.require(ContentRevision.class, target.getCurrentPublishedRevisionId());
+                return new ContentRef(target.getContentId(), target.getKind(), revision.getRevisionId(),
+                    revision.getTitle(), "/community/contents/" + target.getContentId());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Lần đóng làm câu hỏi đang ở trạng thái đóng: sự kiện mới nhất thật sự đóng nó (close, gắn trùng lặp
+     * hoặc điều phối viên đóng), bỏ qua các sự kiện cùng loại không đổi trạng thái đóng. Khi điều phối viên
+     * đóng hoặc gắn trùng lặp qua một hồ sơ báo cáo, action là "moderated" và không kèm người làm hay lý
+     * do, vì lý do được viết trong bối cảnh hồ sơ báo cáo. Actor chỉ mang userId; tên được tra cùng lúc
+     * với các người khác của chi tiết.
+     */
+    private Closure closure(CommunityContent content, Question question, boolean duplicate, boolean moderatorClosed) {
+        for (CommunityOutboxEvent event : relations.closingCandidates(content.getContentId())) {
+            JsonNode payload = event.getPayloadJson();
+            boolean closing = switch (event.getEventType()) {
+                case "content_lifecycle" -> "close".equals(payload.path("action").asText());
+                // Sự kiện cũ không có targetQuestionId: tin vào liên kết trùng lặp hiện có.
+                case "question_duplicate_changed" -> payload.has("targetQuestionId")
+                    ? !payload.get("targetQuestionId").isNull() : duplicate;
+                case "content_moderated" -> payload.has("action")
+                    ? "close".equals(payload.path("action").asText()) : moderatorClosed;
+                default -> false;
+            };
+            if (!closing) {
+                continue;
+            }
+            Instant at = event.getCreateTime() != null ? event.getCreateTime() : event.getAvailableAt();
+            String actorId = event.getActorUserId();
+            boolean byOwner = Objects.equals(actorId, content.getAuthorUserId())
+                || Objects.equals(actorId, content.getMaintainerUserId());
+            if ("content_moderated".equals(event.getEventType()) || !byOwner) {
+                return new Closure("moderated", null, null, at);
+            }
+            String action = "question_duplicate_changed".equals(event.getEventType()) ? "duplicate" : "close";
+            return new Closure(action, question.getClosedReason(), new PersonRef(actorId, null), at);
+        }
+        return new Closure(duplicate ? "duplicate" : "close", null, null, null);
     }
 
     public RevisionDetail revision(ContentRevision revision, CommunityContent content) {
-        return mapper.revision(revision, content.getRowVersion(), relations.assets(revision.getRevisionId()).stream()
-            .map(mapper::asset).toList());
+        String editor = revision.getCreatedBy();
+        return revision(revision, content, editor == null ? Map.of() : identity.fullNames(List.of(editor)));
+    }
+
+    /** Người viết một bản là người mở bản đó, không phải người cập nhật dòng gần nhất. */
+    private RevisionDetail revision(ContentRevision revision, CommunityContent content, Map<String, String> names) {
+        RevisionDetail value = mapper.revision(revision, content.getRowVersion(),
+            relations.assets(revision.getRevisionId()).stream().map(mapper::asset).toList());
+        String editor = revision.getCreatedBy();
+        return new RevisionDetail(value.revisionId(), value.contentId(), value.revisionNo(), value.title(),
+            value.bodyMarkdown(), value.summary(), value.context(), value.revisionStatus(), value.publishedAt(),
+            value.revisionVersion(), value.contentVersion(), value.assets(), value.changeNote(),
+            editor == null ? null : new PersonRef(editor, names.get(editor)),
+            value.updateTime());
     }
 
     public List<TagView> tagViews(Long contentId) {

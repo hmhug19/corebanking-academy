@@ -152,6 +152,19 @@ public class CommunityRelations {
         return events.isEmpty() ? null : events.get(0);
     }
 
+    /** Sự kiện gần nhất có thể đóng câu hỏi: tác giả đóng, đánh dấu trùng lặp hoặc moderator xử lý. */
+    /**
+     * Các sự kiện có thể đã đóng câu hỏi, mới nhất trước. Người gọi chọn sự kiện đóng thật sự theo payload,
+     * vì mở lưu trữ, bỏ trùng lặp hay cảnh báo cũng sinh sự kiện cùng loại sau lần đóng.
+     */
+    public List<CommunityOutboxEvent> closingCandidates(Long contentId) {
+        return repository.page("""
+            select e from CommunityOutboxEvent e where e.contentId = :content and e.eventType in :types
+            order by e.eventId desc
+            """, CommunityOutboxEvent.class, Map.of("content", contentId, "types",
+                List.of("content_lifecycle", "question_duplicate_changed", "content_moderated")), 0, 20);
+    }
+
     public boolean moderatorClosed(Long contentId) {
         return repository.one("""
             select count(a) from ModerationAction a join CommunityReport r on r.reportId = a.reportId
