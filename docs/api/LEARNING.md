@@ -101,6 +101,11 @@ Prefix `/api/v1`; endpoint nghiệp vụ dùng BaseResponse, lỗi logic HTTP 20
 trả thêm cycleNo, startedAt, lastAccessAt, completedAt, lastLessonId/lastBlockId, completedRequiredLessonCount,
 requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds. Các field cũ được giữ.
 Các field resume hiện trả phẳng trong CourseCard; không dùng object minh họa từ bản thiết kế cũ làm contract.
+CourseCard trả thêm fieldId, fieldName, programName, moduleName và failed (thêm ở cuối, các field cũ giữ nguyên).
+Tên lĩnh vực/chương trình/phân hệ là null khi khóa chưa gán chương trình hoặc phân hệ. failed = học viên đã thi bài thi
+cuối khóa (PUBLISHED, chưa xóa) ít nhất một lượt đã chấm (SUBMITTED, AUTO_SUBMITTED) và chưa đạt lượt nào; Learning lấy
+tập khóa qua cổng LearningQuizDirectory, không đọc bảng Assessment. Danh sách giảng viên (MANAGE) không gọi cổng và luôn
+trả failed=false.
 GET enrollment đã có cây revision + tiến độ từng block, dùng để khôi phục player; không cần API resume riêng.
 
 ### Upload và kiểm file

@@ -49,7 +49,8 @@ public final class LearningDetails {
                               Instant updateTime, Integer cycleNo, Instant startedAt, Instant lastAccessAt,
                               Instant completedAt, Long lastLessonId, Long lastBlockId,
                               Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
-                              Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds) {
+                              Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds, Long fieldId,
+                              String fieldName, String programName, String moduleName, boolean failed) {
     }
 
     public record ProgressResult(LearningViews.BlockProgressView block,

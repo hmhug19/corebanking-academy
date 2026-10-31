@@ -29,6 +29,7 @@ public class LearningSearchService {
     private final CourseRepository repository;
     private final LearningAccessPolicy access;
     private final LearningIdentityService identity;
+    private final LearningQuizDirectory quizzes;
 
     public PageResponse<CourseCard> search(String mode, String q, Long fieldId, Long programId, Long moduleId,
                                            String level, String requirement, String learningStatus, String state,
@@ -70,7 +71,8 @@ public class LearningSearchService {
         var scope = access.searchScope(actor);
         var filter = new CourseSearch(mode, actor.person().id(), actor.person().orgId(),
             identity.activeAncestorIds(actor.person().orgId()), scope, q, fieldId, programId, moduleId, level,
-            requirement, learningStatus, state, overdue);
+            requirement, learningStatus, state, overdue,
+            SearchMode.MANAGE.equals(mode) ? Set.of() : quizzes.failedFinalExamCourseIds(actor.person().id()));
 
         // Bước 2: repository lọc quyền và đếm trên grain khóa học trước phân trang; không lọc trang trong memory.
         return repository.search(filter, pageable);

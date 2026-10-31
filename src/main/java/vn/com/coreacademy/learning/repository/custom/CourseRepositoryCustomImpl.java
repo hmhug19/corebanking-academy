@@ -50,6 +50,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             ) r on true
             left join learning_hub.training_programs p on p.program_id = r.program_id
             left join learning_hub.training_fields f on f.field_id = p.field_id
+            left join learning_hub.business_modules m on m.module_id = r.module_id
             left join lateral (
                 select case when count(*) filter (where ar.effective_start_at <= current_timestamp) > 0
                        then min(ar.effective_due_at) filter (where ar.effective_start_at <= current_timestamp)
@@ -161,6 +162,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
         if (filter.learningStatus() == null) {
             sql.bindProjection("codeNotStarted", ProgressStatus.NOT_STARTED);
         }
+        sql.bindProjection("failedIds", filter.failedCourseIds().isEmpty() ? List.of(-1L) : filter.failedCourseIds());
         sql.bindProjection("codeNotActive", DeadlineStatus.NOT_ACTIVE);
         sql.bindProjection("codeNoDeadline", DeadlineStatus.NO_DEADLINE);
         sql.bindProjection("codeCompletedLate", DeadlineStatus.COMPLETED_LATE);
@@ -183,7 +185,8 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                         when e.completed_at is not null then :codeCompletedOnTime
                         when obligations.due_at < current_timestamp then :codeOverdueActive
                         else :codeOnTimeActive end,
-                   resume.media_asset_id, resume.last_pdf_page, resume.last_video_position_seconds
+                   resume.media_asset_id, resume.last_pdf_page, resume.last_video_position_seconds,
+                   f.field_id, f.name, p.name, m.name, c.course_id in (:failedIds)
             """, CourseCard.class, pageable, Map.of("id", "c.course_id", "title", "r.title",
                 "updateTime", "r.update_time", "dueAt", "obligations.due_at", "progressPercent", "e.progress_percent",
                 "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at", "completedAt", "e.completed_at"));
