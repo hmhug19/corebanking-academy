@@ -129,6 +129,10 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             sql.and("lower(c.code) like :term escape '!' or lower(r.title) like :term escape '!'");
             sql.bind("term", term);
         }
+        if (filter.courseId() != null) {
+            sql.and("c.course_id = :courseId");
+            sql.bind("courseId", filter.courseId());
+        }
         if (filter.fieldId() != null) {
             sql.and("p.field_id = :field");
             sql.bind("field", filter.fieldId());

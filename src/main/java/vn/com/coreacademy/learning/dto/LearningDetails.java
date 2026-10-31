@@ -64,6 +64,13 @@ public final class LearningDetails {
     public record LearnerFacets(List<Facet> fields, List<FieldFacet> programs, List<FieldFacet> modules) {
     }
 
+    /**
+     * Khóa học viên thấy kèm nội dung: bản đã nhận khi có lần học, bản xuất bản hiện hành khi chưa đăng ký (khi đó mỗi
+     * bài có danh sách blocks rỗng).
+     */
+    public record LearnerCourse(CourseCard card, CourseDetail content) {
+    }
+
     public record ProgressResult(LearningViews.BlockProgressView block,
                                   LearningViews.LessonProgressView lesson,
                                   LearningViews.CourseEnrollmentView enrollment, MediaViews.Receipt session) {

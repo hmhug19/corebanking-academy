@@ -104,6 +104,21 @@ public class LearningLearnerController {
             learningStatus, state, page, size, sort, overdue, assigned, failed));
     }
 
+    @GetMapping("/courses/{courseId}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Khóa học của học viên kèm nội dung",
+        description = """
+            Thẻ khóa học (cùng quy tắc nhìn thấy và cờ failed với `/catalog`) và cây nội dung. Đã đăng ký thì trả bản
+            revision đã nhận đầy đủ; chưa đăng ký thì trả bản xuất bản hiện hành, mỗi bài có blocks rỗng. Khóa ngoài
+            phạm vi trả LEARNING-NOT_FOUND.
+            """
+    )
+    public BaseResponse<LearningDetails.LearnerCourse> course(@PathVariable @Positive Long courseId) {
+        return BaseResponse.ok(search.course(courseId));
+    }
+
     @GetMapping("/facets")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)

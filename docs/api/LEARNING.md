@@ -97,6 +97,7 @@ Prefix `/api/v1`; endpoint nghiệp vụ dùng BaseResponse, lỗi logic HTTP 20
 | GET `/me/learning/progress/summary` | Counts theo cycle hiện hành của caller; chỉ trả chỉ số có nguồn thật |
 | GET `/me/learning/progress/export` | CSV cùng filter/scope/sort của courses, tối đa 10.000 dòng |
 | GET `/me/learning/facets` | Lĩnh vực, chương trình, phân hệ mà ít nhất một khóa trong danh mục của caller dùng |
+| GET `/me/learning/courses/{courseId}` | `LearnerCourse { card, content }`: thẻ như `/catalog` và cây nội dung của một khóa caller thấy được |
 
 Đã mở rộng GET `/me/learning/courses`: overdue=true/false, sort progressPercent/startedAt/lastAccessAt/completedAt;
 trả thêm cycleNo, startedAt, lastAccessAt, completedAt, lastLessonId/lastBlockId, completedRequiredLessonCount,
@@ -117,6 +118,13 @@ GET `/me/learning/facets` trả `{ fields[], programs[], modules[] }`, mỗi m�
 hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong `/catalog` dùng (cùng quy tắc nhìn thấy, gồm
 khóa đã đăng ký, khóa của đơn vị mình và khóa được chia sẻ), sắp theo `sortNo` rồi tên. Học viên không cần quyền đọc
 `/training-catalog`.
+
+GET `/me/learning/courses/{courseId}` trả `{ card: CourseCard, content: CourseDetail }`. `card` là kết quả search CATALOG
+theo `courseId`, nên quy tắc nhìn thấy, bản revision và cờ failed giống `/catalog`. `content` là bản revision của `card`:
+bản đã nhận khi caller có lần học, bản xuất bản hiện hành (kể cả sau khi có bản mới hơn thì lần học vẫn giữ bản cũ) khi chưa
+đăng ký. Chưa đăng ký thì cây chương/bài được giữ, mỗi bài có `blocks` rỗng để không đọc được nội dung khi chưa học;
+quyền đọc media không đổi. Khóa ngoài phạm vi hoặc không tồn tại trả `LEARNING-NOT_FOUND` (mã không tìm thấy sẵn có của
+Learning, không thêm mã riêng cho khóa học).
 GET enrollment đã có cây revision + tiến độ từng block, dùng để khôi phục player; không cần API resume riêng.
 
 ### Upload và kiểm file
