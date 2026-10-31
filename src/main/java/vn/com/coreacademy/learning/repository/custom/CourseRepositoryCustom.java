@@ -6,7 +6,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseCard;
 import vn.com.coreacademy.learning.dto.LearningDetails.LearnerFacets;
-import vn.com.coreacademy.learning.dto.LearningProgressOverview.Counts;
 import vn.com.coreacademy.learning.service.LearningAccessPolicy.SearchScope;
 
 public interface CourseRepositoryCustom {
@@ -17,7 +16,11 @@ public interface CourseRepositoryCustom {
                         Boolean assigned, Boolean failed, Long courseId, Set<Long> failedCourseIds) {
     }
 
-    Counts summary(String userId);
+    /** Đếm theo trạng thái lần học hiện hành; assigned và mandatory do service lấy từ danh sách. */
+    EnrollmentCounts summary(String userId);
+
+    record EnrollmentCounts(Long total, Long completed, Long inProgress, Long notStarted, Long overdue) {
+    }
 
     Page<CourseCard> search(CourseSearch filter, Pageable pageable);
 

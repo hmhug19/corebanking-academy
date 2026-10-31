@@ -92,6 +92,12 @@ public class LearningSearchService {
         return repository.search(filter, pageable);
     }
 
+    /** Số khóa trong danh sách khóa của tôi theo requirement/assigned; cùng truy vấn với list nên khớp tổng của list. */
+    public long mineTotal(String requirement, Boolean assigned) {
+        return query(SearchMode.MINE, null, null, null, null, null, requirement, null, null, null, assigned, null,
+            PageRequest.of(0, 1, Sort.by("id"))).getTotalElements();
+    }
+
     /** Lĩnh vực, chương trình và phân hệ của các khóa caller thấy trong danh mục, theo cùng quy tắc nhìn thấy với list. */
     public LearnerFacets facets() {
         var actor = access.actor();

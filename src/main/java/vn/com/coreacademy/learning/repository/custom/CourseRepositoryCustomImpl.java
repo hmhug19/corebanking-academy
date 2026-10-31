@@ -25,7 +25,6 @@ import vn.com.coreacademy.learning.dto.LearningDetails.CourseCard;
 import vn.com.coreacademy.learning.dto.LearningDetails.Facet;
 import vn.com.coreacademy.learning.dto.LearningDetails.FieldFacet;
 import vn.com.coreacademy.learning.dto.LearningDetails.LearnerFacets;
-import vn.com.coreacademy.learning.dto.LearningProgressOverview.Counts;
 
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
@@ -246,8 +245,8 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
     }
 
     @Override
-    public Counts summary(String userId) {
-        return (Counts) entityManager.createNativeQuery("""
+    public EnrollmentCounts summary(String userId) {
+        return (EnrollmentCounts) entityManager.createNativeQuery("""
             select count(*) as total, count(*) filter (where e.status = :codeCompleted) as completed,
                    count(*) filter (where e.status = :codeInProgress) as in_progress,
                    count(*) filter (where e.status = :codeNotStarted) as not_started,
@@ -267,7 +266,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                   where later.course_id = e.course_id and later.user_id = e.user_id
                     and later.status <> :codeWithdrawn and later.cycle_no > e.cycle_no
               )
-            """, Counts.class)
+            """, EnrollmentCounts.class)
             .setParameter("user", userId)
             .setParameter("codeCompleted", ProgressStatus.COMPLETED)
             .setParameter("codeInProgress", ProgressStatus.IN_PROGRESS)

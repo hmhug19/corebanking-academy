@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningProgressOverview;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
@@ -24,8 +25,12 @@ public class LearningProgressReportService {
         var actor = access.actor();
         access.requireLearner(actor);
         var unavailable = new LearningProgressOverview.Availability("unavailable");
-        return new LearningProgressOverview(Instant.now(), "Asia/Ho_Chi_Minh", courses.summary(actor.person().id()),
-            unavailable, unavailable, unavailable);
+        var base = courses.summary(actor.person().id());
+        var counts = new LearningProgressOverview.Counts(base.total(), base.completed(), base.inProgress(),
+            base.notStarted(), base.overdue(), search.mineTotal(null, true),
+            search.mineTotal(Requirement.MANDATORY, null));
+        return new LearningProgressOverview(Instant.now(), "Asia/Ho_Chi_Minh", counts, unavailable, unavailable,
+            unavailable);
     }
 
     public byte[] export(String q, Long fieldId, Long programId, Long moduleId, String level, String requirement,

@@ -125,6 +125,10 @@ bản đã nhận khi caller có lần học, bản xuất bản hiện hành (k
 đăng ký. Chưa đăng ký thì cây chương/bài được giữ, mỗi bài có `blocks` rỗng để không đọc được nội dung khi chưa học;
 quyền đọc media không đổi. Khóa ngoài phạm vi hoặc không tồn tại trả `LEARNING-NOT_FOUND` (mã không tìm thấy sẵn có của
 Learning, không thêm mã riêng cho khóa học).
+
+GET `/me/learning/progress/summary` trả thêm `counts.assigned` và `counts.mandatory`: tổng của danh sách `/courses` với
+`assigned=true` và `requirement=mandatory`, cùng truy vấn với danh sách nên tab "Được giao" và "Bắt buộc" luôn khớp số
+trên danh sách.
 GET enrollment đã có cây revision + tiến độ từng block, dùng để khôi phục player; không cần API resume riêng.
 
 ### Upload và kiểm file
