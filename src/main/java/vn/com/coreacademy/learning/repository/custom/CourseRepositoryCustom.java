@@ -13,7 +13,7 @@ public interface CourseRepositoryCustom {
     record CourseSearch(String mode, String actorId, Long actorOrgId, Set<Long> ancestorIds, SearchScope scope,
                         String q, Long fieldId, Long programId, Long moduleId, String level,
                         String requirement, String learningStatus, String publicationState, Boolean overdue,
-                        Set<Long> failedCourseIds) {
+                        Boolean assigned, Boolean failed, Set<Long> failedCourseIds) {
     }
 
     Counts summary(String userId);

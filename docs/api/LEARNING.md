@@ -106,6 +106,11 @@ Tên lĩnh vực/chương trình/phân hệ là null khi khóa chưa gán chươ
 cuối khóa (PUBLISHED, chưa xóa) ít nhất một lượt đã chấm (SUBMITTED, AUTO_SUBMITTED) và chưa đạt lượt nào; Learning lấy
 tập khóa qua cổng LearningQuizDirectory, không đọc bảng Assessment. Danh sách giảng viên (MANAGE) không gọi cổng và luôn
 trả failed=false.
+
+Bộ lọc của danh sách học viên: GET `/me/learning/courses` và `/me/learning/catalog` nhận thêm `assigned` (true chỉ lấy
+khóa caller có đợt giao còn hiệu lực, cùng biểu thức với cờ assigned của thẻ), `failed` (true chỉ lấy khóa trong tập
+failed ở trên, false loại các khóa đó) và `overdue` (catalog nhận thêm; courses đã có). `/me/learning/progress/export`
+nhận cùng bộ lọc với `/courses`. Các bộ lọc kết hợp được với nhau và với `learningStatus`; mỗi bộ lọc true/false.
 GET enrollment đã có cây revision + tiến độ từng block, dùng để khôi phục player; không cần API resume riêng.
 
 ### Upload và kiểm file

@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -68,9 +69,14 @@ public class LearningLearnerController {
         @RequestParam(required = false) String requirement, @RequestParam(required = false) String learningStatus,
         @RequestParam(required = false) String state, @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort,
-        @RequestParam(required = false) Boolean overdue) {
+        @Parameter(description = "true chỉ lấy khóa quá hạn chưa hoàn thành, false loại các khóa đó.")
+        @RequestParam(required = false) Boolean overdue,
+        @Parameter(description = "true chỉ lấy khóa đang được giao cho caller (có đợt giao còn hiệu lực), false chỉ "
+            + "lấy khóa không được giao.") @RequestParam(required = false) Boolean assigned,
+        @Parameter(description = "true chỉ lấy khóa caller đã thi cuối khóa nhưng chưa đạt lượt nào, false loại các "
+            + "khóa đó.") @RequestParam(required = false) Boolean failed) {
         return BaseResponse.ok(search.search(SearchMode.MINE, q, fieldId, programId, moduleId, level, requirement,
-            learningStatus, state, page, size, sort, overdue));
+            learningStatus, state, page, size, sort, overdue, assigned, failed));
     }
 
     @GetMapping("/catalog")
@@ -87,9 +93,15 @@ public class LearningLearnerController {
         @RequestParam(required = false) Long moduleId, @RequestParam(required = false) String level,
         @RequestParam(required = false) String requirement, @RequestParam(required = false) String learningStatus,
         @RequestParam(required = false) String state, @RequestParam(defaultValue = "0") int page,
-        @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort) {
+        @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort,
+        @Parameter(description = "true chỉ lấy khóa quá hạn chưa hoàn thành, false loại các khóa đó.")
+        @RequestParam(required = false) Boolean overdue,
+        @Parameter(description = "true chỉ lấy khóa đang được giao cho caller (có đợt giao còn hiệu lực), false chỉ "
+            + "lấy khóa không được giao.") @RequestParam(required = false) Boolean assigned,
+        @Parameter(description = "true chỉ lấy khóa caller đã thi cuối khóa nhưng chưa đạt lượt nào, false loại các "
+            + "khóa đó.") @RequestParam(required = false) Boolean failed) {
         return BaseResponse.ok(search.search(SearchMode.CATALOG, q, fieldId, programId, moduleId, level, requirement,
-            learningStatus, state, page, size, sort));
+            learningStatus, state, page, size, sort, overdue, assigned, failed));
     }
 
     @GetMapping("/enrollments/{enrollmentId}")
@@ -195,12 +207,20 @@ public class LearningLearnerController {
                                          @RequestParam(required = false) String requirement,
                                          @RequestParam(required = false) String learningStatus,
                                          @RequestParam(required = false) String state,
+                                         @Parameter(description = "true chỉ lấy khóa quá hạn chưa hoàn thành, false loại "
+                                             + "các khóa đó.")
                                          @RequestParam(required = false) Boolean overdue,
+                                         @Parameter(description = "true chỉ lấy khóa đang được giao cho caller, false "
+                                             + "chỉ lấy khóa không được giao.")
+                                         @RequestParam(required = false) Boolean assigned,
+                                         @Parameter(description = "true chỉ lấy khóa caller đã thi cuối khóa nhưng chưa "
+                                             + "đạt lượt nào, false loại các khóa đó.")
+                                         @RequestParam(required = false) Boolean failed,
                                          @RequestParam(defaultValue = "id,asc") String sort) {
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=learning-progress.csv")
             .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
             .body(reports.export(q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
-                overdue, sort));
+                overdue, assigned, failed, sort));
     }
 
 }

@@ -29,9 +29,10 @@ public class LearningProgressReportService {
     }
 
     public byte[] export(String q, Long fieldId, Long programId, Long moduleId, String level, String requirement,
-                         String learningStatus, String state, Boolean overdue, String sort) {
+                         String learningStatus, String state, Boolean overdue, Boolean assigned, Boolean failed,
+                         String sort) {
         var rows = search.export(q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
-            overdue, sort);
+            overdue, assigned, failed, sort);
         if (rows.getTotalElements() > LearningLimits.MAX_EXPORT_ROWS) {
             throw new BusinessException(LearningResponseCode.EXPORT_TOO_LARGE);
         }

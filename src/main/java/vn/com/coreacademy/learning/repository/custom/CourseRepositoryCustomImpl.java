@@ -97,24 +97,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
         if (SearchMode.MANAGE.equals(filter.mode())) {
             applyManagementScope(sql, filter);
         } else {
-            sql.and("""
-                e.enrollment_id is not null
-                or (c.lifecycle_status = :codeCourseActive and r.state = :codeRevisionPublished
-                    and p.status = :codeCatalogPublished and f.status = :codeCatalogPublished and (
-                        c.owner_org_id = :actorOrg
-                        or exists (
-                            select 1 from learning_hub.course_shares s
-                            where s.course_id = c.course_id and s.status = :codeShareActive
-                              and (s.org_id = :actorOrg or (s.include_descendants and s.org_id in (:ancestors)))
-                        )
-                    ))
-                """);
-            sql.bind("codeCourseActive", CourseStatus.ACTIVE);
-            sql.bind("codeRevisionPublished", RevisionState.PUBLISHED);
-            sql.bind("codeCatalogPublished", CatalogStatus.PUBLISHED);
-            sql.bind("codeShareActive", ShareStatus.ACTIVE);
-            sql.bind("actorOrg", filter.actorOrgId() == null ? -1L : filter.actorOrgId());
-            sql.bind("ancestors", filter.ancestorIds().isEmpty() ? List.of(-1L) : filter.ancestorIds());
+            applyLearnerVisibility(sql, filter);
             if (SearchMode.MINE.equals(filter.mode())) {
                 sql.and("e.enrollment_id is not null");
             }
@@ -153,6 +136,10 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             sql.and("r.state = :state");
             sql.bind("state", filter.publicationState());
         }
+        if (filter.assigned() != null) {
+            sql.and("coalesce(obligations.assigned, false) = :assigned");
+            sql.bind("assigned", filter.assigned());
+        }
         if (filter.overdue() != null) {
             sql.and("""
                 coalesce(obligations.due_at < current_timestamp and e.status <> :codeCompleted, false) = :overdue
@@ -162,7 +149,14 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
         if (filter.learningStatus() == null) {
             sql.bindProjection("codeNotStarted", ProgressStatus.NOT_STARTED);
         }
-        sql.bindProjection("failedIds", filter.failedCourseIds().isEmpty() ? List.of(-1L) : filter.failedCourseIds());
+        List<Long> failedIds = filter.failedCourseIds().isEmpty() ? List.of(-1L) : List.copyOf(filter.failedCourseIds());
+        if (filter.failed() == null) {
+            sql.bindProjection("failedIds", failedIds);
+        } else {
+            sql.and("(c.course_id in (:failedIds)) = :failed");
+            sql.bind("failedIds", failedIds);
+            sql.bind("failed", filter.failed());
+        }
         sql.bindProjection("codeNotActive", DeadlineStatus.NOT_ACTIVE);
         sql.bindProjection("codeNoDeadline", DeadlineStatus.NO_DEADLINE);
         sql.bindProjection("codeCompletedLate", DeadlineStatus.COMPLETED_LATE);
@@ -222,6 +216,28 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             .setParameter("codeWithdrawn", ProgressStatus.WITHDRAWN)
             .setParameter("codeAssignmentActive", AssignmentStatus.ACTIVE)
             .setParameter("codeRecipientActive", RecipientStatus.ACTIVE).getSingleResult();
+    }
+
+    /** Khóa học viên thấy được: đã đăng ký, hoặc khóa đang hoạt động đã xuất bản thuộc đơn vị mình hoặc được chia sẻ. */
+    private void applyLearnerVisibility(NativeSearchQuery sql, CourseSearch filter) {
+        sql.and("""
+            e.enrollment_id is not null
+            or (c.lifecycle_status = :codeCourseActive and r.state = :codeRevisionPublished
+                and p.status = :codeCatalogPublished and f.status = :codeCatalogPublished and (
+                    c.owner_org_id = :actorOrg
+                    or exists (
+                        select 1 from learning_hub.course_shares s
+                        where s.course_id = c.course_id and s.status = :codeShareActive
+                          and (s.org_id = :actorOrg or (s.include_descendants and s.org_id in (:ancestors)))
+                    )
+                ))
+            """);
+        sql.bind("codeCourseActive", CourseStatus.ACTIVE);
+        sql.bind("codeRevisionPublished", RevisionState.PUBLISHED);
+        sql.bind("codeCatalogPublished", CatalogStatus.PUBLISHED);
+        sql.bind("codeShareActive", ShareStatus.ACTIVE);
+        sql.bind("actorOrg", filter.actorOrgId() == null ? -1L : filter.actorOrgId());
+        sql.bind("ancestors", filter.ancestorIds().isEmpty() ? List.of(-1L) : filter.ancestorIds());
     }
 
     private void applyManagementScope(NativeSearchQuery sql, CourseSearch filter) {

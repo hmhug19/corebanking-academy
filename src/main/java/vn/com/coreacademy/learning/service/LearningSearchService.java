@@ -35,30 +35,31 @@ public class LearningSearchService {
                                            String level, String requirement, String learningStatus, String state,
                                            int page, int size, String sort) {
         return search(mode, q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
-            page, size, sort, null);
+            page, size, sort, null, null, null);
     }
 
     public PageResponse<CourseCard> search(String mode, String q, Long fieldId, Long programId, Long moduleId,
                                            String level, String requirement, String learningStatus, String state,
-                                           int page, int size, String sort, Boolean overdue) {
+                                           int page, int size, String sort, Boolean overdue, Boolean assigned,
+                                           Boolean failed) {
         var pageable = PageQuery.of(page, size, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
             "startedAt", "lastAccessAt", "completedAt"));
         return PageResponse.from(query(mode, q, fieldId, programId, moduleId, level, requirement, learningStatus,
-            state, overdue, pageable));
+            state, overdue, assigned, failed, pageable));
     }
 
     public Page<CourseCard> export(String q, Long fieldId, Long programId, Long moduleId, String level,
                                    String requirement, String learningStatus, String state, Boolean overdue,
-                                   String sort) {
+                                   Boolean assigned, Boolean failed, String sort) {
         var order = PageQuery.of(0, 1, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
             "startedAt", "lastAccessAt", "completedAt")).getSort();
         return query(SearchMode.MINE, q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
-            overdue, PageRequest.of(0, LearningLimits.MAX_EXPORT_ROWS + 1, order));
+            overdue, assigned, failed, PageRequest.of(0, LearningLimits.MAX_EXPORT_ROWS + 1, order));
     }
 
     private Page<CourseCard> query(String mode, String q, Long fieldId, Long programId, Long moduleId, String level,
                                    String requirement, String learningStatus, String state, Boolean overdue,
-                                   Pageable pageable) {
+                                   Boolean assigned, Boolean failed, Pageable pageable) {
         // Bước 1: scope xuất phát từ grant đang hiệu lực; client chỉ được gửi filter nghiệp vụ.
         var actor = access.actor();
         if (!SearchMode.MANAGE.equals(mode)) {
@@ -71,7 +72,7 @@ public class LearningSearchService {
         var scope = access.searchScope(actor);
         var filter = new CourseSearch(mode, actor.person().id(), actor.person().orgId(),
             identity.activeAncestorIds(actor.person().orgId()), scope, q, fieldId, programId, moduleId, level,
-            requirement, learningStatus, state, overdue,
+            requirement, learningStatus, state, overdue, assigned, failed,
             SearchMode.MANAGE.equals(mode) ? Set.of() : quizzes.failedFinalExamCourseIds(actor.person().id()));
 
         // Bước 2: repository lọc quyền và đếm trên grain khóa học trước phân trang; không lọc trang trong memory.
