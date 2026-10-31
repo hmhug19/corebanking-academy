@@ -220,6 +220,7 @@ CREATE TABLE learning_hub.course_lessons (
     is_required boolean NOT NULL,
     sort_no integer NOT NULL,
     source_lesson_id bigint,
+    quiz_id bigint,
     created_by varchar(20) NOT NULL,
     updated_by varchar(20) NOT NULL,
     row_version bigint NOT NULL DEFAULT 0,
@@ -235,6 +236,7 @@ COMMENT ON COLUMN learning_hub.course_lessons.estimated_duration_seconds IS 'Thu
 COMMENT ON COLUMN learning_hub.course_lessons.is_required IS 'Thuộc tính isRequired; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.course_lessons.sort_no IS 'Thuộc tính sortNo; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.course_lessons.source_lesson_id IS 'ID tham chiếu logic, không có FK; backend kiểm tra tồn tại và quyền.';
+COMMENT ON COLUMN learning_hub.course_lessons.quiz_id IS 'Bài kiểm tra của bài học loại quiz (quizzes.quiz_id, cùng course, ID logic không FK); NULL với bài nội dung.';
 COMMENT ON COLUMN learning_hub.course_lessons.created_by IS 'Mã cán bộ tạo bản ghi.';
 COMMENT ON COLUMN learning_hub.course_lessons.updated_by IS 'Mã cán bộ cập nhật gần nhất.';
 COMMENT ON COLUMN learning_hub.course_lessons.row_version IS 'Optimistic locking chống ghi đè thay đổi.';
@@ -837,6 +839,7 @@ CREATE INDEX ix_lrn_course_revisions_2 ON learning_hub.course_revisions (program
 CREATE INDEX ix_lrn_course_objectives_1 ON learning_hub.course_objectives (revision_id, sort_no);
 CREATE INDEX ix_lrn_course_chapters_1 ON learning_hub.course_chapters (revision_id, sort_no);
 CREATE INDEX ix_lrn_course_lessons_1 ON learning_hub.course_lessons (chapter_id, sort_no);
+CREATE INDEX idx_course_lessons_quiz ON learning_hub.course_lessons (quiz_id) WHERE quiz_id IS NOT NULL;
 CREATE INDEX ix_lrn_lesson_blocks_1 ON learning_hub.lesson_blocks (lesson_id, sort_no);
 CREATE INDEX ix_lrn_process_steps_1 ON learning_hub.process_steps (block_id, sort_no);
 CREATE INDEX ix_lrn_assets_1 ON learning_hub.assets (owner_org_id, status);

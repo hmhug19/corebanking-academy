@@ -43,6 +43,21 @@ Console MinIO: `http://localhost:9001`.
 mỗi khóa một đề PRACTICE + một đề FINAL_EXAM đều PUBLISHED, pool là 8 câu. FINAL_EXAM của `FE-DEMO-C2` yêu cầu hoàn thành bài học nên
 `hocvien` nhận `blockReason=LESSONS_REQUIRED`. Không có lượt thi nào được tạo sẵn. Lần chạy thứ hai báo lỗi và rollback.
 
+## Nâng cấp schema (upgrade)
+
+Script trong `docs/sql/upgrade/` dành cho DB đã chạy baseline; DB mới đã có thay đổi trong baseline nên không cần chạy.
+Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_STOP=1`, mật khẩu qua `PGPASSWORD`.
+
+| Upgrade | Nội dung | Rollback |
+|---|---|---|
+| `2026-11-01-learner-quiz.sql` | Cột `course_lessons.quiz_id` (bài học loại quiz trỏ tới một bài kiểm tra cùng khóa) và index một phần; chạy lại an toàn | `2026-11-01-learner-quiz.rollback.sql` dừng nếu còn bài học loại quiz, ngược lại xóa index và cột |
+
+```bash
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.sql
+# Rollback:
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.rollback.sql
+```
+
 ## Bổ sung Community
 
 [learning_hub_community.sql](learning_hub_community.sql) là baseline thủ công **51 bảng**, chạy một lần sau

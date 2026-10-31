@@ -45,4 +45,8 @@ public class CourseLesson extends LearningRecord {
 
     @Column(name = "source_lesson_id")
     private Long sourceLessonId;
+
+    /** Bài kiểm tra của bài học loại quiz (ID logic, cùng khóa học); null với bài nội dung. */
+    @Column(name = "quiz_id")
+    private Long quizId;
 }
