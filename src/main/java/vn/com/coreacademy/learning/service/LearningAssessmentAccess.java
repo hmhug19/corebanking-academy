@@ -180,4 +180,11 @@ public class LearningAssessmentAccess {
     public boolean quizPassed(String userId, Long enrollmentId, Long quizId) {
         return progress.completeQuizLessons(userId, enrollmentId, quizId);
     }
+
+    /** Bài quiz của phiên bản đã nhận theo đề: quizId → lessonId (đề nằm ở nhiều bài thì lấy bài đầu tiên). */
+    public Map<Long, Long> quizLessonIds(Long revisionId) {
+        return repository.lessons(revisionId).stream()
+            .filter(l -> LessonType.QUIZ.equals(l.getLessonType()) && l.getQuizId() != null)
+            .collect(Collectors.toMap(CourseLesson::getQuizId, CourseLesson::getId, (first, second) -> first));
+    }
 }

@@ -55,6 +55,23 @@ public class LearnerQuizController {
         return BaseResponse.ok(reports.myCompetency(courseId));
     }
 
+    @GetMapping("/courses/{courseId}/quizzes")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Bài kiểm tra của khóa học",
+        description = """
+            Các đề đã xuất bản của khóa kèm lượt còn lại và lý do chưa thể làm bài, đề cuối khóa (FINAL_EXAM) xếp sau cùng.
+            - Caller phải có lần học hợp lệ của khóa; đề DRAFT, CLOSED hoặc đã xóa không hiện.
+            - canStart/blockReason/availableAt giống màn giới thiệu của từng đề.
+            - lessonId là bài quiz trỏ tới đề trong phiên bản caller đã nhận; null nếu chưa gắn vào bài nào.
+            """
+    )
+    public BaseResponse<List<AssessmentViews.LearnerQuizCard>> courseQuizzes(
+        @PathVariable @Positive Long courseId) {
+        return BaseResponse.ok(attempts.courseQuizzes(courseId));
+    }
+
     @GetMapping("/quizzes/{quizId}")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)

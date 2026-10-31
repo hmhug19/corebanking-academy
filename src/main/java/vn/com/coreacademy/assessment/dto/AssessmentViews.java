@@ -175,6 +175,18 @@ public final class AssessmentViews {
     public record CourseRef(Long id, String title) {
     }
 
+    @Schema(description = "Một đề của khóa trong danh sách của học viên; cùng ngữ nghĩa canStart/blockReason với QuizIntro.")
+    public record LearnerQuizCard(
+        LearnerQuiz quiz,
+        AttemptSummary summary,
+        @Schema(description = "TRUE khi có thể bắt đầu lượt mới hoặc tiếp tục lượt đang làm.") Boolean canStart,
+        @Schema(description = "NOT_OPEN | CLOSED | NOT_READY | LESSONS_REQUIRED | PASSED | NO_ATTEMPTS | WAIT")
+        String blockReason,
+        @Schema(description = "Thời điểm có thể làm bài khi blockReason là NOT_OPEN hoặc WAIT.") Instant availableAt,
+        @Schema(description = "Bài học loại quiz trỏ tới đề trong phiên bản học viên đã nhận; NULL nếu đề chưa được gắn.")
+        Long lessonId) {
+    }
+
     public record QuizIntro(
         LearnerQuiz quiz,
         CourseRef course,
