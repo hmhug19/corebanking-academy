@@ -23,6 +23,7 @@ import vn.com.coreacademy.assessment.entity.AttemptAnswer;
 import vn.com.coreacademy.assessment.entity.AttemptQuestion;
 import vn.com.coreacademy.assessment.entity.QuizAttempt;
 import vn.com.coreacademy.assessment.repository.AssessmentRepository;
+import vn.com.coreacademy.learning.service.LearningAssessmentAccess;
 
 /**
  * Chấm lượt thi chỉ dựa trên snapshot attempt_questions và đáp án đã lưu, không đọc lại câu hỏi gốc. Bên gọi phải
@@ -35,6 +36,7 @@ public class AttemptGrader {
 
     private final AssessmentRepository repository;
     private final AttemptJson json;
+    private final LearningAssessmentAccess learning;
 
     public boolean expired(QuizAttempt attempt, Instant now) {
         return now.isAfter(attempt.getDeadlineAt().plusSeconds(attempt.getGraceSeconds()));
@@ -105,6 +107,17 @@ public class AttemptGrader {
         attempt.setStatus(status);
         attempt.setSubmitType(submitType);
         attempt.setSubmittedAt(submittedAt);
+        completeQuizLesson(attempt);
+    }
+
+    /**
+     * Đạt đề thì bài quiz của khóa tự hoàn thành. Nộp, hết giờ và nộp hộ đều đi qua đây; chấm lại tự gọi hook
+     * tương tự. Tiến độ chỉ tăng, không bao giờ hạ.
+     */
+    private void completeQuizLesson(QuizAttempt attempt) {
+        if (Boolean.TRUE.equals(attempt.getPassed()) && attempt.getEnrollmentId() != null) {
+            learning.quizPassed(attempt.getUserId(), attempt.getEnrollmentId(), attempt.getQuizId());
+        }
     }
 
     /**

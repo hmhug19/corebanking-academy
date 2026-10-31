@@ -107,7 +107,7 @@ class LearnerQuizFlowIT extends AssessmentIntegrationTest {
         JsonNode q1 = session.path("questions").get(0);
         JsonNode q2 = session.path("questions").get(1);
         assertThat(q1.fieldNames()).toIterable().containsExactlyInAnyOrder("attemptQuestionId", "displayOrder",
-            "questionType", "content", "options", "selectedOptionIds", "flagged");
+            "questionType", "content", "code", "options", "selectedOptionIds", "flagged");
         assertThat(q1.path("options").get(0).fieldNames()).toIterable().containsExactlyInAnyOrder("id", "content");
         assertThat(q1.path("selectedOptionIds")).isEmpty();
         assertThat(q2.path("questionType").asText()).isEqualTo("MULTIPLE");

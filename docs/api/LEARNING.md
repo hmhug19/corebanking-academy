@@ -67,7 +67,8 @@ nhưng chưa có API Quiz Engine hoạt động. Phần này không phải bằn
 - Viewer/nội dung file chỉ mở khi khóa active, danh mục published và có nguồn học hợp lệ đã tới startAt (hoặc tự đăng ký còn quyền). Danh sách vẫn giữ metadata lịch sử khi khóa paused/archived; không dùng GET enrollment để bỏ qua lịch mở/thu hồi quyền học.
 - Upload vào bucket S3 private; file local chỉ dùng staging tạm và được dọn; file signature + extension và giới hạn byte được kiểm tra. Thời lượng video/số trang PDF được BE kiểm bằng ffprobe/PDFBox; MP4 remux faststart, chưa transcode. Không trả storage key hoặc URL local. Download truyền stream S3 theo single byte range, học viên phải gửi enrollmentId và blockId.
 - Nhắc học là thông báo in-app đến thời điểm đã lên lịch, không tích hợp email/SMTP. reward_points chỉ cấu hình, chưa cộng sổ gamification.
-- Quiz Engine chưa triển khai: không cho lưu quiz lesson/cấu hình assessment có hiệu lực. course_assessments là bảng điểm nối dành cho bước phát triển sau, không phải API chấm thi.
+- Bài học loại quiz (`lessonType=quiz`) không có block và trỏ tới một đề của Assessment qua `quizId` (cột `course_lessons.quiz_id`, ID logic không FK; bài `content` luôn có `quizId=null`). Bản nháp được phép để `quizId` trống; `quizId` phải là đề của đúng khóa này và chưa xóa, nếu không trả `LEARNING-QUIZ_INVALID`. Xuất bản đòi mọi bài quiz trỏ tới đề PUBLISHED của khóa, nếu không trả `LEARNING-QUIZ_LESSON_UNLINKED`. Tạo bản nháp từ bản đã xuất bản giữ `quizId`; sao chép khóa sang khóa mới xóa `quizId` vì đề thuộc khóa cũ. Learning chỉ kiểm tra qua cổng `LearningQuizDirectory` (do Assessment hiện thực), không import class Assessment.
+- Đạt đề thì bài quiz trỏ tới đề đó lên 100% và tiến độ khóa được tính lại (xem `docs/api/ASSESSMENT.md`). Bài quiz không cần mở để được thi: điều kiện `requireLessonsCompleted` của đề chỉ đếm bài `content`. `course_assessments` vẫn là bảng điểm nối chưa dùng; còn dòng ở đó thì xuất bản vẫn bị chặn với `LEARNING-QUIZ_UNAVAILABLE`.
 - Thao tác ghi Learning dùng chung advisory transaction lock với Identity để bảo vệ grain và tham chiếu xuyên module khi chưa có UNIQUE/FK. Xóa team bị chặn nếu còn course, target hoặc snapshot học tập tham chiếu. Đây là lựa chọn ban đầu cho correctness; chưa benchmark tải lớn. Không mở rộng thành nhiều khóa trước khi đo và thiết kế thứ tự khóa.
 
 <a id="my-learning-progress-design"></a>
@@ -230,7 +231,7 @@ Ví dụ lưu trang PDF (expectedVersion lấy từ session hoặc response ti�
   Hợp khoảng video không cộng trùng khi xem lại; tua tới cuối không tính đoạn tua qua.
   Credit tối đa theo 2x và đồng hồ server giữa heartbeat liên tiếp, gap trên 30 giây không được backfill coverage.
 - Video chạm ngưỡng thì block hoàn thành; PDF manual cần xác nhận, pdf_end chỉ chứng minh mở trang cuối.
-  Bài cần đủ các block required; khóa cần đủ bài required. Quiz Engine vẫn bị chặn, không tự coi quiz đã đạt.
+  Bài cần đủ các block required; khóa cần đủ bài required. Bài quiz chỉ hoàn thành khi học viên đạt đề trỏ tới (không có block để tự đánh dấu).
 - Block mới gắn media_asset_id. Legacy dùng block_assets primary khi scalar còn NULL; nếu hai nguồn lệch thì báo
   MEDIA_CHANGED, không chọn file tùy ý. Thay file tạo asset/revision mới, giữ tiến độ của enrollment revision cũ.
 

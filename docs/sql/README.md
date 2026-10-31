@@ -1,5 +1,68 @@
 # Khởi tạo Identity / Organization / RBAC
 
+## Chạy local
+
+Chạy toàn bộ hệ thống trên máy dev, không dùng DB chung (`103.121.90.119`) hay S3 từ xa. Cần Docker, `psql`, Java 21, Maven,
+`ffmpeg`/`ffprobe` (video chỉ thành READY sau khi qua kiểm tra bằng `ffprobe`). `.env` hiện có không bị đổi: biến môi trường
+nạp từ `.env.local` luôn thắng phần import `.env` của `application.yml`.
+
+```bash
+cp .env.local.example .env.local      # thay mọi giá trị change-me; LOCAL_DEMO_PASSWORD lấy từ mục "Đăng nhập demo" bên dưới
+docker compose -f compose.yaml -f compose.local.yaml --env-file .env.local up -d db s3 s3-init
+scripts/local-db-init.sh                # DB rỗng: baseline + demo, theo thứ tự bên dưới
+set -a; . ./.env.local; set +a; mvn spring-boot:run
+scripts/local-seed-media.sh             # (terminal khác) khóa DEMO-MEDIA có PDF + video READY
+scripts/local-smoke.sh                  # kiểm tra đăng nhập và các API đọc
+```
+
+Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_ERROR_STOP=1`:
+
+| # | File | Ghi chú |
+|---|---|---|
+| 1 | `learning_hub_identity.sql` | Schema, 7 tài khoản demo, RBAC |
+| 2 | `learning_hub_learning.sql` | 26 bảng Learning |
+| 3 | `learning_hub_media_progress.sql` | Extension media/tiến độ |
+| 4 | `learning_hub_assessment.sql` | Quiz Engine; cần Identity + Learning, nằm trước Knowledge/Community |
+| 5 | `learning_hub_knowledge.sql` | pgvector (image `pgvector/pgvector:pg16`) |
+| 6 | `learning_hub_community.sql` | 51 bảng Community |
+| 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
+| 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |
+| 9 | `learning_hub_learning_demo.sql` | Chỉ dev/test |
+| 10 | `learning_hub_assessment_demo.sql` | Chỉ dev/test; cần Learning demo (xem bên dưới) |
+| 11 | `learning_hub_learner_quiz_demo.sql` | Chỉ dev/test; cần Assessment demo (xem bên dưới) |
+| 12 | `learning_hub_community_demo.sql` | Chỉ dev/test |
+| 13 | `learning_hub_community_verify.sql` | Chỉ đọc |
+
+Script từ chối chạy khi `learning_hub.users` đã tồn tại và khi `PGHOST` không phải máy local. Khởi tạo lại từ đầu:
+`docker compose -f compose.yaml -f compose.local.yaml --env-file .env.local down -v`, rồi chạy lại các lệnh trên.
+Mật khẩu chỉ đọc từ biến môi trường (`DB_PASSWORD`/`PGPASSWORD`, `LOCAL_DEMO_PASSWORD`), không có trong lệnh hay log.
+MinIO dùng image `bitnamilegacy/minio` đã đóng băng (image `minio/minio` chính thức không còn pull được) nên chỉ dùng local.
+Console MinIO: `http://localhost:9001`.
+
+**Assessment demo** ([learning_hub_assessment_demo.sql](learning_hub_assessment_demo.sql), chỉ dev/test, chạy một lần): 3 nhóm năng lực
+`FE-DEMO-CMP-ARCH/OPS/CTRL`, 16 câu hỏi ACTIVE (8 câu mỗi khóa `FE-DEMO-C1`, `FE-DEMO-C2`, SINGLE và MULTIPLE, gắn bài học của khóa), và với
+mỗi khóa một đề PRACTICE + một đề FINAL_EXAM đều PUBLISHED, pool là 8 câu. FINAL_EXAM của `FE-DEMO-C2` yêu cầu hoàn thành bài học nên
+`hocvien` nhận `blockReason=LESSONS_REQUIRED`. Không có lượt thi nào được tạo sẵn. Lần chạy thứ hai báo lỗi và rollback.
+
+**Learner quiz demo** ([learning_hub_learner_quiz_demo.sql](learning_hub_learner_quiz_demo.sql), chỉ dev/test, chạy một lần): thêm vào
+phiên bản đã xuất bản của `FE-DEMO-C1` và `FE-DEMO-C2` một bài học bắt buộc loại quiz, trỏ tới đề FINAL_EXAM của khóa. Sửa trực tiếp
+bản đã xuất bản để `hocvien` thấy bài quiz ngay mà không cần nhận lại khóa. Lần chạy thứ hai báo lỗi và rollback.
+
+## Nâng cấp schema (upgrade)
+
+Script trong `docs/sql/upgrade/` dành cho DB đã chạy baseline; DB mới đã có thay đổi trong baseline nên không cần chạy.
+Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_STOP=1`, mật khẩu qua `PGPASSWORD`.
+
+| Upgrade | Nội dung | Rollback |
+|---|---|---|
+| `2026-11-01-learner-quiz.sql` | Cột `course_lessons.quiz_id` (bài học loại quiz trỏ tới một bài kiểm tra cùng khóa) và index một phần; chạy lại an toàn | `2026-11-01-learner-quiz.rollback.sql` dừng nếu còn bài học loại quiz, ngược lại xóa index và cột |
+
+```bash
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.sql
+# Rollback:
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.rollback.sql
+```
+
 ## Bổ sung Community
 
 [learning_hub_community.sql](learning_hub_community.sql) là baseline thủ công **51 bảng**, chạy một lần sau

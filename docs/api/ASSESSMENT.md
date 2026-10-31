@@ -91,6 +91,7 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 44 | GET `/api/v1/reports/assessment/questions` | Phân tích câu hỏi theo phiên bản, câu sai nhiều nhất trước |
 | 45 | GET `/api/v1/reports/assessment/{type}/export` | CSV cho `results/learners/competency/questions`, tối đa 10.000 dòng |
 | 46 | GET `/api/v1/me/competency?courseId` | Năng lực của chính học viên |
+| 47 | GET `/api/v1/me/courses/{courseId}/quizzes` | Đề đã xuất bản của khóa (FINAL_EXAM cuối) kèm lượt còn lại, lý do chặn và `lessonId` của bài quiz |
 
 API 21–28, 30–33, 37–39 yêu cầu quyền quản lý khóa chứa câu hỏi/đề; API 36 cần vai trò giảng viên/quản trị; bulk cần
 quyền trên mọi khóa trong lô. API 29 chỉ dành cho quản trị GLOBAL; API 34–35, 46 chỉ trả dữ liệu của caller. API 40–45
@@ -114,7 +115,8 @@ lượt mới vì lượt đã chụp `timeLimitMinutes`, `passPercent`, `scorin
 hạn được trả lại; lượt dở đã quá hạn được tự nộp trước. Thứ tự chặn (`blockReason`): `CLOSED`, `NOT_OPEN`,
 `NOT_READY`, `LESSONS_REQUIRED`, `PASSED` (khi không cho thi nâng điểm), `NO_ATTEMPTS`, `WAIT`. Lượt tính ngay khi
 bắt đầu, trừ VOIDED; lượt còn lại = `maxAttempts` + lượt được cấp − lượt đã dùng. `deadlineAt` =
-min(bắt đầu + thời lượng, `closeAt`). Đề trả về không có đáp án đúng/giải thích.
+min(bắt đầu + thời lượng, `closeAt`). Đề trả về không có đáp án đúng/giải thích. Mỗi câu có `code` là mã trong ngân hàng
+(`questions.code`, lấy theo bản hiện tại của câu, null khi câu không có mã).
 
 **Lưu đáp án.** PATCH chỉ nhận `selectedOptionIds` và/hoặc `flagged` (bỏ qua = giữ nguyên, `[]` = bỏ chọn, field
 khác bị từ chối). ID phải thuộc đề đã phát; SINGLE tối đa 1. Chặn khi lượt không còn IN_PROGRESS hoặc quá
@@ -184,6 +186,14 @@ trong snapshot từng lượt đã chấm (SUBMITTED/AUTO_SUBMITTED; lượt đa
 cập nhật snapshot đáp án, điểm câu và tổng điểm/đạt, ghi `attempt_regrades` (trước/sau, lý do, người chấm, batchId) và
 một audit `ASSESSMENT_ATTEMPTS_REGRADED`; chạy lại không ghi trùng. Lịch sử hiển thị ở `regrades` của API 24.
 
+**Bài quiz của khóa.** Khóa có thể có bài học loại quiz (`lessonType=quiz`, `quizId` trỏ tới đề của khóa; xem
+`docs/api/LEARNING.md`). Khi một lượt được chấm `passed=true` thì `AttemptGrader` (nộp, hết giờ, nộp hộ) hoặc
+`RegradeService` gọi `LearningAssessmentAccess.quizPassed`: bài quiz trỏ tới đề đó trong phiên bản học viên đã nhận lên
+100% và tiến độ khóa được tính lại, nên khóa hoàn thành khi đây là bài bắt buộc cuối cùng. Chạy trong transaction chấm
+bài; lần học đã rút hoặc không còn thì bỏ qua và điểm vẫn được giữ. Một chiều: tiến độ chỉ tăng nên chấm lại từ đạt
+xuống trượt không hạ bài học (chấm lại vốn chỉ áp dụng khi điểm tăng). `requireLessonsCompleted` chỉ đếm bài `content`
+để đề nằm trong khóa không tự chặn chính nó.
+
 **Job tự nộp.** Mỗi `app.assessment.auto-submit-interval` (mặc định 1 phút) quét tối đa 100 lượt quá
 `deadlineAt + graceSeconds`, mỗi lượt một transaction có khóa dòng; chạy lại hoặc nhiều instance không chấm trùng.
 
@@ -211,10 +221,10 @@ Thiếu lần học hợp lệ trả mã Learning `LEARNING-NOT_AVAILABLE`; thi�
 
 ## Kiểm thử
 
-Integration test tại `src/test/java/vn/com/coreacademy/assessment` (51 test, 8 lớp) gọi API qua MockMvc với JWT của
+Integration test tại `src/test/java/vn/com/coreacademy/assessment` (8 lớp, thêm `QuizLessonContentIT`, `QuizLessonCompletionIT`, `LearnerCourseQuizzesIT`) gọi API qua MockMvc với JWT của
 tài khoản seed, dựng khóa học bằng chính API Learning (danh mục → khóa → xuất bản → giao học) rồi kiểm tra envelope
 BaseResponse, field JSON FE dùng, mã lỗi/field path, phân quyền 401/403, cách ly dữ liệu giữa học viên, không lộ đáp án
-khi đang thi, hết giờ/job tự nộp, đóng đề, chấm PARTIAL, BEST/LAST, snapshot khi sửa câu, bắt đầu đồng thời và đủ 46
+khi đang thi, hết giờ/job tự nộp, đóng đề, chấm PARTIAL, BEST/LAST, snapshot khi sửa câu, bắt đầu đồng thời và đủ 47
 operation trên `/v3/api-docs`, nhập/xuất Excel, báo cáo (số liệu tính tay, phạm vi GLOBAL/ORG/TEAM) và chấm lại (chỉ áp dụng tăng điểm).
 
 - Có Docker: `mvn clean verify` (Testcontainers pgvector, giống test Knowledge).
@@ -227,7 +237,8 @@ Mọi mốc thời gian của lượt thi được cắt về micro giây trư�
 
 ## Chưa làm / cần chốt
 
-- Gắn đề vào `course_assessments` và điều kiện hoàn thành khóa: Learning vẫn chặn bài QUIZ (`LEARNING-QUIZ_UNAVAILABLE`);
-  đạt bài thi chưa cập nhật tiến độ khóa.
+- Gắn đề qua `course_assessments` (bảng điểm nối cũ) vẫn bị chặn khi xuất bản (`LEARNING-QUIZ_UNAVAILABLE`); đề gắn vào
+  khóa bằng bài học loại quiz. Chưa có điều kiện "phải đạt đề X mới hoàn thành khóa" ngoài bài quiz bắt buộc.
+- Bài quiz không tự hạ về chưa hoàn thành khi chấm lại làm điểm giảm hoặc khi đề bị đóng sau đó (tiến độ chỉ tăng).
 - Chưa có `quiz_revision`: lượt mới của học viên khóa cũ dùng cấu hình đề hiện tại.
 - Chấm lại chưa áp dụng cho lượt đang làm (lượt đó chấm theo snapshot khi nộp; chạy lại chấm lại sau khi nộp).

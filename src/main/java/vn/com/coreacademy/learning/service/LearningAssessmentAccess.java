@@ -16,6 +16,7 @@ import vn.com.coreacademy.identity.constants.RoleCodes;
 import vn.com.coreacademy.identity.dto.RoleGrant;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
+import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.entity.Course;
 import vn.com.coreacademy.learning.entity.CourseChapter;
@@ -40,6 +41,7 @@ public class LearningAssessmentAccess {
     private final LearningRepository repository;
     private final LearningAssignmentService assignments;
     private final LearningIdentityService identity;
+    private final LearningProgressService progress;
 
     public record ManagedCourse(Long id, String code, Long ownerOrgId) {
     }
@@ -157,13 +159,32 @@ public class LearningAssessmentAccess {
         return userIds.isEmpty() ? Map.of() : identity.fullNames(userIds);
     }
 
-    /** Mọi bài bắt buộc của phiên bản đã nhận đạt 100%; khóa không có bài bắt buộc được coi là đã đủ. */
+    /**
+     * Mọi bài học bắt buộc của phiên bản đã nhận đạt 100%; khóa không có bài bắt buộc được coi là đã đủ. Bài quiz
+     * không tính vì chính đề này có thể nằm trong khóa: đòi bài quiz xong trước khi được thi sẽ khóa vòng tròn.
+     */
     public boolean requiredLessonsCompleted(Long enrollmentId, Long revisionId) {
         Map<Long, BigDecimal> values = repository.lessonProgress(enrollmentId).stream()
             .collect(Collectors.toMap(LessonProgress::getLessonId, LessonProgress::getProgressPercent,
                 BigDecimal::max));
         return repository.lessons(revisionId).stream()
-            .filter(CourseLesson::getIsRequired)
+            .filter(l -> l.getIsRequired() && LessonType.CONTENT.equals(l.getLessonType()))
             .allMatch(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0);
+    }
+
+    /**
+     * Học viên đạt đề: hoàn thành bài quiz trỏ tới đề trong lần học và tính lại tiến độ khóa. Chạy trong transaction
+     * chấm bài của bên gọi; lần học không còn hiệu lực thì bỏ qua (trả false) để điểm không bị mất.
+     */
+    @Transactional
+    public boolean quizPassed(String userId, Long enrollmentId, Long quizId) {
+        return progress.completeQuizLessons(userId, enrollmentId, quizId);
+    }
+
+    /** Bài quiz của phiên bản đã nhận theo đề: quizId → lessonId (đề nằm ở nhiều bài thì lấy bài đầu tiên). */
+    public Map<Long, Long> quizLessonIds(Long revisionId) {
+        return repository.lessons(revisionId).stream()
+            .filter(l -> LessonType.QUIZ.equals(l.getLessonType()) && l.getQuizId() != null)
+            .collect(Collectors.toMap(CourseLesson::getQuizId, CourseLesson::getId, (first, second) -> first));
     }
 }

@@ -114,6 +114,7 @@ public final class LearningViews {
         Boolean isRequired,
         Integer sortNo,
         Long sourceLessonId,
+        Long quizId,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {

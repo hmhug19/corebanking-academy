@@ -224,6 +224,18 @@ public class AssessmentRepository {
             """, Quiz.class, Map.of("ids", questionIds, "published", QuizStatus.PUBLISHED));
     }
 
+    /** Đề đã xuất bản, chưa xóa của khóa; đề DRAFT/CLOSED không hiện cho học viên. */
+    public List<Quiz> publishedQuizzes(Long courseId) {
+        return query("""
+            select z
+            from Quiz z
+            where z.deleted = false
+            and z.status = :published
+            and z.courseId = :course
+            order by z.id
+            """, Quiz.class, Map.of("course", courseId, "published", QuizStatus.PUBLISHED));
+    }
+
     public List<Long> inProgressAttemptIds(Long quizId) {
         return query("""
             select a.id

@@ -11,6 +11,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -26,6 +27,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.AuditAction;
 import vn.com.coreacademy.learning.constants.LearningCodes.BlockType;
 import vn.com.coreacademy.learning.constants.LearningCodes.CompletionMode;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaseState;
+import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
 import vn.com.coreacademy.learning.constants.LearningCodes.PlaybackState;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressEvent;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
@@ -346,6 +348,47 @@ public class LearningProgressService {
         }
         repository.save(enrollment, actor);
     }
+    /**
+     * Học viên đạt đề của khóa: bài quiz trỏ tới đề đó trong phiên bản đã nhận lên 100%, rồi tính lại tiến độ khóa.
+     * Không ném lỗi khi lần học không còn hiệu lực (đã rút hoặc không thuộc người này) vì bên gọi đang nằm trong
+     * transaction chấm bài và điểm phải được giữ; trả false trong trường hợp đó và khi khóa không có bài quiz nào.
+     * Tiến độ chỉ tăng nên chấm lại từ đạt xuống trượt không hạ bài học.
+     */
+    @Transactional
+    public boolean completeQuizLessons(String userId, Long enrollmentId, Long quizId) {
+        CourseEnrollment enrollment = repository.userEnrollments(userId).stream()
+            .filter(e -> e.getId().equals(enrollmentId)).findFirst().orElse(null);
+        if (enrollment == null) {
+            return false;
+        }
+        List<CourseLesson> targets = repository.lessons(enrollment.getRevisionId()).stream()
+            .filter(l -> LessonType.QUIZ.equals(l.getLessonType()) && quizId.equals(l.getQuizId())).toList();
+        if (targets.isEmpty()) {
+            return false;
+        }
+        Instant now = Instant.now();
+        Map<Long, LessonProgress> existing = repository.lessonProgress(enrollmentId).stream()
+            .collect(Collectors.toMap(LessonProgress::getLessonId, Function.identity(), (a, b) -> a));
+        for (CourseLesson lesson : targets) {
+            LessonProgress progress = existing.getOrDefault(lesson.getId(), new LessonProgress());
+            progress.setEnrollmentId(enrollmentId);
+            progress.setLessonId(lesson.getId());
+            progress.setProgressPercent(HUNDRED);
+            progress.setStatus(ProgressStatus.COMPLETED);
+            if (progress.getStartedAt() == null) {
+                progress.setStartedAt(now);
+            }
+            if (progress.getCompletedAt() == null) {
+                progress.setCompletedAt(now);
+            }
+            progress.setLastAccessAt(now);
+            repository.save(progress, userId);
+        }
+        repository.flush();
+        updateEnrollment(enrollment, targets.get(0).getId(), null, now, userId);
+        return true;
+    }
+
     private String fingerprint(Long enrollmentId, Long blockId, LearningRequests.ProgressRequest request) {
         try {
             byte[] bytes = (enrollmentId + ":" + blockId + ":" + json.writeValueAsString(request))

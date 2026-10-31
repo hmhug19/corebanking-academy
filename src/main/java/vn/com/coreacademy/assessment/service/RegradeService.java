@@ -187,6 +187,10 @@ public class RegradeService {
         outcome.answer().setCorrect(outcome.newExact());
         outcome.answer().setScoreAwarded(outcome.newScore());
         AttemptGrader.applyTotals(attempt, outcome.newRaw(), outcome.newCorrectCount());
+        if (Boolean.TRUE.equals(attempt.getPassed()) && attempt.getEnrollmentId() != null) {
+            // Chấm lại chỉ tăng điểm; từ trượt sang đạt thì bài quiz của khóa được hoàn thành như khi nộp bài.
+            learning.quizPassed(attempt.getUserId(), attempt.getEnrollmentId(), attempt.getQuizId());
+        }
 
         history.setNewCorrectCount(attempt.getCorrectCount());
         history.setNewRawScore(attempt.getRawScore());

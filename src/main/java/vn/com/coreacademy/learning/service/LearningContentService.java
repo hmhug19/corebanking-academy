@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -62,6 +63,7 @@ public class LearningContentService {
     private final LearningMapper mapper;
     private final IdentityAuditService audit;
     private final List<LearningResourceExtension> resourceExtensions;
+    private final LearningQuizDirectory quizzes;
 
     /** Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload. */
     @Transactional
@@ -126,9 +128,7 @@ public class LearningContentService {
         }
         for (var chapter : request.chapters()) {
             for (var lesson : chapter.lessons()) {
-                if (!LessonType.CONTENT.equals(lesson.lessonType())) {
-                    throw new BusinessException(LearningResponseCode.QUIZ_UNAVAILABLE);
-                }
+                validateLessonInput(course, lesson);
                 for (var block : lesson.blocks()) {
                     validateBlockInput(course, block);
                 }
@@ -204,7 +204,7 @@ public class LearningContentService {
         CourseRevision source = selectRevision(course, course.getPublishedRevisionId());
         CourseRevision target = newRevision(course, source.getTitle(), actor.person().id(),
             revisions.stream().mapToInt(CourseRevision::getRevisionNo).max().orElse(0) + 1);
-        cloneContent(course, source, target, actor.person().id());
+        cloneContent(course, source, target, actor.person().id(), true);
         record(actor.person().id(), AuditAction.DRAFT_CREATED, course);
         repository.flush();
         return detail(course, target);
@@ -232,7 +232,7 @@ public class LearningContentService {
         repository.save(target, actor.person().id());
         CourseRevision sourceRevision = selectRevision(source, null);
         CourseRevision revision = newRevision(target, sourceRevision.getTitle(), actor.person().id(), 1);
-        cloneContent(target, sourceRevision, revision, actor.person().id());
+        cloneContent(target, sourceRevision, revision, actor.person().id(), false);
         record(actor.person().id(), AuditAction.COURSE_COPIED, target);
         repository.flush();
         return detail(target, revision);
@@ -369,6 +369,29 @@ public class LearningContentService {
         }
     }
 
+    /**
+     * Bài nội dung không có quizId; bài kiểm tra không có khối và (nếu đã chọn) trỏ tới đề chưa xóa của chính khóa này.
+     * Bản nháp được phép chưa chọn đề: việc đó chỉ bị chặn khi xuất bản.
+     */
+    private void validateLessonInput(Course course, LearningRequests.LessonInput lesson) {
+        if (LessonType.CONTENT.equals(lesson.lessonType())) {
+            if (lesson.quizId() != null) {
+                throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
+            }
+            return;
+        }
+        if (!lesson.blocks().isEmpty()) {
+            throw BusinessException.validation("chapters", "INVALID_VALUE",
+                "Bài học loại kiểm tra không có khối nội dung.");
+        }
+        if (lesson.quizId() != null) {
+            var quiz = quizzes.find(lesson.quizId());
+            if (quiz.isEmpty() || quiz.get().deleted() || !course.getId().equals(quiz.get().courseId())) {
+                throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
+            }
+        }
+    }
+
     private void validateBlockInput(Course course, LearningRequests.BlockInput block) {
         if ((CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()) && !BlockType.VIDEO.equals(block.blockType()))
             || (CompletionMode.PDF_END.equals(block.completionMode()) && !BlockType.PDF.equals(block.blockType()))
@@ -432,6 +455,14 @@ public class LearningContentService {
             for (var lesson : chapter.lessons()) {
                 if (lesson.lesson().isRequired()) {
                     requiredLessons++;
+                }
+                if (LessonType.QUIZ.equals(lesson.lesson().lessonType())) {
+                    Optional<LearningQuizDirectory.QuizRef> quiz = lesson.lesson().quizId() == null
+                        ? Optional.empty() : quizzes.find(lesson.lesson().quizId());
+                    if (quiz.isEmpty() || !quiz.get().published() || !course.getId().equals(quiz.get().courseId())) {
+                        throw new BusinessException(LearningResponseCode.QUIZ_LESSON_UNLINKED);
+                    }
+                    continue;
                 }
                 if (lesson.blocks().isEmpty() || lesson.blocks().stream().noneMatch(b -> b.block().isRequired())) {
                     throw new BusinessException(LearningResponseCode.NOT_PUBLISHABLE);
@@ -501,6 +532,7 @@ public class LearningContentService {
                 lesson.setEstimatedDurationSeconds(lessonInput.estimatedDurationSeconds());
                 lesson.setIsRequired(lessonInput.isRequired());
                 lesson.setSortNo(li);
+                lesson.setQuizId(lessonInput.quizId());
                 repository.save(lesson, actor);
                 for (int bi = 0; bi < lessonInput.blocks().size(); bi++) {
                     writeBlock(lesson.getId(), lessonInput.blocks().get(bi), bi, actor);
@@ -545,7 +577,8 @@ public class LearningContentService {
         }
     }
 
-    private void cloneContent(Course course, CourseRevision source, CourseRevision target, String actor) {
+    private void cloneContent(Course course, CourseRevision source, CourseRevision target, String actor,
+                              boolean keepQuizLinks) {
         var original = detail(repository.require(Course.class, source.getCourseId()), source);
         target.setBasedOnRevisionId(source.getId());
         target.setProgramId(source.getProgramId());
@@ -559,7 +592,8 @@ public class LearningContentService {
         repository.save(target, actor);
         var chapters = original.chapters().stream().map(c -> new LearningRequests.ChapterInput(c.chapter().title(),
             c.lessons().stream().map(l -> new LearningRequests.LessonInput(l.lesson().title(), l.lesson().lessonType(),
-                l.lesson().estimatedDurationSeconds(), l.lesson().isRequired(), l.blocks().stream()
+                l.lesson().estimatedDurationSeconds(), l.lesson().isRequired(),
+                keepQuizLinks ? l.lesson().quizId() : null, l.blocks().stream()
                     .map(b -> new LearningRequests.BlockInput(b.block().blockType(), b.block().title(),
                         b.block().body(), b.block().bodyFormat(), b.block().completionMode(),
                         b.block().completionThreshold(), b.block().isRequired(), b.assets().stream()

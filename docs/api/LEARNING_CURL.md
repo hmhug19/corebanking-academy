@@ -658,7 +658,8 @@ curl --silent --show-error --request GET "${BASE_URL}/api/v1/learning-assets/${A
 - Tái dùng idempotencyKey với payload khác: LEARNING-CONFLICT; cùng payload không tạo đợt giao mới.
 - Gửi blockId của revision khác vào enrollment: LEARNING-INVALID_REFERENCE.
 - Publish khi bài trống: LEARNING-NOT_PUBLISHABLE.
-- Gửi lessonType=quiz: LEARNING-QUIZ_UNAVAILABLE; module thi chưa triển khai, không chấm điểm giả.
+- Lưu lessonType=quiz kèm block, hoặc quizId của khóa khác/đề đã xóa, hoặc bài content kèm quizId: LEARNING-QUIZ_INVALID / CORE-VALIDATION_FAILED.
+- Xuất bản khi còn bài quiz chưa có quizId hoặc đề chưa PUBLISHED: LEARNING-QUIZ_LESSON_UNLINKED.
 - Upload sai signature/extension/MIME/dung lượng: LEARNING-ASSET_INVALID (giới hạn multipart toàn request có thể trả 413).
 
 ## Video và PDF

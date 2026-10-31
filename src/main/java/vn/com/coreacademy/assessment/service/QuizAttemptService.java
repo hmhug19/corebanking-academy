@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,7 @@ import vn.com.coreacademy.assessment.constants.AssessmentCodes.AttemptStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.BlockReason;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuestionType;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizStatus;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizType;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.ReviewPolicy;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.ScoreMethod;
 import vn.com.coreacademy.assessment.constants.AssessmentLimits;
@@ -74,14 +76,39 @@ public class QuizAttemptService {
         List<QuizAttempt> attempts = repository.attempts(quizId, learner.userId());
         AttemptSummary summary = summarize(quiz, attempts, repository.grantedAttempts(quizId, learner.userId()), now);
         Block block = summary.runningAttemptId() != null ? null : block(quiz, summary, learner, now);
-        var view = new AssessmentViews.LearnerQuiz(quiz.getId(), quiz.getTitle(), quiz.getDescription(),
-            quiz.getQuizType(), quiz.getStatus(), quiz.getQuestionCount(), quiz.getTimeLimitMinutes(),
-            quiz.getPassPercent(), quiz.getMaxAttempts(), quiz.getRetakeWaitHours(), quiz.getOpenAt(),
-            quiz.getCloseAt(), quiz.getScoreMethod(), quiz.getReviewPolicy(), quiz.getShuffleQuestions(),
-            repository.poolHasActiveMultiple(quizId));
+        var view = learnerQuiz(quiz);
         return new AssessmentViews.QuizIntro(view, new AssessmentViews.CourseRef(quiz.getCourseId(),
             learner.courseTitle()), summary, block == null, block == null ? null : block.reason(),
             block == null ? null : block.availableAt(), now);
+    }
+
+    /**
+     * Các đề đã xuất bản của khóa cho học viên đang học, đề cuối khóa xếp sau cùng. Cùng quy tắc truy cập và cùng mã
+     * chặn với màn giới thiệu; lessonId là bài quiz trỏ tới đề trong phiên bản học viên đã nhận.
+     */
+    public List<AssessmentViews.LearnerQuizCard> courseQuizzes(Long courseId) {
+        StudyingLearner learner = learning.requireStudyingLearner(courseId);
+        Instant now = ServerTime.now();
+        Map<Long, Long> lessons = learning.quizLessonIds(learner.revisionId());
+        return repository.publishedQuizzes(courseId).stream()
+            .sorted(Comparator.comparing((Quiz q) -> QuizType.FINAL_EXAM.equals(q.getQuizType())))
+            .map(quiz -> {
+                List<QuizAttempt> attempts = repository.attempts(quiz.getId(), learner.userId());
+                AttemptSummary summary = summarize(quiz, attempts,
+                    repository.grantedAttempts(quiz.getId(), learner.userId()), now);
+                Block block = summary.runningAttemptId() != null ? null : block(quiz, summary, learner, now);
+                return new AssessmentViews.LearnerQuizCard(learnerQuiz(quiz), summary, block == null,
+                    block == null ? null : block.reason(), block == null ? null : block.availableAt(),
+                    lessons.get(quiz.getId()));
+            }).toList();
+    }
+
+    private AssessmentViews.LearnerQuiz learnerQuiz(Quiz quiz) {
+        return new AssessmentViews.LearnerQuiz(quiz.getId(), quiz.getTitle(), quiz.getDescription(),
+            quiz.getQuizType(), quiz.getStatus(), quiz.getQuestionCount(), quiz.getTimeLimitMinutes(),
+            quiz.getPassPercent(), quiz.getMaxAttempts(), quiz.getRetakeWaitHours(), quiz.getOpenAt(),
+            quiz.getCloseAt(), quiz.getScoreMethod(), quiz.getReviewPolicy(), quiz.getShuffleQuestions(),
+            repository.poolHasActiveMultiple(quiz.getId()));
     }
 
     /**
@@ -290,11 +317,15 @@ public class QuizAttemptService {
 
     private AssessmentViews.AttemptSession session(QuizAttempt attempt, String quizTitle, Instant now) {
         Map<Long, AttemptAnswer> answers = readModel.answersByQuestion(attempt.getId());
-        List<AssessmentViews.SessionQuestion> questions = repository.attemptQuestions(attempt.getId()).stream()
+        List<AttemptQuestion> attemptQuestions = repository.attemptQuestions(attempt.getId());
+        Map<Long, String> codes = new HashMap<>();
+        repository.questions(attemptQuestions.stream().map(AttemptQuestion::getQuestionId).toList())
+            .forEach(question -> codes.put(question.getId(), question.getCode()));
+        List<AssessmentViews.SessionQuestion> questions = attemptQuestions.stream()
             .map(q -> {
                 AttemptAnswer answer = answers.get(q.getId());
                 return new AssessmentViews.SessionQuestion(q.getId(), q.getDisplayOrder(), q.getQuestionType(),
-                    q.getContentSnapshot(), json.options(q.getOptionsSnapshot()),
+                    q.getContentSnapshot(), codes.get(q.getQuestionId()), json.options(q.getOptionsSnapshot()),
                     answer == null ? List.of() : json.ids(answer.getSelectedOptionIds()), q.getFlagged());
             }).toList();
         boolean expired = AttemptStatus.IN_PROGRESS.equals(attempt.getStatus()) && grader.expired(attempt, now);

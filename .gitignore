@@ -5,6 +5,7 @@ target/
 .env
 .env.*
 !.env
+!.env.local.example
 *.log
 .DS_Store
 core-academy-source.tar.gz
