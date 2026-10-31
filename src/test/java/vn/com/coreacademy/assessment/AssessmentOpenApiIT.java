@@ -52,7 +52,8 @@ class AssessmentOpenApiIT extends AssessmentIntegrationTest {
         Map.entry("/api/v1/me/quiz-attempts/{attemptId}", "get"),
         Map.entry("/api/v1/me/quiz-attempts/{attemptId}/questions/{attemptQuestionId}", "patch"),
         Map.entry("/api/v1/me/quiz-attempts/{attemptId}/submit", "post"),
-        Map.entry("/api/v1/me/quiz-attempts/{attemptId}/result", "get"));
+        Map.entry("/api/v1/me/quiz-attempts/{attemptId}/result", "get"),
+        Map.entry("/api/v1/me/courses/{courseId}/quizzes", "get"));
 
     @Autowired
     private MockMvc mvc;
@@ -76,6 +77,6 @@ class AssessmentOpenApiIT extends AssessmentIntegrationTest {
                 operations++;
             }
         }
-        assertThat(operations).isEqualTo(46);
+        assertThat(operations).isEqualTo(47);
     }
 }

@@ -29,8 +29,9 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |
 | 9 | `learning_hub_learning_demo.sql` | Chỉ dev/test |
 | 10 | `learning_hub_assessment_demo.sql` | Chỉ dev/test; cần Learning demo (xem bên dưới) |
-| 11 | `learning_hub_community_demo.sql` | Chỉ dev/test |
-| 12 | `learning_hub_community_verify.sql` | Chỉ đọc |
+| 11 | `learning_hub_learner_quiz_demo.sql` | Chỉ dev/test; cần Assessment demo (xem bên dưới) |
+| 12 | `learning_hub_community_demo.sql` | Chỉ dev/test |
+| 13 | `learning_hub_community_verify.sql` | Chỉ đọc |
 
 Script từ chối chạy khi `learning_hub.users` đã tồn tại và khi `PGHOST` không phải máy local. Khởi tạo lại từ đầu:
 `docker compose -f compose.yaml -f compose.local.yaml --env-file .env.local down -v`, rồi chạy lại các lệnh trên.
@@ -42,6 +43,10 @@ Console MinIO: `http://localhost:9001`.
 `FE-DEMO-CMP-ARCH/OPS/CTRL`, 16 câu hỏi ACTIVE (8 câu mỗi khóa `FE-DEMO-C1`, `FE-DEMO-C2`, SINGLE và MULTIPLE, gắn bài học của khóa), và với
 mỗi khóa một đề PRACTICE + một đề FINAL_EXAM đều PUBLISHED, pool là 8 câu. FINAL_EXAM của `FE-DEMO-C2` yêu cầu hoàn thành bài học nên
 `hocvien` nhận `blockReason=LESSONS_REQUIRED`. Không có lượt thi nào được tạo sẵn. Lần chạy thứ hai báo lỗi và rollback.
+
+**Learner quiz demo** ([learning_hub_learner_quiz_demo.sql](learning_hub_learner_quiz_demo.sql), chỉ dev/test, chạy một lần): thêm vào
+phiên bản đã xuất bản của `FE-DEMO-C1` và `FE-DEMO-C2` một bài học bắt buộc loại quiz, trỏ tới đề FINAL_EXAM của khóa. Sửa trực tiếp
+bản đã xuất bản để `hocvien` thấy bài quiz ngay mà không cần nhận lại khóa. Lần chạy thứ hai báo lỗi và rollback.
 
 ## Nâng cấp schema (upgrade)
 

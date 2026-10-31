@@ -52,6 +52,7 @@ FILES=(
   learning_hub_community_catalog.sql
   learning_hub_learning_demo.sql
   learning_hub_assessment_demo.sql
+  learning_hub_learner_quiz_demo.sql
   learning_hub_community_demo.sql
   learning_hub_community_verify.sql
 )
