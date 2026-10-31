@@ -1,5 +1,42 @@
 # Khởi tạo Identity / Organization / RBAC
 
+## Chạy local
+
+Chạy toàn bộ hệ thống trên máy dev, không dùng DB chung (`103.121.90.119`) hay S3 từ xa. Cần Docker, `psql`, Java 21, Maven,
+`ffmpeg`/`ffprobe` (video chỉ thành READY sau khi qua kiểm tra bằng `ffprobe`). `.env` hiện có không bị đổi: biến môi trường
+nạp từ `.env.local` luôn thắng phần import `.env` của `application.yml`.
+
+```bash
+cp .env.local.example .env.local      # thay mọi giá trị change-me; LOCAL_DEMO_PASSWORD lấy từ mục "Đăng nhập demo" bên dưới
+docker compose -f compose.yaml -f compose.local.yaml --env-file .env.local up -d db s3 s3-init
+scripts/local-db-init.sh                # DB rỗng: baseline + demo, theo thứ tự bên dưới
+set -a; . ./.env.local; set +a; mvn spring-boot:run
+scripts/local-seed-media.sh             # (terminal khác) khóa DEMO-MEDIA có PDF + video READY
+scripts/local-smoke.sh                  # kiểm tra đăng nhập và các API đọc
+```
+
+Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_ERROR_STOP=1`:
+
+| # | File | Ghi chú |
+|---|---|---|
+| 1 | `learning_hub_identity.sql` | Schema, 7 tài khoản demo, RBAC |
+| 2 | `learning_hub_learning.sql` | 26 bảng Learning |
+| 3 | `learning_hub_media_progress.sql` | Extension media/tiến độ |
+| 4 | `learning_hub_assessment.sql` | Quiz Engine; cần Identity + Learning, nằm trước Knowledge/Community |
+| 5 | `learning_hub_knowledge.sql` | pgvector (image `pgvector/pgvector:pg16`) |
+| 6 | `learning_hub_community.sql` | 51 bảng Community |
+| 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
+| 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |
+| 9 | `learning_hub_learning_demo.sql` | Chỉ dev/test |
+| 10 | `learning_hub_community_demo.sql` | Chỉ dev/test |
+| 11 | `learning_hub_community_verify.sql` | Chỉ đọc |
+
+Script từ chối chạy khi `learning_hub.users` đã tồn tại và khi `PGHOST` không phải máy local. Khởi tạo lại từ đầu:
+`docker compose -f compose.yaml -f compose.local.yaml --env-file .env.local down -v`, rồi chạy lại các lệnh trên.
+Mật khẩu chỉ đọc từ biến môi trường (`DB_PASSWORD`/`PGPASSWORD`, `LOCAL_DEMO_PASSWORD`), không có trong lệnh hay log.
+MinIO dùng image `bitnamilegacy/minio` đã đóng băng (image `minio/minio` chính thức không còn pull được) nên chỉ dùng local.
+Console MinIO: `http://localhost:9001`.
+
 ## Bổ sung Community
 
 [learning_hub_community.sql](learning_hub_community.sql) là baseline thủ công **51 bảng**, chạy một lần sau
