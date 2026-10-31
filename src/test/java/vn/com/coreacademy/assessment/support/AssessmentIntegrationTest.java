@@ -48,7 +48,8 @@ public abstract class AssessmentIntegrationTest {
     private static final String EXTERNAL_PASSWORD = System.getProperty("it.postgres.password", "");
     private static final String DATABASE = "coreacademy_assessment_it";
     private static final List<String> SCRIPTS = List.of("learning_hub_identity.sql", "learning_hub_learning.sql",
-        "learning_hub_media_progress.sql", "learning_hub_knowledge.sql", "learning_hub_assessment.sql");
+        "learning_hub_media_progress.sql", "learning_hub_knowledge.sql", "learning_hub_assessment.sql",
+        "learning_hub_community.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */
     static final class DatabaseAvailable implements ExecutionCondition {
