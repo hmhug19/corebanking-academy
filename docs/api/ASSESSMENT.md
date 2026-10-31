@@ -115,7 +115,8 @@ lượt mới vì lượt đã chụp `timeLimitMinutes`, `passPercent`, `scorin
 hạn được trả lại; lượt dở đã quá hạn được tự nộp trước. Thứ tự chặn (`blockReason`): `CLOSED`, `NOT_OPEN`,
 `NOT_READY`, `LESSONS_REQUIRED`, `PASSED` (khi không cho thi nâng điểm), `NO_ATTEMPTS`, `WAIT`. Lượt tính ngay khi
 bắt đầu, trừ VOIDED; lượt còn lại = `maxAttempts` + lượt được cấp − lượt đã dùng. `deadlineAt` =
-min(bắt đầu + thời lượng, `closeAt`). Đề trả về không có đáp án đúng/giải thích.
+min(bắt đầu + thời lượng, `closeAt`). Đề trả về không có đáp án đúng/giải thích. Mỗi câu có `code` là mã trong ngân hàng
+(`questions.code`, lấy theo bản hiện tại của câu, null khi câu không có mã).
 
 **Lưu đáp án.** PATCH chỉ nhận `selectedOptionIds` và/hoặc `flagged` (bỏ qua = giữ nguyên, `[]` = bỏ chọn, field
 khác bị từ chối). ID phải thuộc đề đã phát; SINGLE tối đa 1. Chặn khi lượt không còn IN_PROGRESS hoặc quá

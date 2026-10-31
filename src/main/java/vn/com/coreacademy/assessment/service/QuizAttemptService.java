@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -316,11 +317,15 @@ public class QuizAttemptService {
 
     private AssessmentViews.AttemptSession session(QuizAttempt attempt, String quizTitle, Instant now) {
         Map<Long, AttemptAnswer> answers = readModel.answersByQuestion(attempt.getId());
-        List<AssessmentViews.SessionQuestion> questions = repository.attemptQuestions(attempt.getId()).stream()
+        List<AttemptQuestion> attemptQuestions = repository.attemptQuestions(attempt.getId());
+        Map<Long, String> codes = new HashMap<>();
+        repository.questions(attemptQuestions.stream().map(AttemptQuestion::getQuestionId).toList())
+            .forEach(question -> codes.put(question.getId(), question.getCode()));
+        List<AssessmentViews.SessionQuestion> questions = attemptQuestions.stream()
             .map(q -> {
                 AttemptAnswer answer = answers.get(q.getId());
                 return new AssessmentViews.SessionQuestion(q.getId(), q.getDisplayOrder(), q.getQuestionType(),
-                    q.getContentSnapshot(), json.options(q.getOptionsSnapshot()),
+                    q.getContentSnapshot(), codes.get(q.getQuestionId()), json.options(q.getOptionsSnapshot()),
                     answer == null ? List.of() : json.ids(answer.getSelectedOptionIds()), q.getFlagged());
             }).toList();
         boolean expired = AttemptStatus.IN_PROGRESS.equals(attempt.getStatus()) && grader.expired(attempt, now);

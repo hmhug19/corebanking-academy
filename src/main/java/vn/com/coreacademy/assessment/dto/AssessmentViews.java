@@ -206,6 +206,9 @@ public final class AssessmentViews {
         Integer displayOrder,
         String questionType,
         String content,
+        @Schema(description = "Mã câu hỏi trong ngân hàng (questions.code), null khi câu không có mã. Lấy theo "
+            + "bản hiện tại của câu, không phải bản chụp lúc phát đề.")
+        String code,
         List<OptionText> options,
         List<Long> selectedOptionIds,
         Boolean flagged) {
