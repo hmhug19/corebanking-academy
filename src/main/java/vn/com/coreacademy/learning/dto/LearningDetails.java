@@ -53,6 +53,17 @@ public final class LearningDetails {
                               String fieldName, String programName, String moduleName, boolean failed) {
     }
 
+    /** Một lĩnh vực hoặc giá trị lọc không thuộc lĩnh vực nào. */
+    public record Facet(Long id, String code, String name) {
+    }
+
+    /** Chương trình hoặc phân hệ; fieldId là lĩnh vực chứa nó. */
+    public record FieldFacet(Long id, Long fieldId, String code, String name) {
+    }
+
+    public record LearnerFacets(List<Facet> fields, List<FieldFacet> programs, List<FieldFacet> modules) {
+    }
+
     public record ProgressResult(LearningViews.BlockProgressView block,
                                   LearningViews.LessonProgressView lesson,
                                   LearningViews.CourseEnrollmentView enrollment, MediaViews.Receipt session) {

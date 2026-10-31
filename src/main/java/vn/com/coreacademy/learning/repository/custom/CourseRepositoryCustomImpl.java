@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.repository.custom;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 
 import jakarta.persistence.EntityManager;
 
@@ -21,17 +22,19 @@ import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
 import vn.com.coreacademy.learning.constants.LearningCodes.SearchMode;
 import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseCard;
+import vn.com.coreacademy.learning.dto.LearningDetails.Facet;
+import vn.com.coreacademy.learning.dto.LearningDetails.FieldFacet;
+import vn.com.coreacademy.learning.dto.LearningDetails.LearnerFacets;
 import vn.com.coreacademy.learning.dto.LearningProgressOverview.Counts;
 
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
-    private final EntityManager entityManager;
-
-    /** LATERAL lấy đúng một revision/enrollment; mọi filter và scope dùng chung cho page/count. */
-    @Override
-    public Page<CourseCard> search(CourseSearch filter, Pageable pageable) {
-        NativeSearchQuery sql = new NativeSearchQuery("""
+    /**
+     * Khóa kèm lần học hiện hành của caller (e), revision đang xem (r), chương trình (p), lĩnh vực (f) và phân hệ (m).
+     * Dùng chung cho search và facets để hai nơi cùng một tập khóa nhìn thấy; cần bind bằng bindCourseBase.
+     */
+    private static final String COURSE_BASE = """
             from learning_hub.courses c
             left join lateral (
                 select x.enrollment_id, x.revision_id, x.status, x.progress_percent, x.enrollment_origin,
@@ -51,6 +54,28 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             left join learning_hub.training_programs p on p.program_id = r.program_id
             left join learning_hub.training_fields f on f.field_id = p.field_id
             left join learning_hub.business_modules m on m.module_id = r.module_id
+            """;
+
+    /** Điều kiện học viên thấy khóa; dùng chung cho search và facets, bind bằng bindLearnerVisibility. */
+    private static final String LEARNER_VISIBILITY = """
+        e.enrollment_id is not null
+        or (c.lifecycle_status = :codeCourseActive and r.state = :codeRevisionPublished
+            and p.status = :codeCatalogPublished and f.status = :codeCatalogPublished and (
+                c.owner_org_id = :actorOrg
+                or exists (
+                    select 1 from learning_hub.course_shares s
+                    where s.course_id = c.course_id and s.status = :codeShareActive
+                      and (s.org_id = :actorOrg or (s.include_descendants and s.org_id in (:ancestors)))
+                )
+            ))
+        """;
+
+    private final EntityManager entityManager;
+
+    /** LATERAL lấy đúng một revision/enrollment; mọi filter và scope dùng chung cho page/count. */
+    @Override
+    public Page<CourseCard> search(CourseSearch filter, Pageable pageable) {
+        NativeSearchQuery sql = new NativeSearchQuery(COURSE_BASE + """
             left join lateral (
                 select case when count(*) filter (where ar.effective_start_at <= current_timestamp) > 0
                        then min(ar.effective_due_at) filter (where ar.effective_start_at <= current_timestamp)
@@ -85,15 +110,12 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                   and a.status = :codeAssignmentActive and ar.status = :codeRecipientActive
             ) audience on true
             """);
-        sql.bind("actor", filter.actorId());
-        sql.bind("codeWithdrawn", ProgressStatus.WITHDRAWN);
-        sql.bind("codeManage", SearchMode.MANAGE);
+        bindCourseBase(sql::bind, filter);
         sql.bind("codeMandatory", Requirement.MANDATORY);
         sql.bind("codeAssignmentActive", AssignmentStatus.ACTIVE);
         sql.bind("codeRecipientActive", RecipientStatus.ACTIVE);
         sql.bind("codeCompleted", ProgressStatus.COMPLETED);
 
-        sql.bind("mode", filter.mode());
         if (SearchMode.MANAGE.equals(filter.mode())) {
             applyManagementScope(sql, filter);
         } else {
@@ -186,6 +208,39 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                 "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at", "completedAt", "e.completed_at"));
     }
 
+    /** Lĩnh vực, chương trình, phân hệ của các khóa học viên thấy trong danh mục; filter là mode CATALOG. */
+    @Override
+    public LearnerFacets facets(CourseSearch filter) {
+        return new LearnerFacets(
+            facetRows("""
+                select tf.field_id, tf.code, tf.name from learning_hub.training_fields tf
+                where tf.field_id in (%s)
+                order by tf.sort_no, tf.name
+                """.formatted(visibleValues("p.field_id")), Facet.class, filter),
+            facetRows("""
+                select tp.program_id, tp.field_id, tp.code, tp.name from learning_hub.training_programs tp
+                where tp.program_id in (%s)
+                order by tp.sort_no, tp.name
+                """.formatted(visibleValues("r.program_id")), FieldFacet.class, filter),
+            facetRows("""
+                select tm.module_id, tm.field_id, tm.code, tm.name from learning_hub.business_modules tm
+                where tm.module_id in (%s)
+                order by tm.sort_no, tm.name
+                """.formatted(visibleValues("r.module_id")), FieldFacet.class, filter));
+    }
+
+    private static String visibleValues(String column) {
+        return "select " + column + "\n" + COURSE_BASE + "where (" + LEARNER_VISIBILITY + ") and " + column
+            + " is not null";
+    }
+
+    private <T> List<T> facetRows(String sql, Class<T> type, CourseSearch filter) {
+        var query = entityManager.createNativeQuery(sql, type);
+        bindCourseBase(query::setParameter, filter);
+        bindLearnerVisibility(query::setParameter, filter);
+        return query.getResultList();
+    }
+
     @Override
     public Counts summary(String userId) {
         return (Counts) entityManager.createNativeQuery("""
@@ -220,24 +275,24 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
 
     /** Khóa học viên thấy được: đã đăng ký, hoặc khóa đang hoạt động đã xuất bản thuộc đơn vị mình hoặc được chia sẻ. */
     private void applyLearnerVisibility(NativeSearchQuery sql, CourseSearch filter) {
-        sql.and("""
-            e.enrollment_id is not null
-            or (c.lifecycle_status = :codeCourseActive and r.state = :codeRevisionPublished
-                and p.status = :codeCatalogPublished and f.status = :codeCatalogPublished and (
-                    c.owner_org_id = :actorOrg
-                    or exists (
-                        select 1 from learning_hub.course_shares s
-                        where s.course_id = c.course_id and s.status = :codeShareActive
-                          and (s.org_id = :actorOrg or (s.include_descendants and s.org_id in (:ancestors)))
-                    )
-                ))
-            """);
-        sql.bind("codeCourseActive", CourseStatus.ACTIVE);
-        sql.bind("codeRevisionPublished", RevisionState.PUBLISHED);
-        sql.bind("codeCatalogPublished", CatalogStatus.PUBLISHED);
-        sql.bind("codeShareActive", ShareStatus.ACTIVE);
-        sql.bind("actorOrg", filter.actorOrgId() == null ? -1L : filter.actorOrgId());
-        sql.bind("ancestors", filter.ancestorIds().isEmpty() ? List.of(-1L) : filter.ancestorIds());
+        sql.and(LEARNER_VISIBILITY);
+        bindLearnerVisibility(sql::bind, filter);
+    }
+
+    private static void bindLearnerVisibility(BiConsumer<String, Object> bind, CourseSearch filter) {
+        bind.accept("codeCourseActive", CourseStatus.ACTIVE);
+        bind.accept("codeRevisionPublished", RevisionState.PUBLISHED);
+        bind.accept("codeCatalogPublished", CatalogStatus.PUBLISHED);
+        bind.accept("codeShareActive", ShareStatus.ACTIVE);
+        bind.accept("actorOrg", filter.actorOrgId() == null ? -1L : filter.actorOrgId());
+        bind.accept("ancestors", filter.ancestorIds().isEmpty() ? List.of(-1L) : filter.ancestorIds());
+    }
+
+    private static void bindCourseBase(BiConsumer<String, Object> bind, CourseSearch filter) {
+        bind.accept("actor", filter.actorId());
+        bind.accept("codeWithdrawn", ProgressStatus.WITHDRAWN);
+        bind.accept("codeManage", SearchMode.MANAGE);
+        bind.accept("mode", filter.mode());
     }
 
     private void applyManagementScope(NativeSearchQuery sql, CourseSearch filter) {

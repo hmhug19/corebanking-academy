@@ -104,6 +104,20 @@ public class LearningLearnerController {
             learningStatus, state, page, size, sort, overdue, assigned, failed));
     }
 
+    @GetMapping("/facets")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Lĩnh vực, chương trình và phân hệ của danh mục học viên",
+        description = """
+            Chỉ trả giá trị được ít nhất một khóa trong danh mục của caller dùng (cùng quy tắc nhìn thấy với
+            `/catalog`), sắp theo sortNo rồi tên. Chương trình và phân hệ có fieldId.
+            """
+    )
+    public BaseResponse<LearningDetails.LearnerFacets> facets() {
+        return BaseResponse.ok(search.facets());
+    }
+
     @GetMapping("/enrollments/{enrollmentId}")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)

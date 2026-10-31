@@ -19,6 +19,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
 import vn.com.coreacademy.learning.constants.LearningCodes.SearchMode;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseCard;
+import vn.com.coreacademy.learning.dto.LearningDetails.LearnerFacets;
 import vn.com.coreacademy.learning.repository.CourseRepository;
 import vn.com.coreacademy.learning.repository.custom.CourseRepositoryCustom.CourseSearch;
 
@@ -77,6 +78,16 @@ public class LearningSearchService {
 
         // Bước 2: repository lọc quyền và đếm trên grain khóa học trước phân trang; không lọc trang trong memory.
         return repository.search(filter, pageable);
+    }
+
+    /** Lĩnh vực, chương trình và phân hệ của các khóa caller thấy trong danh mục, theo cùng quy tắc nhìn thấy với list. */
+    public LearnerFacets facets() {
+        var actor = access.actor();
+        access.requireLearner(actor);
+        var filter = new CourseSearch(SearchMode.CATALOG, actor.person().id(), actor.person().orgId(),
+            identity.activeAncestorIds(actor.person().orgId()), access.searchScope(actor), null, null, null, null,
+            null, null, null, null, null, null, null, Set.of());
+        return repository.facets(filter);
     }
 
     private void allowed(String field, String value, Set<String> options) {

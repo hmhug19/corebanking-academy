@@ -5,6 +5,7 @@ import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseCard;
+import vn.com.coreacademy.learning.dto.LearningDetails.LearnerFacets;
 import vn.com.coreacademy.learning.dto.LearningProgressOverview.Counts;
 import vn.com.coreacademy.learning.service.LearningAccessPolicy.SearchScope;
 
@@ -19,4 +20,6 @@ public interface CourseRepositoryCustom {
     Counts summary(String userId);
 
     Page<CourseCard> search(CourseSearch filter, Pageable pageable);
+
+    LearnerFacets facets(CourseSearch filter);
 }
