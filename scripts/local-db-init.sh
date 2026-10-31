@@ -40,7 +40,7 @@ case "$PGHOST" in
 esac
 
 # Order: Identity -> Learning -> media/progress -> Assessment -> Knowledge (pgvector) -> Community -> menu functions ->
-# catalog -> demos -> verify. Assessment needs Identity and Learning only; it sits before Knowledge and Community.
+# catalog -> demos (assessment demo needs the learning demo) -> verify. Assessment needs Identity and Learning only; it sits before Knowledge and Community.
 FILES=(
   learning_hub_identity.sql
   learning_hub_learning.sql
@@ -51,6 +51,7 @@ FILES=(
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql
   learning_hub_learning_demo.sql
+  learning_hub_assessment_demo.sql
   learning_hub_community_demo.sql
   learning_hub_community_verify.sql
 )

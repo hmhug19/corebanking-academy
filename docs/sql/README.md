@@ -28,14 +28,20 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |
 | 9 | `learning_hub_learning_demo.sql` | Chỉ dev/test |
-| 10 | `learning_hub_community_demo.sql` | Chỉ dev/test |
-| 11 | `learning_hub_community_verify.sql` | Chỉ đọc |
+| 10 | `learning_hub_assessment_demo.sql` | Chỉ dev/test; cần Learning demo (xem bên dưới) |
+| 11 | `learning_hub_community_demo.sql` | Chỉ dev/test |
+| 12 | `learning_hub_community_verify.sql` | Chỉ đọc |
 
 Script từ chối chạy khi `learning_hub.users` đã tồn tại và khi `PGHOST` không phải máy local. Khởi tạo lại từ đầu:
 `docker compose -f compose.yaml -f compose.local.yaml --env-file .env.local down -v`, rồi chạy lại các lệnh trên.
 Mật khẩu chỉ đọc từ biến môi trường (`DB_PASSWORD`/`PGPASSWORD`, `LOCAL_DEMO_PASSWORD`), không có trong lệnh hay log.
 MinIO dùng image `bitnamilegacy/minio` đã đóng băng (image `minio/minio` chính thức không còn pull được) nên chỉ dùng local.
 Console MinIO: `http://localhost:9001`.
+
+**Assessment demo** ([learning_hub_assessment_demo.sql](learning_hub_assessment_demo.sql), chỉ dev/test, chạy một lần): 3 nhóm năng lực
+`FE-DEMO-CMP-ARCH/OPS/CTRL`, 16 câu hỏi ACTIVE (8 câu mỗi khóa `FE-DEMO-C1`, `FE-DEMO-C2`, SINGLE và MULTIPLE, gắn bài học của khóa), và với
+mỗi khóa một đề PRACTICE + một đề FINAL_EXAM đều PUBLISHED, pool là 8 câu. FINAL_EXAM của `FE-DEMO-C2` yêu cầu hoàn thành bài học nên
+`hocvien` nhận `blockReason=LESSONS_REQUIRED`. Không có lượt thi nào được tạo sẵn. Lần chạy thứ hai báo lỗi và rollback.
 
 ## Bổ sung Community
 
