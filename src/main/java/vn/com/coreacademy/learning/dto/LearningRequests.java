@@ -89,6 +89,7 @@ public final class LearningRequests {
         @NotNull @DecimalMin("0") @DecimalMax(LearningLimits.MAX_MEDIA_DURATION_TEXT)
         BigDecimal estimatedDurationSeconds,
         boolean isRequired,
+        @Positive Long quizId,
         @NotNull @Size(max = 100) List<@Valid BlockInput> blocks) {
     }
 
