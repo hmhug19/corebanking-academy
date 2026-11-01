@@ -61,6 +61,12 @@ public class LearningAssessmentAccess {
         return access.actor();
     }
 
+    public Actor requireLearnerActor() {
+        Actor actor = access.actor();
+        access.requireLearner(actor);
+        return actor;
+    }
+
     /**
      * Phạm vi báo cáo của caller, xét role và scope trên cùng grant: SUPER_ADMIN/ADMIN/INSTRUCTOR/REPORT_VIEWER với
      * GLOBAL = toàn hệ thống, ORG = đơn vị và cây con active, TEAM = đúng nhóm. OWN không mở quyền báo cáo; không có

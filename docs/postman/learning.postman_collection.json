@@ -144,6 +144,10 @@
     {
       "key": "progressAssetId",
       "value": "null"
+    },
+    {
+      "key": "reportToken",
+      "value": ""
     }
   ],
   "item": [
@@ -1804,6 +1808,179 @@
               "pm.test('HTTP 200 CSV', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'); });"
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard và báo cáo đào tạo",
+      "item": [
+        {
+          "name": "Trang chủ học viên",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{learnerToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/me/learning/dashboard"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Thành công', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('SUCCESS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Năng lực BEST",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{learnerToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/me/learning/dashboard/competencies?method=BEST&page=0&size=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Thành công', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('SUCCESS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tiến độ chương trình",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{learnerToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/me/learning/dashboard/programs?page=0&size=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Thành công', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('SUCCESS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tổng quan đào tạo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{reportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/reports/learning/summary"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Thành công', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('SUCCESS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chi tiết tiến độ",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{reportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/reports/learning/enrollments?page=0&size=20&sort=id"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Thành công', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('SUCCESS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tổng hợp theo khóa",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{reportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/reports/learning/groups?groupBy=course&page=0&size=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Thành công', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('SUCCESS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xuất CSV tiến độ",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{reportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/reports/learning/enrollments/export?sort=id"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 CSV', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'); });"
+                ]
+              }
+            }
+          ]
         }
       ]
     }

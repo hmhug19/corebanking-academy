@@ -301,13 +301,12 @@ public class AssessmentReportRepository {
         NativeSearchQuery sql = new NativeSearchQuery("""
             from (
                 select {key} as group_key, aq.competency_id,
-                       count(*) as total_questions,
-                       count(*) filter (where ans.is_correct) as correct_count,
-                       sum(aq.points) as max_score,
-                       coalesce(sum(ans.score_awarded), 0) as score
+                       cast(sum(aq.question_count) as bigint) as total_questions,
+                       cast(sum(aq.correct_count) as bigint) as correct_count,
+                       sum(aq.max_score) as max_score,
+                       sum(aq.earned_score) as score
                 from learning_hub.quiz_attempts a
-                join learning_hub.attempt_questions aq on aq.attempt_id = a.attempt_id
-                left join learning_hub.attempt_answers ans on ans.attempt_question_id = aq.attempt_question_id
+                join learning_hub.attempt_competency_scores aq on aq.attempt_id = a.attempt_id
                 where a.status in (:graded)
                   and aq.competency_id is not null
                   {conditions}

@@ -201,6 +201,52 @@ Assessment (ddl-auto=validate sẽ từ chối khởi động nếu thiếu bả
 năng lực tạo qua API. Chưa chạy SQL lên DB server của ứng dụng. Contract: [ASSESSMENT.md](../api/ASSESSMENT.md).
 SQL Identity dưới đây vẫn là nguồn khởi tạo duy nhất của **cụm Identity**, không thay bằng SQL Learning.
 
+## Bổ sung dữ liệu tổng hợp Dashboard và báo cáo
+
+[learning_hub_reporting.sql](learning_hub_reporting.sql) tạo `quiz_user_results` (một đề/học viên) và
+`attempt_competency_scores` (một lượt thi/nhóm kiến thức), thêm index tra tiếp tục học/lịch sử thi cá nhân,
+và khởi tạo hai bảng từ lịch sử `SUBMITTED`/`AUTO_SUBMITTED`. Không tạo điểm mẫu hoặc dòng cho người chưa thi.
+Chạy **một lần**, toàn file, sau **Identity → Learning → media/progress → Assessment → reporting**.
+Nếu baseline đã chạy thì chỉ chạy file reporting; không chạy lại các baseline.
+
+Tạm dừng thao tác ghi Assessment, gồm job tự nộp, trước khi chạy: script lấy SHARE lock trên ba bảng nguồn
+để dữ liệu khởi tạo nhất quán. Lock chờ tối đa 10 giây; không lấy được thì transaction thất bại.
+Review/backup trước khi chạy trên môi trường có dữ liệu; không tự chạy file này lúc ứng dụng startup.
+
+```bash
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/learning_hub_reporting.sql
+```
+
+**Trạng thái tích hợp:** backend đồng bộ hai bảng cùng transaction nộp bài/tự nộp/nộp hộ/chấm lại/VOIDED;
+Dashboard dùng kết quả theo đề/học viên, báo cáo năng lực dùng tổng điểm theo lượt. Script không cài trigger/job.
+Phải chạy extension trước khi dùng bản backend này. Nếu bản backend cũ đã ghi thêm lượt sau khi backfill,
+cần tính lại hai bảng từ nguồn trong cửa sổ bảo trì trước khi chuyển sang bản mới; không chạy lại CREATE TABLE.
+Ghi trực tiếp bằng SQL không gọi hook backend và có thể làm read model cũ. Contract tại
+[LEARNING.md](../api/LEARNING.md#dashboard-reporting) và [ASSESSMENT.md](../api/ASSESSMENT.md#reporting-read-model).
+
+Quy tắc đồng bộ và vận hành:
+
+- Tính lại và upsert kết quả theo đúng khóa chính; retry không cộng dồn. Khi không còn lượt hợp lệ, xóa dòng
+  tổng hợp tương ứng. Chấm lại/VOIDED phải cập nhật cả hai bảng, gồm tình huống lượt tốt nhất thay đổi.
+- Dùng cùng khóa serialize cho `(quiz_id, user_id)` trước khi tính lại để hai lượt chấm đồng thời không ghi đè
+  bằng dữ liệu cũ. Tiến độ video không cập nhật các bảng Assessment này.
+- `graded_attempt_count` không phải số lượt đã sử dụng: lượt đang thi cũng chiếm lượt theo chính sách hiện tại.
+- BEST lấy best score và `ever_passed`; LAST lấy last score và `last_passed`. Không tính lại đạt bằng điểm đã
+  làm tròn hoặc ngưỡng đề hiện tại. Hòa điểm chọn submitted_at mới nhất, tiếp theo attempt_id lớn nhất.
+- Radar phải chốt chính sách chọn lượt. Bảng điểm theo năng lực hỗ trợ BEST/LAST hoặc toàn bộ lượt; chọn lượt
+  trước khi SUM, không mặc định đổi semantics báo cáo năng lực hiện tại (đang tổng hợp các lượt trong filter).
+- `quiz_user_results` là kết quả suốt lịch sử đề/học viên, không thay báo cáo có filter kỳ/đơn vị/lần học.
+  Những báo cáo đó lọc `quiz_attempts` đúng phạm vi rồi mới tổng hợp; dùng bảng điểm năng lực theo attempt để
+  giảm đọc đáp án. Không gán đơn vị của lượt cuối cho toàn bộ lịch sử.
+- Read model không cấp quyền. Scope backend vẫn áp dụng trên tài nguyên/người/lượt thi nguồn; không trả đáp án.
+- Chỉ rebuild từ nguồn khi dừng ghi hoặc có cơ chế khóa/snapshot an toàn; rebuild hai bảng nguyên tử, không
+  chạy lại toàn bộ script CREATE TABLE trên schema đã tồn tại. Đối soát trước khi chuyển API sang đọc.
+- Index mới là ứng viên theo access pattern; cần EXPLAIN (ANALYZE, BUFFERS) với dữ liệu đại diện trước khi
+  kết luận hiệu năng. Query tiếp tục học phải khớp partial predicate và vẫn kiểm lần học hiện hành/quyền học.
+
+Không thêm bảng snapshot ngày, điểm thưởng hoặc chuỗi học trong extension này. Nếu transaction chưa COMMIT
+thì ROLLBACK hủy toàn bộ thay đổi; sau COMMIT, giữ API đọc nguồn trong lúc xử lý sự cố, không sửa lịch sử thi.
+
 ## Dữ liệu Learning mẫu cho FE
 
 [learning_hub_learning_demo.sql](learning_hub_learning_demo.sql) là script INSERT **tùy chọn**, chạy thủ công

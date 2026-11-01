@@ -23,6 +23,7 @@ import vn.com.coreacademy.assessment.entity.AttemptAnswer;
 import vn.com.coreacademy.assessment.entity.AttemptQuestion;
 import vn.com.coreacademy.assessment.entity.QuizAttempt;
 import vn.com.coreacademy.assessment.repository.AssessmentRepository;
+import vn.com.coreacademy.assessment.repository.custom.AssessmentResultRepository;
 import vn.com.coreacademy.learning.service.LearningAssessmentAccess;
 
 /**
@@ -37,6 +38,7 @@ public class AttemptGrader {
     private final AssessmentRepository repository;
     private final AttemptJson json;
     private final LearningAssessmentAccess learning;
+    private final AssessmentResultRepository results;
 
     public boolean expired(QuizAttempt attempt, Instant now) {
         return now.isAfter(attempt.getDeadlineAt().plusSeconds(attempt.getGraceSeconds()));
@@ -108,6 +110,7 @@ public class AttemptGrader {
         attempt.setSubmitType(submitType);
         attempt.setSubmittedAt(submittedAt);
         completeQuizLesson(attempt);
+        results.refresh(attempt);
     }
 
     /**
