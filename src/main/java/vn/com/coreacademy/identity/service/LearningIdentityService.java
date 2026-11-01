@@ -104,9 +104,22 @@ public class LearningIdentityService {
         if ("user".equals(kind) && userIds.isEmpty()) {
             return List.of();
         }
+        return candidates(kind, userIds, orgIds, teamId, 501);
+    }
+
+    /**
+     * Học viên đủ điều kiện học (cùng điều kiện với {@link #learners}) trong một nhóm, đơn vị hoặc toàn hệ thống
+     * (kind = "all") để xếp hạng. Trả tối đa limit + 1 người để bên gọi phát hiện phạm vi vượt giới hạn.
+     */
+    public List<Person> rankableLearners(String kind, Collection<Long> orgIds, Long teamId, int limit) {
+        return candidates(kind, Set.of(), orgIds, teamId, limit + 1);
+    }
+
+    private List<Person> candidates(String kind, Collection<String> userIds, Collection<Long> orgIds, Long teamId,
+                                    int size) {
         var ids = userIds.isEmpty() ? Set.of("__no_user__") : userIds;
         var orgs = orgIds.isEmpty() ? Set.of(-1L) : orgIds;
-        return users.findLearningCandidates(kind, ids, orgs, teamId, PageRequest.of(0, 501)).stream()
+        return users.findLearningCandidates(kind, ids, orgs, teamId, PageRequest.of(0, size)).stream()
             .map(u -> new Person(u.getId(), u.getFullName(), u.getOrgId(), u.getTeamId())).toList();
     }
 }

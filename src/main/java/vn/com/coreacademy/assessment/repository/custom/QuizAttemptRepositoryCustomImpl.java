@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assessment.repository.custom;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -99,5 +100,26 @@ public class QuizAttemptRepositoryCustomImpl implements QuizAttemptRepositoryCus
             .setParameter("published", QuizStatus.PUBLISHED)
             .getResultList();
         return rows.stream().map(row -> ((Number) row).longValue()).collect(Collectors.toUnmodifiableSet());
+    }
+
+    @Override
+    public Map<String, Integer> passedQuizCounts(Collection<String> userIds) {
+        if (userIds.isEmpty()) {
+            return Map.of();
+        }
+        List<?> rows = entityManager.createNativeQuery("""
+            select a.user_id, count(distinct a.quiz_id)
+            from learning_hub.quiz_attempts a
+            join learning_hub.quizzes z on z.quiz_id = a.quiz_id
+            where a.user_id in (:users) and a.status in (:graded) and a.graded_at is not null
+              and a.passed = true and z.status = :published and not z.is_deleted
+            group by a.user_id
+            """)
+            .setParameter("users", userIds)
+            .setParameter("graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED))
+            .setParameter("published", QuizStatus.PUBLISHED)
+            .getResultList();
+        return rows.stream().map(Object[].class::cast).collect(Collectors.toUnmodifiableMap(
+            row -> (String) row[0], row -> ((Number) row[1]).intValue()));
     }
 }

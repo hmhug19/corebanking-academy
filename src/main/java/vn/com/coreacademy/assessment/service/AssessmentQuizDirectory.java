@@ -43,6 +43,12 @@ public class AssessmentQuizDirectory implements LearningQuizDirectory {
         return attempts.failedFinalExamCourseIds(userId);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, Integer> passedQuizCounts(Collection<String> userIds) {
+        return attempts.passedQuizCounts(userIds);
+    }
+
     /** Dùng AttemptSummaries như màn giới thiệu đề nên điểm trên tổng quan và trên đề không thể lệch nhau. */
     @Override
     @Transactional(readOnly = true)

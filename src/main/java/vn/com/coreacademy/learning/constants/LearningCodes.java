@@ -266,6 +266,27 @@ public final class LearningCodes {
         }
     }
 
+    /** Phạm vi bảng xếp hạng; team và org trùng giá trị với TargetType để dùng chung truy vấn học viên. */
+    public static final class LeaderboardScope {
+        public static final String TEAM = "team";
+        public static final String ORG = "org";
+        public static final String ALL = "all";
+        public static final String PATTERN = TEAM + "|" + ORG + "|" + ALL;
+
+        private LeaderboardScope() {
+        }
+    }
+
+    /** Hoạt động đầu tiên trong ngày, ghi ở learning_activity_days.first_source. */
+    public static final class ActivitySource {
+        public static final String SESSION = "session";
+        public static final String BLOCK_PROGRESS = "block_progress";
+        public static final String QUIZ = "quiz";
+
+        private ActivitySource() {
+        }
+    }
+
     public static final class SearchMode {
         public static final String MANAGE = "manage";
         public static final String MINE = "mine";

@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -35,6 +36,13 @@ public interface LearningQuizDirectory {
     }
 
     Optional<QuizRef> find(Long quizId);
+
+    /**
+     * Số bài kiểm tra khác nhau (PUBLISHED, chưa xóa) mà mỗi học viên đã đạt: có ít nhất một lượt đã chấm với
+     * passed = true. Một truy vấn gom theo học viên; học viên chưa đạt bài nào không có trong kết quả và userIds rỗng
+     * trả bản đồ rỗng mà không truy vấn.
+     */
+    Map<String, Integer> passedQuizCounts(Collection<String> userIds);
 
     /**
      * ID các khóa mà học viên đã thi bài thi cuối khóa (PUBLISHED, chưa xóa) ít nhất một lượt đã chấm và chưa đạt lượt

@@ -16,14 +16,18 @@ import vn.com.coreacademy.identity.repository.projection.LearningPersonRow;
 import vn.com.coreacademy.identity.repository.projection.TeamMemberPreview;
 
 public interface UserRepository extends JpaRepository<UserAccount, String>, UserRepositoryCustom {
-    /** Chỉ resolve học viên active có LEARNER/OWN hợp lệ, giới hạn tại DB trước khi giao đồng bộ. */
+    /**
+     * Chỉ resolve học viên active có LEARNER/OWN hợp lệ, giới hạn tại DB trước khi giao đồng bộ. kind = 'all' lấy mọi
+     * học viên đủ điều kiện, dùng cho bảng xếp hạng; giao học không dùng kind này.
+     */
     @Query("""
         select u.id as id, u.fullName as fullName, u.orgId as orgId, u.teamId as teamId
         from UserAccount u
         where u.status = ACTIVE and u.mustChangePassword = false
           and ((:kind = 'user' and u.id in :userIds)
             or (:kind = 'org' and u.orgId in :orgIds)
-            or (:kind = 'team' and u.teamId = :teamId and u.orgId in :orgIds))
+            or (:kind = 'team' and u.teamId = :teamId and u.orgId in :orgIds)
+            or :kind = 'all')
           and exists (
             select g.id from RoleAssignment g
             where g.user.id = u.id and g.active = true and g.role.active = true

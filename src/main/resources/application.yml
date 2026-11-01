@@ -47,6 +47,13 @@ app:
       connect-timeout-seconds: ${S3_CONNECT_TIMEOUT_SECONDS:5}
       read-timeout-seconds: ${S3_READ_TIMEOUT_SECONDS:60}
       call-timeout-seconds: ${S3_CALL_TIMEOUT_SECONDS:600}
+  learning:
+    points:
+      # Weights of the learning leaderboard; override with APP_LEARNING_POINTS_LESSON and so on.
+      lesson: 5
+      quiz-pass: 30
+      streak-day: 10
+      streak-cap: 30
   knowledge:
     storage-dir: ${KNOWLEDGE_STORAGE_DIR:./data/knowledge}
     max-file-size: ${KNOWLEDGE_MAX_FILE_SIZE:20MB}

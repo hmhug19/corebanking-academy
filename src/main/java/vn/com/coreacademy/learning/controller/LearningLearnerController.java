@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.learning.constants.LearningCodes.ActivitySource;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressEvent;
 import vn.com.coreacademy.learning.constants.LearningCodes.SearchMode;
 import vn.com.coreacademy.learning.dto.LearningDetails;
@@ -35,11 +36,13 @@ import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.dto.MediaRequests;
 import vn.com.coreacademy.learning.dto.MediaViews;
+import vn.com.coreacademy.learning.service.LearningActivityService;
 import vn.com.coreacademy.learning.service.LearningMediaTokenService;
 import vn.com.coreacademy.learning.service.LearningProgressReportService;
 import vn.com.coreacademy.learning.service.LearningProgressService;
 import vn.com.coreacademy.learning.service.LearningSearchService;
 import vn.com.coreacademy.learning.service.LearningSessionService;
+import vn.com.coreacademy.security.SecurityContextUtils;
 
 @RestController
 @RequestMapping(value = "/api/v1/me/learning", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -53,6 +56,7 @@ public class LearningLearnerController {
     private final LearningProgressReportService reports;
     private final LearningProgressService progress;
     private final LearningSearchService search;
+    private final LearningActivityService activity;
 
     @GetMapping("/courses")
     @ApiResponse(responseCode = "200",
@@ -161,6 +165,7 @@ public class LearningLearnerController {
         @PathVariable @Positive Long blockId, @Valid @RequestBody LearningRequests.ProgressRequest request,
         HttpServletRequest httpRequest, HttpServletResponse response) {
         var result = progress.progress(enrollmentId, blockId, request);
+        activity.record(SecurityContextUtils.getUserId(), ActivitySource.BLOCK_PROGRESS);
         mediaTokens.renew(request.sessionId(), request.sessionFence(), ProgressEvent.CLOSE.equals(request.eventType()),
             httpRequest, response);
         return BaseResponse.ok(result);
@@ -204,6 +209,7 @@ public class LearningLearnerController {
     public BaseResponse<MediaViews.Session> session(@Valid @RequestBody MediaRequests.Session request,
                                                     HttpServletRequest httpRequest, HttpServletResponse response) {
         var result = sessions.claim(request);
+        activity.record(SecurityContextUtils.getUserId(), ActivitySource.SESSION);
         mediaTokens.cookie(result, httpRequest, response);
         return BaseResponse.ok(result);
     }

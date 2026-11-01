@@ -127,6 +127,7 @@ public class QuizAttemptService {
         if (running != null) {
             running = repository.lockAttempt(running.getId());
             if (!grader.expired(running, now)) {
+                learning.recordQuizActivity(learner.userId());
                 return session(running, quiz.getTitle(), now);
             }
             grader.finalizeExpired(running);
@@ -141,6 +142,7 @@ public class QuizAttemptService {
         }
         int attemptNo = attempts.stream().mapToInt(QuizAttempt::getAttemptNo).max().orElse(0) + 1;
         QuizAttempt attempt = createAttempt(quiz, learner, attemptNo, now, clientIp, userAgent);
+        learning.recordQuizActivity(learner.userId());
         return session(attempt, quiz.getTitle(), now);
     }
 
@@ -209,6 +211,7 @@ public class QuizAttemptService {
         if (AttemptStatus.IN_PROGRESS.equals(attempt.getStatus())) {
             grader.submit(attempt, ServerTime.now());
             repository.flush();
+            learning.recordQuizActivity(attempt.getUserId());
         }
         return result(attempt);
     }
