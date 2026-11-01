@@ -301,6 +301,46 @@ Chỉ làm presigned URL khi có endpoint HTTPS mà browser thật truy cập đ
 4. Video/PDF: không Range trả 200; single byte range hợp lệ trả 206 với Content-Range/Content-Length/Accept-Ranges đúng byte. Range vượt độ dài trả 416 với Content-Range dạng bytes */total. Multiple ranges hoặc cú pháp sai trả 416; If-Range chỉ chấp nhận strong ETag khớp, ngày/ETag khác trả toàn file 200. Mỗi GET mở stream mới, đóng khi hoàn tất/client ngắt; không giữ transaction/DB lock trong thời gian phát video.
 5. Lỗi: không đổi AccessDenied/timeout/credential sai từ AIStor thành dữ liệu trống hoặc lỗi validation. Mapping theo lỗi hệ thống hiện có, không lộ SDK exception/key/secret. Nếu stream đã bắt đầu, không ghép JSON BaseResponse vào phần binary còn lại. Không mặc định healthUP hiện tại chứng minh bucket/S3 có thể đọc ghi; kiểm tra dependency storage riêng khi triển khai.
 
+### Giới hạn request khi upload từng phần qua Nginx
+
+BE cấp `partSize` **8 MiB (8.388.608 byte)**; FE phải chia theo giá trị BE trả về. Nginx giới hạn theo
+**từng request**, nên part 8 MiB vẫn bị HTTP 413 nếu proxy giữ mức mặc định 1 MiB. Không tăng giới hạn bằng
+dung lượng toàn video để xử lý luồng chia phần. Mẫu tại `deploy/nginx/core-academy.conf.example`:
+
+```nginx
+location ~ "^/api/v1/learning-assets/uploads/[0-9a-fA-F-]+/parts/[1-9][0-9]*$" {
+    client_max_body_size 10m;
+    proxy_request_buffering off;
+    proxy_pass http://127.0.0.1:8019;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+}
+```
+
+Đặt location trong server block thực tế đang phục vụ API; cập nhật cả virtual host HTTP/HTTPS hoặc proxy khác
+trong đường đi nếu có. Không mặc định sửa file example trong repository là server đã đổi. Prefix `location ^~`
+khác có thể chặn regex này; đối chiếu cấu hình đang nạp bằng `nginx -T`. Giới hạn multipart của Spring không
+thay thế giới hạn Nginx; API part dùng raw octet-stream, không phải multipart/form-data.
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Chỉ reload sau khi nginx -t thành công. Xác minh part 8 MiB thực sự đến BE với phiên upload/token hợp lệ;
+request lớn hơn 10 MiB phải bị proxy từ chối. Các API khác giữ cấu hình hiện hữu, không tắt giới hạn toàn server.
+
+Nghiệm thu proxy trước đó ngày 30/10/2026: request chỉ gửi headers với Content-Length 8 MiB và 10 MiB tới
+route part đã đến BE và nhận 401 do không có token; 10 MiB + 1 byte bị Nginx trả 413. Đã kiểm cả HTTPS và
+HTTP qua IP. Đây chỉ là kiểm tra ngưỡng proxy, chưa chứng minh upload video thật hoàn tất. Khi nghiệm thu đầy
+đủ, gửi part 8 MiB bằng tài khoản/session upload hợp lệ, complete upload và kiểm phát/tua video. Việc khôi phục
+tài liệu và mẫu cấu hình trong source không chạy lại các bước nghiệm thu hoặc thay đổi server.
+
 ### Kiểm chứng source và nghiệm thu server
 
 Kiểm tra cục bộ: compile/package thành công; full Maven clean verify trên workspace mới nhất có 1 lỗi PdfTextExtractorTest do CR/LF trên Windows, 33 test Knowledge cần Docker bị skip (phần thay đổi song song ngoài storage); YAML parse; MinIO SDK thật với S3 protocol fake localhost, Spring HTTP và H2 tạm (upload/checksum, video multipart 135 MB, byte ranges/HEAD/416, quyền, lỗi upstream và cleanup khi DB rollback); cấu hình thiếu/sai; hồi quy Identity. Đây không phải benchmark server hoặc test AIStor thật. Harness ở ngoài repository, không thêm file test source. H2 chỉ điều chỉnh timestamptz/bỏ index biểu thức không hỗ trợ và thay advisory lock trong harness; SQL nguồn giữ PostgreSQL.

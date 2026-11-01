@@ -27,6 +27,7 @@ import vn.com.coreacademy.assessment.entity.Quiz;
 import vn.com.coreacademy.assessment.entity.QuizAttempt;
 import vn.com.coreacademy.assessment.exception.AssessmentResponseCode;
 import vn.com.coreacademy.assessment.repository.AssessmentRepository;
+import vn.com.coreacademy.assessment.repository.custom.AssessmentResultRepository;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.learning.service.LearningAssessmentAccess;
@@ -47,6 +48,7 @@ public class RegradeService {
     private final AttemptJson json;
     private final LearningWriteLock lock;
     private final IdentityAuditService audit;
+    private final AssessmentResultRepository results;
 
     /**
      * dryRun (mặc định) chỉ tính và trả kết quả từng lượt. Áp dụng thật giữ write lock, khóa từng lượt, cập nhật
@@ -199,6 +201,7 @@ public class RegradeService {
         history.setRegradedBy(actor);
         history.setRegradedAt(ServerTime.now());
         repository.persist(history);
+        results.refresh(attempt);
     }
 
     private static String group(String code) {

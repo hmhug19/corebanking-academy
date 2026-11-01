@@ -49,7 +49,7 @@ public abstract class AssessmentIntegrationTest {
     private static final String DATABASE = "coreacademy_assessment_it";
     private static final List<String> SCRIPTS = List.of("learning_hub_identity.sql", "learning_hub_learning.sql",
         "learning_hub_media_progress.sql", "learning_hub_knowledge.sql", "learning_hub_assessment.sql",
-        "learning_hub_community.sql");
+        "learning_hub_community.sql", "learning_hub_reporting.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */
     static final class DatabaseAvailable implements ExecutionCondition {
@@ -97,7 +97,7 @@ public abstract class AssessmentIntegrationTest {
                 boolean pgvector = hasExtension(statement, "vector");
                 for (String script : SCRIPTS) {
                     String sql = Files.readString(Path.of("docs/sql", script), StandardCharsets.UTF_8);
-                    if (script.contains("knowledge") && !pgvector) {
+                    if ((script.contains("knowledge") || script.contains("community")) && !pgvector) {
                         sql = withoutPgvector(sql);
                     }
                     // Mỗi file có BEGIN/COMMIT riêng; PgJDBC gửi cả file trong một lệnh như khi vận hành chạy psql -f.

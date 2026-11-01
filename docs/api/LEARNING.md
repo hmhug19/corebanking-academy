@@ -623,3 +623,82 @@ Những bảng này chưa nằm trong 26 bảng chi tiết kể trên. Giải th
 | lesson_progress / block_progress | Tổng tiến độ bài / chi tiết tiến độ và vị trí từng khối. |
 | assets / block_assets | File/tài nguyên gốc / một lần dùng file trong nội dung. |
 | course_assessments / assessment_attempts | Cấu hình kiểm tra trong khóa / một lần học viên thực hiện kiểm tra đó. |
+
+<a id="dashboard-reporting"></a>
+
+## 16. Trang chủ học viên và báo cáo đào tạo
+
+Chạy `learning_hub_reporting.sql` một lần sau Assessment trước khi dùng các API này. File không cần chạy lại
+nếu đã áp dụng; thay đổi comment trong source không phải nâng cấp schema. Không có bảng snapshot ngày,
+điểm thưởng hoặc streak trong phạm vi này. Tất cả API JSON dùng BaseResponse, size 1..100, page từ 0.
+
+| Method / URL | FE sử dụng |
+|---|---|
+| GET `/api/v1/me/learning/dashboard` | KPI, tiếp tục học, tối đa 5 hạn gần nhất và điểm thi cuối khóa |
+| GET `/api/v1/me/learning/dashboard/competencies?method=BEST&page=0&size=20` | Radar/dạng bảng, chọn BEST hoặc LAST |
+| GET `/api/v1/me/learning/dashboard/programs?page=0&size=20` | Tiến độ các chương trình |
+| GET `/api/v1/reports/learning/summary` | KPI quản lý theo bộ lọc |
+| GET `/api/v1/reports/learning/enrollments` | Chi tiết học viên/khóa, phân trang |
+| GET `/api/v1/reports/learning/groups?groupBy=course` | Tổng hợp theo user/course/program/org/team |
+| GET `/api/v1/reports/learning/enrollments/export` | CSV cùng filter/scope/sort, tối đa 10.000 dòng |
+
+### Trang chủ và quy ước hiển thị
+
+Dashboard trả `dataAsOf`, `timeZone`, `learning` và `assessment`; tên người dùng lấy từ `/auth/me`.
+`learning.counts` có enrollments/learners/courses/assigned/mandatory/completed/inProgress/notStarted/overdue,
+`averageProgress` và `completionRate`. Trên dashboard một người, enrollment hiện hành được chọn theo từng khóa,
+không cộng các cycle cũ hoặc nhiều đợt giao cùng enrollment. Hai chỉ số % khác nhau:
+
+- `completionRate` = số khóa hoàn thành / tổng khóa * 100 (1/5 = 20%).
+- `averageProgress` = trung bình % tiến độ của các khóa (có thể là 39% dù mới hoàn thành 1/5).
+
+`assigned`/`mandatory`/`dueAt` lấy nghĩa vụ còn hiệu lực đã đến thời điểm bắt đầu. Khóa chưa đến ngày giao vẫn có
+thể có enrollment nhưng chưa tính vào assigned hiện hành. `overdue` là nghĩa vụ đã quá hạn và khóa chưa hoàn thành;
+hạn được tính theo đồng hồ DB mỗi request, không lưu cờ quá hạn cố định. Mọi count rỗng là 0; điểm chưa có là null.
+
+`learning.nextAction` trả enrollmentId/courseId/courseTitle/lessonId/blockId/blockType/quizId/assetId,
+lastPdfPage/lastVideoPositionSeconds; null nếu không còn nội dung phù hợp. Ưu tiên lần học truy cập gần nhất
+đang được phép học, khối cũ chưa xong, rồi nội dung chưa hoàn thành theo thứ tự chương/bài/khối. Bài quiz có thể
+không có blockId nhưng có quizId. Tiến độ đã hoàn thành không bị hạ khi xem lại. FE vẫn claim session trước khi
+đọc media/ghi tiến độ; vị trí điều hướng không thay thế kiểm quyền tại API nội dung.
+
+`learning.deadlines` chứa tối đa 5 dòng enrollment chưa hoàn thành có hạn, sắp hạn tăng dần, bao gồm đang quá hạn;
+`canStudy=false` thì không cho mở player trực tiếp. Dùng API `/me/learning/courses` hiện có cho card/phân trang/tìm kiếm
+và `/me/learning/enrollments/{id}` cho cây nội dung; dashboard không tải cây bài hoặc gọi S3.
+
+`assessment.counts` là số đề cuối khóa đã có kết quả và số đề đạt theo scoreMethod hiện tại. latest/best gồm
+quizId/quizTitle/courseId/attemptId/enrollmentId/scorePercent/passed/submittedAt; tính trên lịch sử thi của caller,
+không gồm PRACTICE hoặc VOIDED. Nhãn thẻ nên ghi rõ "Điểm thi cuối khóa gần nhất/cao nhất". Radar mới mặc định
+chọn BEST mỗi đề, có thể chọn LAST; khác API `/me/competency` cũ tổng hợp toàn bộ lượt. Nhóm không xuất hiện là
+chưa được đánh giá, không render thành 0. `percent = SUM(earnedScore)/SUM(maxScore)*100`; điểm 0 có dữ liệu là hợp lệ.
+
+Tiến độ chương trình trả page `items` theo grain chương trình, gồm counts và hai tỷ lệ. Không diễn giải thành
+thứ tự tiên quyết giữa các khóa. Nhóm có id=null là chưa gắn chương trình/đơn vị/nhóm, không là lỗi API.
+
+### Bộ lọc và phạm vi báo cáo quản lý
+
+Filter chung: `q` (mã/tên khóa, tối đa 100 ký tự, LIKE literal), `userId`, `orgId` (gồm cây con active), `teamId`,
+`courseId`, `programId`, `fieldId`, `status` (not_started/in_progress/completed), `overdue`, `from`, `to`.
+`from <= enrolledAt < to`: đây là báo cáo hiện trạng của nhóm ghi danh trong kỳ, không phải số liệu tại một ngày
+trong quá khứ. Summary/list/groups/export dùng cùng filter và scope. Chỉ lấy cycle hiện hành, không gồm withdrawn.
+Sort chi tiết: id/progressPercent/dueAt/lastAccessAt/enrolledAt, kèm `,asc`/`,desc`; groups sort theo id ổn định.
+
+Chi tiết trả `items[].enrollment` và fullName/orgName/teamName ở ngoài. Tên được lấy theo lô một trang, không
+query từng học viên. Groups trả id/name/enrollments/learners/courses/completed/inProgress/notStarted/overdue,
+averageProgress/completionRate; số người duy nhất giữa các nhóm không cộng trực tiếp thành tổng người duy nhất.
+
+Scope theo grant hiện tại của SUPER_ADMIN/ADMIN/INSTRUCTOR/REPORT_VIEWER: GLOBAL/ORG gồm cây con active/TEAM.
+OWN không cấp quyền báo cáo; học viên dùng các API `/me`. Bộ lọc chỉ thu hẹp scope. Dữ liệu tiến độ quản lý xét
+org/team snapshot của enrollment, báo cáo Assessment xét snapshot lúc thi; không tự coi hai mốc này là giống nhau.
+Không trả mật khẩu, đáp án, storage key hoặc raw token. Người xem báo cáo không có quyền sửa dữ liệu qua các API này.
+
+### Hiệu năng và đồng bộ
+
+Dashboard dùng snapshot REPEATABLE READ ngắn cho các KPI cùng request; không cache kết quả qua người dùng/quyền.
+Read model Assessment cập nhật trong transaction chấm/hủy/chấm lại; video heartbeat không ghi các bảng này.
+Báo cáo năng lực hiện có vẫn giữ policy mọi lượt trong filter nhưng đọc điểm đã gộp theo attempt, giảm join đáp án.
+Báo cáo có kỳ/đơn vị không dùng kết quả suốt lịch sử của quiz_user_results để thay thế filter gốc.
+
+Native query áp scope/filter trước aggregate và phân trang; không gọi GET danh sách từng người. CSV có giới hạn,
+BOM/escape và bảo vệ công thức. Hai bảng read model không có JPA entity: repository native đọc/ghi projection,
+không auto DDL. Không kết luận throughput/latency production từ kiểm thử dữ liệu nhỏ; cần EXPLAIN và đo tải đại diện.

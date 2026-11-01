@@ -42,7 +42,9 @@ public abstract class KnowledgeIntegrationTest {
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_community.sql"),
                     "/docker-entrypoint-initdb.d/05-community.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_assessment.sql"),
-                    "/docker-entrypoint-initdb.d/05-assessment.sql");
+                    "/docker-entrypoint-initdb.d/05-assessment.sql")
+                .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_reporting.sql"),
+                    "/docker-entrypoint-initdb.d/06-reporting.sql");
             postgres.start();
             return postgres;
         }

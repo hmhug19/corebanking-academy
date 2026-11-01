@@ -725,3 +725,27 @@ curl --output learning-progress.csv "${BASE_URL}/api/v1/me/learning/progress/exp
 
 Cookie jar chứa token ngắn hạn, giữ local và không commit. File video cần ffprobe/ffmpeg trên máy BE;
 Docker runtime đã cài công cụ này. Mọi request phải kiểm status/messageCode hoặc HTTP/header khi trả binary/CSV.
+
+## Trang chủ và báo cáo đào tạo
+
+`LEARNER_TOKEN` phải có LEARNER/OWN; `REPORT_TOKEN` là token có quyền báo cáo GLOBAL/ORG/TEAM tương ứng.
+Không truyền userId vào Dashboard để chọn người khác. Filter dưới đây là ví dụ; bỏ filter nếu muốn xem toàn
+phạm vi được cấp. Định nghĩa KPI và điều hướng xem [contract](LEARNING.md#dashboard-reporting).
+
+```bash
+curl "${BASE_URL}/api/v1/me/learning/dashboard" \
+  --header "Authorization: Bearer ${LEARNER_TOKEN}"
+curl "${BASE_URL}/api/v1/me/learning/dashboard/competencies?method=BEST&page=0&size=20" \
+  --header "Authorization: Bearer ${LEARNER_TOKEN}"
+curl "${BASE_URL}/api/v1/me/learning/dashboard/programs?page=0&size=20" \
+  --header "Authorization: Bearer ${LEARNER_TOKEN}"
+curl "${BASE_URL}/api/v1/reports/learning/summary?courseId=${COURSE_ID}" \
+  --header "Authorization: Bearer ${REPORT_TOKEN}"
+curl "${BASE_URL}/api/v1/reports/learning/enrollments?courseId=${COURSE_ID}&page=0&size=20&sort=id" \
+  --header "Authorization: Bearer ${REPORT_TOKEN}"
+curl "${BASE_URL}/api/v1/reports/learning/groups?groupBy=org&courseId=${COURSE_ID}&page=0&size=20" \
+  --header "Authorization: Bearer ${REPORT_TOKEN}"
+curl --output learning-report.csv \
+  "${BASE_URL}/api/v1/reports/learning/enrollments/export?courseId=${COURSE_ID}&sort=id" \
+  --header "Authorization: Bearer ${REPORT_TOKEN}"
+```

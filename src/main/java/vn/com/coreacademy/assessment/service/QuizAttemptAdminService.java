@@ -23,6 +23,7 @@ import vn.com.coreacademy.assessment.exception.AssessmentResponseCode;
 import vn.com.coreacademy.assessment.repository.AssessmentRepository;
 import vn.com.coreacademy.assessment.repository.QuizAttemptRepository;
 import vn.com.coreacademy.assessment.repository.custom.QuizAttemptRepositoryCustom;
+import vn.com.coreacademy.assessment.repository.custom.AssessmentResultRepository;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -51,6 +52,7 @@ public class QuizAttemptAdminService {
     private final IdentityAuditService audit;
     private final AttemptGrader grader;
     private final RegradeService regrades;
+    private final AssessmentResultRepository results;
 
     public PageResponse<AssessmentViews.AdminAttemptRow> search(Long quizId, String userId, String status,
                                                                 Boolean passed, Instant from, Instant to, int page,
@@ -112,6 +114,7 @@ public class QuizAttemptAdminService {
         attempt.setVoidedBy(actor);
         attempt.setVoidedAt(ServerTime.now());
         repository.flush();
+        results.refresh(attempt);
 
         Map<String, Object> changes = new LinkedHashMap<>();
         changes.put("quizId", attempt.getQuizId());

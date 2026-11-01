@@ -200,6 +200,26 @@ xuống trượt không hạ bài học (chấm lại vốn chỉ áp dụng khi
 **Job tự nộp.** Mỗi `app.assessment.auto-submit-interval` (mặc định 1 phút) quét tối đa 100 lượt quá
 `deadlineAt + graceSeconds`, mỗi lượt một transaction có khóa dòng; chạy lại hoặc nhiều instance không chấm trùng.
 
+<a id="reporting-read-model"></a>
+
+## Đồng bộ dữ liệu tổng hợp cho Dashboard/báo cáo
+
+Extension `docs/sql/learning_hub_reporting.sql` phải có trước khi chạy bản backend này. `AttemptGrader` cập nhật
+read model sau nộp tay/tự nộp/nộp hộ; `RegradeService` cập nhật sau mỗi lượt áp dụng chấm lại; quản trị VOIDED
+xóa điểm năng lực của lượt và tính lại kết quả theo đề/học viên. Mọi bước trong cùng transaction, lỗi rollback
+cả kết quả gốc và read model. Không có trigger, job refresh toàn bảng hoặc cập nhật theo heartbeat video.
+
+`AssessmentResultRepository` serialize theo `(quiz_id,user_id)` bằng advisory transaction lock riêng, không
+khóa các lượt khác khi recompute. Kết quả tính lại từ lịch sử thay vì cộng số đếm; retry không cộng trùng. BEST
+chọn score_percent cao nhất, hòa điểm chọn submitted_at DESC/attempt_id DESC; LAST theo thời điểm nộp, không
+theo ngày chấm lại. `ever_passed` giữ semantics BEST hiện tại; không suy từ điểm làm tròn hoặc ngưỡng đề mới.
+Nếu không còn lượt hợp lệ thì xóa dòng quiz_user_results, không tạo một kết quả 0 giả.
+
+Báo cáo `/reports/assessment/competency` và `/me/competency` giữ cách chọn mọi lượt đã chấm trong filter, nhưng
+đọc `attempt_competency_scores` trước khi tổng hợp. Radar Dashboard mới chọn một lượt mỗi đề (BEST/LAST), chỉ
+thi cuối khóa; không đổi semantics API cũ. Các báo cáo theo kỳ/đơn vị vẫn lọc quiz_attempts trước aggregate.
+Contract FE: [Trang chủ và báo cáo đào tạo](LEARNING.md#dashboard-reporting).
+
 ## Mã lỗi
 
 | messageCode | Khi nào |

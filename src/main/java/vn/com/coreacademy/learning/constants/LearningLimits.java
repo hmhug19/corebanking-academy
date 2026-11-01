@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 /** Giới hạn nghiệp vụ dùng chung DTO/service; số byte là hệ thập phân, riêng part là 8 MiB. */
 public final class LearningLimits {
+    public static final int DASHBOARD_DEADLINES = 5;
     public static final int MAX_LESSONS_PER_COURSE = 500;
     public static final int MAX_BLOCKS_PER_COURSE = 2_000;
     public static final int MAX_LEARNERS_PER_ASSIGNMENT = 500;
