@@ -1,7 +1,7 @@
 package vn.com.coreacademy.learning.service;
 
-import java.util.ArrayList;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +36,6 @@ import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.repository.CourseRepository;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 import vn.com.coreacademy.learning.repository.custom.CourseRepositoryCustom.CourseSearch;
-import vn.com.coreacademy.security.SecurityContextUtils;
 
 @Service
 @Transactional(readOnly = true)
@@ -109,7 +108,7 @@ public class LearningSearchService {
             return cards;
         }
         Map<Long, BigDecimal> finalExamBest = new HashMap<>();
-        quizzes.scores(SecurityContextUtils.getUserId(), cards.map(CourseCard::courseId).toList()).stream()
+        quizzes.scores(access.actor().person().id(), cards.map(CourseCard::courseId).toList()).stream()
             .filter(LearningQuizDirectory.QuizScore::finalExam)
             .forEach(score -> finalExamBest.put(score.courseId(), score.bestScore()));
         return cards.map(card -> card.withBestScorePercent(finalExamBest.get(card.courseId())));
