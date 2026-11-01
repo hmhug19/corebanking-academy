@@ -908,7 +908,7 @@ COMMENT ON COLUMN learning_hub.lesson_bookmarks.block_id IS 'Khối chứa vị 
 COMMENT ON COLUMN learning_hub.lesson_bookmarks.anchor_type IS 'Loại neo: pdf (một trang) | video (một giây).';
 COMMENT ON COLUMN learning_hub.lesson_bookmarks.pdf_page IS 'Số trang PDF, từ 1 đến assets.page_count; chỉ có khi anchor_type = pdf.';
 COMMENT ON COLUMN learning_hub.lesson_bookmarks.video_second IS 'Giây video nguyên, từ 0 đến phần nguyên của assets.duration_seconds; chỉ có khi anchor_type = video.';
-COMMENT ON COLUMN learning_hub.lesson_bookmarks.label IS 'Nhãn tùy chọn, tối đa 200 ký tự; NULL thì giao diện tự đặt nhãn từ tên khối và vị trí.';
+COMMENT ON COLUMN learning_hub.lesson_bookmarks.label IS 'Nhãn tối đa 200 ký tự; người dùng không gửi thì service đặt "{tên khối} — trang n" hoặc "{tên khối} — m:ss".';
 COMMENT ON COLUMN learning_hub.lesson_bookmarks.is_deleted IS 'Xóa mềm: true là đã bỏ đánh dấu, mọi truy vấn của học viên bỏ qua dòng này.';
 COMMENT ON COLUMN learning_hub.lesson_bookmarks.created_by IS 'Mã cán bộ tạo bản ghi.';
 COMMENT ON COLUMN learning_hub.lesson_bookmarks.updated_by IS 'Mã cán bộ cập nhật gần nhất.';
