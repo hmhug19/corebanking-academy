@@ -287,6 +287,30 @@ public final class LearningCodes {
         }
     }
 
+    /** Loại neo của ghi chú và đánh dấu, ghi ở anchor_type; đánh dấu chỉ nhận pdf và video. */
+    public static final class AnchorType {
+        public static final String NONE = "none";
+        public static final String PDF = "pdf";
+        public static final String VIDEO = "video";
+        public static final String PATTERN = NONE + "|" + PDF + "|" + VIDEO;
+        public static final String BOOKMARK_PATTERN = PDF + "|" + VIDEO;
+
+        private AnchorType() {
+        }
+    }
+
+    /** Tab của trang Đã lưu (tham số kind). Mỗi dòng trả về mang kind số ít: note hoặc bookmark. */
+    public static final class SavedKind {
+        public static final String NOTES = "notes";
+        public static final String BOOKMARKS = "bookmarks";
+        public static final String PATTERN = NOTES + "|" + BOOKMARKS;
+        public static final String NOTE_ITEM = "note";
+        public static final String BOOKMARK_ITEM = "bookmark";
+
+        private SavedKind() {
+        }
+    }
+
     public static final class SearchMode {
         public static final String MANAGE = "manage";
         public static final String MINE = "mine";
