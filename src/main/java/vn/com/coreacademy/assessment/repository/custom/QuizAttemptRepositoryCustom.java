@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assessment.repository.custom;
 
 import java.time.Instant;
+import java.util.Set;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,4 +19,10 @@ public interface QuizAttemptRepositoryCustom {
     }
 
     Page<AssessmentViews.MyAttemptRow> searchMine(MineFilter filter, Pageable page);
+
+    /**
+     * Khóa có bài thi cuối PUBLISHED (chưa xóa) mà userId có lượt đã chấm (SUBMITTED, AUTO_SUBMITTED) và không lượt
+     * nào đạt. Một truy vấn, gom theo khóa.
+     */
+    Set<Long> failedFinalExamCourseIds(String userId);
 }

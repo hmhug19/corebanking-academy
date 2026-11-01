@@ -49,7 +49,26 @@ public final class LearningDetails {
                               Instant updateTime, Integer cycleNo, Instant startedAt, Instant lastAccessAt,
                               Instant completedAt, Long lastLessonId, Long lastBlockId,
                               Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
-                              Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds) {
+                              Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds, Long fieldId,
+                              String fieldName, String programName, String moduleName, boolean failed) {
+    }
+
+    /** Một lĩnh vực hoặc giá trị lọc không thuộc lĩnh vực nào. */
+    public record Facet(Long id, String code, String name) {
+    }
+
+    /** Chương trình hoặc phân hệ; fieldId là lĩnh vực chứa nó. */
+    public record FieldFacet(Long id, Long fieldId, String code, String name) {
+    }
+
+    public record LearnerFacets(List<Facet> fields, List<FieldFacet> programs, List<FieldFacet> modules) {
+    }
+
+    /**
+     * Khóa học viên thấy kèm nội dung: bản đã nhận khi có lần học, bản xuất bản hiện hành khi chưa đăng ký (khi đó mỗi
+     * bài có danh sách blocks rỗng).
+     */
+    public record LearnerCourse(CourseCard card, CourseDetail content) {
     }
 
     public record ProgressResult(LearningViews.BlockProgressView block,

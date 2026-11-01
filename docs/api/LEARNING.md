@@ -96,11 +96,39 @@ Prefix `/api/v1`; endpoint nghiệp vụ dùng BaseResponse, lỗi logic HTTP 20
 | POST `/me/learning/sessions` | Claim/handoff/takeover một phiên học trên toàn tài khoản |
 | GET `/me/learning/progress/summary` | Counts theo cycle hiện hành của caller; chỉ trả chỉ số có nguồn thật |
 | GET `/me/learning/progress/export` | CSV cùng filter/scope/sort của courses, tối đa 10.000 dòng |
+| GET `/me/learning/facets` | Lĩnh vực, chương trình, phân hệ mà ít nhất một khóa trong danh mục của caller dùng |
+| GET `/me/learning/courses/{courseId}` | `LearnerCourse { card, content }`: thẻ như `/catalog` và cây nội dung của một khóa caller thấy được |
 
 Đã mở rộng GET `/me/learning/courses`: overdue=true/false, sort progressPercent/startedAt/lastAccessAt/completedAt;
 trả thêm cycleNo, startedAt, lastAccessAt, completedAt, lastLessonId/lastBlockId, completedRequiredLessonCount,
 requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds. Các field cũ được giữ.
 Các field resume hiện trả phẳng trong CourseCard; không dùng object minh họa từ bản thiết kế cũ làm contract.
+CourseCard trả thêm fieldId, fieldName, programName, moduleName và failed (thêm ở cuối, các field cũ giữ nguyên).
+Tên lĩnh vực/chương trình/phân hệ là null khi khóa chưa gán chương trình hoặc phân hệ. failed = học viên đã thi bài thi
+cuối khóa (PUBLISHED, chưa xóa) ít nhất một lượt đã chấm (SUBMITTED, AUTO_SUBMITTED) và chưa đạt lượt nào; Learning lấy
+tập khóa qua cổng LearningQuizDirectory, không đọc bảng Assessment. Danh sách giảng viên (MANAGE) không gọi cổng và luôn
+trả failed=false.
+
+Bộ lọc của danh sách học viên: GET `/me/learning/courses` và `/me/learning/catalog` nhận thêm `assigned` (true chỉ lấy
+khóa caller có đợt giao còn hiệu lực, cùng biểu thức với cờ assigned của thẻ), `failed` (true chỉ lấy khóa trong tập
+failed ở trên, false loại các khóa đó) và `overdue` (catalog nhận thêm; courses đã có). `/me/learning/progress/export`
+nhận cùng bộ lọc với `/courses`. Các bộ lọc kết hợp được với nhau và với `learningStatus`; mỗi bộ lọc true/false.
+
+GET `/me/learning/facets` trả `{ fields[], programs[], modules[] }`, mỗi mục `{ id, code, name }`; chương trình và phân
+hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong `/catalog` dùng (cùng quy tắc nhìn thấy, gồm
+khóa đã đăng ký, khóa của đơn vị mình và khóa được chia sẻ), sắp theo `sortNo` rồi tên. Học viên không cần quyền đọc
+`/training-catalog`.
+
+GET `/me/learning/courses/{courseId}` trả `{ card: CourseCard, content: CourseDetail }`. `card` là kết quả search CATALOG
+theo `courseId`, nên quy tắc nhìn thấy, bản revision và cờ failed giống `/catalog`. `content` là bản revision của `card`:
+bản đã nhận khi caller có lần học, bản xuất bản hiện hành (kể cả sau khi có bản mới hơn thì lần học vẫn giữ bản cũ) khi chưa
+đăng ký. Chưa đăng ký thì cây chương/bài được giữ, mỗi bài có `blocks` rỗng để không đọc được nội dung khi chưa học;
+quyền đọc media không đổi. Khóa ngoài phạm vi hoặc không tồn tại trả `LEARNING-NOT_FOUND` (mã không tìm thấy sẵn có của
+Learning, không thêm mã riêng cho khóa học).
+
+GET `/me/learning/progress/summary` trả thêm `counts.assigned` và `counts.mandatory`: tổng của danh sách `/courses` với
+`assigned=true` và `requirement=mandatory`, cùng truy vấn với danh sách nên tab "Được giao" và "Bắt buộc" luôn khớp số
+trên danh sách.
 GET enrollment đã có cây revision + tiến độ từng block, dùng để khôi phục player; không cần API resume riêng.
 
 ### Upload và kiểm file

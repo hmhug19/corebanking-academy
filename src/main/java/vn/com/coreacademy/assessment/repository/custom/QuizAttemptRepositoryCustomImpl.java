@@ -1,6 +1,9 @@
 package vn.com.coreacademy.assessment.repository.custom;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import jakarta.persistence.EntityManager;
 
@@ -8,6 +11,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.AttemptStatus;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizStatus;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizType;
 import vn.com.coreacademy.assessment.dto.AssessmentViews;
 import vn.com.coreacademy.common.persistence.NativeSearchQuery;
 
@@ -70,5 +76,24 @@ public class QuizAttemptRepositoryCustomImpl implements QuizAttemptRepositoryCus
                    a.started_at, a.submitted_at, a.total_questions, a.correct_count, a.score_percent, a.passed
             """, AssessmentViews.MyAttemptRow.class, page, Map.of("id", "a.attempt_id", "startedAt", "a.started_at",
                 "submittedAt", "a.submitted_at"));
+    }
+
+    @Override
+    public Set<Long> failedFinalExamCourseIds(String userId) {
+        List<?> rows = entityManager.createNativeQuery("""
+            select z.course_id
+            from learning_hub.quizzes z
+            join learning_hub.quiz_attempts a on a.quiz_id = z.quiz_id
+            where a.user_id = :user and a.status in (:graded) and a.graded_at is not null
+              and z.quiz_type = :finalExam and z.status = :published and not z.is_deleted
+            group by z.course_id
+            having not bool_or(coalesce(a.passed, false))
+            """)
+            .setParameter("user", userId)
+            .setParameter("graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED))
+            .setParameter("finalExam", QuizType.FINAL_EXAM)
+            .setParameter("published", QuizStatus.PUBLISHED)
+            .getResultList();
+        return rows.stream().map(row -> ((Number) row).longValue()).collect(Collectors.toUnmodifiableSet());
     }
 }

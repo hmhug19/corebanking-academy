@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningProgressOverview;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
@@ -24,14 +25,19 @@ public class LearningProgressReportService {
         var actor = access.actor();
         access.requireLearner(actor);
         var unavailable = new LearningProgressOverview.Availability("unavailable");
-        return new LearningProgressOverview(Instant.now(), "Asia/Ho_Chi_Minh", courses.summary(actor.person().id()),
-            unavailable, unavailable, unavailable);
+        var base = courses.summary(actor.person().id());
+        var counts = new LearningProgressOverview.Counts(base.total(), base.completed(), base.inProgress(),
+            base.notStarted(), base.overdue(), search.mineTotal(null, true),
+            search.mineTotal(Requirement.MANDATORY, null));
+        return new LearningProgressOverview(Instant.now(), "Asia/Ho_Chi_Minh", counts, unavailable, unavailable,
+            unavailable);
     }
 
     public byte[] export(String q, Long fieldId, Long programId, Long moduleId, String level, String requirement,
-                         String learningStatus, String state, Boolean overdue, String sort) {
+                         String learningStatus, String state, Boolean overdue, Boolean assigned, Boolean failed,
+                         String sort) {
         var rows = search.export(q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
-            overdue, sort);
+            overdue, assigned, failed, sort);
         if (rows.getTotalElements() > LearningLimits.MAX_EXPORT_ROWS) {
             throw new BusinessException(LearningResponseCode.EXPORT_TOO_LARGE);
         }
