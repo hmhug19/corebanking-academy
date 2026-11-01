@@ -1,6 +1,8 @@
 package vn.com.coreacademy.assessment.repository.custom;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.data.domain.Page;
@@ -28,4 +30,10 @@ public interface QuizAttemptRepositoryCustom {
      * nào đạt. Một truy vấn, gom theo khóa.
      */
     Set<Long> failedFinalExamCourseIds(String userId);
+
+    /**
+     * Số đề PUBLISHED (chưa xóa) khác nhau mà mỗi người trong userIds có lượt đã chấm đạt. Một truy vấn gom theo
+     * người; người chưa đạt đề nào không có trong kết quả.
+     */
+    Map<String, Integer> passedQuizCounts(Collection<String> userIds);
 }

@@ -611,8 +611,17 @@ public class LearningContentService {
         var sourceLessons = repository.lessons(source.getId());
         var targetLessons = repository.lessons(target.getId());
         Map<Long, Long> lessonIds = new HashMap<>();
+        boolean sameCourse = source.getCourseId().equals(target.getCourseId());
         for (int index = 0; index < sourceLessons.size(); index++) {
-            lessonIds.put(sourceLessons.get(index).getId(), targetLessons.get(index).getId());
+            var sourceLesson = sourceLessons.get(index);
+            var targetLesson = targetLessons.get(index);
+            lessonIds.put(sourceLesson.getId(), targetLesson.getId());
+            if (sameCourse) {
+                // Trỏ tới bài gốc đầu tiên, không phải bản sao liền trước (xem CourseLesson.sourceLessonId).
+                targetLesson.setSourceLessonId(sourceLesson.getSourceLessonId() != null
+                    ? sourceLesson.getSourceLessonId() : sourceLesson.getId());
+                repository.save(targetLesson, actor);
+            }
         }
         resourceExtensions.forEach(extension -> extension.cloneResources(source.getId(), target.getId(), lessonIds));
         var rule = repository.rules(target.getId()).get(0);

@@ -325,6 +325,45 @@ vượt 10.000 dòng báo lỗi rõ thay vì cắt im lặng. API summary độc
 
 <a id="media-progress-scenarios"></a>
 
+### Điểm học tập và bảng xếp hạng
+
+Điểm tính **khi đọc** từ dữ liệu gốc, không lưu tổng, nên không lệch khỏi tiến độ. Chỉ học viên (`LEARNER`, scope `OWN`)
+có điểm; vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Hạng phụ thuộc phạm vi nên không nằm trong `/points`.
+
+| API | Trách nhiệm |
+|---|---|
+| GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, courses, streak }, streakDays }` của caller |
+
+Bốn phần của điểm và trọng số (cấu hình `app.learning.points.*` trong `application.yml`, ghi đè bằng biến môi trường
+`APP_LEARNING_POINTS_LESSON`, `_QUIZ_PASS`, `_STREAK_DAY`, `_STREAK_CAP`; đổi trọng số làm điểm của mọi người đổi theo):
+
+| Phần | Công thức | Trọng số mặc định |
+|---|---|---|
+| `lessons` | trọng số × số bài học khác nhau có `lesson_progress.status = completed` | 5 / bài |
+| `quizzes` | trọng số × số đề PUBLISHED, chưa xóa, khác nhau có ít nhất một lượt đã chấm (`SUBMITTED`, `AUTO_SUBMITTED`) với `passed = true` | 30 / đề |
+| `courses` | tổng `course_completion_rules.reward_points` của phiên bản trong lần học hoàn thành gần nhất (`cycle_no` lớn nhất) của từng khóa | theo khóa |
+| `streak` | trọng số × `min(streakDays, trần)` | 10 / ngày, trần 30 ngày |
+
+Quy tắc:
+
+- **Bài học tính một lần** qua các lần học (cycle) và các phiên bản. Định danh bài là `coalesce(source_lesson_id, lesson_id)`.
+  `source_lesson_id` luôn trỏ tới bài gốc đầu tiên: khi nhân bản bản nháp của cùng khóa (`POST /courses/{id}/draft`), bài
+  mới nhận `coalesce(source.source_lesson_id, source.lesson_id)`. Bài của phiên bản tạo trước khi cột được ghi có giá trị
+  null và tính là bài riêng, nên một người đã học lại khóa trên phiên bản cũ có thể được tính hai lần cho đến khi dữ
+  liệu được đối soát. Sao chép khóa (`copy`) tạo bài mới và để trống cột này.
+- **Khóa tính một lần**: học lại một khóa không cộng thêm điểm thưởng; lần học đang học dở hoặc đã rút không có điểm thưởng.
+- **Đề tính một lần** dù đạt nhiều lượt; đề chưa xuất bản hoặc đã xóa không tính. Điểm đề đi qua cổng
+  `LearningQuizDirectory.passedQuizCounts`, Learning không đọc bảng của Assessment.
+- **Chuỗi ngày học** (`streakDays`) là số ngày liên tiếp kết thúc ở ngày học gần nhất, và chỉ tính khi ngày đó là hôm nay
+  hoặc hôm qua (giờ `Asia/Ho_Chi_Minh`); bỏ một ngày trọn vẹn thì chuỗi về 0. Điểm chuỗi bị chặn bởi trần, còn
+  `streakDays` thì không.
+- **Ngày học** ghi vào `learning_activity_days` khi một trong các thao tác sau thành công: mở phiên học
+  (`POST /me/learning/sessions`), ghi tiến độ khối (`PUT .../blocks/{blockId}/progress`), bắt đầu hoặc nộp bài thi. Mỗi
+  người mỗi ngày một dòng, kiểm tra dưới khóa advisory theo người dùng. Ghi nhận chạy sau khi thao tác commit, trong giao
+  dịch riêng; lỗi ghi chỉ được log và không bao giờ làm hỏng thao tác của học viên.
+- Schema: `docs/sql/upgrade/2026-11-02-learning-leaderboard.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
+  backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
+
 ### Đối chiếu tình huống demo và phần phát triển tiếp
 
 | ID | Xử lý hiện tại / giới hạn |
