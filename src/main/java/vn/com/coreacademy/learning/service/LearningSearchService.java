@@ -1,5 +1,6 @@
 package vn.com.coreacademy.learning.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -37,6 +38,8 @@ import vn.com.coreacademy.learning.repository.custom.CourseRepositoryCustom.Cour
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class LearningSearchService {
+    private static final int MINE_IDS_PAGE_SIZE = 200;
+
     private final CourseRepository repository;
     private final LearningAccessPolicy access;
     private final LearningIdentityService identity;
@@ -96,6 +99,22 @@ public class LearningSearchService {
     public long mineTotal(String requirement, Boolean assigned) {
         return query(SearchMode.MINE, null, null, null, null, null, requirement, null, null, null, assigned, null,
             PageRequest.of(0, 1, Sort.by("id"))).getTotalElements();
+    }
+
+    /**
+     * ID mọi khóa trong danh sách khóa của tôi, cùng truy vấn với list và mineTotal nên các số trên tổng quan học tập
+     * và các tab dùng một tập khóa. Đọc từng trang để không cắt im lặng khi caller có nhiều khóa.
+     */
+    public List<Long> mineCourseIds() {
+        var ids = new ArrayList<Long>();
+        Page<CourseCard> page;
+        int number = 0;
+        do {
+            page = query(SearchMode.MINE, null, null, null, null, null, null, null, null, null, null, null,
+                PageRequest.of(number++, MINE_IDS_PAGE_SIZE, Sort.by("id")));
+            page.forEach(card -> ids.add(card.courseId()));
+        } while (page.hasNext());
+        return ids;
     }
 
     /** Lĩnh vực, chương trình và phân hệ của các khóa caller thấy trong danh mục, theo cùng quy tắc nhìn thấy với list. */

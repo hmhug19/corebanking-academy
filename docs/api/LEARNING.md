@@ -94,7 +94,7 @@ Prefix `/api/v1`; endpoint nghiệp vụ dùng BaseResponse, lỗi logic HTTP 20
 | DELETE `/learning-assets/uploads/{uploadId}` | Caller chủ phiên yêu cầu abort multipart chưa complete, retry được |
 | DELETE `/learning-assets/{assetId}` | Xóa mềm asset chưa được tham chiếu, không tự xóa bytes S3 |
 | POST `/me/learning/sessions` | Claim/handoff/takeover một phiên học trên toàn tài khoản |
-| GET `/me/learning/progress/summary` | Counts theo cycle hiện hành của caller; chỉ trả chỉ số có nguồn thật |
+| GET `/me/learning/progress/summary` | Counts theo cycle hiện hành của caller và `assessment` (điểm trên đề của các khóa hiện tại); chỉ trả chỉ số có nguồn thật |
 | GET `/me/learning/progress/export` | CSV cùng filter/scope/sort của courses, tối đa 10.000 dòng |
 | GET `/me/learning/facets` | Lĩnh vực, chương trình, phân hệ mà ít nhất một khóa trong danh mục của caller dùng |
 | GET `/me/learning/courses/{courseId}` | `LearnerCourse { card, content }`: thẻ như `/catalog` và cây nội dung của một khóa caller thấy được |
@@ -291,8 +291,24 @@ Gateway nội bộ (ẩn Swagger) GET `/learning-assets/{assetId}/gateway-author
 
 Summary trả serverTime, timeZone=Asia/Ho_Chi_Minh và counts total/completed/inProgress/notStarted/overdue trên
 cycle hiện hành; không phụ thuộc trang/tìm kiếm bảng, không đếm lặp nhiều đợt giao cùng enrollment.
-activity/assessment/competency trả availability=unavailable; không tạo giờ học/streak/điểm/radar bằng số 0 giả.
+activity/competency trả availability=unavailable; không tạo giờ học/streak/radar bằng số 0 giả.
 Demo nên dùng bốn KPI Hoàn thành/Đang học/Chưa bắt đầu/Đang quá hạn.
+
+`assessment` là `{ availability: "unavailable" }` khi các khóa hiện tại của caller (cùng tập khóa với `counts`, tức danh
+sách `/courses`) không có đề PUBLISHED nào; ngược lại là `AssessmentOverview`, kể cả khi caller chưa thi lần nào:
+
+| Field | Ý nghĩa |
+|---|---|
+| `availability` | Luôn `available` |
+| `last` | Lượt chấm gần nhất qua mọi đề: `quizId`, `quizTitle`, `courseId`, `attemptId`, `scorePercent`, `passed` (kết quả của chính lượt đó), `submittedAt`; null khi chưa có lượt chấm |
+| `bestScorePercent` | Điểm cao nhất (`bestScore`) qua các đề; null khi chưa có lượt chấm |
+| `averageScorePercent` | Trung bình `finalScore` của từng đề đã có lượt chấm (một số cho mỗi đề, không phải mỗi lượt), 2 chữ số, làm tròn lên từ .5; null khi chưa có lượt chấm |
+| `passedQuizCount` | Số đề có `passed = true` theo `scoreMethod` của đề |
+| `quizCount` | Số đề PUBLISHED, chưa xóa của các khóa hiện tại, gồm cả đề luyện tập |
+
+Lượt chấm là SUBMITTED hoặc AUTO_SUBMITTED; IN_PROGRESS và VOIDED không tính. Learning lấy điểm qua cổng
+`LearningQuizDirectory.scores`; Assessment tính bằng cùng quy tắc `AttemptSummary` của màn giới thiệu đề
+(`GET /me/quizzes/{quizId}`), nên con số trên tổng quan và trên đề không thể lệch nhau.
 
 Ngày bắt đầu khác ngày ghi danh; completedAt giữ khi xem lại. Deadline là trạng thái riêng: no_deadline,
 on_time_active, overdue_active, completed_on_time, completed_late. Hoàn thành muộn không còn trong KPI đang quá hạn.
