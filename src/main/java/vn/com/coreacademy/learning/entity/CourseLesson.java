@@ -43,6 +43,14 @@ public class CourseLesson extends LearningRecord {
     @Column(name = "sort_no", nullable = false)
     private Integer sortNo;
 
+    /**
+     * Bài học gốc mà bài này được nhân bản từ đó. Mỗi phiên bản nhân bản có lesson_id mới, nên "cùng một bài qua các
+     * phiên bản" chỉ nhận ra được qua cột này. Định danh của bài = coalesce(source_lesson_id, lesson_id). Cột luôn
+     * trỏ tới bài gốc đầu tiên, không trỏ tới bản sao liền trước: khi nhân bản bản nháp của cùng khóa, bài mới nhận
+     * coalesce(source.sourceLessonId, source.id), nên một bước nối là đủ, không cần đệ quy. Bài sao chép sang khóa
+     * khác (copy) là bài mới và để trống. Bài của phiên bản tạo trước khi cột được ghi có giá trị null và tính là bài
+     * riêng.
+     */
     @Column(name = "source_lesson_id")
     private Long sourceLessonId;
 

@@ -20,7 +20,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | # | File | Ghi chú |
 |---|---|---|
 | 1 | `learning_hub_identity.sql` | Schema, 7 tài khoản demo, RBAC |
-| 2 | `learning_hub_learning.sql` | 26 bảng Learning |
+| 2 | `learning_hub_learning.sql` | 27 bảng Learning (gồm `learning_activity_days`) |
 | 3 | `learning_hub_media_progress.sql` | Extension media/tiến độ |
 | 4 | `learning_hub_assessment.sql` | Quiz Engine; cần Identity + Learning, nằm trước Knowledge/Community |
 | 5 | `learning_hub_knowledge.sql` | pgvector (image `pgvector/pgvector:pg16`) |
@@ -56,11 +56,21 @@ Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_S
 | Upgrade | Nội dung | Rollback |
 |---|---|---|
 | `2026-11-01-learner-quiz.sql` | Cột `course_lessons.quiz_id` (bài học loại quiz trỏ tới một bài kiểm tra cùng khóa) và index một phần; chạy lại an toàn | `2026-11-01-learner-quiz.rollback.sql` dừng nếu còn bài học loại quiz, ngược lại xóa index và cột |
+| `2026-11-02-learning-leaderboard.sql` | Bảng `learning_activity_days` (một dòng mỗi người mỗi ngày học theo `Asia/Ho_Chi_Minh`, phục vụ chuỗi ngày học của bảng xếp hạng) và index; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu bảng | `2026-11-02-learning-leaderboard.rollback.sql` xóa index và bảng, chuỗi ngày học về 0 |
+| `2026-11-02-learning-leaderboard-backfill.sql` | Tùy chọn: thêm mỗi người mỗi ngày đã có tiến độ bài học hoặc lượt thi đã chấm (`first_source='backfill'`); bỏ qua ngày đã có nên chạy lại không thêm dòng | `DELETE FROM learning_hub.learning_activity_days WHERE first_source = 'backfill';` |
 
 ```bash
 psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.sql
 # Rollback:
 psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.rollback.sql
+```
+
+```bash
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-02-learning-leaderboard.sql
+# Tùy chọn, sau upgrade: tạo chuỗi ngày học từ dữ liệu cũ (cần baseline Assessment).
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-02-learning-leaderboard-backfill.sql
+# Rollback:
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-02-learning-leaderboard.rollback.sql
 ```
 
 ## Bổ sung Community
@@ -174,7 +184,7 @@ cho kiểm chứng vector. Hạ tầng S3/video/worker/crash đã kiểm local; 
 
 ## Bổ sung module Learning
 
-Backend hiện có thêm 46 API Learning và 26 bảng được định nghĩa tại
+Backend hiện có thêm 46 API Learning và 27 bảng được định nghĩa tại
 [learning_hub_learning.sql](learning_hub_learning.sql). Review và chạy file Learning **một lần sau Identity**
 trên môi trường được phép, trước khi chạy bản ứng dụng có entity Learning. File không có FK/REFERENCES,
 không seed/reset/cấp quyền và không sửa 8 bảng Identity. Không chạy lại trên schema đã có các bảng Learning;
