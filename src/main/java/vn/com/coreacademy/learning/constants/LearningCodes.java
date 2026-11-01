@@ -266,6 +266,16 @@ public final class LearningCodes {
         }
     }
 
+    /** Hoạt động đầu tiên trong ngày, ghi ở learning_activity_days.first_source. */
+    public static final class ActivitySource {
+        public static final String SESSION = "session";
+        public static final String BLOCK_PROGRESS = "block_progress";
+        public static final String QUIZ = "quiz";
+
+        private ActivitySource() {
+        }
+    }
+
     public static final class SearchMode {
         public static final String MANAGE = "manage";
         public static final String MINE = "mine";

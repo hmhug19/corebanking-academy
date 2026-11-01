@@ -16,6 +16,7 @@ import vn.com.coreacademy.identity.constants.RoleCodes;
 import vn.com.coreacademy.identity.dto.RoleGrant;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
+import vn.com.coreacademy.learning.constants.LearningCodes.ActivitySource;
 import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.entity.Course;
@@ -42,6 +43,7 @@ public class LearningAssessmentAccess {
     private final LearningAssignmentService assignments;
     private final LearningIdentityService identity;
     private final LearningProgressService progress;
+    private final LearningActivityService activity;
 
     public record ManagedCourse(Long id, String code, Long ownerOrgId) {
     }
@@ -179,6 +181,14 @@ public class LearningAssessmentAccess {
     @Transactional
     public boolean quizPassed(String userId, Long enrollmentId, Long quizId) {
         return progress.completeQuizLessons(userId, enrollmentId, quizId);
+    }
+
+    /**
+     * Ghi ngày học khi học viên bắt đầu hoặc nộp bài thi. Chờ giao dịch của bên gọi commit rồi mới ghi, và lỗi ghi
+     * không làm hỏng lượt thi.
+     */
+    public void recordQuizActivity(String userId) {
+        activity.record(userId, ActivitySource.QUIZ);
     }
 
     /** Bài quiz của phiên bản đã nhận theo đề: quizId → lessonId (đề nằm ở nhiều bài thì lấy bài đầu tiên). */
