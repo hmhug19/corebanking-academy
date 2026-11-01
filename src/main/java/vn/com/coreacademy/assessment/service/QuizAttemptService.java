@@ -236,15 +236,15 @@ public class QuizAttemptService {
     }
 
     /** Mọi lượt của caller qua các đề (trang Tiến độ); chỉ dữ liệu của chính caller. */
-    public PageResponse<AssessmentViews.MyAttemptRow> mine(Long quizId, String status, int page, int size,
-                                                           String sort) {
-        var filter = mineFilter(quizId, status);
+    public PageResponse<AssessmentViews.MyAttemptRow> mine(Long quizId, String status, Boolean graded, int page,
+                                                           int size, String sort) {
+        var filter = mineFilter(quizId, status, graded);
         return PageResponse.from(attemptRepository.searchMine(filter, PageQuery.of(page, size, sort, MINE_SORTS)));
     }
 
     /** CSV tối đa MAX_EXPORT_ROWS dòng, UTF-8 BOM; ô bắt đầu bằng ký tự công thức được vô hiệu hóa. */
-    public byte[] exportMine(Long quizId, String status, String sort) {
-        var filter = mineFilter(quizId, status);
+    public byte[] exportMine(Long quizId, String status, Boolean graded, String sort) {
+        var filter = mineFilter(quizId, status, graded);
         Sort order = PageQuery.of(0, 1, sort, MINE_SORTS).getSort();
         var rows = attemptRepository.searchMine(filter,
             PageRequest.of(0, AssessmentLimits.MAX_EXPORT_ROWS + 1, order)).getContent();
@@ -257,12 +257,13 @@ public class QuizAttemptService {
             row.totalQuestions(), row.scorePercent(), row.passed()}).toList());
     }
 
-    private QuizAttemptRepositoryCustom.MineFilter mineFilter(Long quizId, String status) {
+    private QuizAttemptRepositoryCustom.MineFilter mineFilter(Long quizId, String status, Boolean graded) {
         if (status != null && !Set.of(AttemptStatus.IN_PROGRESS, AttemptStatus.SUBMITTED,
             AttemptStatus.AUTO_SUBMITTED, AttemptStatus.VOIDED).contains(status)) {
             throw BusinessException.validation("status", "INVALID_VALUE", "Giá trị không hợp lệ.");
         }
-        return new QuizAttemptRepositoryCustom.MineFilter(learning.actor().person().id(), quizId, status);
+        return new QuizAttemptRepositoryCustom.MineFilter(learning.actor().person().id(), quizId, status,
+            Boolean.TRUE.equals(graded));
     }
 
     private QuizAttempt createAttempt(Quiz quiz, StudyingLearner learner, int attemptNo, Instant now,

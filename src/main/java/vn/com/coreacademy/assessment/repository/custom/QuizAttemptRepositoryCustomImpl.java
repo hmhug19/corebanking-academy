@@ -71,6 +71,10 @@ public class QuizAttemptRepositoryCustomImpl implements QuizAttemptRepositoryCus
             sql.and("a.status = :status");
             sql.bind("status", filter.status());
         }
+        if (filter.gradedOnly()) {
+            sql.and("a.status in (:graded)");
+            sql.bind("graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED));
+        }
         return sql.page(entityManager, """
             select a.attempt_id, a.quiz_id, z.title, z.course_id, a.attempt_no, a.status, a.submit_type,
                    a.started_at, a.submitted_at, a.total_questions, a.correct_count, a.score_percent, a.passed
