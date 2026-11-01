@@ -333,6 +333,28 @@ có điểm; vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Hạng phụ thuộ
 | API | Trách nhiệm |
 |---|---|
 | GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, courses, streak }, streakDays }` của caller |
+| GET `/me/learning/leaderboard?scope=team\|org\|all&page&size` | `LeaderboardPage { page: PageResponse<LeaderboardRow>, me: LeaderboardRow }`; `scope` mặc định `org`, `page` mặc định 0, `size` mặc định 20, tối đa 100 |
+
+`LeaderboardRow { rank, userId, fullName, teamName, points, streakDays, me }`. `points` bằng `total` của `/points` cho cùng
+người, nên thẻ điểm và bảng không lệch nhau.
+
+Bảng xếp hạng (`/leaderboard`):
+
+- **Ai được xếp hạng**: học viên active, đã đổi mật khẩu, có vai trò `LEARNER` scope `OWN`, cùng điều kiện với giao học
+  (`UserRepository.findLearningCandidates`, dùng lại qua `LearningIdentityService.rankableLearners`). `team` là nhóm của
+  caller, `org` là đơn vị của caller (không gồm đơn vị con), `all` là mọi học viên đủ điều kiện trong hệ thống, kể cả đơn vị
+  khác (xem tên người của đơn vị khác là quyết định nghiệp vụ, mặc định bật như mockup "Toàn hệ thống").
+- **Thứ tự**: điểm giảm dần, cùng điểm xếp theo họ tên (Collator `vi`) rồi mã cán bộ. Cùng điểm chung hạng và hạng kế
+  tiếp nhảy cóc (1, 1, 3). Người 0 điểm nằm cuối, cũng theo tên, và chung một hạng.
+- **`me`** là dòng của caller (`me = true`), luôn có kể cả khi không nằm trong trang; `rank` của `me` tính trong đúng phạm
+  vi đang xem. Caller chưa thuộc nhóm nào xem `team` nhận trang rỗng, `me.rank = null` và `me.teamName = null`.
+- Điểm của cả phạm vi được tính rồi mới phân trang vì hạng phụ thuộc điểm của mọi người: một truy vấn gom cho mỗi phần
+  điểm và một lần gọi cổng quiz, không truy vấn theo từng người. Phạm vi vượt 5.000 học viên trả `LEARNING-LEADERBOARD_TOO_LARGE`.
+  Đo trên PostgreSQL 16 (Testcontainers, dữ liệu tổng hợp 60 ngày học, 5 lần học × 12 bài hoàn thành, 3 đề đạt mỗi
+  người): 7 người của bộ demo 3 ms, 500 người 57 ms, 4.900 người 540 ms cho điểm và 618 ms cho cả API. Nếu phạm vi
+  thực tế vượt vài nghìn người, cân nhắc bảng tổng hợp hằng đêm thay vì tính khi đọc.
+- Lỗi: `scope` ngoài `team|org|all`, `size` ngoài 1-100 hoặc `page` âm trả `CORE-VALIDATION_FAILED`; vai trò không phải
+  học viên trả 403 `CORE-ACCESS_DENIED`.
 
 Bốn phần của điểm và trọng số (cấu hình `app.learning.points.*` trong `application.yml`, ghi đè bằng biến môi trường
 `APP_LEARNING_POINTS_LESSON`, `_QUIZ_PASS`, `_STREAK_DAY`, `_STREAK_CAP`; đổi trọng số làm điểm của mọi người đổi theo):
