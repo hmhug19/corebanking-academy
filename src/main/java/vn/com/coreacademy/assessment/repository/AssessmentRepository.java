@@ -236,6 +236,37 @@ public class AssessmentRepository {
             """, Quiz.class, Map.of("course", courseId, "published", QuizStatus.PUBLISHED));
     }
 
+    /** Đề đã xuất bản, chưa xóa của nhiều khóa trong một truy vấn; courseIds rỗng trả rỗng. */
+    public List<Quiz> publishedQuizzes(Collection<Long> courseIds) {
+        if (courseIds.isEmpty()) {
+            return List.of();
+        }
+        return query("""
+            select z
+            from Quiz z
+            where z.deleted = false
+            and z.status = :published
+            and z.courseId in :courses
+            order by z.id
+            """, Quiz.class, Map.of("courses", courseIds, "published", QuizStatus.PUBLISHED));
+    }
+
+    /** Lượt đã chấm của một học viên trên nhiều đề trong một truy vấn; lượt đang làm và VOIDED không có điểm. */
+    public List<QuizAttempt> gradedAttempts(Collection<Long> quizIds, String userId) {
+        if (quizIds.isEmpty()) {
+            return List.of();
+        }
+        return query("""
+            select a
+            from QuizAttempt a
+            where a.userId = :user
+            and a.quizId in :quizzes
+            and a.status in :graded
+            order by a.quizId, a.attemptNo
+            """, QuizAttempt.class, Map.of("user", userId, "quizzes", quizIds,
+            "graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED)));
+    }
+
     public List<Long> inProgressAttemptIds(Long quizId) {
         return query("""
             select a.id

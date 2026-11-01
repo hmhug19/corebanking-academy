@@ -205,7 +205,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                         when obligations.due_at < current_timestamp then :codeOverdueActive
                         else :codeOnTimeActive end,
                    resume.media_asset_id, resume.last_pdf_page, resume.last_video_position_seconds,
-                   f.field_id, f.name, p.name, m.name, c.course_id in (:failedIds)
+                   f.field_id, f.name, p.name, m.name, c.course_id in (:failedIds), cast(null as numeric)
             """, CourseCard.class, pageable, Map.of("id", "c.course_id", "title", "r.title",
                 "updateTime", "r.update_time", "dueAt", "obligations.due_at", "progressPercent", "e.progress_percent",
                 "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at", "completedAt", "e.completed_at"));

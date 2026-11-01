@@ -8,7 +8,6 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -23,7 +22,6 @@ import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuestionType;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizType;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.ReviewPolicy;
-import vn.com.coreacademy.assessment.constants.AssessmentCodes.ScoreMethod;
 import vn.com.coreacademy.assessment.constants.AssessmentLimits;
 import vn.com.coreacademy.assessment.dto.AssessmentRequests;
 import vn.com.coreacademy.assessment.dto.AssessmentViews;
@@ -74,7 +72,8 @@ public class QuizAttemptService {
         StudyingLearner learner = learning.requireStudyingLearner(quiz.getCourseId());
         Instant now = ServerTime.now();
         List<QuizAttempt> attempts = repository.attempts(quizId, learner.userId());
-        AttemptSummary summary = summarize(quiz, attempts, repository.grantedAttempts(quizId, learner.userId()), now);
+        AttemptSummary summary = AttemptSummaries.summarize(quiz, attempts,
+            repository.grantedAttempts(quizId, learner.userId()), now);
         Block block = summary.runningAttemptId() != null ? null : block(quiz, summary, learner, now);
         var view = learnerQuiz(quiz);
         return new AssessmentViews.QuizIntro(view, new AssessmentViews.CourseRef(quiz.getCourseId(),
@@ -94,7 +93,7 @@ public class QuizAttemptService {
             .sorted(Comparator.comparing((Quiz q) -> QuizType.FINAL_EXAM.equals(q.getQuizType())))
             .map(quiz -> {
                 List<QuizAttempt> attempts = repository.attempts(quiz.getId(), learner.userId());
-                AttemptSummary summary = summarize(quiz, attempts,
+                AttemptSummary summary = AttemptSummaries.summarize(quiz, attempts,
                     repository.grantedAttempts(quiz.getId(), learner.userId()), now);
                 Block block = summary.runningAttemptId() != null ? null : block(quiz, summary, learner, now);
                 return new AssessmentViews.LearnerQuizCard(learnerQuiz(quiz), summary, block == null,
@@ -134,7 +133,8 @@ public class QuizAttemptService {
             repository.flush();
         }
 
-        AttemptSummary summary = summarize(quiz, attempts, repository.grantedAttempts(quizId, learner.userId()), now);
+        AttemptSummary summary = AttemptSummaries.summarize(quiz, attempts,
+            repository.grantedAttempts(quizId, learner.userId()), now);
         Block block = block(quiz, summary, learner, now);
         if (block != null) {
             throw new BusinessException(blockCode(block.reason()));
@@ -226,7 +226,8 @@ public class QuizAttemptService {
         String userId = learning.actor().person().id();
         Instant now = ServerTime.now();
         List<QuizAttempt> attempts = repository.attempts(quizId, userId);
-        AttemptSummary summary = summarize(quiz, attempts, repository.grantedAttempts(quizId, userId), now);
+        AttemptSummary summary = AttemptSummaries.summarize(quiz, attempts,
+            repository.grantedAttempts(quizId, userId), now);
         List<AssessmentViews.AttemptRow> rows = attempts.stream().map(a -> new AssessmentViews.AttemptRow(a.getId(),
             a.getAttemptNo(), a.getStatus(), a.getSubmitType(), a.getStartedAt(), a.getSubmittedAt(),
             AttemptReadModel.duration(a),
@@ -235,15 +236,15 @@ public class QuizAttemptService {
     }
 
     /** Mọi lượt của caller qua các đề (trang Tiến độ); chỉ dữ liệu của chính caller. */
-    public PageResponse<AssessmentViews.MyAttemptRow> mine(Long quizId, String status, int page, int size,
-                                                           String sort) {
-        var filter = mineFilter(quizId, status);
+    public PageResponse<AssessmentViews.MyAttemptRow> mine(Long quizId, String status, Boolean graded, int page,
+                                                           int size, String sort) {
+        var filter = mineFilter(quizId, status, graded);
         return PageResponse.from(attemptRepository.searchMine(filter, PageQuery.of(page, size, sort, MINE_SORTS)));
     }
 
     /** CSV tối đa MAX_EXPORT_ROWS dòng, UTF-8 BOM; ô bắt đầu bằng ký tự công thức được vô hiệu hóa. */
-    public byte[] exportMine(Long quizId, String status, String sort) {
-        var filter = mineFilter(quizId, status);
+    public byte[] exportMine(Long quizId, String status, Boolean graded, String sort) {
+        var filter = mineFilter(quizId, status, graded);
         Sort order = PageQuery.of(0, 1, sort, MINE_SORTS).getSort();
         var rows = attemptRepository.searchMine(filter,
             PageRequest.of(0, AssessmentLimits.MAX_EXPORT_ROWS + 1, order)).getContent();
@@ -256,12 +257,13 @@ public class QuizAttemptService {
             row.totalQuestions(), row.scorePercent(), row.passed()}).toList());
     }
 
-    private QuizAttemptRepositoryCustom.MineFilter mineFilter(Long quizId, String status) {
+    private QuizAttemptRepositoryCustom.MineFilter mineFilter(Long quizId, String status, Boolean graded) {
         if (status != null && !Set.of(AttemptStatus.IN_PROGRESS, AttemptStatus.SUBMITTED,
             AttemptStatus.AUTO_SUBMITTED, AttemptStatus.VOIDED).contains(status)) {
             throw BusinessException.validation("status", "INVALID_VALUE", "Giá trị không hợp lệ.");
         }
-        return new QuizAttemptRepositoryCustom.MineFilter(learning.actor().person().id(), quizId, status);
+        return new QuizAttemptRepositoryCustom.MineFilter(learning.actor().person().id(), quizId, status,
+            Boolean.TRUE.equals(graded));
     }
 
     private QuizAttempt createAttempt(Quiz quiz, StudyingLearner learner, int attemptNo, Instant now,
@@ -337,8 +339,9 @@ public class QuizAttemptService {
     private AssessmentViews.AttemptResult result(QuizAttempt attempt) {
         Quiz quiz = repository.require(Quiz.class, attempt.getQuizId());
         Instant now = ServerTime.now();
-        AttemptSummary summary = summarize(quiz, repository.attempts(quiz.getId(), attempt.getUserId()),
-            repository.grantedAttempts(quiz.getId(), attempt.getUserId()), now);
+        String userId = attempt.getUserId();
+        AttemptSummary summary = AttemptSummaries.summarize(quiz, repository.attempts(quiz.getId(), userId),
+            repository.grantedAttempts(quiz.getId(), userId), now);
         List<AttemptQuestion> questions = repository.attemptQuestions(attempt.getId());
         Map<Long, AttemptAnswer> answers = readModel.answersByQuestion(attempt.getId());
         boolean graded = !AttemptStatus.VOIDED.equals(attempt.getStatus());
@@ -352,34 +355,6 @@ public class QuizAttemptService {
             attempt.getPassPercent(), attempt.getPassed(), summary,
             graded ? readModel.competencies(questions, answers) : List.of(), quiz.getReviewPolicy(), reviewAvailable,
             review);
-    }
-
-    /**
-     * Tổng hợp lượt của (đề, học viên). Lượt tính ngay khi bắt đầu, trừ VOIDED. passed/finalScore theo score_method:
-     * BEST = từng đạt/điểm cao nhất, LAST = lượt chấm gần nhất.
-     */
-    private static AttemptSummary summarize(Quiz quiz, List<QuizAttempt> attempts, int extra, Instant now) {
-        List<QuizAttempt> graded = attempts.stream()
-            .filter(a -> Set.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED).contains(a.getStatus()))
-            .sorted(Comparator.comparing(QuizAttempt::getSubmittedAt).thenComparing(QuizAttempt::getId))
-            .toList();
-        int used = (int) attempts.stream().filter(a -> !AttemptStatus.VOIDED.equals(a.getStatus())).count();
-        int left = Math.max(0, quiz.getMaxAttempts() + extra - used);
-        BigDecimal best = graded.stream().map(QuizAttempt::getScorePercent).filter(Objects::nonNull)
-            .max(BigDecimal::compareTo).orElse(null);
-        QuizAttempt last = graded.isEmpty() ? null : graded.get(graded.size() - 1);
-        boolean everPassed = graded.stream().anyMatch(a -> Boolean.TRUE.equals(a.getPassed()));
-        boolean byLast = ScoreMethod.LAST.equals(quiz.getScoreMethod());
-        boolean passed = byLast ? last != null && Boolean.TRUE.equals(last.getPassed()) : everPassed;
-        BigDecimal lastScore = last == null ? null : last.getScorePercent();
-        Long running = attempts.stream().filter(a -> AttemptStatus.IN_PROGRESS.equals(a.getStatus()))
-            .filter(a -> !now.isAfter(a.getDeadlineAt().plusSeconds(a.getGraceSeconds())))
-            .map(QuizAttempt::getId).findFirst().orElse(null);
-        Instant lastSubmitted = last == null ? null : last.getSubmittedAt();
-        Instant next = lastSubmitted == null || quiz.getRetakeWaitHours() == 0 ? null
-            : lastSubmitted.plus(Duration.ofHours(quiz.getRetakeWaitHours()));
-        return new AttemptSummary(quiz.getMaxAttempts(), extra, used, left, best, lastScore, byLast ? lastScore : best,
-            passed, everPassed, running, lastSubmitted, next);
     }
 
     /** Điều kiện bắt đầu lượt mới theo thứ tự ưu tiên hiển thị cho học viên. */

@@ -1,5 +1,9 @@
 package vn.com.coreacademy.learning.service;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -15,6 +19,21 @@ public interface LearningQuizDirectory {
         }
     }
 
+    /**
+     * Điểm của một đề đã xuất bản với một học viên. bestScore/finalScore/passed đúng bằng AttemptSummary của màn giới
+     * thiệu đề (finalScore và passed theo scoreMethod của đề); null khi học viên chưa có lượt chấm nào.
+     */
+    record QuizScore(Long quizId, Long courseId, String title, String quizType, BigDecimal bestScore,
+                     BigDecimal finalScore, boolean passed, LastAttempt last) {
+        public boolean finalExam() {
+            return "FINAL_EXAM".equals(quizType);
+        }
+    }
+
+    /** Lượt chấm gần nhất của một đề; passed là kết quả của chính lượt đó, không theo scoreMethod. */
+    record LastAttempt(Long attemptId, BigDecimal scorePercent, Boolean passed, Instant submittedAt) {
+    }
+
     Optional<QuizRef> find(Long quizId);
 
     /**
@@ -23,4 +42,10 @@ public interface LearningQuizDirectory {
      * thi cuối học viên từng thi.
      */
     Set<Long> failedFinalExamCourseIds(String userId);
+
+    /**
+     * Điểm của userId trên mọi đề PUBLISHED, chưa xóa của các khóa courseIds, mỗi đề một phần tử theo thứ tự quizId.
+     * Hai truy vấn bất kể số khóa; courseIds rỗng trả danh sách rỗng mà không truy vấn.
+     */
+    List<QuizScore> scores(String userId, Collection<Long> courseIds);
 }

@@ -77,8 +77,8 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 31 | DELETE `/api/v1/quizzes/{id}?expectedVersion` | Xóa mềm đề chưa từng có lượt thi |
 | 32 | GET `/api/v1/quizzes/{id}/preview` | Bốc thử một đề kèm đáp án; không tạo lượt |
 | 33 | POST `/api/v1/quiz-attempts/{attemptId}/force-submit` | Quản trị nộp hộ lượt đang làm |
-| 34 | GET `/api/v1/me/quiz-attempts?quizId&status&page&size&sort` | Mọi lượt thi của tôi; sort `id/startedAt/submittedAt` |
-| 35 | GET `/api/v1/me/quiz-attempts/export?quizId&status&sort` | Xuất CSV lượt thi của tôi, tối đa 10.000 dòng |
+| 34 | GET `/api/v1/me/quiz-attempts?quizId&status&graded&page&size&sort` | Mọi lượt thi của tôi; sort `id/startedAt/submittedAt`; `graded=true` chỉ lấy lượt đã chấm |
+| 35 | GET `/api/v1/me/quiz-attempts/export?quizId&status&graded&sort` | Xuất CSV lượt thi của tôi, tối đa 10.000 dòng; cùng bộ lọc với danh sách |
 
 | 36 | GET `/api/v1/questions/import-template` | Tải mẫu Excel nhập câu hỏi |
 | 37 | POST `/api/v1/questions/import?courseId&dryRun&overwrite` | Kiểm tra (dryRun=true, mặc định) hoặc nhập câu hỏi từ .xlsx (part `file`) |
@@ -97,6 +97,9 @@ API 21–28, 30–33, 37–39 yêu cầu quyền quản lý khóa chứa câu h�
 quyền trên mọi khóa trong lô. API 29 chỉ dành cho quản trị GLOBAL; API 34–35, 46 chỉ trả dữ liệu của caller. API 40–45
 theo phạm vi báo cáo bên dưới. Báo cáo nhận chung `orgId` (gồm đơn vị con), `teamId`, `courseId`, `quizId`, `from`/`to`
 (thời điểm nộp, ISO-8601; learners không áp dụng from/to).
+
+`graded=true` của API 34–35 giữ lại lượt SUBMITTED và AUTO_SUBMITTED, bỏ IN_PROGRESS và VOIDED vốn chưa có điểm; kết hợp
+với `quizId` và `status` theo AND (ví dụ `status=VOIDED&graded=true` trả rỗng). `graded=false` hoặc bỏ qua thì không lọc.
 
 `expectedVersion` là `rowVersion` vừa đọc; lệch trả `ASSESSMENT-CONFLICT`.
 

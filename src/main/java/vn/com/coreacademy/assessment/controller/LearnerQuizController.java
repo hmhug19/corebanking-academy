@@ -124,16 +124,19 @@ public class LearnerQuizController {
         summary = "Tất cả lượt thi của tôi",
         description = """
             Lượt thi của caller qua mọi bài kiểm tra, dùng cho trang Tiến độ; có thể lọc theo đề và trạng thái.
+            - graded=true chỉ trả lượt đã chấm (SUBMITTED, AUTO_SUBMITTED), bỏ lượt đang làm và VOIDED vốn chưa có điểm.
             """
     )
     public BaseResponse<PageResponse<AssessmentViews.MyAttemptRow>> mine(
         @RequestParam(required = false) @Positive Long quizId,
         @Parameter(description = "IN_PROGRESS | SUBMITTED | AUTO_SUBMITTED | VOIDED") @RequestParam(required = false)
         String status,
+        @Parameter(description = "true chỉ lấy lượt đã chấm (SUBMITTED, AUTO_SUBMITTED); kết hợp với status theo AND")
+        @RequestParam(required = false) Boolean graded,
         @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
         @Parameter(description = "id | startedAt | submittedAt, kèm ,asc hoặc ,desc")
         @RequestParam(defaultValue = "startedAt,desc") String sort) {
-        return BaseResponse.ok(attempts.mine(quizId, status, page, size, sort));
+        return BaseResponse.ok(attempts.mine(quizId, status, graded, page, size, sort));
     }
 
     @GetMapping(value = "/quiz-attempts/export", produces = {"text/csv", MediaType.APPLICATION_JSON_VALUE})
@@ -146,10 +149,11 @@ public class LearnerQuizController {
     )
     public ResponseEntity<byte[]> exportMine(@RequestParam(required = false) @Positive Long quizId,
                                              @RequestParam(required = false) String status,
+                                             @RequestParam(required = false) Boolean graded,
                                              @RequestParam(defaultValue = "startedAt,desc") String sort) {
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=quiz-attempts.csv")
             .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-            .body(attempts.exportMine(quizId, status, sort));
+            .body(attempts.exportMine(quizId, status, graded, sort));
     }
 
     @GetMapping("/quiz-attempts/{attemptId}")
