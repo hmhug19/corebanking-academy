@@ -1,0 +1,159 @@
+package vn.com.coreacademy.learning.service;
+
+import java.math.RoundingMode;
+import java.util.List;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.common.validation.TextValues;
+import vn.com.coreacademy.learning.constants.LearningCodes.AnchorType;
+import vn.com.coreacademy.learning.constants.LearningLimits;
+import vn.com.coreacademy.learning.dto.LearningNoteRequests.AddNote;
+import vn.com.coreacademy.learning.dto.LearningNoteRequests.AnchorRequest;
+import vn.com.coreacademy.learning.dto.LearningNoteViews.Anchor;
+import vn.com.coreacademy.learning.dto.LearningNoteViews.NoteView;
+import vn.com.coreacademy.learning.entity.LessonNote;
+import vn.com.coreacademy.learning.exception.LearningResponseCode;
+import vn.com.coreacademy.learning.mapper.LessonNoteMapper;
+import vn.com.coreacademy.learning.repository.LessonAnchorRepository;
+import vn.com.coreacademy.learning.repository.LessonAnchorRepository.BlockBounds;
+import vn.com.coreacademy.learning.repository.LessonNoteRepository;
+
+/**
+ * Ghi chú và đánh dấu riêng của học viên trên bài học. Mọi thao tác chỉ chạm dữ liệu của chính người gọi; ghi chú
+ * của người khác, đã xóa hoặc không tồn tại đều trả LEARNING-NOT_FOUND để không lộ sự tồn tại. Vị trí neo luôn được
+ * kiểm trên tài nguyên thật của khối, không tin giá trị client gửi.
+ */
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class LearningNotesService {
+    private final LearningAccessPolicy access;
+    private final LessonAnchorRepository anchors;
+    private final LessonNoteRepository notes;
+    private final LessonNoteMapper mapper;
+
+    /** Vị trí neo đã kiểm; block là null khi neo là cả bài. */
+    private record Resolved(Anchor anchor, BlockBounds block) {
+    }
+
+    /** Ghi chú còn sống của người gọi trên bài học, mới nhất trước. */
+    public List<NoteView> notes(Long lessonId) {
+        String userId = requireLessonAccess(lessonId);
+        return notes.findByUserIdAndLessonIdAndIsDeletedFalseOrderByCreateTimeDescIdDesc(userId, lessonId).stream()
+            .map(mapper::view).toList();
+    }
+
+    /**
+     * Thêm ghi chú. Thứ tự kiểm: quyền vào bài, nội dung, vị trí neo, rồi giới hạn dưới khóa advisory của người dùng
+     * để hai request đồng thời không cùng vượt giới hạn.
+     */
+    @Transactional
+    public NoteView addNote(Long lessonId, AddNote request) {
+        String userId = requireLessonAccess(lessonId);
+        String text = noteText(request.text());
+        Resolved resolved = resolve(lessonId, request.anchor(), true);
+
+        notes.lock("lesson-note:" + userId);
+        if (notes.countByUserIdAndLessonIdAndIsDeletedFalse(userId, lessonId) >= LearningLimits.MAX_NOTES_PER_LESSON) {
+            throw new BusinessException(LearningResponseCode.NOTE_LIMIT);
+        }
+
+        Anchor anchor = resolved.anchor();
+        LessonNote note = new LessonNote();
+        note.setUserId(userId);
+        note.setLessonId(lessonId);
+        note.setBlockId(anchor.blockId());
+        note.setAnchorType(anchor.type());
+        note.setPdfPage(anchor.page());
+        note.setVideoSecond(anchor.second());
+        note.setBody(text);
+        note.setCreatedBy(userId);
+        note.setUpdatedBy(userId);
+        return mapper.view(notes.saveAndFlush(note));
+    }
+
+    /** Xóa mềm. Ghi chú của người khác, không có hoặc đã xóa đều là LEARNING-NOT_FOUND. */
+    @Transactional
+    public void deleteNote(Long noteId) {
+        String userId = learnerId();
+        LessonNote note = notes.findByIdAndUserIdAndIsDeletedFalse(noteId, userId)
+            .orElseThrow(() -> new BusinessException(LearningResponseCode.NOT_FOUND));
+        note.setIsDeleted(true);
+        note.setUpdatedBy(userId);
+    }
+
+    private String learnerId() {
+        var actor = access.actor();
+        access.requireLearner(actor);
+        return actor.person().id();
+    }
+
+    /** Bài phải thuộc phiên bản của một lần học của người gọi, bất kể trạng thái học; ngoài ra là NOT_FOUND. */
+    private String requireLessonAccess(Long lessonId) {
+        String userId = learnerId();
+        if (!anchors.lessonVisibleTo(userId, lessonId)) {
+            throw new BusinessException(LearningResponseCode.NOT_FOUND);
+        }
+        return userId;
+    }
+
+    private static String noteText(String raw) {
+        String text = TextValues.required(raw, "text");
+        if (text.length() > LearningLimits.MAX_NOTE_LENGTH) {
+            throw BusinessException.validation("text", "INVALID_LENGTH",
+                "Ghi chú tối đa %d ký tự.".formatted(LearningLimits.MAX_NOTE_LENGTH));
+        }
+        return text;
+    }
+
+    /**
+     * Kiểm vị trí neo. Thiếu hoặc thừa trường theo loại neo là lỗi dữ liệu đầu vào (CORE-VALIDATION_FAILED). Khối
+     * không thuộc bài, sai loại, hoặc vị trí ngoài giới hạn của tài nguyên là LEARNING-INVALID_REFERENCE: trang từ 1
+     * đến page_count, giây từ 0 đến phần nguyên của duration_seconds; tài nguyên thiếu giới hạn thì từ chối loại neo
+     * đó thay vì nhận mọi giá trị.
+     */
+    private Resolved resolve(Long lessonId, AnchorRequest request, boolean allowNone) {
+        String type = request.type();
+        if (AnchorType.NONE.equals(type)) {
+            if (!allowNone) {
+                throw BusinessException.validation("anchor.type", "INVALID_VALUE", "Loại neo không hợp lệ.");
+            }
+            if (request.blockId() != null || request.page() != null || request.second() != null) {
+                throw BusinessException.validation("anchor", "INVALID_VALUE", "Neo cả bài không có khối hay vị trí.");
+            }
+            return new Resolved(new Anchor(AnchorType.NONE, null, null, null), null);
+        }
+
+        boolean pdf = AnchorType.PDF.equals(type);
+        Integer position = pdf ? request.page() : request.second();
+        String positionField = pdf ? "anchor.page" : "anchor.second";
+        if (request.blockId() == null) {
+            throw BusinessException.validation("anchor.blockId", "REQUIRED", "Thông tin này là bắt buộc.");
+        }
+        if (position == null) {
+            throw BusinessException.validation(positionField, "REQUIRED", "Thông tin này là bắt buộc.");
+        }
+        if ((pdf ? request.second() : request.page()) != null) {
+            throw BusinessException.validation(pdf ? "anchor.second" : "anchor.page", "INVALID_VALUE",
+                "Giá trị không áp dụng cho loại neo này.");
+        }
+
+        BlockBounds block = anchors.block(lessonId, request.blockId())
+            .filter(found -> type.equals(found.blockType()))
+            .orElseThrow(() -> new BusinessException(LearningResponseCode.INVALID_REFERENCE));
+        boolean bounded = pdf ? block.pageCount() != null : block.durationSeconds() != null;
+        if (!bounded) {
+            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+        }
+        int min = pdf ? 1 : 0;
+        int max = pdf ? block.pageCount() : block.durationSeconds().setScale(0, RoundingMode.FLOOR).intValue();
+        if (position < min || position > max) {
+            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+        }
+        return new Resolved(new Anchor(type, request.blockId(), pdf ? position : null, pdf ? null : position),
+            block);
+    }
+}
