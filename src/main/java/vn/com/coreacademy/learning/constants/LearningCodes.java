@@ -299,6 +299,18 @@ public final class LearningCodes {
         }
     }
 
+    /** Tab của trang Đã lưu (tham số kind). Mỗi dòng trả về mang kind số ít: note hoặc bookmark. */
+    public static final class SavedKind {
+        public static final String NOTES = "notes";
+        public static final String BOOKMARKS = "bookmarks";
+        public static final String PATTERN = NOTES + "|" + BOOKMARKS;
+        public static final String NOTE_ITEM = "note";
+        public static final String BOOKMARK_ITEM = "bookmark";
+
+        private SavedKind() {
+        }
+    }
+
     public static final class SearchMode {
         public static final String MANAGE = "manage";
         public static final String MINE = "mine";

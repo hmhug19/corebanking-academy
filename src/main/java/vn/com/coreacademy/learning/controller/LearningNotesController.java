@@ -3,9 +3,13 @@ package vn.com.coreacademy.learning.controller;
 import java.util.List;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -18,14 +22,18 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.learning.constants.LearningCodes.SavedKind;
+import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningNoteRequests.AddNote;
 import vn.com.coreacademy.learning.dto.LearningNoteRequests.ToggleBookmark;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.BookmarkToggle;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.BookmarkView;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.NoteView;
+import vn.com.coreacademy.learning.dto.LearningNoteViews.SavedPage;
 import vn.com.coreacademy.learning.service.LearningNotesService;
 
 @RestController
@@ -131,5 +139,25 @@ public class LearningNotesController {
     public BaseResponse<Void> deleteBookmark(@PathVariable @Positive Long bookmarkId) {
         notes.deleteBookmark(bookmarkId);
         return BaseResponse.ok();
+    }
+
+    @GetMapping("/saved")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Đã lưu và ghi chú",
+        description = """
+            Ghi chú hoặc đánh dấu còn sống của người gọi trên mọi bài học, mới nhất trước, kèm tên khóa và bài.
+            - kind=notes (mặc định) hoặc bookmarks chọn tab; mỗi dòng có kind là note hoặc bookmark.
+            - counts luôn có số của cả hai tab. Dòng của ghi chú có text, của đánh dấu có label.
+            - Chỉ học viên (LEARNER, OWN); chỉ dữ liệu của chính người gọi.
+            """
+    )
+    public BaseResponse<SavedPage> saved(
+        @Parameter(description = "notes | bookmarks")
+        @RequestParam(defaultValue = SavedKind.NOTES) @Pattern(regexp = SavedKind.PATTERN) String kind,
+        @RequestParam(defaultValue = "0") @Min(0) int page,
+        @RequestParam(defaultValue = "20") @Min(1) @Max(LearningLimits.MAX_SAVED_PAGE_SIZE) int size) {
+        return BaseResponse.ok(notes.saved(kind, page, size));
     }
 }

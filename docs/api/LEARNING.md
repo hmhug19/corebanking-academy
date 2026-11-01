@@ -386,6 +386,64 @@ Quy tắc:
 - Schema: `docs/sql/upgrade/2026-11-02-learning-leaderboard.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
   backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
 
+### Ghi chú và đánh dấu
+
+Học viên (`LEARNER`, scope `OWN`) giữ ghi chú và đánh dấu **riêng** trên bài học đang học; vai trò khác nhận 403
+`CORE-ACCESS_DENIED`. Mọi API chỉ chạm dữ liệu của chính caller.
+
+| API | Trách nhiệm |
+|---|---|
+| GET `/me/learning/lessons/{lessonId}/notes` | N1. `List<NoteView>` còn sống, mới nhất trước |
+| POST `/me/learning/lessons/{lessonId}/notes` | N2. Body `{ anchor, text }` → `NoteView` |
+| DELETE `/me/learning/notes/{noteId}` | N3. Xóa mềm; `data = null` |
+| GET `/me/learning/lessons/{lessonId}/bookmarks` | N4. `List<BookmarkView>` còn sống, mới nhất trước |
+| PUT `/me/learning/lessons/{lessonId}/bookmarks` | N5. Body `{ anchor, label? }` → `BookmarkToggle { saved, bookmark }`; bật hoặc tắt |
+| GET `/me/learning/saved?kind=notes\|bookmarks&page&size` | N6. `SavedPage { page: PageResponse<SavedItemView>, counts { notes, bookmarks } }`; `kind` mặc định `notes`, `page` mặc định 0, `size` mặc định 20, tối đa 100 |
+| DELETE `/me/learning/bookmarks/{bookmarkId}` | N7. Xóa mềm; `data = null`, dùng cho trang Đã lưu |
+
+Dạng dữ liệu (`anchor` có cùng dạng ở request và response):
+
+- `anchor { type, blockId, page, second }`: `type` là `none`, `pdf` hoặc `video`; trường không áp dụng là `null`.
+- `NoteView { id, lessonId, anchor, text, createTime }`, `BookmarkView { id, lessonId, anchor, label, createTime }`.
+- `SavedItemView { kind, id, lessonId, anchor, text, label, createTime, courseId, courseTitle, lessonTitle }`: `kind` là
+  `note` (có `text`, `label = null`) hoặc `bookmark` (có `label`, `text = null`); `courseTitle`, `lessonTitle` là `null` nếu
+  bài học không còn tra được.
+
+Luật neo (kiểm trên tài nguyên thật của khối, không tin giá trị client gửi):
+
+| `anchor.type` | Yêu cầu | Hợp lệ khi |
+|---|---|---|
+| `none` | không có `blockId`, `page`, `second`; chỉ cho ghi chú | luôn |
+| `pdf` | `blockId` và `page`, không có `second` | khối loại `pdf` của chính bài đó, tài nguyên `ready` có `page_count`, `1 ≤ page ≤ page_count` |
+| `video` | `blockId` và `second` (giây **nguyên**), không có `page` | khối loại `video` của chính bài đó, tài nguyên `ready` có `duration_seconds`, `0 ≤ second ≤ floor(duration_seconds)` |
+
+Tài nguyên của khối là `media_asset_id` hoặc, nếu trống, tài nguyên `primary` đầu tiên của `block_assets`. Tài nguyên chưa
+`ready`, đã xóa hoặc thiếu giới hạn thì từ chối loại neo đó thay vì nhận mọi giá trị. Đánh dấu chỉ nhận `pdf` và `video`.
+
+Quy tắc:
+
+- **Quyền vào bài**: bài phải thuộc phiên bản của một lần học (`course_enrollments`) của caller, bất kể trạng thái học
+  trừ `withdrawn`, bằng một truy vấn. Ngoài ra là `LEARNING-NOT_FOUND`. Ghi chú ở lại bài và khối nơi nó được viết;
+  phiên bản mới của khóa không mang ghi chú sang (bài mới có `lesson_id` mới).
+- **Nội dung ghi chú**: `text` cắt khoảng trắng đầu cuối, 1 đến 4.000 ký tự; trống hoặc dài hơn là
+  `CORE-VALIDATION_FAILED` (field `text`). `label` tối đa 200 ký tự; bỏ trống thì backend đặt
+  `"{tên khối} — trang n"` hoặc `"{tên khối} — m:ss"`.
+- **Lỗi**: anchor thiếu hoặc thừa trường theo loại, hoặc `type` ngoài `none|pdf|video` (đánh dấu: `none`) là
+  `CORE-VALIDATION_FAILED`; khối không thuộc bài, sai loại hoặc vị trí ngoài tài nguyên là `LEARNING-INVALID_REFERENCE`.
+- **Giới hạn**: tối đa 500 ghi chú và 500 đánh dấu còn sống mỗi người mỗi bài; vượt là `LEARNING-NOTE_LIMIT`. Bỏ một
+  đánh dấu khi đã đủ 500 vẫn được. Đếm dưới khóa advisory `lesson-note:{userId}`.
+- **Bật/tắt đánh dấu (N5)**: chạy dưới khóa advisory `lesson-bookmark:{userId}`. Nếu đã có đánh dấu còn sống cùng
+  khối và vị trí thì xóa mềm nó (`saved = false`, `bookmark = null`); chưa có thì thêm (`saved = true`). Bảng không có
+  UNIQUE; hai lần bật đồng thời được xếp hàng nên không bao giờ có hai dòng sống cho cùng một vị trí.
+- **Xóa là xóa mềm** (`is_deleted`, `updated_by`, `row_version`). Ghi chú hoặc đánh dấu của người khác, không tồn tại hoặc
+  đã xóa đều là `LEARNING-NOT_FOUND`, nên không lộ sự tồn tại.
+- **N6 (Đã lưu)** không cần còn quyền vào bài: dữ liệu luôn của chính caller, nên mục của bài đã rút vẫn xem và xóa được.
+  `counts` luôn có số của cả hai tab. `kind` ngoài `notes|bookmarks`, `size` ngoài 1-100 hoặc `page` âm là
+  `CORE-VALIDATION_FAILED`.
+- Ghi chú không tính là ngày học của chuỗi ngày học.
+- Schema: `docs/sql/upgrade/2026-11-03-lesson-notes.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
+  backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
+
 ### Đối chiếu tình huống demo và phần phát triển tiếp
 
 | ID | Xử lý hiện tại / giới hạn |

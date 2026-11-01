@@ -2,13 +2,18 @@ package vn.com.coreacademy.learning.service;
 
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.function.Function;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.validation.TextValues;
 import vn.com.coreacademy.learning.constants.LearningCodes.AnchorType;
+import vn.com.coreacademy.learning.constants.LearningCodes.SavedKind;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningNoteRequests.AddNote;
 import vn.com.coreacademy.learning.dto.LearningNoteRequests.AnchorRequest;
@@ -17,6 +22,9 @@ import vn.com.coreacademy.learning.dto.LearningNoteViews.Anchor;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.BookmarkToggle;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.BookmarkView;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.NoteView;
+import vn.com.coreacademy.learning.dto.LearningNoteViews.SavedCounts;
+import vn.com.coreacademy.learning.dto.LearningNoteViews.SavedItemView;
+import vn.com.coreacademy.learning.dto.LearningNoteViews.SavedPage;
 import vn.com.coreacademy.learning.entity.LessonBookmark;
 import vn.com.coreacademy.learning.entity.LessonNote;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
@@ -25,6 +33,9 @@ import vn.com.coreacademy.learning.repository.LessonAnchorRepository;
 import vn.com.coreacademy.learning.repository.LessonAnchorRepository.BlockBounds;
 import vn.com.coreacademy.learning.repository.LessonBookmarkRepository;
 import vn.com.coreacademy.learning.repository.LessonNoteRepository;
+import vn.com.coreacademy.learning.repository.LessonSavedRepository;
+import vn.com.coreacademy.learning.repository.LessonSavedRepository.Counts;
+import vn.com.coreacademy.learning.repository.LessonSavedRepository.SavedRow;
 
 /**
  * Ghi chú và đánh dấu riêng của học viên trên bài học. Mọi thao tác chỉ chạm dữ liệu của chính người gọi; ghi chú
@@ -39,6 +50,7 @@ public class LearningNotesService {
     private final LessonAnchorRepository anchors;
     private final LessonNoteRepository notes;
     private final LessonBookmarkRepository bookmarks;
+    private final LessonSavedRepository saved;
     private final LessonNoteMapper mapper;
 
     /** Vị trí neo đã kiểm; block là null khi neo là cả bài. */
@@ -140,6 +152,27 @@ public class LearningNotesService {
         LessonBookmark bookmark = bookmarks.findByIdAndUserIdAndIsDeletedFalse(bookmarkId, userId)
             .orElseThrow(() -> new BusinessException(LearningResponseCode.NOT_FOUND));
         softDelete(bookmark, userId);
+    }
+
+    /**
+     * Trang Đã lưu: ghi chú hoặc đánh dấu còn sống của người gọi trên mọi bài, mới nhất trước, kèm tên khóa và bài.
+     * Không cần quyền vào bài: dữ liệu luôn của chính người gọi, nên mục của bài đã mất quyền vẫn xem và xóa được.
+     * counts luôn đủ cả hai tab bất kể tab đang xem.
+     */
+    public SavedPage saved(String kind, int page, int size) {
+        String userId = learnerId();
+        Counts counts = saved.counts(userId);
+        boolean notesTab = SavedKind.NOTES.equals(kind);
+        long total = notesTab ? counts.notes() : counts.bookmarks();
+        long offset = (long) page * size;
+        List<SavedRow> rows = offset >= total ? List.of()
+            : notesTab ? saved.notes(userId, (int) offset, size) : saved.bookmarks(userId, (int) offset, size);
+        Function<SavedRow, SavedItemView> view = row -> new SavedItemView(
+            notesTab ? SavedKind.NOTE_ITEM : SavedKind.BOOKMARK_ITEM, row.id(), row.lessonId(),
+            new Anchor(row.anchorType(), row.blockId(), row.pdfPage(), row.videoSecond()), row.text(), row.label(),
+            row.createTime(), row.courseId(), row.courseTitle(), row.lessonTitle());
+        return new SavedPage(PageResponse.from(new PageImpl<>(rows.stream().map(view).toList(),
+            PageRequest.of(page, size), total)), new SavedCounts(counts.notes(), counts.bookmarks()));
     }
 
     private String learnerId() {
