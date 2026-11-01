@@ -82,10 +82,11 @@ public class LearningProgressReportService {
             throw new BusinessException(LearningResponseCode.EXPORT_TOO_LARGE);
         }
         StringBuilder csv = new StringBuilder("\uFEFFMã khóa,Tên khóa,Lần học,Trạng thái,Tiến độ,Bắt đầu,"
-            + "Truy cập gần nhất,Hoàn thành,Hạn,Trạng thái hạn\r\n");
+            + "Truy cập gần nhất,Hoàn thành,Hạn,Trạng thái hạn,Điểm cao nhất\r\n");
         for (var row : rows) {
             Object[] values = {row.code(), row.title(), row.cycleNo(), row.learningStatus(), row.progressPercent(),
-                row.startedAt(), row.lastAccessAt(), row.completedAt(), row.dueAt(), row.deadlineStatus()};
+                row.startedAt(), row.lastAccessAt(), row.completedAt(), row.dueAt(), row.deadlineStatus(),
+                row.bestScorePercent()};
             for (int index = 0; index < values.length; index++) {
                 if (index > 0) {
                     csv.append(',');

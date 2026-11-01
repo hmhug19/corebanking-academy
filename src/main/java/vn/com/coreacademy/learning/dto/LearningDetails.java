@@ -50,7 +50,20 @@ public final class LearningDetails {
                               Instant completedAt, Long lastLessonId, Long lastBlockId,
                               Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
                               Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds, Long fieldId,
-                              String fieldName, String programName, String moduleName, boolean failed) {
+                              String fieldName, String programName, String moduleName, boolean failed,
+                              BigDecimal bestScorePercent) {
+        /**
+         * Điểm cao nhất của lượt đã chấm trên bài thi cuối khóa (PUBLISHED, chưa xóa); null khi khóa không có bài thi
+         * cuối, chưa có lượt chấm, hoặc ở chế độ MANAGE. Search chỉ để null, service điền theo từng trang.
+         */
+        public CourseCard withBestScorePercent(BigDecimal score) {
+            return new CourseCard(courseId, revisionId, code, title, programId, moduleId, level, requirement,
+                publicationState, lifecycleStatus, lessonCount, durationSeconds, assignedCount, enrollmentId,
+                learningStatus, progressPercent, dueAt, assigned, overdue, updateTime, cycleNo, startedAt,
+                lastAccessAt, completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount,
+                requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId,
+                fieldName, programName, moduleName, failed, score);
+        }
     }
 
     /** Một lĩnh vực hoặc giá trị lọc không thuộc lĩnh vực nào. */

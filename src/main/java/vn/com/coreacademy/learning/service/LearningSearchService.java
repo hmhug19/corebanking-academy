@@ -1,7 +1,10 @@
 package vn.com.coreacademy.learning.service;
 
 import java.util.ArrayList;
+import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -33,6 +36,7 @@ import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.repository.CourseRepository;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 import vn.com.coreacademy.learning.repository.custom.CourseRepositoryCustom.CourseSearch;
+import vn.com.coreacademy.security.SecurityContextUtils;
 
 @Service
 @Transactional(readOnly = true)
@@ -60,8 +64,8 @@ public class LearningSearchService {
                                            Boolean failed) {
         var pageable = PageQuery.of(page, size, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
             "startedAt", "lastAccessAt", "completedAt"));
-        return PageResponse.from(query(mode, q, fieldId, programId, moduleId, level, requirement, learningStatus,
-            state, overdue, assigned, failed, pageable));
+        return PageResponse.from(withBestScores(mode, query(mode, q, fieldId, programId, moduleId, level, requirement,
+            learningStatus, state, overdue, assigned, failed, pageable)));
     }
 
     public Page<CourseCard> export(String q, Long fieldId, Long programId, Long moduleId, String level,
@@ -69,8 +73,9 @@ public class LearningSearchService {
                                    Boolean assigned, Boolean failed, String sort) {
         var order = PageQuery.of(0, 1, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
             "startedAt", "lastAccessAt", "completedAt")).getSort();
-        return query(SearchMode.MINE, q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
-            overdue, assigned, failed, PageRequest.of(0, LearningLimits.MAX_EXPORT_ROWS + 1, order));
+        return withBestScores(SearchMode.MINE, query(SearchMode.MINE, q, fieldId, programId, moduleId, level,
+            requirement, learningStatus, state, overdue, assigned, failed,
+            PageRequest.of(0, LearningLimits.MAX_EXPORT_ROWS + 1, order)));
     }
 
     private Page<CourseCard> query(String mode, String q, Long fieldId, Long programId, Long moduleId, String level,
@@ -93,6 +98,21 @@ public class LearningSearchService {
 
         // Bước 2: repository lọc quyền và đếm trên grain khóa học trước phân trang; không lọc trang trong memory.
         return repository.search(filter, pageable);
+    }
+
+    /**
+     * Điền điểm cao nhất của bài thi cuối khóa vào từng thẻ của trang bằng một lần gọi cổng quiz cho cả trang. Chế độ
+     * MANAGE là danh sách của giảng viên, không phải của người học nên không gọi cổng và để null.
+     */
+    private Page<CourseCard> withBestScores(String mode, Page<CourseCard> cards) {
+        if (SearchMode.MANAGE.equals(mode) || cards.isEmpty()) {
+            return cards;
+        }
+        Map<Long, BigDecimal> finalExamBest = new HashMap<>();
+        quizzes.scores(SecurityContextUtils.getUserId(), cards.map(CourseCard::courseId).toList()).stream()
+            .filter(LearningQuizDirectory.QuizScore::finalExam)
+            .forEach(score -> finalExamBest.put(score.courseId(), score.bestScore()));
+        return cards.map(card -> card.withBestScorePercent(finalExamBest.get(card.courseId())));
     }
 
     /** Số khóa trong danh sách khóa của tôi theo requirement/assigned; cùng truy vấn với list nên khớp tổng của list. */
@@ -137,7 +157,7 @@ public class LearningSearchService {
         if (cards.isEmpty()) {
             throw new BusinessException(LearningResponseCode.NOT_FOUND);
         }
-        var card = cards.getContent().get(0);
+        var card = withBestScores(SearchMode.CATALOG, cards).getContent().get(0);
         var detail = content.detail(records.require(Course.class, courseId),
             records.require(CourseRevision.class, card.revisionId()));
         return new LearnerCourse(card, card.enrollmentId() == null ? withoutBlocks(detail) : detail);

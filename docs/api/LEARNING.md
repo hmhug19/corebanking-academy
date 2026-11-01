@@ -108,6 +108,11 @@ Tên lĩnh vực/chương trình/phân hệ là null khi khóa chưa gán chươ
 cuối khóa (PUBLISHED, chưa xóa) ít nhất một lượt đã chấm (SUBMITTED, AUTO_SUBMITTED) và chưa đạt lượt nào; Learning lấy
 tập khóa qua cổng LearningQuizDirectory, không đọc bảng Assessment. Danh sách giảng viên (MANAGE) không gọi cổng và luôn
 trả failed=false.
+CourseCard trả thêm bestScorePercent ở cuối: điểm cao nhất (`bestScore`, % với 2 chữ số) của các lượt đã chấm trên bài thi
+cuối khóa (FINAL_EXAM, PUBLISHED, chưa xóa) của khóa, theo cùng quy tắc `AttemptSummary` của đề. Null khi khóa không có bài
+thi cuối, caller chưa có lượt chấm nào hoặc ở danh sách giảng viên (MANAGE, không gọi cổng). Có trên `/courses`,
+`/catalog`, `/courses/{courseId}` (trong `card`) và trong CSV; mỗi trang chỉ một lần gọi `LearningQuizDirectory.scores`.
+Đề luyện tập không được tính vào thẻ khóa học.
 
 Bộ lọc của danh sách học viên: GET `/me/learning/courses` và `/me/learning/catalog` nhận thêm `assigned` (true chỉ lấy
 khóa caller có đợt giao còn hiệu lực, cùng biểu thức với cờ assigned của thẻ), `failed` (true chỉ lấy khóa trong tập
@@ -312,6 +317,9 @@ Lượt chấm là SUBMITTED hoặc AUTO_SUBMITTED; IN_PROGRESS và VOIDED khôn
 
 Ngày bắt đầu khác ngày ghi danh; completedAt giữ khi xem lại. Deadline là trạng thái riêng: no_deadline,
 on_time_active, overdue_active, completed_on_time, completed_late. Hoàn thành muộn không còn trong KPI đang quá hạn.
+CSV có các cột Mã khóa, Tên khóa, Lần học, Trạng thái, Tiến độ, Bắt đầu, Truy cập gần nhất, Hoàn thành, Hạn, Trạng thái
+hạn, Điểm cao nhất; cột mới nằm cuối để vị trí các cột cũ không đổi. Điểm cao nhất là `bestScorePercent` của thẻ khóa
+(ô trống khi null).
 List/export cùng query/filter/sort/scope; CSV UTF-8 BOM, escape quote/newline và công thức bảng tính,
 vượt 10.000 dòng báo lỗi rõ thay vì cắt im lặng. API summary độc lập với filter của bảng.
 

@@ -145,13 +145,13 @@ class CatalogCardIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void theCsvExportKeepsItsColumns() throws Exception {
+    void theCsvExportKeepsItsColumnsAndAppendsTheBestScoreAtTheEnd() throws Exception {
         fixtures.course(LEARNER);
 
         String csv = api.raw(LEARNER, get(LEARNING + "/progress/export")).getContentAsString(StandardCharsets.UTF_8);
 
         assertThat(csv.lines().findFirst().orElseThrow()).isEqualTo("﻿Mã khóa,Tên khóa,Lần học,Trạng thái,"
-            + "Tiến độ,Bắt đầu,Truy cập gần nhất,Hoàn thành,Hạn,Trạng thái hạn");
+            + "Tiến độ,Bắt đầu,Truy cập gần nhất,Hoàn thành,Hạn,Trạng thái hạn,Điểm cao nhất");
     }
 
     private long exam(Course course, String type) {

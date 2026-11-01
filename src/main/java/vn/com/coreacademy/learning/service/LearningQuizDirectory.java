@@ -25,6 +25,9 @@ public interface LearningQuizDirectory {
      */
     record QuizScore(Long quizId, Long courseId, String title, String quizType, BigDecimal bestScore,
                      BigDecimal finalScore, boolean passed, LastAttempt last) {
+        public boolean finalExam() {
+            return "FINAL_EXAM".equals(quizType);
+        }
     }
 
     /** Lượt chấm gần nhất của một đề; passed là kết quả của chính lượt đó, không theo scoreMethod. */
