@@ -181,7 +181,10 @@ public class LearningNotesService {
         return actor.person().id();
     }
 
-    /** Bài phải thuộc phiên bản của một lần học của người gọi, bất kể trạng thái học; ngoài ra là NOT_FOUND. */
+    /**
+     * Bài phải thuộc phiên bản của một lần học của người gọi, bất kể tiến độ (chưa học, đang học hay đã hoàn thành
+     * đều được); lần học đã rút (withdrawn) không tính. Ngoài ra là NOT_FOUND.
+     */
     private String requireLessonAccess(Long lessonId) {
         String userId = learnerId();
         if (!anchors.lessonVisibleTo(userId, lessonId)) {
