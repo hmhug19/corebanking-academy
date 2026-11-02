@@ -453,6 +453,34 @@ Quy tắc:
 - Schema: `docs/sql/upgrade/2026-11-03-lesson-notes.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
   backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
 
+### Mốc video và transcript
+
+Khối `video` có thể mang **mốc** (`videoChapters`) và **transcript** (`transcript`) để trình phát hiện hàng mốc và danh sách
+đoạn có tìm kiếm. Không có API riêng: hai danh sách đi cùng khối trong lưu cây khóa (PUT
+`/api/v1/courses/{courseId}/revisions/{revisionId}`) và trả về trong `LessonBlockView` ở mọi nơi có khối (cây biên soạn,
+`GET /me/learning/courses/{courseId}`, `GET /me/learning/enrollments/{enrollmentId}`).
+
+| Trường của khối | Kiểu | Ghi chú |
+|---|---|---|
+| `videoChapters` | `[{ startSeconds, title }]` | Request: bỏ qua, `null` hoặc `[]` đều nghĩa là không có mốc. Response: luôn là danh sách, `[]` khi không có |
+| `transcript` | `[{ startSeconds, text }]` | Cùng quy tắc |
+
+Giới hạn (vi phạm là `CORE-VALIDATION_FAILED`, `errors[0].field` là `videoChapters` hoặc `transcript`):
+
+- Tối đa 50 mốc, tên 1-120 ký tự sau khi cắt khoảng trắng; tối đa 2000 đoạn, nội dung 1-1000 ký tự sau khi cắt.
+- `startSeconds` là số không âm (cho phép phần thập phân), **tăng ngặt** trong từng danh sách, và không vượt
+  `duration_seconds` của tài nguyên chính khi đã biết (chưa biết thì không kiểm).
+- Chỉ khối `video` được mang hai danh sách; khối khác gửi danh sách không rỗng bị từ chối.
+
+Lưu ý khi tích hợp:
+
+- **Lưu cây thay thế toàn bộ khối**, nên một lần lưu không gửi hai danh sách sẽ **xóa** chúng. Client nào lưu cây (kể cả
+  trình biên soạn khóa) phải gửi lại các danh sách đã tải về nếu muốn giữ.
+- Danh sách rỗng được lưu thành `NULL` trong `lesson_blocks.video_chapters` và `lesson_blocks.transcript` (jsonb).
+- Bản nháp mới nhân bản từ bản đã xuất bản giữ nguyên hai danh sách.
+- Schema: `docs/sql/upgrade/2026-11-03-lesson-player-modes.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
+  backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu cột); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
+
 ### Phản hồi bài học
 
 Dưới nội dung bài, học viên (`LEARNER`, scope `OWN`) đánh giá bài từ 1 đến 5 sao, gửi nhận xét **công khai** cho học viên

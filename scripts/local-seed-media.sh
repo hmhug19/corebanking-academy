@@ -2,6 +2,8 @@
 # Seeds the demo course DEMO-MEDIA on the local stack through the public API, signed in as the admin account:
 #   upload the sample PDF and MP4 (each must become READY) -> field/programme/module -> course with one PDF lesson
 #   and one video lesson -> publish -> assign to the demo learner.
+# The video block also gets the demo chapters and transcript (docs/sql/demo-media/lesson-player-modes-demo.sql holds
+# the same lists for a course that already exists).
 # Does nothing when the course DEMO-MEDIA already exists. Never writes SQL: a READY asset has to pass the real probe.
 #
 # Needs: curl, jq, a running backend (default http://localhost:8019), docs/sql/demo-media/*.
@@ -150,6 +152,17 @@ tree="$(jq -n --argjson ver "$REVISION_VERSION" --argjson program "$PROGRAM_ID" 
         {title: "Bài 2: Video", lessonType: "content", estimatedDurationSeconds: 30, isRequired: true,
          blocks: [{blockType: "video", title: "Video giới thiệu", body: null, bodyFormat: null,
                    completionMode: "video_coverage", completionThreshold: 90, isRequired: true, steps: [],
+                   videoChapters: [
+                     {startSeconds: 0, title: "Giới thiệu"},
+                     {startSeconds: 10, title: "Khái niệm chính"},
+                     {startSeconds: 20, title: "Tổng kết"}],
+                   transcript: [
+                     {startSeconds: 0, text: "Xin chào, đây là video giới thiệu về hệ thống Core Banking."},
+                     {startSeconds: 5, text: "Hôm nay chúng ta làm quen với các phân hệ chính của lõi ngân hàng."},
+                     {startSeconds: 10, text: "Phân hệ tiền gửi quản lý tài khoản, lãi suất và kỳ hạn."},
+                     {startSeconds: 15, text: "Phân hệ tín dụng theo dõi hồ sơ vay, giải ngân và thu nợ."},
+                     {startSeconds: 20, text: "Mọi giao dịch cuối cùng đều được ghi nhận vào sổ cái."},
+                     {startSeconds: 25, text: "Cảm ơn bạn đã theo dõi, hẹn gặp lại ở bài sau."}],
                    assets: [{assetId: $video, usage: "primary", caption: "Video mẫu 30 giây.", altText: null}]}]}
       ]
     }]
