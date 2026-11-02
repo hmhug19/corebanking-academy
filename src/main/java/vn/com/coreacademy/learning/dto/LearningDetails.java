@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.dto.LearningFeedbackViews.RatingSummary;
 
 public final class LearningDetails {
@@ -75,6 +77,15 @@ public final class LearningDetails {
                 completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount, requiredLessonCount,
                 deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId, fieldName,
                 programName, moduleName, failed, bestScorePercent, null);
+        }
+
+        /**
+         * The certificate of this card's cycle: the enrollment id when the cycle is completed, else null. Derived, so
+         * "a completed cycle is a certificate" stays a server rule and the search SQL does not change.
+         */
+        @JsonProperty("certificateId")
+        public Long certificateId() {
+            return ProgressStatus.COMPLETED.equals(learningStatus) ? enrollmentId : null;
         }
 
         /**
