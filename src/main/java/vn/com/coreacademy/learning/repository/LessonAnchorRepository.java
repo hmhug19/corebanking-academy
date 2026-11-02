@@ -12,7 +12,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.AssetStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.AssetUsage;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 
-/** Tra cứu quyền truy cập bài học và giới hạn tài nguyên của khối để kiểm neo ghi chú, đánh dấu. Chỉ đọc. */
+/** Tra cứu quyền truy cập bài học và giới hạn tài nguyên của khối để kiểm neo ghi chú, đánh dấu, phản hồi. Chỉ đọc. */
 @Repository
 @RequiredArgsConstructor
 public class LessonAnchorRepository {
@@ -26,22 +26,23 @@ public class LessonAnchorRepository {
     }
 
     /**
-     * Bài học có thuộc phiên bản của một lần học của người dùng hay không, bằng một truy vấn; lần học đã rút
-     * (withdrawn) không còn quyền như khi mở bài.
+     * Khóa học chứa bài nếu bài thuộc phiên bản của một lần học của người dùng, bằng một truy vấn; rỗng nếu không.
+     * Lần học đã rút (withdrawn) không còn quyền như khi mở bài.
      */
-    public boolean lessonVisibleTo(String userId, Long lessonId) {
-        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
-            select exists (
-                select 1
-                from learning_hub.course_lessons l
-                join learning_hub.course_chapters c on c.chapter_id = l.chapter_id
-                join learning_hub.course_enrollments e on e.revision_id = c.revision_id
-                where l.lesson_id = :lessonId and e.user_id = :userId and e.status <> :withdrawn)
+    public Optional<Long> visibleCourseId(String userId, Long lessonId) {
+        List<?> rows = entityManager.createNativeQuery("""
+            select e.course_id
+            from learning_hub.course_lessons l
+            join learning_hub.course_chapters c on c.chapter_id = l.chapter_id
+            join learning_hub.course_enrollments e on e.revision_id = c.revision_id
+            where l.lesson_id = :lessonId and e.user_id = :userId and e.status <> :withdrawn
+            limit 1
             """)
             .setParameter("lessonId", lessonId)
             .setParameter("userId", userId)
             .setParameter("withdrawn", ProgressStatus.WITHDRAWN)
-            .getSingleResult());
+            .getResultList();
+        return rows.stream().findFirst().map(row -> ((Number) row).longValue());
     }
 
     /** Rỗng nếu khối không thuộc bài học. */

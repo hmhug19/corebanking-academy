@@ -52,6 +52,9 @@ public enum LearningResponseCode implements ApiResponseCode {
         "Bài học đã đạt giới hạn %d ghi chú hoặc %d đánh dấu. Hãy xóa bớt trước khi thêm."
             .formatted(LearningLimits.MAX_NOTES_PER_LESSON, LearningLimits.MAX_BOOKMARKS_PER_LESSON),
         "Đã đạt giới hạn"),
+    FEEDBACK_LIMIT("LEARNING-FEEDBACK_LIMIT",
+        "Bạn đã gửi tối đa %d nhận xét, câu hỏi và báo cáo cho bài học này trong hôm nay. Hãy thử lại vào ngày mai."
+            .formatted(LearningLimits.MAX_FEEDBACK_PER_LESSON_PER_DAY), "Đã đạt giới hạn"),
     QUIZ_UNAVAILABLE("LEARNING-QUIZ_UNAVAILABLE", "Module kiểm tra chưa được triển khai; chưa thể cấu hình bài quiz.",
         "Chưa hỗ trợ kiểm tra"),
     QUIZ_INVALID("LEARNING-QUIZ_INVALID",

@@ -17,6 +17,13 @@ public final class LearningLimits {
     public static final int MAX_NOTE_LENGTH = 4_000;
     public static final int MAX_BOOKMARK_LABEL_LENGTH = 200;
     public static final int MAX_SAVED_PAGE_SIZE = 100;
+    public static final int MIN_STARS = 1;
+    public static final int MAX_STARS = 5;
+    public static final int MIN_FEEDBACK_LENGTH = 5;
+    public static final int MAX_FEEDBACK_LENGTH = 1_000;
+    public static final int MAX_FEEDBACK_PER_LESSON_PER_DAY = 20;
+    public static final int FEEDBACK_PAGE_SIZE = 20;
+    public static final int MAX_COMMENT_PAGE_SIZE = 100;
     public static final int MAX_EXPORT_ROWS = 10_000;
     public static final int MAX_UPLOAD_PARTS = 10_000;
     public static final int UPLOAD_PART_BYTES = 8 * 1024 * 1024;

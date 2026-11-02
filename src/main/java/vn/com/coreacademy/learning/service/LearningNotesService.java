@@ -1,6 +1,5 @@
 package vn.com.coreacademy.learning.service;
 
-import java.math.RoundingMode;
 import java.util.List;
 import java.util.function.Function;
 
@@ -16,7 +15,6 @@ import vn.com.coreacademy.learning.constants.LearningCodes.AnchorType;
 import vn.com.coreacademy.learning.constants.LearningCodes.SavedKind;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningNoteRequests.AddNote;
-import vn.com.coreacademy.learning.dto.LearningNoteRequests.AnchorRequest;
 import vn.com.coreacademy.learning.dto.LearningNoteRequests.ToggleBookmark;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.Anchor;
 import vn.com.coreacademy.learning.dto.LearningNoteViews.BookmarkToggle;
@@ -29,13 +27,13 @@ import vn.com.coreacademy.learning.entity.LessonBookmark;
 import vn.com.coreacademy.learning.entity.LessonNote;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.mapper.LessonNoteMapper;
-import vn.com.coreacademy.learning.repository.LessonAnchorRepository;
 import vn.com.coreacademy.learning.repository.LessonAnchorRepository.BlockBounds;
 import vn.com.coreacademy.learning.repository.LessonBookmarkRepository;
 import vn.com.coreacademy.learning.repository.LessonNoteRepository;
 import vn.com.coreacademy.learning.repository.LessonSavedRepository;
 import vn.com.coreacademy.learning.repository.LessonSavedRepository.Counts;
 import vn.com.coreacademy.learning.repository.LessonSavedRepository.SavedRow;
+import vn.com.coreacademy.learning.service.LessonAnchors.Resolved;
 
 /**
  * Ghi chú và đánh dấu riêng của học viên trên bài học. Mọi thao tác chỉ chạm dữ liệu của chính người gọi; ghi chú
@@ -46,20 +44,15 @@ import vn.com.coreacademy.learning.repository.LessonSavedRepository.SavedRow;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class LearningNotesService {
-    private final LearningAccessPolicy access;
-    private final LessonAnchorRepository anchors;
+    private final LessonAnchors lessonAnchors;
     private final LessonNoteRepository notes;
     private final LessonBookmarkRepository bookmarks;
     private final LessonSavedRepository saved;
     private final LessonNoteMapper mapper;
 
-    /** Vị trí neo đã kiểm; block là null khi neo là cả bài. */
-    private record Resolved(Anchor anchor, BlockBounds block) {
-    }
-
     /** Ghi chú còn sống của người gọi trên bài học, mới nhất trước. */
     public List<NoteView> notes(Long lessonId) {
-        String userId = requireLessonAccess(lessonId);
+        String userId = lessonAnchors.requireLessonAccess(lessonId).userId();
         return notes.findByUserIdAndLessonIdAndIsDeletedFalseOrderByCreateTimeDescIdDesc(userId, lessonId).stream()
             .map(mapper::view).toList();
     }
@@ -70,9 +63,9 @@ public class LearningNotesService {
      */
     @Transactional
     public NoteView addNote(Long lessonId, AddNote request) {
-        String userId = requireLessonAccess(lessonId);
+        String userId = lessonAnchors.requireLessonAccess(lessonId).userId();
         String text = noteText(request.text());
-        Resolved resolved = resolve(lessonId, request.anchor(), true);
+        Resolved resolved = lessonAnchors.resolve(lessonId, request.anchor(), true);
 
         notes.lock("lesson-note:" + userId);
         if (notes.countByUserIdAndLessonIdAndIsDeletedFalse(userId, lessonId) >= LearningLimits.MAX_NOTES_PER_LESSON) {
@@ -96,7 +89,7 @@ public class LearningNotesService {
     /** Xóa mềm. Ghi chú của người khác, không có hoặc đã xóa đều là LEARNING-NOT_FOUND. */
     @Transactional
     public void deleteNote(Long noteId) {
-        String userId = learnerId();
+        String userId = lessonAnchors.learnerId();
         LessonNote note = notes.findByIdAndUserIdAndIsDeletedFalse(noteId, userId)
             .orElseThrow(() -> new BusinessException(LearningResponseCode.NOT_FOUND));
         softDelete(note, userId);
@@ -104,7 +97,7 @@ public class LearningNotesService {
 
     /** Đánh dấu còn sống của người gọi trên bài học, mới nhất trước. */
     public List<BookmarkView> bookmarks(Long lessonId) {
-        String userId = requireLessonAccess(lessonId);
+        String userId = lessonAnchors.requireLessonAccess(lessonId).userId();
         return bookmarks.findByUserIdAndLessonIdAndIsDeletedFalseOrderByCreateTimeDescIdDesc(userId, lessonId)
             .stream().map(mapper::view).toList();
     }
@@ -116,8 +109,8 @@ public class LearningNotesService {
      */
     @Transactional
     public BookmarkToggle toggleBookmark(Long lessonId, ToggleBookmark request) {
-        String userId = requireLessonAccess(lessonId);
-        Resolved resolved = resolve(lessonId, request.anchor(), false);
+        String userId = lessonAnchors.requireLessonAccess(lessonId).userId();
+        Resolved resolved = lessonAnchors.resolve(lessonId, request.anchor(), false);
         Anchor anchor = resolved.anchor();
 
         notes.lock("lesson-bookmark:" + userId);
@@ -148,7 +141,7 @@ public class LearningNotesService {
     /** Bỏ đánh dấu theo ID, cùng luật với xóa ghi chú: của người khác, không có hoặc đã xóa đều là NOT_FOUND. */
     @Transactional
     public void deleteBookmark(Long bookmarkId) {
-        String userId = learnerId();
+        String userId = lessonAnchors.learnerId();
         LessonBookmark bookmark = bookmarks.findByIdAndUserIdAndIsDeletedFalse(bookmarkId, userId)
             .orElseThrow(() -> new BusinessException(LearningResponseCode.NOT_FOUND));
         softDelete(bookmark, userId);
@@ -160,7 +153,7 @@ public class LearningNotesService {
      * counts luôn đủ cả hai tab bất kể tab đang xem.
      */
     public SavedPage saved(String kind, int page, int size) {
-        String userId = learnerId();
+        String userId = lessonAnchors.learnerId();
         Counts counts = saved.counts(userId);
         boolean notesTab = SavedKind.NOTES.equals(kind);
         long total = notesTab ? counts.notes() : counts.bookmarks();
@@ -173,24 +166,6 @@ public class LearningNotesService {
             row.createTime(), row.courseId(), row.courseTitle(), row.lessonTitle());
         return new SavedPage(PageResponse.from(new PageImpl<>(rows.stream().map(view).toList(),
             PageRequest.of(page, size), total)), new SavedCounts(counts.notes(), counts.bookmarks()));
-    }
-
-    private String learnerId() {
-        var actor = access.actor();
-        access.requireLearner(actor);
-        return actor.person().id();
-    }
-
-    /**
-     * Bài phải thuộc phiên bản của một lần học của người gọi, bất kể tiến độ (chưa học, đang học hay đã hoàn thành
-     * đều được); lần học đã rút (withdrawn) không tính. Ngoài ra là NOT_FOUND.
-     */
-    private String requireLessonAccess(Long lessonId) {
-        String userId = learnerId();
-        if (!anchors.lessonVisibleTo(userId, lessonId)) {
-            throw new BusinessException(LearningResponseCode.NOT_FOUND);
-        }
-        return userId;
     }
 
     private static void softDelete(LessonNote note, String userId) {
@@ -226,53 +201,5 @@ public class LearningNotesService {
                 "Ghi chú tối đa %d ký tự.".formatted(LearningLimits.MAX_NOTE_LENGTH));
         }
         return text;
-    }
-
-    /**
-     * Kiểm vị trí neo. Thiếu hoặc thừa trường theo loại neo là lỗi dữ liệu đầu vào (CORE-VALIDATION_FAILED). Khối
-     * không thuộc bài, sai loại, hoặc vị trí ngoài giới hạn của tài nguyên là LEARNING-INVALID_REFERENCE: trang từ 1
-     * đến page_count, giây từ 0 đến phần nguyên của duration_seconds; tài nguyên thiếu giới hạn thì từ chối loại neo
-     * đó thay vì nhận mọi giá trị.
-     */
-    private Resolved resolve(Long lessonId, AnchorRequest request, boolean allowNone) {
-        String type = request.type();
-        if (AnchorType.NONE.equals(type)) {
-            if (!allowNone) {
-                throw BusinessException.validation("anchor.type", "INVALID_VALUE", "Loại neo không hợp lệ.");
-            }
-            if (request.blockId() != null || request.page() != null || request.second() != null) {
-                throw BusinessException.validation("anchor", "INVALID_VALUE", "Neo cả bài không có khối hay vị trí.");
-            }
-            return new Resolved(new Anchor(AnchorType.NONE, null, null, null), null);
-        }
-
-        boolean pdf = AnchorType.PDF.equals(type);
-        Integer position = pdf ? request.page() : request.second();
-        String positionField = pdf ? "anchor.page" : "anchor.second";
-        if (request.blockId() == null) {
-            throw BusinessException.validation("anchor.blockId", "REQUIRED", "Thông tin này là bắt buộc.");
-        }
-        if (position == null) {
-            throw BusinessException.validation(positionField, "REQUIRED", "Thông tin này là bắt buộc.");
-        }
-        if ((pdf ? request.second() : request.page()) != null) {
-            throw BusinessException.validation(pdf ? "anchor.second" : "anchor.page", "INVALID_VALUE",
-                "Giá trị không áp dụng cho loại neo này.");
-        }
-
-        BlockBounds block = anchors.block(lessonId, request.blockId())
-            .filter(found -> type.equals(found.blockType()))
-            .orElseThrow(() -> new BusinessException(LearningResponseCode.INVALID_REFERENCE));
-        boolean bounded = pdf ? block.pageCount() != null : block.durationSeconds() != null;
-        if (!bounded) {
-            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
-        }
-        int min = pdf ? 1 : 0;
-        int max = pdf ? block.pageCount() : block.durationSeconds().setScale(0, RoundingMode.FLOOR).intValue();
-        if (position < min || position > max) {
-            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
-        }
-        return new Resolved(new Anchor(type, request.blockId(), pdf ? position : null, pdf ? null : position),
-            block);
     }
 }

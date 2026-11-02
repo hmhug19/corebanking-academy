@@ -69,9 +69,14 @@ class ProgressSummaryScoresIT extends AssessmentIntegrationTest {
 
         JsonNode assessment = api.ok(LEARNER, get(LEARNING + "/progress/summary")).path("assessment");
 
+        // Đọc mọi trang: tổng quan tính trên mọi khóa của tôi, mà DB test dùng chung có thể vượt một trang 100 khóa.
         List<Long> courseIds = new ArrayList<>();
-        api.ok(LEARNER, get(LEARNING + "/courses?size=100")).path("items")
-            .forEach(card -> courseIds.add(card.path("courseId").asLong()));
+        int pages = 1;
+        for (int page = 0; page < pages; page++) {
+            JsonNode mine = api.ok(LEARNER, get(LEARNING + "/courses?size=100&page=" + page));
+            mine.path("items").forEach(card -> courseIds.add(card.path("courseId").asLong()));
+            pages = mine.path("totalPages").asInt();
+        }
         List<QuizScore> scores = directory.scores(LEARNER, courseIds);
         int quizCount = scores.size();
         int passed = (int) scores.stream().filter(QuizScore::passed).count();

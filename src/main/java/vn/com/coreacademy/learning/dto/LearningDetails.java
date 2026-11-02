@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
+import vn.com.coreacademy.learning.dto.LearningFeedbackViews.RatingSummary;
+
 public final class LearningDetails {
     private LearningDetails() {
     }
@@ -51,7 +53,30 @@ public final class LearningDetails {
                               Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
                               Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds, Long fieldId,
                               String fieldName, String programName, String moduleName, boolean failed,
-                              BigDecimal bestScorePercent) {
+                              BigDecimal bestScorePercent, RatingSummary rating) {
+        /**
+         * Dạng không có rating cho truy vấn search: Hibernate dựng thẻ từ các cột của câu SQL, còn điểm đánh giá của
+         * khóa do service điền theo từng trang bằng withRating.
+         */
+        public CourseCard(Long courseId, Long revisionId, String code, String title, Long programId,
+                          Long moduleId, String level, String requirement, String publicationState,
+                          String lifecycleStatus, long lessonCount, BigDecimal durationSeconds,
+                          long assignedCount, Long enrollmentId, String learningStatus,
+                          BigDecimal progressPercent, Instant dueAt, boolean assigned, boolean overdue,
+                          Instant updateTime, Integer cycleNo, Instant startedAt, Instant lastAccessAt,
+                          Instant completedAt, Long lastLessonId, Long lastBlockId,
+                          Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
+                          Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds, Long fieldId,
+                          String fieldName, String programName, String moduleName, boolean failed,
+                          BigDecimal bestScorePercent) {
+            this(courseId, revisionId, code, title, programId, moduleId, level, requirement, publicationState,
+                lifecycleStatus, lessonCount, durationSeconds, assignedCount, enrollmentId, learningStatus,
+                progressPercent, dueAt, assigned, overdue, updateTime, cycleNo, startedAt, lastAccessAt,
+                completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount, requiredLessonCount,
+                deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId, fieldName,
+                programName, moduleName, failed, bestScorePercent, null);
+        }
+
         /**
          * Điểm cao nhất của lượt đã chấm trên bài thi cuối khóa (PUBLISHED, chưa xóa); null khi khóa không có bài thi
          * cuối, chưa có lượt chấm, hoặc ở chế độ MANAGE. Search chỉ để null, service điền theo từng trang.
@@ -62,7 +87,20 @@ public final class LearningDetails {
                 learningStatus, progressPercent, dueAt, assigned, overdue, updateTime, cycleNo, startedAt,
                 lastAccessAt, completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount,
                 requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId,
-                fieldName, programName, moduleName, failed, score);
+                fieldName, programName, moduleName, failed, score, rating);
+        }
+
+        /**
+         * Điểm đánh giá của khóa: trung bình các đánh giá bài học sống qua mọi phiên bản, làm tròn một chữ số, và số
+         * đánh giá; null khi khóa chưa có đánh giá nào. Search chỉ để null, service điền theo từng trang.
+         */
+        public CourseCard withRating(RatingSummary courseRating) {
+            return new CourseCard(courseId, revisionId, code, title, programId, moduleId, level, requirement,
+                publicationState, lifecycleStatus, lessonCount, durationSeconds, assignedCount, enrollmentId,
+                learningStatus, progressPercent, dueAt, assigned, overdue, updateTime, cycleNo, startedAt,
+                lastAccessAt, completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount,
+                requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId,
+                fieldName, programName, moduleName, failed, bestScorePercent, courseRating);
         }
     }
 

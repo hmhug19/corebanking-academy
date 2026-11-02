@@ -113,6 +113,10 @@ cuối khóa (FINAL_EXAM, PUBLISHED, chưa xóa) của khóa, theo cùng quy t�
 thi cuối, caller chưa có lượt chấm nào hoặc ở danh sách giảng viên (MANAGE, không gọi cổng). Có trên `/courses`,
 `/catalog`, `/courses/{courseId}` (trong `card`) và trong CSV; mỗi trang chỉ một lần gọi `LearningQuizDirectory.scores`.
 Đề luyện tập không được tính vào thẻ khóa học.
+CourseCard trả thêm `rating` ở cuối: `{ average, count }` là trung bình các đánh giá bài học còn sống của khóa, làm tròn một
+chữ số thập phân, và số đánh giá, **qua mọi phiên bản** của khóa. Null khi khóa chưa có đánh giá nào. Có trên `/courses`,
+`/catalog`, `/courses/{courseId}` (trong `card`) và danh sách giảng viên (MANAGE); mỗi trang chỉ một truy vấn gom nhóm. CSV
+không có cột này. Xem [Phản hồi bài học](#phản-hồi-bài-học).
 
 Bộ lọc của danh sách học viên: GET `/me/learning/courses` và `/me/learning/catalog` nhận thêm `assigned` (true chỉ lấy
 khóa caller có đợt giao còn hiệu lực, cùng biểu thức với cờ assigned của thẻ), `failed` (true chỉ lấy khóa trong tập
@@ -442,6 +446,59 @@ Quy tắc:
   `CORE-VALIDATION_FAILED`.
 - Ghi chú không tính là ngày học của chuỗi ngày học.
 - Schema: `docs/sql/upgrade/2026-11-03-lesson-notes.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
+  backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
+
+### Phản hồi bài học
+
+Dưới nội dung bài, học viên (`LEARNER`, scope `OWN`) đánh giá bài từ 1 đến 5 sao, gửi nhận xét **công khai** cho học viên
+của bài, hỏi giảng viên và báo nội dung không phù hợp; hai loại sau chỉ người gửi thấy. Vai trò khác nhận 403
+`CORE-ACCESS_DENIED`. Ngoài phạm vi: hộp thư của giảng viên, trả lời và xử lý (`status`, `reply` đã có trong bảng nhưng chưa
+API nào ghi).
+
+| API | Trách nhiệm |
+|---|---|
+| GET `/me/learning/lessons/{lessonId}/feedback` | F1. `LessonFeedbackView { rating, myStars, comments, mine }` |
+| PUT `/me/learning/lessons/{lessonId}/rating` | F2. Body `{ stars }` → `RatingResult { average, count, myStars }` |
+| POST `/me/learning/lessons/{lessonId}/feedback` | F3. Body `{ kind, text, anchor }` → `FeedbackView` |
+| GET `/me/learning/lessons/{lessonId}/comments?page&size` | F4. `PageResponse<CommentView>`; `page` mặc định 0, `size` mặc định 20, tối đa 100 |
+| `CourseCard.rating` | F5. `{ average, count }` hoặc `null`; xem mục thẻ khóa học ở trên |
+
+Dạng dữ liệu (`anchor` là `anchor` của ghi chú ở mục trên):
+
+- `rating { average, count }`: `average` là số thập phân một chữ số (`4.3`), `count` là số đánh giá còn sống.
+- `LessonFeedbackView`: `rating` là `null` khi bài chưa có đánh giá; `myStars` là `null` khi caller chưa đánh giá;
+  `comments` là trang đầu (20, mới nhất trước) của nhận xét; `mine` là danh sách `FeedbackView` câu hỏi và báo nội dung của
+  **chính caller**, mới nhất trước.
+- `CommentView { id, authorName, text, anchor, createTime, mine }`: `authorName` là họ tên (`users.full_name`) của người
+  gửi, `mine` là `true` khi do caller gửi.
+- `FeedbackView { id, kind, text, anchor, status, reply, replyTime, createTime }`: `kind` là `comment`, `question` hoặc
+  `report`; `status` là `null` với nhận xét, `new | answered | resolved` với câu hỏi và báo nội dung; `reply` và
+  `replyTime` là `null` cho tới khi có trả lời.
+
+Quy tắc:
+
+- **Quyền vào bài** như ghi chú: bài thuộc phiên bản của một lần học của caller, trừ `withdrawn`; ngoài ra là
+  `LEARNING-NOT_FOUND`. Người vào được bài thấy nhận xét và điểm đánh giá của bài, bất kể phiên bản khóa họ đang học.
+- **Đánh giá (F2)**: `stars` là số nguyên từ 1 đến 5, ngoài khoảng đó là `CORE-VALIDATION_FAILED` (field `stars`, "Số sao
+  phải từ 1 đến 5."). Mỗi người một đánh giá sống mỗi bài: `PUT` lại thì sửa tại chỗ. Chạy dưới khóa advisory
+  `lesson-rating:{userId}` nên hai `PUT` đồng thời không để lại hai dòng. Đánh giá sửa tại chỗ nên không tính vào giới hạn
+  gửi.
+- **Nội dung (F3)**: `text` cắt khoảng trắng đầu cuối, 5 đến 1.000 ký tự. Ngắn hơn (kể cả trống) là
+  `CORE-VALIDATION_FAILED` field `text` "Nội dung cần tối thiểu 5 ký tự."; dài hơn là "Nội dung tối đa 1000 ký tự.".
+  `kind` ngoài `comment|question|report` (kể cả `rating`) là `CORE-VALIDATION_FAILED`.
+- **Neo**: cùng luật với ghi chú (`none`, `pdf`, `video`, kiểm trên tài nguyên thật của khối); mọi loại gửi kèm vị trí
+  hiện tại, `none` khi không có. Thiếu hoặc thừa trường theo loại là `CORE-VALIDATION_FAILED`; khối không thuộc bài, sai
+  loại hoặc vị trí ngoài tài nguyên là `LEARNING-INVALID_REFERENCE`.
+- **Giới hạn**: tối đa 20 lần gửi nhận xét, câu hỏi và báo nội dung mỗi người mỗi bài mỗi ngày học (từ 00:00 theo
+  `Asia/Ho_Chi_Minh`, không theo UTC); lần thứ 21 là `LEARNING-FEEDBACK_LIMIT`. Đếm dưới khóa advisory
+  `lesson-feedback:{userId}` nên các lần gửi đồng thời không cùng vượt giới hạn.
+- **Quyền xem**: nhận xét hiện cho mọi học viên của bài, kèm tên người gửi (nội dung công khai, giao diện nói rõ điều
+  này). Câu hỏi và báo nội dung chỉ trả cho người gửi, ở `mine`; không có API nào trả của người khác. Học viên chưa thể xóa
+  nhận xét của mình.
+- **Điểm đánh giá của khóa (F5)**: trung bình các đánh giá bài học còn sống có cùng `course_id`, qua mọi phiên bản, làm
+  tròn một chữ số, nên đánh giá không mất khi khóa có phiên bản mới.
+- Không có thông báo cho giảng viên; nhận xét, câu hỏi và đánh giá không tính là ngày học của chuỗi ngày học.
+- Schema: `docs/sql/upgrade/2026-11-04-lesson-feedback.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
   backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
 
 ### Đối chiếu tình huống demo và phần phát triển tiếp

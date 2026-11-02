@@ -311,6 +311,28 @@ public final class LearningCodes {
         }
     }
 
+    /** Loại phản hồi bài học, ghi ở lesson_feedback.kind; gửi qua POST chỉ nhận comment, question và report. */
+    public static final class FeedbackKind {
+        public static final String RATING = "rating";
+        public static final String COMMENT = "comment";
+        public static final String QUESTION = "question";
+        public static final String REPORT = "report";
+        public static final String SENDABLE_PATTERN = COMMENT + "|" + QUESTION + "|" + REPORT;
+
+        private FeedbackKind() {
+        }
+    }
+
+    /** Trạng thái xử lý của câu hỏi và báo nội dung, ghi ở lesson_feedback.status; nhận xét và đánh giá không có. */
+    public static final class FeedbackStatus {
+        public static final String NEW = "new";
+        public static final String ANSWERED = "answered";
+        public static final String RESOLVED = "resolved";
+
+        private FeedbackStatus() {
+        }
+    }
+
     public static final class SearchMode {
         public static final String MANAGE = "manage";
         public static final String MINE = "mine";
