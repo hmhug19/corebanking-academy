@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.dto.LearningFeedbackViews.RatingSummary;
 
 public final class LearningDetails {
@@ -75,6 +77,15 @@ public final class LearningDetails {
                 completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount, requiredLessonCount,
                 deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId, fieldName,
                 programName, moduleName, failed, bestScorePercent, null);
+        }
+
+        /**
+         * Chứng nhận của chu kỳ trên thẻ này: id ghi danh khi chu kỳ đã hoàn thành, ngược lại null. Giá trị suy ra, nên
+         * quy tắc "chu kỳ hoàn thành là một chứng nhận" vẫn nằm ở server và SQL tìm kiếm không đổi.
+         */
+        @JsonProperty("certificateId")
+        public Long certificateId() {
+            return ProgressStatus.COMPLETED.equals(learningStatus) ? enrollmentId : null;
         }
 
         /**

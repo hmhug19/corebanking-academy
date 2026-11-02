@@ -117,6 +117,11 @@ CourseCard trả thêm `rating` ở cuối: `{ average, count }` là trung bình
 chữ số thập phân, và số đánh giá, **qua mọi phiên bản** của khóa. Null khi khóa chưa có đánh giá nào. Có trên `/courses`,
 `/catalog`, `/courses/{courseId}` (trong `card`) và danh sách giảng viên (MANAGE); mỗi trang chỉ một truy vấn gom nhóm. CSV
 không có cột này. Xem [Phản hồi bài học](#phản-hồi-bài-học).
+CourseCard trả thêm `certificateId` ở cuối: `enrollmentId` của thẻ khi lần học của thẻ có `learningStatus = completed`, ngược
+lại `null` (chưa đăng ký, đang học, ở danh sách giảng viên). Là giá trị suy ra từ hai field có sẵn, không phải cột và không
+đổi SQL tìm kiếm; có trên `/courses`, `/catalog` và `/courses/{courseId}` (trong `card`). Thẻ chỉ mô tả lần học hiện tại,
+nên học viên đang học lại một khóa đã hoàn thành có `certificateId = null`; chứng nhận của lần trước vẫn có trong danh sách.
+Xem [Chứng nhận](#chứng-nhận).
 
 Bộ lọc của danh sách học viên: GET `/me/learning/courses` và `/me/learning/catalog` nhận thêm `assigned` (true chỉ lấy
 khóa caller có đợt giao còn hiệu lực, cùng biểu thức với cờ assigned của thẻ), `failed` (true chỉ lấy khóa trong tập
@@ -500,6 +505,63 @@ Quy tắc:
 - Không có thông báo cho giảng viên; nhận xét, câu hỏi và đánh giá không tính là ngày học của chuỗi ngày học.
 - Schema: `docs/sql/upgrade/2026-11-04-lesson-feedback.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
   backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
+
+### Chứng nhận
+
+Chứng nhận là **một lần học (`course_enrollments`) đã hoàn thành** của chính caller: `status = 'completed'` và
+`completed_at` có giá trị (`withdrawn` là một trạng thái riêng, không tính). Không có bảng chứng nhận, không có API cấp, thu
+hồi hay tải PDF: hoàn thành do `LearningProgressService` quyết định, chứng nhận chỉ đọc kết quả. Chứng nhận giữ nguyên khi
+khóa ra phiên bản mới vì trỏ vào phiên bản (`revisionId`) mà học viên đã học xong. Chỉ học viên (`LEARNER`, scope `OWN`);
+vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Ngoài phạm vi: xác thực công khai bằng mã, ảnh con dấu hoặc chữ ký.
+
+| API | Trách nhiệm |
+|---|---|
+| GET `/me/learning/certificates?page&size` | C1. `PageResponse<CertificateView>`; `page` mặc định 0, `size` mặc định 20, tối đa 100 |
+| GET `/me/learning/certificates/{enrollmentId}` | C2. `CertificateView` |
+| `CourseCard.certificateId` | C3. `enrollmentId` khi lần học của thẻ đã hoàn thành, ngược lại `null`; xem mục thẻ khóa học ở trên |
+
+`CertificateView { id, courseId, courseCode, courseTitle, cycleNo, revisionId, userId, fullName, completedAt,
+bestScorePercent, verificationCode }`:
+
+- `id` là `enrollmentId`, ổn định và mang theo lần học.
+- `courseTitle` là tên của **phiên bản đã học xong** (`course_revisions.title`), có thể `null` như thẻ khóa học; giao diện
+  hiển thị `courseCode` khi `null`.
+- `fullName` là họ tên (`users.full_name`) của caller, lấy một lần cho cả trang.
+- `completedAt` là `completed_at` của lần học.
+- `bestScorePercent` là `bestScorePercent` của thẻ khóa học: điểm cao nhất bài thi cuối khóa (`FINAL_EXAM`) qua mọi lượt
+  chấm của caller, lấy một lần gọi `LearningQuizDirectory.scores` cho cả trang; `null` khi khóa không có bài thi cuối hoặc
+  chưa có lượt chấm. Vì tính qua mọi lượt chấm, chứng nhận của một lần học cũ có thể thấy điểm của lượt thi sau đó.
+- `verificationCode` là `CBA-{courseCode}-{userId}-{cycleNo}` viết hoa, ví dụ `CBA-FE-DEMO-C4-000004-1`. Có `cycleNo`
+  để hai lần học của cùng một khóa có hai mã khác nhau. Mã được suy ra khi đọc, chưa có API tra cứu.
+
+Quy tắc:
+
+- **Thứ tự (C1)**: `completed_at` mới nhất trước, cùng thời điểm thì `id` lớn trước. `size` ngoài 1 đến 100 hoặc `page`
+  âm là `CORE-VALIDATION_FAILED`; trang quá cuối trả `items` rỗng với `totalElements` đúng.
+- **Không tìm thấy (C2)**: lần học của người khác, chưa hoàn thành (kể cả `withdrawn` hoặc `completed` thiếu `completed_at`)
+  và `id` không tồn tại đều là `LEARNING-NOT_FOUND`, để không lộ lần học nào tồn tại.
+- **Mỗi lần học một chứng nhận**: học lại (`cycleNo` tăng) và hoàn thành lần nữa cho chứng nhận thứ hai của cùng khóa.
+- Schema: không đổi, không có bước SQL khi triển khai.
+
+Ví dụ `GET /me/learning/certificates/12` (phần `data`):
+
+```json
+{
+  "id": 12,
+  "courseId": 4,
+  "courseCode": "FE-DEMO-C4",
+  "courseTitle": "Khóa kiểm thử",
+  "cycleNo": 1,
+  "revisionId": 4,
+  "userId": "000004",
+  "fullName": "Học viên Demo",
+  "completedAt": "2026-10-27T03:00:00Z",
+  "bestScorePercent": null,
+  "verificationCode": "CBA-FE-DEMO-C4-000004-1"
+}
+```
+
+Lỗi (`status = ERROR`, HTTP 200): `{ "messageCode": "LEARNING-NOT_FOUND", "data": null }`.
 
 ### Đối chiếu tình huống demo và phần phát triển tiếp
 
