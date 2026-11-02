@@ -60,6 +60,7 @@ Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_S
 | `2026-11-02-learning-leaderboard-backfill.sql` | Tùy chọn: thêm mỗi người mỗi ngày đã có tiến độ bài học hoặc lượt thi đã chấm (`first_source='backfill'`); bỏ qua ngày đã có nên chạy lại không thêm dòng | `DELETE FROM learning_hub.learning_activity_days WHERE first_source = 'backfill';` |
 | `2026-11-03-lesson-notes.sql` | Bảng `lesson_notes` và `lesson_bookmarks` (ghi chú và đánh dấu riêng của học viên trên trang PDF hoặc giây video; xóa mềm, có CHECK nhất quán của neo, không FK, không UNIQUE) cùng hai index một phần; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu bảng | `2026-11-03-lesson-notes.rollback.sql` in số dòng của hai bảng rồi xóa index và bảng, mất mọi ghi chú và đánh dấu |
 | `2026-11-04-lesson-feedback.sql` | Bảng `lesson_feedback` (đánh giá sao, nhận xét công khai, câu hỏi giảng viên và báo nội dung của học viên trên một bài học; `status` chỉ có với câu hỏi và báo nội dung; xóa mềm, có CHECK về nội dung, trạng thái và neo, không FK, không UNIQUE) cùng hai index một phần; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu bảng | `2026-11-04-lesson-feedback.rollback.sql` in số dòng của bảng rồi xóa index và bảng, mất mọi phản hồi |
+| `2026-11-03-lesson-player-modes.sql` | Hai cột `jsonb` có thể NULL trên `lesson_blocks`: `video_chapters` (mốc) và `transcript` (đoạn transcript) của khối video; không FK, không UNIQUE; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu cột | `2026-11-03-lesson-player-modes.rollback.sql` in số khối đang có mốc hoặc transcript rồi xóa hai cột, mất dữ liệu đó |
 
 ```bash
 psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.sql
@@ -79,6 +80,12 @@ psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/20
 psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-03-lesson-notes.sql
 # Rollback:
 psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-03-lesson-notes.rollback.sql
+```
+
+```bash
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-03-lesson-player-modes.sql
+# Rollback:
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-03-lesson-player-modes.rollback.sql
 ```
 
 ## Bổ sung Community
