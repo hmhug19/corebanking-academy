@@ -56,14 +56,15 @@ public class LessonFeedbackReadRepository {
         if (courseIds.isEmpty()) {
             return ratings;
         }
+        // kind là literal, không bind: với plan tổng quát của prepared statement, Postgres không chứng minh được
+        // predicate của index một phần idx_lesson_feedback_course_rating (kind = 'rating') nên sẽ không dùng nó.
         List<?> rows = entityManager.createNativeQuery("""
             select course_id, round(avg(stars), 1), count(*)
             from learning_hub.lesson_feedback
-            where course_id in (:courseIds) and kind = :rating and not is_deleted
+            where course_id in (:courseIds) and kind = 'rating' and not is_deleted
             group by course_id
             """)
             .setParameter("courseIds", courseIds)
-            .setParameter("rating", FeedbackKind.RATING)
             .getResultList();
         rows.forEach(row -> {
             Object[] v = (Object[]) row;
