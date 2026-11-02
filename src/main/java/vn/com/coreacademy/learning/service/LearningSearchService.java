@@ -30,11 +30,13 @@ import vn.com.coreacademy.learning.dto.LearningDetails.CourseCard;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseDetail;
 import vn.com.coreacademy.learning.dto.LearningDetails.LearnerCourse;
 import vn.com.coreacademy.learning.dto.LearningDetails.LearnerFacets;
+import vn.com.coreacademy.learning.dto.LearningFeedbackViews.RatingSummary;
 import vn.com.coreacademy.learning.entity.Course;
 import vn.com.coreacademy.learning.entity.CourseRevision;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.repository.CourseRepository;
 import vn.com.coreacademy.learning.repository.LearningRepository;
+import vn.com.coreacademy.learning.repository.LessonFeedbackReadRepository;
 import vn.com.coreacademy.learning.repository.custom.CourseRepositoryCustom.CourseSearch;
 
 @Service
@@ -49,6 +51,7 @@ public class LearningSearchService {
     private final LearningQuizDirectory quizzes;
     private final LearningRepository records;
     private final LearningContentService content;
+    private final LessonFeedbackReadRepository feedback;
 
     public PageResponse<CourseCard> search(String mode, String q, Long fieldId, Long programId, Long moduleId,
                                            String level, String requirement, String learningStatus, String state,
@@ -63,8 +66,8 @@ public class LearningSearchService {
                                            Boolean failed) {
         var pageable = PageQuery.of(page, size, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
             "startedAt", "lastAccessAt", "completedAt"));
-        return PageResponse.from(withBestScores(mode, query(mode, q, fieldId, programId, moduleId, level, requirement,
-            learningStatus, state, overdue, assigned, failed, pageable)));
+        return PageResponse.from(withRatings(withBestScores(mode, query(mode, q, fieldId, programId, moduleId, level,
+            requirement, learningStatus, state, overdue, assigned, failed, pageable))));
     }
 
     public Page<CourseCard> export(String q, Long fieldId, Long programId, Long moduleId, String level,
@@ -114,6 +117,18 @@ public class LearningSearchService {
         return cards.map(card -> card.withBestScorePercent(finalExamBest.get(card.courseId())));
     }
 
+    /**
+     * Điền điểm đánh giá của khóa vào từng thẻ của trang bằng một truy vấn gom nhóm cho cả trang, ở mọi chế độ kể cả
+     * MANAGE vì đánh giá là của khóa chứ không của người xem. Khóa chưa có đánh giá để rating là null.
+     */
+    private Page<CourseCard> withRatings(Page<CourseCard> cards) {
+        if (cards.isEmpty()) {
+            return cards;
+        }
+        Map<Long, RatingSummary> ratings = feedback.courseRatings(cards.map(CourseCard::courseId).toList());
+        return cards.map(card -> card.withRating(ratings.get(card.courseId())));
+    }
+
     /** Số khóa trong danh sách khóa của tôi theo requirement/assigned; cùng truy vấn với list nên khớp tổng của list. */
     public long mineTotal(String requirement, Boolean assigned) {
         return query(SearchMode.MINE, null, null, null, null, null, requirement, null, null, null, assigned, null,
@@ -156,7 +171,7 @@ public class LearningSearchService {
         if (cards.isEmpty()) {
             throw new BusinessException(LearningResponseCode.NOT_FOUND);
         }
-        var card = withBestScores(SearchMode.CATALOG, cards).getContent().get(0);
+        var card = withRatings(withBestScores(SearchMode.CATALOG, cards)).getContent().get(0);
         var detail = content.detail(records.require(Course.class, courseId),
             records.require(CourseRevision.class, card.revisionId()));
         return new LearnerCourse(card, card.enrollmentId() == null ? withoutBlocks(detail) : detail);
