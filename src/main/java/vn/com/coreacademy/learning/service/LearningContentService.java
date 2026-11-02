@@ -1,5 +1,6 @@
 package vn.com.coreacademy.learning.service;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,6 +51,7 @@ import vn.com.coreacademy.learning.entity.TrainingField;
 import vn.com.coreacademy.learning.entity.TrainingProgram;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.mapper.LearningMapper;
+import vn.com.coreacademy.learning.mapper.LessonBlockJson;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 
 @Service
@@ -405,6 +407,7 @@ public class LearningContentService {
         if (CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()) && block.completionThreshold() == null) {
             throw BusinessException.validation("completionThreshold", "REQUIRED", "Vui lòng đặt tỷ lệ xem video.");
         }
+        validatePlayerLists(course, block);
         for (var link : block.assets()) {
             LearningAsset asset = usableAsset(course, link.assetId());
             boolean matches = switch (block.blockType()) {
@@ -425,6 +428,63 @@ public class LearningContentService {
             if (!matches) {
                 throw new BusinessException(LearningResponseCode.ASSET_INVALID);
             }
+        }
+    }
+
+    /**
+     * Mốc và transcript chỉ dành cho khối video: tối đa 50 mốc (tên 1-120 ký tự) và 2000 đoạn (nội dung 1-1000 ký tự),
+     * startSeconds không âm, tăng ngặt và không vượt thời lượng tài nguyên chính khi đã biết.
+     */
+    private void validatePlayerLists(Course course, LearningRequests.BlockInput block) {
+        var chapters = block.videoChapters() == null ? List.<LearningRequests.VideoChapterInput>of()
+            : block.videoChapters();
+        var lines = block.transcript() == null ? List.<LearningRequests.TranscriptLineInput>of() : block.transcript();
+        if (chapters.isEmpty() && lines.isEmpty()) {
+            return;
+        }
+        if (!BlockType.VIDEO.equals(block.blockType())) {
+            throw BusinessException.validation(chapters.isEmpty() ? "transcript" : "videoChapters", "INVALID_VALUE",
+                "Mốc và transcript chỉ dùng cho khối video.");
+        }
+        BigDecimal duration = block.assets().stream().filter(a -> AssetUsage.PRIMARY.equals(a.usage())).findFirst()
+            .map(a -> repository.require(LearningAsset.class, a.assetId()).getDurationSeconds()).orElse(null);
+        checkPlayerList("videoChapters", "mốc", LearningLimits.MAX_VIDEO_CHAPTERS,
+            LearningLimits.MAX_CHAPTER_TITLE_LENGTH, duration, chapters.stream()
+                .map(c -> c == null ? null : new PlayerItem(c.startSeconds(), c.title())).toList());
+        checkPlayerList("transcript", "đoạn transcript", LearningLimits.MAX_TRANSCRIPT_LINES,
+            LearningLimits.MAX_TRANSCRIPT_TEXT_LENGTH, duration, lines.stream()
+                .map(t -> t == null ? null : new PlayerItem(t.startSeconds(), t.text())).toList());
+    }
+
+    private record PlayerItem(BigDecimal startSeconds, String label) {
+    }
+
+    private void checkPlayerList(String field, String noun, int maxCount, int maxLength, BigDecimal duration,
+                                 List<PlayerItem> items) {
+        if (items.size() > maxCount) {
+            throw BusinessException.validation(field, "TOO_MANY", "Tối đa " + maxCount + " " + noun + ".");
+        }
+        BigDecimal previous = null;
+        for (PlayerItem item : items) {
+            String label = item == null || item.label() == null ? "" : item.label().strip();
+            if (label.isEmpty() || label.length() > maxLength) {
+                throw BusinessException.validation(field, "INVALID_VALUE",
+                    "Nội dung của " + noun + " phải từ 1 đến " + maxLength + " ký tự.");
+            }
+            BigDecimal start = item.startSeconds();
+            if (start == null || start.signum() < 0) {
+                throw BusinessException.validation(field, "INVALID_VALUE",
+                    "Thời điểm của " + noun + " phải là số giây không âm.");
+            }
+            if (previous != null && start.compareTo(previous) <= 0) {
+                throw BusinessException.validation(field, "INVALID_VALUE",
+                    "Thời điểm của " + noun + " phải tăng dần.");
+            }
+            if (duration != null && start.compareTo(duration) > 0) {
+                throw BusinessException.validation(field, "INVALID_VALUE",
+                    "Thời điểm của " + noun + " vượt quá thời lượng video.");
+            }
+            previous = start;
         }
     }
 
@@ -552,6 +612,8 @@ public class LearningContentService {
         block.setCompletionThreshold(input.completionThreshold());
         block.setIsRequired(input.isRequired());
         block.setSortNo(sort);
+        block.setVideoChapters(LessonBlockJson.chaptersColumn(input.videoChapters()));
+        block.setTranscript(LessonBlockJson.linesColumn(input.transcript()));
         block.setMediaAssetId(input.assets().stream().filter(a -> AssetUsage.PRIMARY.equals(a.usage()))
             .map(LearningRequests.AssetUse::assetId).findFirst().orElse(null));
         repository.save(block, actor);
@@ -599,7 +661,11 @@ public class LearningContentService {
                         b.block().completionThreshold(), b.block().isRequired(), b.assets().stream()
                             .map(a -> new LearningRequests.AssetUse(a.usage().assetId(), a.usage().usage(),
                                 a.usage().caption(), a.usage().altText())).toList(), b.steps().stream()
-                            .map(s -> new LearningRequests.StepInput(s.title(), s.description())).toList())).toList()))
+                            .map(s -> new LearningRequests.StepInput(s.title(), s.description())).toList(),
+                        b.block().videoChapters().stream().map(ch -> new LearningRequests.VideoChapterInput(
+                            ch.startSeconds(), ch.title())).toList(), b.block().transcript().stream()
+                            .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList()))
+                    .toList()))
                 .toList())).toList();
         var payload = new LearningRequests.DraftRequest(0L, source.getProgramId(), source.getModuleId(),
             source.getTitle(), source.getSummary(), source.getLevel(), source.getDefaultRequirement(),

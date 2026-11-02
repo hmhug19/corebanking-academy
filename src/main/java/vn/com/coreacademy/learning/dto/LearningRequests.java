@@ -102,7 +102,17 @@ public final class LearningRequests {
         @DecimalMin("1") @DecimalMax("100") BigDecimal completionThreshold,
         boolean isRequired,
         @NotNull @Size(max = 20) List<@Valid AssetUse> assets,
-        @NotNull @Size(max = 200) List<@Valid StepInput> steps) {
+        @NotNull @Size(max = 200) List<@Valid StepInput> steps,
+        List<VideoChapterInput> videoChapters,
+        List<TranscriptLineInput> transcript) {
+    }
+
+    /** Mốc của khối video; service kiểm tra số lượng, độ dài, thứ tự và giới hạn thời lượng. */
+    public record VideoChapterInput(BigDecimal startSeconds, String title) {
+    }
+
+    /** Một đoạn transcript của khối video; cùng luật kiểm tra với mốc. */
+    public record TranscriptLineInput(BigDecimal startSeconds, String text) {
     }
 
     public record AssetUse(
