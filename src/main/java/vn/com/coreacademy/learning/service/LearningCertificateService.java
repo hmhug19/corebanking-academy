@@ -20,9 +20,9 @@ import vn.com.coreacademy.learning.repository.LearningCertificateRepository;
 import vn.com.coreacademy.learning.repository.LearningCertificateRepository.CertificateRow;
 
 /**
- * Certificates of the caller. A certificate is a completed enrollment cycle: nothing is stored, so there is nothing
- * to issue or revoke, and completion itself stays decided by LearningProgressService. An enrollment that is not the
- * caller's, is not completed or does not exist is LEARNING-NOT_FOUND, so the answer does not reveal which.
+ * Chứng nhận của người gọi. Chứng nhận là một chu kỳ ghi danh đã hoàn thành: không lưu gì thêm nên không có gì để cấp
+ * hay thu hồi, còn việc hoàn thành vẫn do LearningProgressService quyết định. Ghi danh không phải của người gọi, chưa
+ * hoàn thành hoặc không tồn tại đều trả LEARNING-NOT_FOUND, để câu trả lời không lộ ra là trường hợp nào.
  */
 @Service
 @Transactional(readOnly = true)
@@ -33,7 +33,10 @@ public class LearningCertificateService {
     private final LearningIdentityService identity;
     private final LearningQuizDirectory quizzes;
 
-    /** Completed cycles of the caller, newest completion first. Name and scores are filled once per page. */
+    /**
+     * Các chu kỳ đã hoàn thành của người gọi, hoàn thành gần nhất trước. Họ tên và điểm được điền một lần cho mỗi
+     * trang.
+     */
     public PageResponse<CertificateView> list(int page, int size) {
         String userId = learnerId();
         long total = certificates.count(userId);

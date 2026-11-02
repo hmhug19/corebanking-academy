@@ -80,8 +80,8 @@ public final class LearningDetails {
         }
 
         /**
-         * The certificate of this card's cycle: the enrollment id when the cycle is completed, else null. Derived, so
-         * "a completed cycle is a certificate" stays a server rule and the search SQL does not change.
+         * Chứng nhận của chu kỳ trên thẻ này: id ghi danh khi chu kỳ đã hoàn thành, ngược lại null. Giá trị suy ra, nên
+         * quy tắc "chu kỳ hoàn thành là một chứng nhận" vẫn nằm ở server và SQL tìm kiếm không đổi.
          */
         @JsonProperty("certificateId")
         public Long certificateId() {

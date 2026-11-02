@@ -12,9 +12,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 /**
- * Read queries behind the certificates: a certificate is a completed enrollment cycle, so there is no table of its
- * own. Only rows of the given user with status completed and completed_at set count; the title is the one of the
- * revision the cycle was learned on. Paging is done in the database.
+ * Các truy vấn đọc cho chứng nhận: chứng nhận là một chu kỳ ghi danh đã hoàn thành nên không có bảng riêng. Chỉ tính
+ * các dòng của người dùng đã cho có trạng thái completed và completed_at khác null; tiêu đề lấy từ phiên bản khóa học
+ * mà chu kỳ đã học. Phân trang thực hiện ngay trong cơ sở dữ liệu.
  */
 @Repository
 @RequiredArgsConstructor
@@ -29,7 +29,7 @@ public class LearningCertificateRepository {
 
     private final EntityManager entityManager;
 
-    /** One completed cycle joined with its course code and the title of the revision that was learned. */
+    /** Một chu kỳ đã hoàn thành, kèm mã khóa học và tiêu đề của phiên bản khóa học đã học. */
     public record CertificateRow(Long enrollmentId, Long courseId, String courseCode, String courseTitle,
                                  Integer cycleNo, Long revisionId, String userId, Instant completedAt) {
     }
@@ -41,14 +41,14 @@ public class LearningCertificateRepository {
             """).setParameter("userId", userId).getSingleResult()).longValue();
     }
 
-    /** Newest completion first, then the highest enrollment id. */
+    /** Hoàn thành gần nhất trước, rồi đến id ghi danh lớn nhất. */
     public List<CertificateRow> page(String userId, int offset, int limit) {
         return entityManager.createNativeQuery(SELECT + " order by e.completed_at desc, e.enrollment_id desc")
             .setParameter("userId", userId).setFirstResult(offset).setMaxResults(limit).getResultList().stream()
             .map(row -> row((Object[]) row)).toList();
     }
 
-    /** Empty when the enrollment is not the user's, is not completed (withdrawn included) or does not exist. */
+    /** Rỗng khi ghi danh không phải của người dùng, chưa hoàn thành (kể cả đã rút) hoặc không tồn tại. */
     public Optional<CertificateRow> find(String userId, Long enrollmentId) {
         return entityManager.createNativeQuery(SELECT + " and e.enrollment_id = :id")
             .setParameter("userId", userId).setParameter("id", enrollmentId).getResultList().stream()
@@ -60,7 +60,7 @@ public class LearningCertificateRepository {
             (String) v[3], ((Number) v[4]).intValue(), ((Number) v[5]).longValue(), (String) v[6], instant(v[7]));
     }
 
-    /** Native timestamptz comes back as one of three types depending on the JDBC setup. */
+    /** Cột timestamptz của truy vấn native trả về một trong ba kiểu, tùy cấu hình JDBC. */
     private static Instant instant(Object value) {
         if (value instanceof Instant instant) {
             return instant;

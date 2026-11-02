@@ -18,7 +18,7 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTO
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER_2;
 
-/** CourseCard.certificateId is the enrollment id of a completed cycle and null otherwise, on every card the learner sees. */
+/** CourseCard.certificateId là id ghi danh của chu kỳ đã hoàn thành, còn lại là null, trên mọi thẻ học viên thấy. */
 class CourseCardCertificateIT extends AssessmentIntegrationTest {
     private static final String LEARNING = "/api/v1/me/learning";
 

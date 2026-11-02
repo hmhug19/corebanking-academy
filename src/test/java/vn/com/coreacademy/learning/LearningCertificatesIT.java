@@ -34,8 +34,8 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER_2
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.quizBody;
 
 /**
- * Certificates are the caller's completed enrollment cycles. Cycles are completed with SQL because completion itself
- * is the progress service's job and is covered elsewhere; here only what the certificates read of it matters.
+ * Chứng nhận là các chu kỳ ghi danh đã hoàn thành của người gọi. Chu kỳ được hoàn thành bằng SQL vì việc hoàn thành
+ * là của dịch vụ tiến độ và đã có test riêng; ở đây chỉ quan tâm phần chứng nhận đọc lại từ đó.
  */
 class LearningCertificatesIT extends AssessmentIntegrationTest {
     private static final String LIST = "/api/v1/me/learning/certificates";
@@ -68,7 +68,7 @@ class LearningCertificatesIT extends AssessmentIntegrationTest {
         competency = fixtures.competency();
     }
 
-    /** The database is shared with other tests, so the two learners start without a completed cycle. */
+    /** Cơ sở dữ liệu dùng chung với các test khác, nên hai học viên bắt đầu mà chưa có chu kỳ nào hoàn thành. */
     @BeforeEach
     void startWithoutCompletedCycles() {
         jdbc.update("""
@@ -312,7 +312,7 @@ class LearningCertificatesIT extends AssessmentIntegrationTest {
         return fixtures.quiz(body, questions, true);
     }
 
-    /** Answers the first {@code right} questions of the two-question quiz correctly, leaves the rest blank, submits. */
+    /** Trả lời đúng {@code right} câu đầu của bài kiểm tra hai câu, bỏ trống phần còn lại rồi nộp bài. */
     private void attempt(String user, long quizId, int right) {
         JsonNode session = api.ok(user, api.post(Map.of(), "/api/v1/me/quizzes/{id}/attempts", quizId));
         long attemptId = session.path("attemptId").asLong();
