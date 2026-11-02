@@ -20,7 +20,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | # | File | Ghi chú |
 |---|---|---|
 | 1 | `learning_hub_identity.sql` | Schema, 7 tài khoản demo, RBAC |
-| 2 | `learning_hub_learning.sql` | 29 bảng Learning (gồm `learning_activity_days`, `lesson_notes`, `lesson_bookmarks`) |
+| 2 | `learning_hub_learning.sql` | 30 bảng Learning (gồm `learning_activity_days`, `lesson_notes`, `lesson_bookmarks`, `lesson_feedback`) |
 | 3 | `learning_hub_media_progress.sql` | Extension media/tiến độ |
 | 4 | `learning_hub_assessment.sql` | Quiz Engine; cần Identity + Learning, nằm trước Knowledge/Community |
 | 5 | `learning_hub_knowledge.sql` | pgvector (image `pgvector/pgvector:pg16`) |
@@ -59,6 +59,7 @@ Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_S
 | `2026-11-02-learning-leaderboard.sql` | Bảng `learning_activity_days` (một dòng mỗi người mỗi ngày học theo `Asia/Ho_Chi_Minh`, phục vụ chuỗi ngày học của bảng xếp hạng) và index; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu bảng | `2026-11-02-learning-leaderboard.rollback.sql` xóa index và bảng, chuỗi ngày học về 0 |
 | `2026-11-02-learning-leaderboard-backfill.sql` | Tùy chọn: thêm mỗi người mỗi ngày đã có tiến độ bài học hoặc lượt thi đã chấm (`first_source='backfill'`); bỏ qua ngày đã có nên chạy lại không thêm dòng | `DELETE FROM learning_hub.learning_activity_days WHERE first_source = 'backfill';` |
 | `2026-11-03-lesson-notes.sql` | Bảng `lesson_notes` và `lesson_bookmarks` (ghi chú và đánh dấu riêng của học viên trên trang PDF hoặc giây video; xóa mềm, có CHECK nhất quán của neo, không FK, không UNIQUE) cùng hai index một phần; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu bảng | `2026-11-03-lesson-notes.rollback.sql` in số dòng của hai bảng rồi xóa index và bảng, mất mọi ghi chú và đánh dấu |
+| `2026-11-04-lesson-feedback.sql` | Bảng `lesson_feedback` (đánh giá sao, nhận xét công khai, câu hỏi giảng viên và báo nội dung của học viên trên một bài học; `status` chỉ có với câu hỏi và báo nội dung; xóa mềm, có CHECK về nội dung, trạng thái và neo, không FK, không UNIQUE) cùng hai index một phần; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu bảng | `2026-11-04-lesson-feedback.rollback.sql` in số dòng của bảng rồi xóa index và bảng, mất mọi phản hồi |
 
 ```bash
 psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.sql
@@ -191,7 +192,7 @@ cho kiểm chứng vector. Hạ tầng S3/video/worker/crash đã kiểm local; 
 
 ## Bổ sung module Learning
 
-Backend hiện có thêm 46 API Learning và 29 bảng được định nghĩa tại
+Backend hiện có thêm 46 API Learning và 30 bảng được định nghĩa tại
 [learning_hub_learning.sql](learning_hub_learning.sql). Review và chạy file Learning **một lần sau Identity**
 trên môi trường được phép, trước khi chạy bản ứng dụng có entity Learning. File không có FK/REFERENCES,
 không seed/reset/cấp quyền và không sửa 8 bảng Identity. Không chạy lại trên schema đã có các bảng Learning;
