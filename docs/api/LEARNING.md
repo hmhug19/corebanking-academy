@@ -695,6 +695,29 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 | 35 | POST `/api/v1/learning-assets` | Upload tài nguyên |
 | 36 | GET `/api/v1/learning-assets/{assetId}/content` | Tải tài nguyên |
 
+### Xuất bản kèm đối tượng giao và chia sẻ
+
+`POST /courses/{courseId}/revisions/{revisionId}/publish` nhận `PublishRequest`:
+`{expectedVersion, assignments?, shareOrgIds?}`. Chỉ có `expectedVersion` thì hành vi như trước.
+
+- `assignments` tối đa 20 dòng, mỗi dòng `{startAt, dueAt?, reminderEnabled, reminderDaysBefore (0–365), target}`;
+  `target` là `TargetInput` (user | team | org | learning_group). `shareOrgIds` tối đa 50 đơn vị. Hai danh sách null
+  được hiểu là rỗng.
+- Tất cả chạy trong **một transaction**, theo thứ tự: xuất bản, từng chia sẻ, từng dòng giao. Lỗi ở bất kỳ bước nào hủy
+  cả việc xuất bản (revision vẫn là bản nháp, không còn lượt giao hay chia sẻ nào) nên có thể gửi lại sau khi sửa.
+- **Chia sẻ:** đơn vị đã có chia sẻ đang hoạt động được bỏ qua (không ghi, không audit). Còn lại đi qua cùng quy tắc
+  của `PUT /shares` với `includeDescendants`=true, `canAssign`=true, `canSelfEnroll`=false, `active`=true.
+- **Lượt giao:** mỗi dòng đi qua logic của `POST /assignments` với `revisionId` là bản vừa xuất bản,
+  `assigningOrgId` là đơn vị sở hữu khóa, `title` null, `requirement` là `defaultRequirement` của bản đó,
+  `enrollmentMode`=`continue`, `idempotencyKey`=`publish-{revisionId}-{chỉ số dòng}`.
+- **Lỗi theo dòng:** trả `CORE-VALIDATION_FAILED` với đúng một phần tử `errors`: `field` là `assignments[i]` hoặc
+  `shareOrgIds[j]`, `code` và `message` là của lỗi gốc (ví dụ `LEARNING-EMPTY_TARGET`, `OUT_OF_RANGE`,
+  `LEARNING-INVALID_REFERENCE`). Lỗi quyền với người nhận cũng trả theo dòng đó với `CORE-ACCESS_DENIED`, không phải
+  403 trần. Lỗi kiểm tra định dạng giữ đường dẫn thường, ví dụ `assignments[0].target`.
+- **Audit:** theo thứ tự `COURSE_PUBLISHED`, `COURSE_SHARED` cho từng chia sẻ mới, rồi các sự kiện giao học.
+- **Khóa ghi:** `assign` và `share` gọi lại `LearningWriteLock.acquire()` trong cùng transaction; đó là
+  `pg_advisory_xact_lock` của PostgreSQL, cho phép cùng một session lấy lại nhiều lần nên không tự khóa chết.
+
 ## Hướng dẫn sử dụng từng bảng
 
 

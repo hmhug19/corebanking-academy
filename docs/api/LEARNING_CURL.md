@@ -409,6 +409,36 @@ curl --silent --show-error --request POST "${BASE_URL}/api/v1/courses/${COURSE_I
 JSON
 ```
 
+Xuất bản kèm giao học và chia sẻ trong một transaction (tối đa 20 dòng giao, 50 đơn vị). Lỗi ở dòng nào thì cả việc
+xuất bản bị hủy và `errors[0].field` là `assignments[i]` hoặc `shareOrgIds[j]`; xem [LEARNING.md](LEARNING.md).
+
+```bash
+curl --silent --show-error --request POST "${BASE_URL}/api/v1/courses/${COURSE_ID}/revisions/${REVISION_ID}/publish" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
+  --header "Content-Type: application/json" \
+  --data-binary @- <<JSON
+{
+  "expectedVersion": ${REVISION_VERSION},
+  "assignments": [
+    {
+      "startAt": "2026-11-10T00:00:00Z",
+      "dueAt": "2026-12-10T00:00:00Z",
+      "reminderEnabled": true,
+      "reminderDaysBefore": 3,
+      "target": { "targetType": "user", "userId": "${LEARNER_ID}", "includeDescendants": false }
+    },
+    {
+      "startAt": "2026-11-10T00:00:00Z",
+      "reminderEnabled": false,
+      "reminderDaysBefore": 0,
+      "target": { "targetType": "org", "orgId": ${ORG_ID}, "includeDescendants": true }
+    }
+  ],
+  "shareOrgIds": [${SHARED_ORG_ID}]
+}
+JSON
+```
+
 ## 14. Mở bản nháp để chỉnh sửa
 
 Tái sử dụng draft hiện có hoặc clone từ bản published; không sao chép tiến độ.
