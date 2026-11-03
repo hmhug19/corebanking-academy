@@ -9,10 +9,12 @@ import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.common.dto.FieldViolation;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
+import vn.com.coreacademy.learning.constants.LearningCodes.EnrollmentMode;
 import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.dto.LearningDetails;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.entity.Course;
+import vn.com.coreacademy.learning.entity.CourseRevision;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 
 /**
@@ -34,9 +36,10 @@ public class LearningPublishService {
         var detail = content.publish(courseId, revisionId,
             new LearningRequests.VersionRequest(request.expectedVersion()));
 
-        // Bước 2: chia sẻ theo thứ tự yêu cầu, rồi giao học (xem assign bên dưới).
+        // Bước 2: chia sẻ rồi giao học theo thứ tự yêu cầu; lỗi ở dòng nào cũng hủy cả transaction.
         Course course = repository.require(Course.class, courseId);
         shareAll(course, request.shareOrgIds());
+        assignAll(course, repository.require(CourseRevision.class, revisionId), request.assignments());
         return detail;
     }
 
@@ -50,6 +53,25 @@ public class LearningPublishService {
                 assignments.share(course.getId(), new LearningRequests.ShareRequest(orgId, true, true, false, true));
             } catch (BusinessException | AccessDeniedException exception) {
                 throw rowFailure("shareOrgIds[" + index + "]", exception);
+            }
+        }
+    }
+
+    /**
+     * Mỗi dòng thành một lượt giao qua {@link LearningAssignmentService#assign}, mọi quy tắc của lượt giao đều áp dụng.
+     * Khóa idempotency theo bản và chỉ số dòng nên lượt xuất bản bị hủy rồi gửi lại không va chạm với lần trước.
+     */
+    private void assignAll(Course course, CourseRevision revision, List<LearningRequests.PublishAssignment> rows) {
+        for (int index = 0; index < rows.size(); index++) {
+            var row = rows.get(index);
+            var assignment = new LearningRequests.AssignmentRequest(revision.getId(), course.getOwnerOrgId(), null,
+                row.startAt(), row.dueAt(), revision.getDefaultRequirement(), EnrollmentMode.CONTINUE,
+                row.reminderEnabled(), row.reminderDaysBefore(), "publish-" + revision.getId() + "-" + index,
+                List.of(row.target()));
+            try {
+                assignments.assign(course.getId(), assignment);
+            } catch (BusinessException | AccessDeniedException exception) {
+                throw rowFailure("assignments[" + index + "]", exception);
             }
         }
     }
