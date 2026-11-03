@@ -34,7 +34,9 @@ public class AssessmentQuizDirectory implements LearningQuizDirectory {
     @Transactional(readOnly = true)
     public Optional<QuizRef> find(Long quizId) {
         return quizzes.findById(quizId)
-            .map(q -> new QuizRef(q.getId(), q.getCourseId(), q.getStatus(), Boolean.TRUE.equals(q.getDeleted())));
+            .map(q -> new QuizRef(q.getId(), q.getCourseId(), q.getStatus(), Boolean.TRUE.equals(q.getDeleted()),
+                q.getQuizType(), q.getPassPercent(), q.getMaxAttempts(),
+                Boolean.TRUE.equals(q.getAllowRetakeAfterPass())));
     }
 
     @Override

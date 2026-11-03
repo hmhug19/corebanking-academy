@@ -14,7 +14,7 @@ public final class LearningDetails {
 
     public record CourseDetail(LearningViews.CourseView course, LearningViews.CourseRevisionView revision,
                                List<LearningViews.CourseObjectiveView> objectives, List<ChapterDetail> chapters,
-                               LearningViews.CourseCompletionRuleView completionRule) {
+                               LearningViews.CourseCompletionRuleView completionRule, Long finalQuizId) {
     }
 
     public record ChapterDetail(LearningViews.CourseChapterView chapter, List<LessonDetail> lessons) {
