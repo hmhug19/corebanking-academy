@@ -58,6 +58,28 @@ public final class LearningRequests {
     public record VersionRequest(@NotNull @Min(0) Long expectedVersion) {
     }
 
+    /**
+     * Xuất bản kèm đối tượng giao và đơn vị được chia sẻ; hai danh sách bỏ trống hoặc null nghĩa là không có.
+     * Mỗi dòng giao chỉ có một đối tượng; các giá trị còn lại của lượt giao lấy từ bản vừa xuất bản.
+     */
+    public record PublishRequest(
+        @NotNull @Min(0) Long expectedVersion,
+        @Size(max = LearningLimits.MAX_PUBLISH_ASSIGNMENTS) List<@Valid @NotNull PublishAssignment> assignments,
+        @Size(max = LearningLimits.MAX_PUBLISH_SHARES) List<@NotNull @Positive Long> shareOrgIds) {
+        public PublishRequest {
+            assignments = assignments == null ? List.of() : assignments;
+            shareOrgIds = shareOrgIds == null ? List.of() : shareOrgIds;
+        }
+    }
+
+    public record PublishAssignment(
+        @NotNull Instant startAt,
+        Instant dueAt,
+        boolean reminderEnabled,
+        @Min(0) @Max(365) int reminderDaysBefore,
+        @NotNull @Valid TargetInput target) {
+    }
+
     public record CopyRequest(@NotBlank @Size(max = 50) String code) {
     }
 

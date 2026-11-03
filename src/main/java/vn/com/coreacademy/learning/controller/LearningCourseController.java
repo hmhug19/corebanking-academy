@@ -28,6 +28,7 @@ import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.service.LearningAssignmentService;
 import vn.com.coreacademy.learning.service.LearningContentService;
+import vn.com.coreacademy.learning.service.LearningPublishService;
 
 @RestController
 @RequestMapping(value = "/api/v1/courses", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -37,6 +38,7 @@ import vn.com.coreacademy.learning.service.LearningContentService;
 @RequiredArgsConstructor
 public class LearningCourseController {
     private final LearningContentService content;
+    private final LearningPublishService publisher;
     private final LearningAssignmentService assignments;
 
     @PostMapping
@@ -89,11 +91,14 @@ public class LearningCourseController {
         summary = "Xuất bản khóa học",
         description = """
             Kiểm tra nội dung, danh mục và tài nguyên trước khi đóng băng revision. Không reset tiến độ cũ.
+            Có thể kèm assignments (đối tượng giao) và shareOrgIds (đơn vị chia sẻ): tất cả cùng một transaction,
+            một dòng lỗi làm hủy cả việc xuất bản và trả CORE-VALIDATION_FAILED với field assignments[i] hoặc
+            shareOrgIds[j].
             """
     )
     public BaseResponse<LearningDetails.CourseDetail> publish(@PathVariable @Positive Long courseId,
-        @PathVariable @Positive Long revisionId, @Valid @RequestBody LearningRequests.VersionRequest request) {
-        return BaseResponse.ok(content.publish(courseId, revisionId, request));
+        @PathVariable @Positive Long revisionId, @Valid @RequestBody LearningRequests.PublishRequest request) {
+        return BaseResponse.ok(publisher.publish(courseId, revisionId, request));
     }
 
     @PostMapping("/{courseId}/draft")
