@@ -67,7 +67,10 @@ public class LearningContentService {
     private final List<LearningResourceExtension> resourceExtensions;
     private final LearningQuizDirectory quizzes;
 
-    /** Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload. */
+    /**
+     * Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload.
+     * Nếu payload có {@code draft} thì ghi luôn nội dung nháp trong cùng transaction; {@code draft.title} ưu tiên hơn {@code title}.
+     */
     @Transactional
     public LearningDetails.CourseDetail create(LearningRequests.CreateCourse request) {
         // Bước 1: xác định caller và kiểm tra scope tổ chức/nhóm trước khi tạo tài nguyên.
@@ -90,7 +93,13 @@ public class LearningContentService {
         course.setOwnerUserId(actor.person().id());
         course.setLifecycleStatus(CourseStatus.ACTIVE);
         repository.save(course, actor.person().id());
-        CourseRevision revision = newRevision(course, request.title(), actor.person().id(), 1);
+        var draft = request.draft();
+        String title = draft != null && draft.title() != null ? draft.title() : request.title();
+        CourseRevision revision = newRevision(course, title, actor.person().id(), 1);
+        if (draft != null) {
+            // Cùng transaction với khóa mới: nội dung nháp lỗi thì rollback, không để lại khóa rỗng.
+            applyDraft(course, revision, draft.withTitle(title), actor.person().id());
+        }
 
         // Bước 3: lưu audit cùng transaction; flush để trả đúng rowVersion do JPA sinh.
         record(actor.person().id(), AuditAction.COURSE_CREATED, course);
@@ -118,17 +127,35 @@ public class LearningContentService {
         CourseRevision revision = repository.require(CourseRevision.class, revisionId);
         requireDraft(course, revision);
         version(revision, request.expectedVersion());
-        validateCatalog(course, request.programId(), request.moduleId(), false);
-        validateDraftSize(request);
+
+        // Bước 2: kiểm tra và thay cây draft bằng nội dung mới.
+        applyDraft(course, revision, request.content(), actor.person().id());
+
+        // Bước 3: audit và flush trong cùng transaction để caller nhận version mới dùng lần lưu sau.
+        record(actor.person().id(), AuditAction.DRAFT_SAVED, course);
+        repository.flush();
+        repository.incrementVersion(revision);
+        return detail(course, revision);
+    }
+
+    /**
+     * Kiểm tra rồi ghi toàn bộ nội dung nháp vào revision; dùng chung cho lưu nháp và tạo khóa kèm nháp.
+     * Lỗi bất kỳ ném ngoại lệ trước khi cây cũ bị thay, transaction của caller sẽ rollback.
+     */
+    private void applyDraft(Course course, CourseRevision revision, LearningRequests.DraftContent draft,
+                            String actor) {
+        // Bước 1: kiểm tra danh mục và quy mô.
+        validateCatalog(course, draft.programId(), draft.moduleId(), false);
+        validateDraftSize(draft);
 
         // Bước 2: kiểm tra tệp/quy tắc khối trước khi thay cây; lỗi bất kỳ rollback toàn bộ.
-        if (request.coverAssetId() != null) {
-            LearningAsset cover = usableAsset(course, request.coverAssetId());
+        if (draft.coverAssetId() != null) {
+            LearningAsset cover = usableAsset(course, draft.coverAssetId());
             if (!cover.getMimeType().startsWith(MediaMime.IMAGE_PREFIX)) {
                 throw new BusinessException(LearningResponseCode.ASSET_INVALID);
             }
         }
-        for (var chapter : request.chapters()) {
+        for (var chapter : draft.chapters()) {
             for (var lesson : chapter.lessons()) {
                 validateLessonInput(course, lesson);
                 for (var block : lesson.blocks()) {
@@ -139,26 +166,20 @@ public class LearningContentService {
 
         // Bước 3: chỉ xóa cây draft, không đụng các revision published/enrollment/progress lịch sử.
         clearDraftTree(revision.getId());
-        revision.setProgramId(request.programId());
-        revision.setModuleId(request.moduleId());
-        revision.setTitle(request.title());
-        revision.setSummary(request.summary());
-        revision.setLevel(request.level());
-        revision.setDefaultRequirement(request.defaultRequirement());
-        revision.setCoverAssetId(request.coverAssetId());
-        revision.setCoverIcon(request.coverIcon());
-        revision.setCoverColor(request.coverColor());
-        repository.save(revision, actor.person().id());
-        writeTree(revision, request, actor.person().id());
+        revision.setProgramId(draft.programId());
+        revision.setModuleId(draft.moduleId());
+        revision.setTitle(draft.title());
+        revision.setSummary(draft.summary());
+        revision.setLevel(draft.level());
+        revision.setDefaultRequirement(draft.defaultRequirement());
+        revision.setCoverAssetId(draft.coverAssetId());
+        revision.setCoverIcon(draft.coverIcon());
+        revision.setCoverColor(draft.coverColor());
+        repository.save(revision, actor);
+        writeTree(revision, draft, actor);
         CourseCompletionRule rule = repository.rules(revision.getId()).get(0);
-        rule.setRewardPoints(request.rewardPoints());
-        repository.save(rule, actor.person().id());
-
-        // Bước 4: audit và flush trong cùng transaction để caller nhận version mới dùng lần lưu sau.
-        record(actor.person().id(), AuditAction.DRAFT_SAVED, course);
-        repository.flush();
-        repository.incrementVersion(revision);
-        return detail(course, revision);
+        rule.setRewardPoints(draft.rewardPoints());
+        repository.save(rule, actor);
     }
 
     @Transactional
@@ -359,7 +380,7 @@ public class LearningContentService {
         }
     }
 
-    private void validateDraftSize(LearningRequests.DraftRequest request) {
+    private void validateDraftSize(LearningRequests.DraftContent request) {
         long lessons = request.chapters().stream().mapToLong(c -> c.lessons().size()).sum();
         long blocks = request.chapters().stream().flatMap(c -> c.lessons().stream())
             .mapToLong(l -> l.blocks().size()).sum();
@@ -568,7 +589,7 @@ public class LearningContentService {
         repository.objectives(revisionId).forEach(repository::remove);
     }
 
-    private void writeTree(CourseRevision revision, LearningRequests.DraftRequest request, String actor) {
+    private void writeTree(CourseRevision revision, LearningRequests.DraftContent request, String actor) {
         for (int i = 0; i < request.objectives().size(); i++) {
             CourseObjective objective = new CourseObjective();
             objective.setRevisionId(revision.getId());
@@ -667,7 +688,7 @@ public class LearningContentService {
                             .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList()))
                     .toList()))
                 .toList())).toList();
-        var payload = new LearningRequests.DraftRequest(0L, source.getProgramId(), source.getModuleId(),
+        var payload = new LearningRequests.DraftContent(source.getProgramId(), source.getModuleId(),
             source.getTitle(), source.getSummary(), source.getLevel(), source.getDefaultRequirement(),
             source.getCoverAssetId(), source.getCoverIcon(), source.getCoverColor(),
             original.objectives().stream().map(LearningViews.CourseObjectiveView::description).toList(), chapters,
