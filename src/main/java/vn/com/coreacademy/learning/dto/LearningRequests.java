@@ -46,6 +46,7 @@ public final class LearningRequests {
         @Min(0) int sortNo) {
     }
 
+    /** {@code draft} (tùy chọn) là nội dung nháp ghi cùng lúc với khóa mới; bỏ trống thì tạo bản nháp rỗng. */
     public record CreateCourse(
         @NotNull @Positive Long ownerOrgId,
         @Positive Long ownerTeamId,
@@ -78,6 +79,11 @@ public final class LearningRequests {
         @NotNull @Size(max = 100) List<@NotBlank @Size(max = 2000) String> objectives,
         @NotNull @Size(max = 100) List<@Valid ChapterInput> chapters,
         @Min(0) @Max(100000) int rewardPoints) {
+        /** Bản sao với tiêu đề khác; dùng khi tiêu đề của khóa lấy từ trường ngoài nội dung nháp. */
+        public DraftContent withTitle(String newTitle) {
+            return new DraftContent(programId, moduleId, newTitle, summary, level, defaultRequirement, coverAssetId,
+                coverIcon, coverColor, objectives, chapters, rewardPoints);
+        }
     }
 
     public record DraftRequest(

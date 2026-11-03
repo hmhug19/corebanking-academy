@@ -254,6 +254,57 @@ curl --silent --show-error --request POST "${BASE_URL}/api/v1/courses" \
 JSON
 ```
 
+Có thể gửi kèm `draft` (cùng cấu trúc bước 12, không có `expectedVersion`) để ghi khóa và nội dung nháp trong một lần;
+lỗi nội dung thì không tạo khóa. `draft.title` ưu tiên hơn `title`.
+
+```bash
+curl --silent --show-error --request POST "${BASE_URL}/api/v1/courses" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
+  --header "Content-Type: application/json" \
+  --data-binary @- <<JSON
+{
+  "ownerOrgId": ${ORG_ID},
+  "ownerTeamId": null,
+  "code": "COURSE-DEMO-02",
+  "draft": {
+    "title": "Tổng quan Core Banking",
+    "summary": "Giới thiệu hệ thống.",
+    "level": "basic",
+    "defaultRequirement": "optional",
+    "objectives": ["Nắm kiến trúc tổng thể"],
+    "chapters": [
+      {
+        "title": "Chương 1",
+        "lessons": [
+          {
+            "title": "Bài 1",
+            "lessonType": "content",
+            "estimatedDurationSeconds": 300,
+            "isRequired": true,
+            "quizId": null,
+            "blocks": [
+              {
+                "blockType": "text",
+                "title": "Giới thiệu",
+                "body": "Nội dung bài học.",
+                "bodyFormat": "markdown",
+                "completionMode": "manual",
+                "completionThreshold": null,
+                "isRequired": true,
+                "assets": [],
+                "steps": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "rewardPoints": 0
+  }
+}
+JSON
+```
+
 ## 11. Xem cây nội dung để biên soạn
 
 Chỉ người có quyền sửa khóa được xem bản nháp; không gửi revisionId sẽ lấy bản mới nhất.

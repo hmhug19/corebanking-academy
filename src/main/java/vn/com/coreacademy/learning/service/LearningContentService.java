@@ -67,7 +67,10 @@ public class LearningContentService {
     private final List<LearningResourceExtension> resourceExtensions;
     private final LearningQuizDirectory quizzes;
 
-    /** Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload. */
+    /**
+     * Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload.
+     * Nếu payload có {@code draft} thì ghi luôn nội dung nháp trong cùng transaction; {@code draft.title} ưu tiên hơn {@code title}.
+     */
     @Transactional
     public LearningDetails.CourseDetail create(LearningRequests.CreateCourse request) {
         // Bước 1: xác định caller và kiểm tra scope tổ chức/nhóm trước khi tạo tài nguyên.
@@ -90,7 +93,13 @@ public class LearningContentService {
         course.setOwnerUserId(actor.person().id());
         course.setLifecycleStatus(CourseStatus.ACTIVE);
         repository.save(course, actor.person().id());
-        CourseRevision revision = newRevision(course, request.title(), actor.person().id(), 1);
+        var draft = request.draft();
+        String title = draft != null && draft.title() != null ? draft.title() : request.title();
+        CourseRevision revision = newRevision(course, title, actor.person().id(), 1);
+        if (draft != null) {
+            // Cùng transaction với khóa mới: nội dung nháp lỗi thì rollback, không để lại khóa rỗng.
+            applyDraft(course, revision, draft.withTitle(title), actor.person().id());
+        }
 
         // Bước 3: lưu audit cùng transaction; flush để trả đúng rowVersion do JPA sinh.
         record(actor.person().id(), AuditAction.COURSE_CREATED, course);
