@@ -603,8 +603,15 @@ public class LearningContentService {
         if (revision.getCoverAssetId() != null) {
             usableAsset(course, revision.getCoverAssetId());
         }
-        if (!repository.assessments(revision.getId()).isEmpty()) {
-            throw new BusinessException(LearningResponseCode.QUIZ_UNAVAILABLE);
+        // Bài thi cuối khóa (nếu có) phải là đề FINAL_EXAM đã xuất bản, chưa xóa, của chính khóa này.
+        var finalQuizId = repository.finalAssessment(revision.getId())
+            .map(CourseAssessment::getAssessmentRevisionId);
+        if (finalQuizId.isPresent()) {
+            var quiz = quizzes.find(finalQuizId.get());
+            if (quiz.isEmpty() || !quiz.get().published() || !quiz.get().finalExam()
+                || !course.getId().equals(quiz.get().courseId())) {
+                throw new BusinessException(LearningResponseCode.FINAL_EXAM_UNPUBLISHED);
+            }
         }
     }
 

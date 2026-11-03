@@ -67,6 +67,7 @@ public class LearningProgressService {
     private final LearningWriteLock lock;
     private final LearningMapper mapper;
     private final IdentityAuditService audit;
+    private final LearningQuizDirectory quizzes;
 
     public LearningDetails.EnrollmentDetail get(Long enrollmentId) {
         var actor = access.actor();
@@ -320,6 +321,20 @@ public class LearningProgressService {
         return progress;
     }
 
+    /**
+     * Revision không có bài thi cuối khóa thì coi là đã đạt; ngược lại học viên phải đạt đề đó theo scoreMethod của
+     * đề (cùng nguồn điểm với màn tổng quan). Đề không còn trong danh sách đề đã xuất bản thì chưa đạt.
+     */
+    private boolean finalExamPassed(CourseEnrollment enrollment) {
+        var finalExam = repository.finalAssessment(enrollment.getRevisionId());
+        if (finalExam.isEmpty()) {
+            return true;
+        }
+        Long quizId = finalExam.get().getAssessmentRevisionId();
+        return quizzes.scores(enrollment.getUserId(), List.of(enrollment.getCourseId())).stream()
+            .anyMatch(score -> quizId.equals(score.quizId()) && score.passed());
+    }
+
     private void updateEnrollment(CourseEnrollment enrollment, Long lessonId, Long blockId, Instant now, String actor) {
         var lessons = repository.lessons(enrollment.getRevisionId()).stream().filter(CourseLesson::getIsRequired)
             .toList();
@@ -331,7 +346,7 @@ public class LearningProgressService {
             : sum.divide(BigDecimal.valueOf(lessons.size()), 3, RoundingMode.DOWN);
         boolean complete = !lessons.isEmpty() && lessons.stream()
             .allMatch(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0)
-            && repository.assessments(enrollment.getRevisionId()).isEmpty();
+            && finalExamPassed(enrollment);
         enrollment.setProgressPercent(enrollment.getProgressPercent().max(percent));
         enrollment.setStatus(complete || enrollment.getCompletedAt() != null ? ProgressStatus.COMPLETED :
             ProgressStatus.IN_PROGRESS);
@@ -351,7 +366,9 @@ public class LearningProgressService {
     /**
      * Học viên đạt đề của khóa: bài quiz trỏ tới đề đó trong phiên bản đã nhận lên 100%, rồi tính lại tiến độ khóa.
      * Không ném lỗi khi lần học không còn hiệu lực (đã rút hoặc không thuộc người này) vì bên gọi đang nằm trong
-     * transaction chấm bài và điểm phải được giữ; trả false trong trường hợp đó và khi khóa không có bài quiz nào.
+     * transaction chấm bài và điểm phải được giữ; trả false trong trường hợp đó và khi đề không gắn với khóa (không có
+     * bài quiz trỏ tới và cũng không phải bài thi cuối khóa của phiên bản). Đề là bài thi cuối khóa thì luôn tính lại
+     * khóa dù không có bài quiz nào, vì đạt đề có thể là điều kiện còn thiếu để hoàn thành.
      * Tiến độ chỉ tăng nên chấm lại từ đạt xuống trượt không hạ bài học.
      */
     @Transactional
@@ -363,10 +380,17 @@ public class LearningProgressService {
         }
         List<CourseLesson> targets = repository.lessons(enrollment.getRevisionId()).stream()
             .filter(l -> LessonType.QUIZ.equals(l.getLessonType()) && quizId.equals(l.getQuizId())).toList();
-        if (targets.isEmpty()) {
-            return false;
-        }
+        boolean finalExam = repository.finalAssessment(enrollment.getRevisionId())
+            .map(a -> quizId.equals(a.getAssessmentRevisionId())).orElse(false);
         Instant now = Instant.now();
+        if (targets.isEmpty()) {
+            if (!finalExam) {
+                return false;
+            }
+            // Đề là bài thi cuối khóa nhưng không bài quiz nào trỏ tới: chỉ cần tính lại khóa.
+            updateEnrollment(enrollment, enrollment.getLastLessonId(), enrollment.getLastBlockId(), now, userId);
+            return true;
+        }
         Map<Long, LessonProgress> existing = repository.lessonProgress(enrollmentId).stream()
             .collect(Collectors.toMap(LessonProgress::getLessonId, Function.identity(), (a, b) -> a));
         for (CourseLesson lesson : targets) {
