@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.dto;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 /** Read model scalar; không trả entity hoặc quan hệ JPA qua API. */
 public final class LearningViews {
@@ -133,9 +134,17 @@ public final class LearningViews {
         Integer sortNo,
         Long sourceBlockId,
         Long mediaAssetId,
+        List<VideoChapterView> videoChapters,
+        List<TranscriptLineView> transcript,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {
+    }
+
+    public record VideoChapterView(BigDecimal startSeconds, String title) {
+    }
+
+    public record TranscriptLineView(BigDecimal startSeconds, String text) {
     }
 
     public record ProcessStepView(

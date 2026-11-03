@@ -255,6 +255,8 @@ CREATE TABLE learning_hub.lesson_blocks (
     is_required boolean NOT NULL,
     sort_no integer NOT NULL,
     source_block_id bigint,
+    video_chapters jsonb,
+    transcript jsonb,
     created_by varchar(20) NOT NULL,
     updated_by varchar(20) NOT NULL,
     row_version bigint NOT NULL DEFAULT 0,
@@ -273,6 +275,8 @@ COMMENT ON COLUMN learning_hub.lesson_blocks.completion_threshold IS 'Thuộc t�
 COMMENT ON COLUMN learning_hub.lesson_blocks.is_required IS 'Thuộc tính isRequired; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.sort_no IS 'Thuộc tính sortNo; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.source_block_id IS 'ID tham chiếu logic, không có FK; backend kiểm tra tồn tại và quyền.';
+COMMENT ON COLUMN learning_hub.lesson_blocks.video_chapters IS 'Mốc của khối video: mảng JSON [{"startSeconds": số giây, "title": tên mốc}], tối đa 50 mốc, startSeconds tăng dần; NULL khi không có mốc hoặc khối không phải video. Service kiểm tra, không có ràng buộc DB.';
+COMMENT ON COLUMN learning_hub.lesson_blocks.transcript IS 'Transcript của khối video: mảng JSON [{"startSeconds": số giây, "text": nội dung}], tối đa 2000 đoạn, startSeconds tăng dần; NULL khi không có transcript hoặc khối không phải video. Service kiểm tra, không có ràng buộc DB.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.created_by IS 'Mã cán bộ tạo bản ghi.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.updated_by IS 'Mã cán bộ cập nhật gần nhất.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.row_version IS 'Optimistic locking chống ghi đè thay đổi.';

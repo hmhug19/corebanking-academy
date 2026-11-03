@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -60,4 +61,14 @@ public class LessonBlock extends LearningRecord {
 
     @Column(name = "media_asset_id")
     private Long mediaAssetId;
+
+    /** Mốc của khối video: mảng JSON {startSeconds, title}; NULL khi không có. */
+    @Column(name = "video_chapters", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode videoChapters;
+
+    /** Transcript của khối video: mảng JSON {startSeconds, text}; NULL khi không có. */
+    @Column(name = "transcript", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode transcript;
 }

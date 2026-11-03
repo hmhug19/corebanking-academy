@@ -14,6 +14,10 @@ public final class LearningLimits {
     public static final int MAX_ASSIGNMENT_TARGETS = 100;
     public static final int MAX_NOTES_PER_LESSON = 500;
     public static final int MAX_BOOKMARKS_PER_LESSON = 500;
+    public static final int MAX_VIDEO_CHAPTERS = 50;
+    public static final int MAX_CHAPTER_TITLE_LENGTH = 120;
+    public static final int MAX_TRANSCRIPT_LINES = 2_000;
+    public static final int MAX_TRANSCRIPT_TEXT_LENGTH = 1_000;
     public static final int MAX_NOTE_LENGTH = 4_000;
     public static final int MAX_BOOKMARK_LABEL_LENGTH = 200;
     public static final int MAX_SAVED_PAGE_SIZE = 100;

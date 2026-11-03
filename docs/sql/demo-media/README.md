@@ -18,3 +18,6 @@ ffmpeg -y -f lavfi -i "testsrc2=size=640x360:rate=15:duration=30" \
   -c:v libx264 -preset slow -crf 30 -pix_fmt yuv420p -c:a aac -b:a 48k -shortest -movflags +faststart \
   docs/sql/demo-media/demo-core-banking.mp4
 ```
+
+`lesson-player-modes-demo.sql` fills the chapters and transcript of the demo video block (block 33) on a local DB that
+was seeded before those columns existed. Local only; it writes only when both columns are still NULL.
