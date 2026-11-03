@@ -50,7 +50,8 @@ public final class LearningRequests {
         @NotNull @Positive Long ownerOrgId,
         @Positive Long ownerTeamId,
         @NotBlank @Size(max = 50) String code,
-        @Size(max = 255) String title) {
+        @Size(max = 255) String title,
+        @Valid DraftContent draft) {
     }
 
     public record VersionRequest(@NotNull @Min(0) Long expectedVersion) {
@@ -61,6 +62,22 @@ public final class LearningRequests {
 
     public record CourseState(@NotNull @Min(0) Long expectedVersion,
                               @NotNull @Pattern(regexp = CourseStatus.PATTERN) String status) {
+    }
+
+    /** Nội dung bản nháp (mọi trường của {@link DraftRequest} trừ expectedVersion); dùng chung khi lưu nháp và khi tạo khóa. */
+    public record DraftContent(
+        @Positive Long programId,
+        @Positive Long moduleId,
+        @Size(max = 255) String title,
+        @Size(max = 30000) String summary,
+        @Pattern(regexp = Level.PATTERN) String level,
+        @NotNull @Pattern(regexp = Requirement.PATTERN) String defaultRequirement,
+        @Positive Long coverAssetId,
+        @Size(max = 50) String coverIcon,
+        @Pattern(regexp = "#[0-9A-Fa-f]{6}") String coverColor,
+        @NotNull @Size(max = 100) List<@NotBlank @Size(max = 2000) String> objectives,
+        @NotNull @Size(max = 100) List<@Valid ChapterInput> chapters,
+        @Min(0) @Max(100000) int rewardPoints) {
     }
 
     public record DraftRequest(
@@ -77,6 +94,11 @@ public final class LearningRequests {
         @NotNull @Size(max = 100) List<@NotBlank @Size(max = 2000) String> objectives,
         @NotNull @Size(max = 100) List<@Valid ChapterInput> chapters,
         @Min(0) @Max(100000) int rewardPoints) {
+        /** Phần nội dung của payload, bỏ expectedVersion. */
+        public DraftContent content() {
+            return new DraftContent(programId, moduleId, title, summary, level, defaultRequirement, coverAssetId,
+                coverIcon, coverColor, objectives, chapters, rewardPoints);
+        }
     }
 
     public record ChapterInput(@NotBlank @Size(max = 255) String title,
