@@ -388,6 +388,12 @@ curl --silent --show-error --request PUT "${BASE_URL}/api/v1/courses/${COURSE_ID
 JSON
 ```
 
+Bài kiểm tra cuối khóa: thêm `"finalQuizId": QUIZ_ID` vào thân PUT (hoặc `draft` của POST `/courses`). `QUIZ_ID` là đề
+`FINAL_EXAM` của đúng khóa (đề nháp được lưu, nhưng xuất bản đòi đề `PUBLISHED`, nếu không trả
+`LEARNING-FINAL_EXAM_UNPUBLISHED`). Bỏ trường hoặc gửi `null` là xóa bài thi cuối khóa; đề sai loại/khóa trả
+`LEARNING-QUIZ_INVALID` (lỗi trường `finalQuizId`). Response có `finalQuizId`. Học viên trên revision đó chỉ hoàn thành khóa
+khi đã làm xong bài bắt buộc và đạt đề (POST `/api/v1/me/quizzes/{quizId}/attempts` rồi `.../quiz-attempts/{id}/submit`).
+
 ## 13. Xuất bản khóa học
 
 Kiểm tra nội dung, danh mục và tài nguyên trước khi đóng băng revision. Không reset tiến độ cũ.
