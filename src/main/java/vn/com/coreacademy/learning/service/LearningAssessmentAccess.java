@@ -25,6 +25,7 @@ import vn.com.coreacademy.learning.entity.CourseEnrollment;
 import vn.com.coreacademy.learning.entity.CourseLesson;
 import vn.com.coreacademy.learning.entity.CourseRevision;
 import vn.com.coreacademy.learning.entity.LessonProgress;
+import vn.com.coreacademy.learning.entity.TrainingProgram;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 
@@ -46,6 +47,30 @@ public class LearningAssessmentAccess {
     private final LearningActivityService activity;
 
     public record ManagedCourse(Long id, String code, Long ownerOrgId) {
+    }
+
+    public record ManagedProgram(Long id, Long ownerOrgId) {
+    }
+
+    /** Ngân hàng chung thuộc đơn vị sở hữu chương trình, không suy quyền từ một khóa học của caller. */
+    public ManagedProgram requireManagedProgram(Long programId) {
+        TrainingProgram program = repository.require(TrainingProgram.class, programId);
+        access.requireManage(access.actor(), program.getOwnerOrgId(), null, null);
+        return new ManagedProgram(program.getId(), program.getOwnerOrgId());
+    }
+
+    /** Cùng phiên bản mới nhất mà màn biên soạn khóa học đang mở. */
+    public Long courseProgramId(Long courseId) {
+        return repository.revisions(courseId).stream().findFirst().map(CourseRevision::getProgramId).orElse(null);
+    }
+
+    /** Giảng viên chỉ quản lý khóa vẫn được đọc bộ câu hỏi chung của đúng chương trình và đơn vị của khóa đó. */
+    public void requireCourseProgramBank(Long courseId, Long programId) {
+        ManagedCourse course = requireManagedCourse(courseId);
+        TrainingProgram program = repository.require(TrainingProgram.class, programId);
+        if (!programId.equals(courseProgramId(courseId)) || !program.getOwnerOrgId().equals(course.ownerOrgId())) {
+            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+        }
     }
 
     /** Lần học hợp lệ của caller tại thời điểm gọi; orgId/teamId là đơn vị hiện tại để chụp vào lượt thi. */

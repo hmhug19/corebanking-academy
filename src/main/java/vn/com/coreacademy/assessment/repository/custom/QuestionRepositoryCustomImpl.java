@@ -24,8 +24,15 @@ public class QuestionRepositoryCustomImpl implements QuestionRepositoryCustom {
             left join learning_hub.competencies c on c.competency_id = q.competency_id
             """);
         sql.and("not q.is_deleted");
-        sql.and("q.course_id = :course");
-        sql.bind("course", filter.courseId());
+        if (filter.programId() != null) {
+            sql.and("q.program_id = :program");
+            sql.bind("program", filter.programId());
+        } else if (filter.courseId() != null) {
+            sql.and("q.course_id = :course");
+            sql.bind("course", filter.courseId());
+        } else {
+            throw new IllegalArgumentException("Question bank scope is required");
+        }
         String term = NativeSearchQuery.containsPattern(filter.q());
         if (term != null) {
             sql.and("lower(coalesce(q.code, '')) like :term escape '!' or lower(q.content) like :term escape '!'");
@@ -63,7 +70,7 @@ public class QuestionRepositoryCustomImpl implements QuestionRepositoryCustom {
                    (select count(*) from learning_hub.quiz_questions qq
                     join learning_hub.quizzes z on z.quiz_id = qq.quiz_id and not z.is_deleted
                     where qq.question_id = q.question_id),
-                   q.row_version, q.update_time
+                   q.row_version, q.update_time, q.program_id
             """, AssessmentViews.QuestionSummary.class, page, Map.of("id", "q.question_id", "code", "q.code",
                 "updateTime", "q.update_time"));
     }

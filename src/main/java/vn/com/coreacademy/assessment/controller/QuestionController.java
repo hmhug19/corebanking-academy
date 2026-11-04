@@ -52,14 +52,16 @@ public class QuestionController {
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
-        summary = "Danh sách câu hỏi của khóa",
+        summary = "Danh sách câu hỏi theo chương trình",
         description = """
-            Ngân hàng câu hỏi theo khóa; caller phải có quyền quản lý khóa.
+            Ngân hàng theo programId; quyền biên soạn GLOBAL/ORG trong đơn vị sở hữu chương trình.
+            - courseId vẫn được nhận để tương thích client cũ, không bắt buộc khi có programId.
             - Kèm số phương án, số đáp án đúng và số đề đang dùng câu; không trả nội dung phương án.
             """
     )
     public BaseResponse<PageResponse<AssessmentViews.QuestionSummary>> search(
-        @RequestParam @Positive Long courseId,
+        @RequestParam(required = false) @Positive Long courseId,
+        @RequestParam(required = false) @Positive Long programId,
         @Parameter(description = "Tìm trong mã hoặc nội dung, tối đa 100 ký tự.") @RequestParam(required = false)
         String q,
         @RequestParam(required = false) @Positive Long lessonId,
@@ -70,8 +72,8 @@ public class QuestionController {
         @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
         @Parameter(description = "id | code | updateTime, kèm ,asc hoặc ,desc") @RequestParam(defaultValue = "id,desc")
         String sort) {
-        return BaseResponse.ok(questions.search(courseId, q, lessonId, competencyId, questionType, difficulty, status,
-            page, size, sort));
+        return BaseResponse.ok(questions.search(courseId, programId, q, lessonId, competencyId, questionType, difficulty,
+            status, page, size, sort));
     }
 
     @GetMapping("/{id}")
@@ -93,7 +95,7 @@ public class QuestionController {
     @Operation(
         summary = "Tạo câu hỏi",
         description = """
-            Tạo câu hỏi trong ngân hàng của courseId.
+            Tạo câu hỏi dùng chung của programId; courseId chỉ dành cho client cũ.
             - Từ 2 phương án; SINGLE đúng 1 đáp án đúng, MULTIPLE ít nhất 2.
             - Mã để trống thì backend sinh Q<ID>; nhóm năng lực phải ACTIVE.
             """
@@ -181,7 +183,7 @@ public class QuestionController {
     @Operation(
         summary = "Đổi trạng thái câu hỏi hàng loạt",
         description = """
-            Đặt ACTIVE/INACTIVE cho tối đa 100 câu; caller phải quản lý mọi khóa chứa các câu.
+            Đặt ACTIVE/INACTIVE cho tối đa 100 câu; caller phải quản lý mọi ngân hàng chứa các câu.
             - Từ chối cả lô nếu có ID không tồn tại hoặc ngưng sử dụng làm đề đã xuất bản thiếu câu.
             """
     )

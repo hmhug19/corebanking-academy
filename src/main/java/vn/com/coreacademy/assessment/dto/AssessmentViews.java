@@ -41,7 +41,8 @@ public final class AssessmentViews {
         Long correctCount,
         Long usedInQuizCount,
         Long rowVersion,
-        Instant updateTime) {
+        Instant updateTime,
+        Long programId) {
     }
 
     public record OptionView(Long id, String content, Boolean correct, Integer sortNo) {
@@ -67,7 +68,8 @@ public final class AssessmentViews {
         List<QuizRef> usedInQuizzes,
         Long rowVersion,
         Instant createTime,
-        Instant updateTime) {
+        Instant updateTime,
+        Long programId) {
     }
 
     public record QuizView(

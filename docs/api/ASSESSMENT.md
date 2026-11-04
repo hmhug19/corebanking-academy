@@ -34,7 +34,9 @@ Mã trạng thái/loại dùng IN HOA (`ACTIVE`, `DRAFT`, `IN_PROGRESS`…) theo
 |---|---|
 | Đọc nhóm năng lực | Tài khoản đã đăng nhập |
 | Ghi nhóm năng lực | SUPER_ADMIN hoặc ADMIN phạm vi GLOBAL |
-| Câu hỏi, bài thi | Quyền quản lý khóa học theo `LearningAccessPolicy` (cùng quy tắc biên soạn khóa); `courseId` bắt buộc khi liệt kê |
+| Ngân hàng chương trình | SUPER_ADMIN/GLOBAL hoặc ADMIN/INSTRUCTOR với GLOBAL/ORG bao phủ đơn vị sở hữu chương trình; không suy quyền ghi ngân hàng chung từ một khóa OWN/TEAM |
+| Chọn câu hỏi cho đề | `programId` + `courseId`: caller quản lý khóa, chương trình phải là chương trình của revision mới nhất và cùng đơn vị sở hữu; cho phép đọc câu hỏi dùng chung để lập đề |
+| API câu hỏi courseId cũ, bài thi | Giữ quyền quản lý khóa theo `LearningAccessPolicy`. Câu hỏi mới không có courseId được kiểm quyền bằng chương trình thực tế của câu |
 | `/me/**` | Vai trò LEARNER/OWN và lần học hợp lệ của khóa (khóa active, nguồn giao/tự đăng ký còn hiệu lực); lượt của người khác trả `ASSESSMENT-NOT_FOUND` |
 
 Module Assessment truy cập Learning qua adapter công khai `LearningAssessmentAccess`, không dùng repository Learning.
@@ -46,7 +48,7 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 1 | GET `/api/v1/competencies?status` | Danh sách nhóm năng lực (phẳng, có parentId) |
 | 2 | POST `/api/v1/competencies` | Tạo nhóm năng lực |
 | 3 | PUT `/api/v1/competencies/{id}?expectedVersion` | Cập nhật nhóm năng lực |
-| 4 | GET `/api/v1/questions?courseId&q&lessonId&competencyId&questionType&difficulty&status&page&size&sort` | Danh sách câu hỏi của khóa; sort `id/code/updateTime` |
+| 4 | GET `/api/v1/questions?programId&courseId&q&lessonId&competencyId&questionType&difficulty&status&page&size&sort` | Câu hỏi trong chương trình (courseId riêng lẻ giữ tương thích cũ); sort `id/code/updateTime` |
 | 5 | GET `/api/v1/questions/{id}` | Chi tiết câu, phương án, đáp án đúng, đề đang dùng |
 | 6 | POST `/api/v1/questions` | Tạo câu hỏi |
 | 7 | PUT `/api/v1/questions/{id}?expectedVersion` | Cập nhật câu hỏi và toàn bộ phương án |
@@ -104,6 +106,30 @@ với `quizId` và `status` theo AND (ví dụ `status=VOIDED&graded=true` trả
 `expectedVersion` là `rowVersion` vừa đọc; lệch trả `ASSESSMENT-CONFLICT`.
 
 ## Quy tắc chính
+
+**Ngân hàng chương trình.** Câu hỏi mới gửi `programId`, không cần `courseId` hoặc `lessonId`.
+`programId` trong summary/detail là chương trình sở hữu, không được chuyển khi sửa. ID danh mục lấy từ
+`GET /api/v1/training-catalog/programs?ownerOrgId&page&size` như form khóa học. `GET /questions?programId=...`
+trả toàn bộ câu hỏi trong chương trình qua phân trang, gồm câu tạo từ các khóa khác và câu không gắn khóa.
+Lập đề gửi thêm `courseId` để server kiểm đúng quyền khóa và chương trình; không lấy scope từ request.
+Thay pool chỉ nhận câu cùng chương trình của revision mới nhất của khóa. Giữ snapshot của các lượt thi cũ.
+Mã câu hỏi vẫn duy nhất toàn ngân hàng theo quy tắc cũ, không thêm unique constraint mới.
+
+```json
+{"programId":2,"competencyId":1,"code":"CT-001","questionType":"SINGLE","content":"Nội dung câu hỏi?","explanation":"Giải thích","difficulty":"EASY","points":1,"status":"ACTIVE","options":[{"content":"A","correct":true},{"content":"B","correct":false}]}
+```
+
+`POST /questions` trả detail: `id`, `code`, `programId`, `courseId: null`, `lessonId: null`, các trường nội dung,
+`contentVersion`, `options[{id,content,correct,sortNo}]`, `usedInQuizzes`, `rowVersion`, `createTime`, `updateTime`.
+`PUT /questions/{id}?expectedVersion=N` nhận cùng body; giữ ID phương án cũ, bỏ ID khi thêm phương án.
+Summary có `contentPreview`, `competencyName`, `optionCount`, `correctCount`, `usedInQuizCount` và `rowVersion`;
+không trả đáp án. Tất cả field JSON là camelCase. Response vẫn nằm trong envelope chung.
+Ngưng sử dụng bằng PUT hoặc bulk-status đều bị từ chối nếu làm đề đã xuất bản thiếu câu ACTIVE; rollback toàn bộ.
+
+DB đã chạy baseline cần [upgrade ngân hàng chương trình](../sql/upgrade/2026-11-04-program-question-bank.sql)
+trước backend mới. Backfill theo revision mới nhất, không đổi programme đã có; câu cũ chưa xác định được
+chương trình vẫn giữ lại qua API courseId cũ. Nhập/xuất Excel bằng courseId giữ nguyên contract cũ. Với câu có nguồn courseId cũ, API theo ID/bulk
+giữ quyền quản lý khóa đó; câu mới không có courseId luôn kiểm theo chương trình sở hữu.
 
 **Câu hỏi.** Từ 2 tới 10 phương án; SINGLE đúng 1 đáp án đúng, MULTIPLE ít nhất 2. Mã để trống thì sinh `Q<ID>`.
 PUT gửi danh sách phương án đầy đủ: có `id` thì sửa tại chỗ, không `id` là phương án mới, phương án cũ vắng mặt

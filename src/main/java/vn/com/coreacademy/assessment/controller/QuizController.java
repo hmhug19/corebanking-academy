@@ -123,7 +123,7 @@ public class QuizController {
     @Operation(
         summary = "Thay pool câu hỏi của bài kiểm tra",
         description = """
-            Thay toàn bộ pool; câu phải thuộc cùng khóa, chưa xóa và không lặp. Gửi expectedVersion của đề.
+            Thay toàn bộ pool; câu phải thuộc chương trình của khóa, chưa xóa và không lặp. Gửi expectedVersion của đề.
             - points bỏ trống để dùng điểm mặc định của câu hỏi.
             """
     )

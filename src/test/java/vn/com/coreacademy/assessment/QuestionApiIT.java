@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
+import static vn.com.coreacademy.assessment.support.AssessmentFixtures.ROOT;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.questionBody;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.quizBody;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.unique;
@@ -104,7 +105,7 @@ class QuestionApiIT extends AssessmentIntegrationTest {
         Map<String, Object> missingCourse = questionBody(course.id(), competency, "SINGLE", 0);
         missingCourse.put("courseId", null);
         JsonNode required = api.error(INSTRUCTOR, api.post(missingCourse, URL), "CORE-VALIDATION_FAILED");
-        assertThat(required.path("errors").get(0).path("field").asText()).isEqualTo("courseId");
+        assertThat(required.path("errors").get(0).path("field").asText()).isEqualTo("programId");
 
         Map<String, Object> badCompetency = questionBody(course.id(), 999_999_999L, "SINGLE", 0);
         JsonNode reference = api.error(INSTRUCTOR, api.post(badCompetency, URL), "ASSESSMENT-INVALID_REFERENCE");
@@ -226,6 +227,78 @@ class QuestionApiIT extends AssessmentIntegrationTest {
         api.error(INSTRUCTOR, api.post(Map.of("ids", List.of(free)), URL + "/bulk-delete"),
             "ASSESSMENT-INVALID_REFERENCE");
         api.error(INSTRUCTOR, api.post(Map.of("ids", List.of()), URL + "/bulk-delete"), "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
+    void programBankCrudDoesNotRequireACourseAndKeepsItsScope() {
+        long program = jdbc.queryForObject("""
+            select program_id from learning_hub.course_revisions where revision_id = ?
+            """, Long.class, course.revisionId());
+        Map<String, Object> body = questionBody(course.id(), competency, "SINGLE", 0);
+        body.remove("courseId");
+        body.put("programId", program);
+        body.put("code", unique("PROGRAM"));
+        JsonNode created = api.ok(ROOT, api.post(body, URL));
+        long id = created.path("id").asLong();
+        assertThat(created.path("programId").asLong()).isEqualTo(program);
+        assertThat(created.path("courseId").isNull()).isTrue();
+        JsonNode page = api.ok(ROOT, get(URL + "?programId={p}&q={q}", program, body.get("code")));
+        assertThat(page.path("items")).hasSize(1);
+        assertThat(page.path("items").get(0).path("correctCount").asLong()).isEqualTo(1);
+        api.http(LEARNER, get(URL + "?programId={p}", program), 403, "CORE-ACCESS_DENIED");
+        api.http(LEARNER, api.post(body, URL), 403, "CORE-ACCESS_DENIED");
+        api.error(ROOT, api.put(body, URL + "/{id}?expectedVersion={v}", id, 99), "ASSESSMENT-CONFLICT");
+        JsonNode updated = api.ok(ROOT, api.put(body, URL + "/{id}?expectedVersion={v}", id,
+            created.path("rowVersion").asLong()));
+        Map<String, Object> moved = new LinkedHashMap<>(body);
+        long other = fixtures.course().revisionId();
+        moved.put("programId", jdbc.queryForObject("""
+            select program_id from learning_hub.course_revisions where revision_id = ?
+            """, Long.class, other));
+        api.error(ROOT, api.put(moved, URL + "/{id}?expectedVersion={v}", id,
+            updated.path("rowVersion").asLong()), "CORE-VALIDATION_FAILED");
+        api.ok(ROOT, api.post(Map.of("ids", List.of(id), "status", "INACTIVE"), URL + "/bulk-status"));
+        api.ok(ROOT, api.post(Map.of("ids", List.of(id)), URL + "/bulk-delete"));
+        api.error(ROOT, get(URL + "/{id}", id), "ASSESSMENT-NOT_FOUND");
+    }
+
+    @Test
+    void quizAcceptsAnotherCourseInItsProgramAndRejectsAnotherProgram() {
+        long program = jdbc.queryForObject("""
+            select program_id from learning_hub.course_revisions where revision_id = ?
+            """, Long.class, course.revisionId());
+        long question = fixtures.question(course.id(), competency, "SINGLE", 0);
+        long copied = api.ok(INSTRUCTOR, api.post(Map.of("code", unique("COPY")),
+            "/api/v1/courses/{c}/copy", course.id())).path("course").path("id").asLong();
+        long quiz = fixtures.quiz(quizBody(copied), List.of(), false);
+        JsonNode candidates = api.ok(INSTRUCTOR, get(URL + "?programId={p}&courseId={c}", program, copied));
+        assertThat(candidates.path("items").findValues("id").stream().map(JsonNode::asLong).toList())
+            .contains(question);
+        Map<String, Object> programQuestion = questionBody(course.id(), competency, "SINGLE", 0);
+        programQuestion.remove("courseId");
+        programQuestion.put("programId", program);
+        long shared = api.ok(ROOT, api.post(programQuestion, URL)).path("id").asLong();
+        Map<String, Object> pool = Map.of("items", List.of(Map.of("questionId", question, "sortNo", 0),
+            Map.of("questionId", shared, "sortNo", 1)));
+        JsonNode saved = api.ok(INSTRUCTOR, api.put(pool,
+            "/api/v1/quizzes/{id}/questions?expectedVersion={v}", quiz, fixtures.quizVersion(quiz)));
+        assertThat(saved.path("pool").get(0).path("questionId").asLong()).isEqualTo(question);
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", saved.path("quiz").path("rowVersion").asLong()),
+            "/api/v1/quizzes/{id}/publish", quiz));
+        api.error(ROOT, api.post(Map.of("ids", List.of(shared)), URL + "/bulk-delete"),
+            "ASSESSMENT-QUESTION_IN_USE");
+        programQuestion.put("status", "INACTIVE");
+        api.error(ROOT, api.put(programQuestion, URL + "/{id}?expectedVersion={v}", shared,
+            api.ok(ROOT, get(URL + "/{id}", shared)).path("rowVersion").asLong()),
+            "ASSESSMENT-QUIZ_NOT_READY");
+        assertThat(api.ok(ROOT, get(URL + "/{id}", shared)).path("status").asText()).isEqualTo("ACTIVE");
+        Course outside = fixtures.course();
+        long foreign = fixtures.question(outside.id(), competency, "SINGLE", 0);
+        api.error(INSTRUCTOR, api.put(Map.of("items", List.of(Map.of("questionId", foreign, "sortNo", 0))),
+            "/api/v1/quizzes/{id}/questions?expectedVersion={v}", quiz, fixtures.quizVersion(quiz)),
+            "ASSESSMENT-INVALID_REFERENCE");
+        api.error(INSTRUCTOR, get(URL + "?programId={p}&courseId={c}", program, outside.id()),
+            "LEARNING-INVALID_REFERENCE");
     }
 
     private static Map<String, Object> option(Long id, String content, boolean correct) {

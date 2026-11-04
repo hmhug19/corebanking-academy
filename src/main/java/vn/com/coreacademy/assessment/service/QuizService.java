@@ -141,6 +141,7 @@ public class QuizService {
         Map<Long, Question> found = repository.questions(items.stream().map(AssessmentRequests.PoolItem::questionId)
             .toList()).stream().collect(Collectors.toMap(Question::getId, Function.identity()));
         Set<Long> seen = new HashSet<>();
+        Long programId = learning.courseProgramId(quiz.getCourseId());
         long active = 0;
         for (int i = 0; i < items.size(); i++) {
             Long questionId = items.get(i).questionId();
@@ -150,9 +151,11 @@ public class QuizService {
                     "Câu hỏi bị lặp trong pool.");
             }
             if (question == null || Boolean.TRUE.equals(question.getDeleted())
-                || !question.getCourseId().equals(quiz.getCourseId())) {
+                || (question.getProgramId() != null
+                    ? !question.getProgramId().equals(programId)
+                    : !Objects.equals(question.getCourseId(), quiz.getCourseId()))) {
                 throw BusinessException.field(AssessmentResponseCode.INVALID_REFERENCE, "items[" + i + "].questionId",
-                    "NOT_FOUND", "Câu hỏi không tồn tại hoặc không thuộc khóa học này.");
+                    "NOT_FOUND", "Câu hỏi không tồn tại hoặc không thuộc chương trình của khóa học này.");
             }
             if (ItemStatus.ACTIVE.equals(question.getStatus())) {
                 active++;
@@ -192,6 +195,13 @@ public class QuizService {
         requireVersion(quiz, request.expectedVersion());
         if (QuizStatus.PUBLISHED.equals(quiz.getStatus())) {
             return detail(quiz);
+        }
+        Long programId = learning.courseProgramId(quiz.getCourseId());
+        List<Long> questionIds = repository.pool(id).stream().map(QuizQuestion::getQuestionId).toList();
+        if (repository.questions(questionIds).stream().anyMatch(question -> question.getProgramId() != null
+            && !question.getProgramId().equals(programId))) {
+            throw BusinessException.field(AssessmentResponseCode.INVALID_REFERENCE, "items", "INVALID_VALUE",
+                "Bộ đề có câu hỏi ngoài chương trình hiện tại của khóa học.");
         }
         if (repository.activePoolSize(id) < quiz.getQuestionCount()) {
             throw new BusinessException(AssessmentResponseCode.QUIZ_NOT_READY);

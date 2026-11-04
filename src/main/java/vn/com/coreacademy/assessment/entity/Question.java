@@ -14,8 +14,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * Câu hỏi trong ngân hàng của một khóa học. contentVersion tăng khi sửa câu đã từng được phát đề; rowVersion chỉ
- * dùng chống ghi đè đồng thời.
+ * Câu hỏi dùng chung trong chương trình; courseId chỉ giữ nguồn của dữ liệu cũ.
+ * contentVersion tăng khi sửa câu đã từng được phát đề; rowVersion chống ghi đè đồng thời.
  */
 @Getter
 @Setter
@@ -31,7 +31,10 @@ public class Question extends AssessmentRecord {
     @Column(name = "code", length = 50)
     private String code;
 
-    @Column(name = "course_id", nullable = false)
+    @Column(name = "program_id")
+    private Long programId;
+
+    @Column(name = "course_id")
     private Long courseId;
 
     @Column(name = "lesson_id")
