@@ -380,4 +380,80 @@ Mật khẩu công khai của bộ dữ liệu demo: **Demo@123**. Có thể đ�
 5. quantri.ban quản lý toàn Ban gồm 15 nhóm và các tài khoản thường trong Ban; hocvien.tichhop là học viên nhóm tích hợp, không phải user ngoài đơn vị. Quyền TEAM của baocao chỉ gắn với Ban Giám đốc; tên bộ phận/chức danh không tự cấp quyền quản trị. Chỉ SUPER_ADMIN quản lý tài khoản đang mang vai trò quản trị.
 
 Schema/seed cùng một transaction PostgreSQL; có lỗi thì rollback transaction trước khi chạy lại. Database đã có dữ liệu cần giữ phải có kế hoạch thay đổi riêng, không dùng file khởi tạo để nâng cấp hoặc reset. Không có script nào tự chạy khi ứng dụng khởi động.
-.
+
+
+## Bộ dữ liệu tổng hợp cô lập: demo-showcase-v1
+
+Hai file mới là script chạy thủ công, không thay thế baseline hoặc các demo FE cũ:
+
+- `learning_hub_showcase_v1.sql`: 1.413 dòng mẫu trong đủ 105 bảng và một marker audit bổ sung.
+- `learning_hub_showcase_v1_verify.sql`: đối chiếu manifest, sự tồn tại từng dòng, fingerprint,
+  trạng thái tài khoản/hàng đợi và tổng điểm từng lượt thi bằng transaction READ ONLY.
+
+**Trạng thái kiểm chứng:** đã kiểm tra tĩnh tên bảng/cột, cột bắt buộc, độ dài varchar, tham chiếu ID,
+10 unique index đơn giản, quyền không hoạt động và 24 lượt thi. Chưa thực thi bằng PostgreSQL hoặc qua API;
+môi trường tác giả không có PostgreSQL/Docker, tải môi trường kiểm thử tạm thất bại. Chưa thể coi là script
+đã nghiệm thu để chạy trực tiếp trên prod. Phải chạy quy trình kiểm thử dưới đây trên bản sao DB trước.
+
+### Phạm vi và dữ liệu
+
+- Đơn vị riêng `DEMO-SHOWCASE-V1`, một phòng con, một nhóm chuyên môn, một nhóm học tập.
+- 12 hồ sơ `DMSH0001`–`DMSH0012`, username `demo.showcase.01`–`demo.showcase.12`;
+  email miền `example.invalid`, SSO + locked, không có mật khẩu, không đăng nhập được.
+- Role/function mẫu inactive và mọi grant Identity mẫu inactive; moderator Community đã revoked.
+  Không chỉnh role, mật khẩu, org/team hoặc grant của người dùng có sẵn.
+- 8 khóa published với bài text/process có nội dung đọc, một khóa media nháp, 96 lượt ghi danh chính,
+  8 đợt giao học, tiến độ 0/50/100%, thời hạn tương đối, phản hồi/ghi chú/đánh dấu.
+- 32 câu hỏi, 8 đề, 24 lượt thi đã chấm, đáp án snapshot và hai bảng tổng hợp kết quả nhất quán.
+- 3 Guild, 16 nội dung Community gồm hỏi đáp/bài viết/wiki/radar/review/bài học/yêu cầu tri thức,
+  3 bộ sưu tập, bình luận/bình chọn và các ví dụ lịch sử kiểm duyệt/thông báo/đóng góp.
+- Hàng đợi không pending/processing, reminder cancelled, notification suppressed, digest failed,
+  subscription muted và digest frequency off. Không gửi tin, chạy mô hình AI hoặc upload S3.
+- Không có bytes media thực: file failed chỉ ở khóa/bản ghi recording nháp. Transcript là draft.
+  Tài liệu Knowledge failed, đoạn vector zero chỉ là sentinel kỹ thuật để phủ bảng và không dùng cho
+  tìm kiếm ngữ nghĩa (truy hồi hợp lệ phải lọc document ready). Search chunk Community failed.
+  Lượt AI failed, source used_in_answer=false. Đây không phải kết quả xử lý media/AI thật.
+- Mọi tên nội dung người dùng thấy có nhãn DEMO; không dùng làm hướng dẫn nghiệp vụ chính thức.
+
+**Phạm vi hiển thị:** bộ mẫu nằm trong đơn vị riêng theo lựa chọn của người yêu cầu. Nó không tự làm đầy
+trang học viên, thông báo cá nhân hoặc Community của tài khoản thật đang thuộc đơn vị khác. CommunityPolicy
+kiểm tra ownerOrgId bằng orgId của actor. Quản trị GLOBAL có thể kiểm tra các danh sách quản trị theo scope
+được backend hỗ trợ; không giả định GLOBAL tự vượt ACL Community. Để duyệt toàn bộ trải nghiệm như người
+học/Community, cần cấp tài khoản DEMO có chủ đích qua quy trình quản trị hiện có trong môi trường thử nghiệm;
+script này không tự mở khóa, đổi đơn vị hay cấp thêm quyền cho bất kỳ tài khoản nào.
+
+### Kiểm thử trước khi triển khai
+
+1. DBA sao lưu và tạo bản sao DB có cùng schema/extension/quyền với môi trường đích. Không chạy lại baseline
+   CREATE TABLE hoặc các file demo cũ trên DB có dữ liệu thật. Cần đủ bảy SQL baseline hiện hành,
+   extension media/progress, vector(1024) và các nâng cấp lesson notes/feedback nếu DB dùng baseline cũ.
+2. Chạy toàn bộ seed bằng SQL client cùng một connection hoặc psql:
+
+   `psql -X -v ON_ERROR_STOP=1 -d <database-copy> -f docs/sql/learning_hub_showcase_v1.sql`
+
+3. Chạy verify; cần đủ 105 bảng, 1.413 dòng manifest và không có exception:
+
+   `psql -X -v ON_ERROR_STOP=1 -d <database-copy> -f docs/sql/learning_hub_showcase_v1_verify.sql`
+
+4. Chạy seed lần hai và verify lần hai: seed phải NOTICE đã tồn tại, không tăng dòng, không đổi ngày,
+   không ghi đè chỉnh sửa. Kiểm tra các API/màn có phạm vi quản trị cho đơn vị DEMO trên bản sao DB.
+5. So sánh dữ liệu có sẵn trước/sau, chạy các worker đang được bật trên bản sao DB, xác nhận không phát sinh
+   gửi tin, truy cập object store, gọi AI hoặc thay đổi quyền thật. Đối chiếu schema prod với schema đã test.
+6. Chỉ sau khi hoàn tất các bước trên mới chạy hai lệnh tương đương trên prod trong đợt triển khai được duyệt.
+   Quyền DB cần SELECT/INSERT trên 105 bảng, UPDATE con trỏ courses/community_contents, USAGE sequence và TEMP;
+   không cần CREATE/DROP bảng trong schema learning_hub. Không đặt credential trong file hoặc câu lệnh lưu Git.
+
+### Chạy lại, xung đột và hoàn tác
+
+- Một transaction, advisory lock chung riêng bộ seed, lock_timeout 5s, statement_timeout 180s.
+  Một lỗi trước COMMIT sẽ rollback toàn bộ dữ liệu; sequence PostgreSQL có thể vẫn tiêu thụ ID khi rollback.
+  Không có setval, số ID cố định kiểu bigint, TRUNCATE, DELETE, DROP bảng hoặc UPSERT lên dữ liệu đã tồn tại.
+- ID bigint lấy từ INSERT RETURNING. Marker `DEMO_SHOWCASE_INSTALLED` ở audit_log giữ namespace,
+  orgId và manifest PK/fingerprint từng dòng. Chạy lại là NO-OP; không bổ sung lại dòng đã bị xóa hoặc đổi ngày.
+- Nếu namespace đã tồn tại nhưng thiếu marker, script dừng trước INSERT; không đoán quyền sở hữu dữ liệu.
+  Không xóa marker để ép chạy lại. Verify báo thiếu dòng hoặc cảnh báo fingerprint thay đổi để review.
+- Không cung cấp DELETE cascade tự động trên prod: quan hệ là logic, không có FK bảo vệ dữ liệu người dùng
+  tạo thêm sau seed. Nếu cần gỡ sau COMMIT, DBA phải đối chiếu manifest và mọi tham chiếu mới trong cửa sổ
+  bảo trì để lập bản xóa chọn lọc được duyệt. Bản sao DB thử nghiệm có thể hủy/tạo lại theo cơ chế vận hành;
+  khôi phục snapshot prod chỉ được thực hiện theo kế hoạch phục hồi đã duyệt, tránh mất giao dịch mới.
+
