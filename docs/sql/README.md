@@ -55,6 +55,7 @@ Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_S
 
 | Upgrade | Nội dung | Rollback |
 |---|---|---|
+| `2026-11-04-program-question-bank.sql` | Thêm `questions.program_id`, cho phép `course_id` NULL; backfill theo revision mới nhất và thêm index lọc chương trình. Câu cũ chưa có chương trình được giữ lại qua đường courseId; chạy trước backend mới, chạy lại an toàn, không đổi chương trình đã được ghi | `2026-11-04-program-question-bank.rollback.sql` từ chối nếu còn câu không gắn khóa hoặc bộ đề dùng câu khác khóa; không tự xóa/gán lại dữ liệu để rollback |
 | `2026-11-01-learner-quiz.sql` | Cột `course_lessons.quiz_id` (bài học loại quiz trỏ tới một bài kiểm tra cùng khóa) và index một phần; chạy lại an toàn | `2026-11-01-learner-quiz.rollback.sql` dừng nếu còn bài học loại quiz, ngược lại xóa index và cột |
 | `2026-11-02-learning-leaderboard.sql` | Bảng `learning_activity_days` (một dòng mỗi người mỗi ngày học theo `Asia/Ho_Chi_Minh`, phục vụ chuỗi ngày học của bảng xếp hạng) và index; chạy lại an toàn. **Chạy trước khi triển khai backend**: `ddl-auto=validate` từ chối khởi động nếu thiếu bảng | `2026-11-02-learning-leaderboard.rollback.sql` xóa index và bảng, chuỗi ngày học về 0 |
 | `2026-11-02-learning-leaderboard-backfill.sql` | Tùy chọn: thêm mỗi người mỗi ngày đã có tiến độ bài học hoặc lượt thi đã chấm (`first_source='backfill'`); bỏ qua ngày đã có nên chạy lại không thêm dòng | `DELETE FROM learning_hub.learning_activity_days WHERE first_source = 'backfill';` |

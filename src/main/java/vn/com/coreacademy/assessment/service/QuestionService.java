@@ -48,35 +48,53 @@ public class QuestionService {
     private final LearningWriteLock lock;
     private final IdentityAuditService audit;
 
-    public PageResponse<AssessmentViews.QuestionSummary> search(Long courseId, String q, Long lessonId,
+    public PageResponse<AssessmentViews.QuestionSummary> search(Long courseId, Long programId, String q, Long lessonId,
                                                                 Long competencyId, String questionType,
                                                                 String difficulty, String status, int page,
                                                                 int size, String sort) {
-        learning.requireManagedCourse(courseId);
+        if (programId != null) {
+            if (courseId != null) {
+                learning.requireCourseProgramBank(courseId, programId);
+            } else {
+                learning.requireManagedProgram(programId);
+            }
+        } else if (courseId != null) {
+            learning.requireManagedCourse(courseId);
+        } else {
+            throw BusinessException.validation("programId", "REQUIRED", "Chọn chương trình của ngân hàng câu hỏi.");
+        }
         requireCode("questionType", questionType, Set.of(QuestionType.SINGLE, QuestionType.MULTIPLE));
         requireCode("difficulty", difficulty, Set.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD));
         requireCode("status", status, Set.of(ItemStatus.ACTIVE, ItemStatus.INACTIVE));
         var filter = new QuestionRepositoryCustom.Filter(courseId, q, lessonId, competencyId, questionType,
-            difficulty, status);
+            difficulty, status, programId);
         return PageResponse.from(questions.search(filter, PageQuery.of(page, size, sort, SORTS)));
     }
 
     public AssessmentViews.QuestionDetail get(Long id) {
         Question question = requireQuestion(id);
-        learning.requireManagedCourse(question.getCourseId());
+        questionBank(question, false);
         return detail(question);
     }
 
-    /** Tạo câu hỏi trong ngân hàng của khóa; mã để trống thì sinh Q<ID> sau khi có ID. */
+    /** Tạo câu hỏi theo chương trình; courseId chỉ còn là đường tương thích cho client cũ. */
     @Transactional
     public AssessmentViews.QuestionDetail create(AssessmentRequests.QuestionRequest request) {
-        if (request.courseId() == null) {
-            throw BusinessException.validation("courseId", "REQUIRED", "Thông tin này là bắt buộc.");
+        Bank bank;
+        if (request.programId() != null) {
+            var program = learning.requireManagedProgram(request.programId());
+            if (request.courseId() != null) {
+                learning.requireCourseProgramBank(request.courseId(), program.id());
+            }
+            bank = new Bank(program.id(), request.courseId(), program.ownerOrgId());
+        } else if (request.courseId() != null) {
+            bank = courseBank(learning.requireManagedCourse(request.courseId()));
+        } else {
+            throw BusinessException.validation("programId", "REQUIRED", "Chọn chương trình của ngân hàng câu hỏi.");
         }
-        ManagedCourse course = learning.requireManagedCourse(request.courseId());
         String actor = learning.actor().person().id();
         lock.acquire();
-        return detail(insert(course, request, actor));
+        return detail(insert(bank, request, actor));
     }
 
     /**
@@ -84,7 +102,11 @@ public class QuestionService {
      * đã kiểm quyền khóa và giữ write lock trong transaction hiện tại.
      */
     Question insert(ManagedCourse course, AssessmentRequests.QuestionRequest request, String actor) {
-        validateReferences(course.id(), request, null);
+        return insert(courseBank(course), request, actor);
+    }
+
+    private Question insert(Bank bank, AssessmentRequests.QuestionRequest request, String actor) {
+        validateReferences(bank.courseId(), request, null);
         List<AssessmentRequests.OptionInput> options = validateOptions(request, List.of());
         String code = blankToNull(request.code());
         if (code != null && repository.questionCodeExists(code, null)) {
@@ -92,7 +114,8 @@ public class QuestionService {
         }
 
         Question question = new Question();
-        question.setCourseId(course.id());
+        question.setCourseId(bank.courseId());
+        question.setProgramId(bank.programId());
         question.setCode(code);
         apply(question, request);
         repository.save(question, actor);
@@ -111,7 +134,7 @@ public class QuestionService {
         repository.flush();
 
         audit.record(actor, AuditAction.QUESTION_CREATED, "question", question.getId().toString(),
-            course.ownerOrgId(), Map.of("courseId", course.id(), "code", question.getCode()));
+            bank.ownerOrgId(), Map.of("code", question.getCode()));
         return question;
     }
 
@@ -124,14 +147,14 @@ public class QuestionService {
     public AssessmentViews.QuestionDetail update(Long id, Long expectedVersion,
                                                  AssessmentRequests.QuestionRequest request) {
         Question question = requireQuestion(id);
-        ManagedCourse course = learning.requireManagedCourse(question.getCourseId());
+        Bank bank = questionBank(question, request.programId() != null);
         String actor = learning.actor().person().id();
         lock.acquire();
 
         if (!Objects.equals(question.getRowVersion(), expectedVersion)) {
             throw new BusinessException(AssessmentResponseCode.CONFLICT);
         }
-        return detail(overwrite(question, course, request, actor));
+        return detail(overwrite(question, bank, request, actor));
     }
 
     /**
@@ -140,11 +163,20 @@ public class QuestionService {
      */
     Question overwrite(Question question, ManagedCourse course, AssessmentRequests.QuestionRequest request,
                        String actor) {
+        return overwrite(question, courseBank(course), request, actor);
+    }
+
+    private Question overwrite(Question question, Bank bank, AssessmentRequests.QuestionRequest request,
+                               String actor) {
         Long id = question.getId();
+        if (request.programId() != null && !request.programId().equals(question.getProgramId())) {
+            throw BusinessException.validation("programId", "INVALID_VALUE",
+                "Không thể chuyển câu hỏi sang chương trình khác.");
+        }
         if (request.courseId() != null && !request.courseId().equals(question.getCourseId())) {
             throw BusinessException.validation("courseId", "INVALID_VALUE", "Không thể chuyển câu hỏi sang khóa khác.");
         }
-        validateReferences(course.id(), request, question);
+        validateReferences(bank.courseId(), request, question);
         List<QuestionOption> existing = repository.options(List.of(id));
         List<AssessmentRequests.OptionInput> inputs = validateOptions(request, existing);
         String code = blankToNull(request.code());
@@ -173,7 +205,11 @@ public class QuestionService {
         changes.put("code", question.getCode());
         changes.put("status", question.getStatus());
         changes.put("contentVersion", question.getContentVersion());
-        audit.record(actor, AuditAction.QUESTION_UPDATED, "question", id.toString(), course.ownerOrgId(), changes);
+        if (ItemStatus.INACTIVE.equals(question.getStatus()) && repository.publishedQuizzesUsing(List.of(id)).stream()
+            .anyMatch(quiz -> repository.activePoolSize(quiz.getId()) < quiz.getQuestionCount())) {
+            throw new BusinessException(AssessmentResponseCode.QUIZ_NOT_READY);
+        }
+        audit.record(actor, AuditAction.QUESTION_UPDATED, "question", id.toString(), bank.ownerOrgId(), changes);
         return question;
     }
 
@@ -184,7 +220,7 @@ public class QuestionService {
     @Transactional
     public AssessmentViews.BulkResult bulkStatus(AssessmentRequests.BulkStatusRequest request) {
         List<Question> found = requireBulk(request.ids());
-        Map<Long, ManagedCourse> courses = managedCourses(found);
+        Map<BankKey, Bank> banks = managedBanks(found);
         String actor = learning.actor().person().id();
         lock.acquire();
 
@@ -201,7 +237,7 @@ public class QuestionService {
                 throw new BusinessException(AssessmentResponseCode.QUIZ_NOT_READY);
             }
         }
-        auditByCourse(actor, AuditAction.QUESTIONS_STATUS_CHANGED, changed, courses, request.status());
+        auditByBank(actor, AuditAction.QUESTIONS_STATUS_CHANGED, changed, banks, request.status());
         return new AssessmentViews.BulkResult(changed.size());
     }
 
@@ -209,7 +245,7 @@ public class QuestionService {
     @Transactional
     public AssessmentViews.BulkResult bulkDelete(AssessmentRequests.BulkIdsRequest request) {
         List<Question> found = requireBulk(request.ids());
-        Map<Long, ManagedCourse> courses = managedCourses(found);
+        Map<BankKey, Bank> banks = managedBanks(found);
         String actor = learning.actor().person().id();
         lock.acquire();
 
@@ -222,7 +258,7 @@ public class QuestionService {
             repository.save(q, actor);
         });
         repository.flush();
-        auditByCourse(actor, AuditAction.QUESTIONS_DELETED, found, courses, null);
+        auditByBank(actor, AuditAction.QUESTIONS_DELETED, found, banks, null);
         return new AssessmentViews.BulkResult(found.size());
     }
 
@@ -238,23 +274,50 @@ public class QuestionService {
         return found;
     }
 
-    /** Caller phải quản lý được mọi khóa chứa các câu trong lô. */
-    private Map<Long, ManagedCourse> managedCourses(List<Question> questions) {
-        Map<Long, ManagedCourse> courses = new LinkedHashMap<>();
-        questions.stream().map(Question::getCourseId).distinct()
-            .forEach(id -> courses.put(id, learning.requireManagedCourse(id)));
-        return courses;
+    private record Bank(Long programId, Long courseId, Long ownerOrgId) {
     }
 
-    private void auditByCourse(String actor, String action, List<Question> questions,
-                               Map<Long, ManagedCourse> courses, String status) {
-        questions.stream().collect(Collectors.groupingBy(Question::getCourseId)).forEach((courseId, group) -> {
+    private record BankKey(Long courseId, Long programId) {
+        static BankKey of(Question question) {
+            return question.getCourseId() != null ? new BankKey(question.getCourseId(), null)
+                : new BankKey(null, question.getProgramId());
+        }
+    }
+
+    private Bank courseBank(ManagedCourse course) {
+        return new Bank(learning.courseProgramId(course.id()), course.id(), course.ownerOrgId());
+    }
+
+    private Bank questionBank(Question question, boolean programScope) {
+        if (programScope || question.getCourseId() == null) {
+            var program = learning.requireManagedProgram(question.getProgramId());
+            return new Bank(program.id(), question.getCourseId(), program.ownerOrgId());
+        }
+        ManagedCourse course = learning.requireManagedCourse(question.getCourseId());
+        return new Bank(question.getProgramId(), course.id(), course.ownerOrgId());
+    }
+
+    /** Kiểm quyền mọi ngân hàng trước khi ghi; dữ liệu courseId cũ vẫn giữ đúng scope quản lý khóa. */
+    private Map<BankKey, Bank> managedBanks(List<Question> questions) {
+        Map<BankKey, Bank> banks = new LinkedHashMap<>();
+        for (Question question : questions) {
+            banks.computeIfAbsent(BankKey.of(question), key -> questionBank(question, false));
+        }
+        return banks;
+    }
+
+    private void auditByBank(String actor, String action, List<Question> questions,
+                             Map<BankKey, Bank> banks, String status) {
+        questions.stream().collect(Collectors.groupingBy(BankKey::of)).forEach((key, group) -> {
             Map<String, Object> changes = new LinkedHashMap<>();
             changes.put("questionIds", group.stream().map(Question::getId).toList());
             if (status != null) {
                 changes.put("status", status);
             }
-            audit.record(actor, action, "course", courseId.toString(), courses.get(courseId).ownerOrgId(), changes);
+            boolean legacy = key.courseId() != null;
+            Long id = legacy ? key.courseId() : key.programId();
+            audit.record(actor, action, legacy ? "course" : "training_program", id.toString(),
+                banks.get(key).ownerOrgId(), changes);
         });
     }
 
@@ -264,7 +327,7 @@ public class QuestionService {
             question.getLessonId(), question.getCompetencyId(), question.getQuestionType(), question.getContent(),
             question.getExplanation(), question.getDifficulty(), question.getPoints(), question.getStatus(),
             question.getContentVersion(), options, repository.quizzesUsing(question.getId()),
-            question.getRowVersion(), question.getCreateTime(), question.getUpdateTime());
+            question.getRowVersion(), question.getCreateTime(), question.getUpdateTime(), question.getProgramId());
     }
 
     private Question requireQuestion(Long id) {
@@ -290,6 +353,10 @@ public class QuestionService {
     private void validateReferences(Long courseId, AssessmentRequests.QuestionRequest request, Question current) {
         if (request.lessonId() != null
             && (current == null || !request.lessonId().equals(current.getLessonId()))) {
+            if (courseId == null) {
+                throw BusinessException.validation("lessonId", "INVALID_VALUE",
+                    "Câu hỏi chương trình không gắn bài học của khóa.");
+            }
             try {
                 learning.requireLessonInCourse(request.lessonId(), courseId);
             } catch (BusinessException exception) {

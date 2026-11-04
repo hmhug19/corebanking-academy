@@ -61,7 +61,7 @@ public final class AssessmentRequests {
     }
 
     public record QuestionRequest(
-        @Schema(description = "Bắt buộc khi tạo. Khi cập nhật bỏ trống hoặc gửi đúng khóa hiện tại.")
+        @Schema(description = "Nguồn khóa học của client cũ; tạo mới theo chương trình chỉ gửi programId.")
         @Positive Long courseId,
         @Positive Long lessonId,
         @NotNull @Positive Long competencyId,
@@ -75,7 +75,15 @@ public final class AssessmentRequests {
         @NotNull @Pattern(regexp = ItemStatus.PATTERN) String status,
         @Schema(description = "Danh sách đầy đủ phương án; phương án cũ không có trong danh sách sẽ bị xóa mềm.")
         @NotNull @Size(min = AssessmentLimits.MIN_OPTIONS, max = AssessmentLimits.MAX_OPTIONS)
-        List<@Valid @NotNull OptionInput> options) {
+        List<@Valid @NotNull OptionInput> options,
+        @Schema(description = "Chương trình sở hữu ngân hàng câu hỏi; không được đổi khi cập nhật.")
+        @Positive Long programId) {
+        public QuestionRequest(Long courseId, Long lessonId, Long competencyId, String code, String questionType,
+                               String content, String explanation, String difficulty, BigDecimal points,
+                               String status, List<OptionInput> options) {
+            this(courseId, lessonId, competencyId, code, questionType, content, explanation, difficulty, points,
+                status, options, null);
+        }
     }
 
     public record QuizRequest(

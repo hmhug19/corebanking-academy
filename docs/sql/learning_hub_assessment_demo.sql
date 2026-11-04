@@ -89,7 +89,7 @@ BEGIN
 
     -- 3. Câu hỏi, phương án và hai đề cho mỗi khóa.
     FOR v_course IN
-        SELECT c.course_id, c.code, r.title
+        SELECT c.course_id, c.code, r.title, r.program_id
         FROM learning_hub.courses c JOIN learning_hub.course_revisions r ON r.revision_id = c.published_revision_id
         WHERE c.code IN ('FE-DEMO-C1', 'FE-DEMO-C2') ORDER BY c.code
     LOOP
@@ -107,9 +107,9 @@ BEGIN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_data -> 'courses' -> v_course.code) LOOP
             v_i := v_i + 1;
             INSERT INTO learning_hub.questions
-                (code, course_id, lesson_id, competency_id, question_type, content, explanation, difficulty, points,
+                (code, program_id, course_id, lesson_id, competency_id, question_type, content, explanation, difficulty, points,
                  created_by, updated_by)
-            VALUES ('FE-DEMO-Q' || right(v_course.code, 1) || '-' || lpad(v_i::text, 2, '0'), v_course.course_id,
+            VALUES ('FE-DEMO-Q' || right(v_course.code, 1) || '-' || lpad(v_i::text, 2, '0'), v_course.program_id, v_course.course_id,
                     v_lessons[1 + (v_i - 1) % cardinality(v_lessons)], (v_comp ->> (v_item ->> 'c'))::bigint,
                     v_item ->> 't', v_item ->> 'q', v_item ->> 'e', v_item ->> 'd', (v_item ->> 'p')::numeric,
                     v_actor, v_actor)
