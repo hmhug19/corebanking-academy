@@ -380,3 +380,4 @@ Mật khẩu công khai của bộ dữ liệu demo: **Demo@123**. Có thể đ�
 5. quantri.ban quản lý toàn Ban gồm 15 nhóm và các tài khoản thường trong Ban; hocvien.tichhop là học viên nhóm tích hợp, không phải user ngoài đơn vị. Quyền TEAM của baocao chỉ gắn với Ban Giám đốc; tên bộ phận/chức danh không tự cấp quyền quản trị. Chỉ SUPER_ADMIN quản lý tài khoản đang mang vai trò quản trị.
 
 Schema/seed cùng một transaction PostgreSQL; có lỗi thì rollback transaction trước khi chạy lại. Database đã có dữ liệu cần giữ phải có kế hoạch thay đổi riêng, không dùng file khởi tạo để nâng cấp hoặc reset. Không có script nào tự chạy khi ứng dụng khởi động.
+.
