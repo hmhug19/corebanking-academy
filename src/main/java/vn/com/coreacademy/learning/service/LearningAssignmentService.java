@@ -206,7 +206,11 @@ public class LearningAssignmentService {
                                                                  int size) {
         var actor = access.actor();
         access.requireManage(actor, assigningOrgId, null, null);
-        requireAssignCourse(actor, repository.require(Course.class, courseId), assigningOrgId);
+        Course course = repository.require(Course.class, courseId);
+        // Đọc lịch sử không đồng nghĩa đơn vị hiện tại được phép tạo lượt giao mới cho khóa khác đơn vị.
+        if (!access.canManage(actor, course.getOwnerOrgId(), course.getOwnerTeamId(), course.getOwnerUserId())) {
+            requireAssignCourse(actor, course, assigningOrgId);
+        }
         return PageResponse.from(assignments.findByCourseIdAndAssigningOrgId(courseId, assigningOrgId,
             PageQuery.of(page, size, "id,desc", Set.of("id"))).map(mapper::view));
     }

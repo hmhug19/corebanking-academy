@@ -184,7 +184,9 @@ public class LearningCourseController {
     @Operation(
         summary = "Xem các đợt giao của đơn vị",
         description = """
-            Kiểm tra phạm vi assigningOrgId và quyền khai thác khóa trước phân trang.
+            Đọc các đợt giao thuộc assigningOrgId sau khi kiểm tra phạm vi quản lý đơn vị.
+            - Người quản lý khóa được đọc danh sách dù đơn vị giao chưa có share hoặc khóa đã tạm dừng.
+            - Người không quản lý khóa vẫn cần quyền khai thác hợp lệ; tạo lượt giao mới kiểm tra riêng.
             """
     )
     public BaseResponse<PageResponse<LearningViews.CourseAssignmentView>> assignments(

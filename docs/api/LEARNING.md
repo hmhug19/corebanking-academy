@@ -669,7 +669,7 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 | 17 | GET `/api/v1/courses/{courseId}/shares` | Xem chia sẻ khóa học |
 | 18 | PUT `/api/v1/courses/{courseId}/shares` | Chia sẻ hoặc thu hồi chia sẻ |
 | 19 | POST `/api/v1/courses/{courseId}/assignments` | Giao khóa học cho cá nhân/nhóm/đơn vị |
-| 20 | GET `/api/v1/courses/{courseId}/assignments` | Xem các đợt giao của đơn vị |
+| 20 | GET `/api/v1/courses/{courseId}/assignments` | Xem đợt giao trong scope đơn vị; người quản lý khóa không cần share để đọc, tạo lượt giao mới vẫn kiểm tra share |
 | 21 | POST `/api/v1/courses/{courseId}/enrollments` | Tự đăng ký khóa học tự chọn |
 | 22 | GET `/api/v1/learning-groups` | Danh sách nhóm học tập |
 | 23 | POST `/api/v1/learning-groups` | Tạo nhóm học tập |

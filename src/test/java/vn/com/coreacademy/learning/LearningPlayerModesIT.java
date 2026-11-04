@@ -21,6 +21,7 @@ import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
+import static vn.com.coreacademy.assessment.support.AssessmentFixtures.ADMIN;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
 
@@ -311,6 +312,49 @@ class LearningPlayerModesIT extends AssessmentIntegrationTest {
         JsonNode empty = firstBlock(save(draft, block(draft, "video", List.of(), List.of())));
         assertThat(empty.path(CHAPTERS)).isEmpty();
         assertThat(columnsAreNull(empty.path("id").asLong())).isTrue();
+    }
+
+    @Test
+    void assignmentHistoryKeepsOrgScopeWithoutGrantingCrossOrgAssignment() {
+        Course course = fixtures.course(LEARNER);
+        long otherOrg = jdbc.queryForObject("""
+            insert into learning_hub.orgs (org_type, code, name)
+            values ('UNIT', ?, 'Đơn vị kiểm thử lịch sử giao học') returning org_id
+            """, Long.class, AssessmentFixtures.unique("ASSIGN-ORG"));
+        String list = COURSE + "/assignments?assigningOrgId={org}&page=0&size=10";
+
+        JsonNode empty = api.ok(ADMIN, get(list, course.id(), otherOrg));
+        assertThat(empty.path("items")).isEmpty();
+        assertThat(empty.path("totalElements").asLong()).isZero();
+        api.http(INSTRUCTOR, get(list, course.id(), otherOrg), 403, "CORE-ACCESS_DENIED");
+        api.http(LEARNER, get(list, course.id(), course.ownerOrgId()), 403, "CORE-ACCESS_DENIED");
+
+        JsonNode foreign = api.ok(ADMIN, api.post(Map.of("ownerOrgId", otherOrg,
+            "code", AssessmentFixtures.unique("FOREIGN"), "title", "Khóa khác phạm vi giảng viên"), "/api/v1/courses"));
+        api.http(INSTRUCTOR, get(list, foreign.path("course").path("id").asLong(), course.ownerOrgId()),
+            403, "CORE-ACCESS_DENIED");
+
+        Map<String, Object> request = new HashMap<>();
+        request.put("revisionId", course.revisionId());
+        request.put("assigningOrgId", otherOrg);
+        request.put("title", "Không được phép giao chéo đơn vị khi chưa có share");
+        request.put("startAt", "2020-01-01T00:00:00Z");
+        request.put("requirement", "mandatory");
+        request.put("enrollmentMode", "continue");
+        request.put("reminderEnabled", false);
+        request.put("reminderDaysBefore", 0);
+        request.put("idempotencyKey", AssessmentFixtures.unique("no-share"));
+        request.put("targets", List.of(Map.of("targetType", "user", "userId", LEARNER,
+            "includeDescendants", false)));
+        api.http(ADMIN, api.post(request, COURSE + "/assignments", course.id()), 403, "CORE-ACCESS_DENIED");
+        assertThat(jdbc.queryForObject("""
+            select count(*) from learning_hub.course_assignments where course_id = ? and assigning_org_id = ?
+            """, Long.class, course.id(), otherOrg)).isZero();
+
+        jdbc.update("UPDATE learning_hub.courses SET lifecycle_status = 'paused' WHERE course_id = ?", course.id());
+        JsonNode history = api.ok(ADMIN, get(list, course.id(), course.ownerOrgId()));
+        assertThat(history.path("items")).hasSize(1);
+        assertThat(history.path("totalElements").asLong()).isEqualTo(1);
     }
 
     private void assign(Draft draft, String learner) {
