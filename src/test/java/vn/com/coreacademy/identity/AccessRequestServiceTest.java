@@ -61,8 +61,10 @@ class AccessRequestServiceTest {
     private final RoleRepository roles = mock(RoleRepository.class);
     private final RoleAssignmentRepository assignments = mock(RoleAssignmentRepository.class);
     private final IdentityWriteLock writeLock = mock(IdentityWriteLock.class);
+    private final org.springframework.security.crypto.password.PasswordEncoder encoder =
+        mock(org.springframework.security.crypto.password.PasswordEncoder.class);
     private final AccessRequestService service = new AccessRequestService(requests, access, organizations,
-        new AccessRequestMapperImpl(), audit, users, roles, assignments, writeLock);
+        new AccessRequestMapperImpl(), audit, users, roles, assignments, writeLock, encoder);
 
     @BeforeEach
     void signIn() {
@@ -301,5 +303,98 @@ class AccessRequestServiceTest {
         when(organizations.findAllById(any())).thenReturn(List.of());
         service.reject(5L, null);
         assertThat(row.getPasswordHash()).isNull();
+    }
+
+    private AccessRequest passwordReset(long id, String target) {
+        AccessRequest row = request(id, AccessRequestKind.PASSWORD_RESET, 1L, target);
+        row.setPasswordHash(null);
+        return row;
+    }
+
+    private UserAccount account(String id) {
+        UserAccount user = new UserAccount();
+        user.setId(id);
+        user.setUsername(id);
+        user.setOrgId(1L);
+        user.setPasswordHash("old-hash");
+        return user;
+    }
+
+    @Test
+    void resetsThePasswordOnceWithAHashedPolicyValidTemporaryOneAndNeverAuditsIt() {
+        when(access.boundary("000002")).thenReturn(UNIT);
+        AccessRequest row = passwordReset(7, "000004");
+        when(requests.findById(7L)).thenReturn(Optional.of(row));
+        UserAccount user = account("000004");
+        long before = user.getAuthorizationVersion();
+        when(access.manageableUser("000002", "000004")).thenReturn(user);
+        when(encoder.encode(any())).thenReturn("new-hash");
+
+        var result = service.resetPassword(7L, " đã gọi lại ");
+
+        ArgumentCaptor<String> encoded = ArgumentCaptor.forClass(String.class);
+        verify(encoder).encode(encoded.capture());
+        assertThat(result.temporaryPassword()).isEqualTo(encoded.getValue()).hasSize(12);
+        assertThat(user.getPasswordHash()).isEqualTo("new-hash");
+        assertThat(user.isMustChangePassword()).isTrue();
+        assertThat(user.getAuthorizationVersion()).isEqualTo(before + 1);
+        assertThat(row.getStatus()).isEqualTo(AccessRequestStatus.APPROVED);
+        assertThat(row.getResolutionNote()).isEqualTo("đã gọi lại");
+        assertThat(result.request().status()).isEqualTo("APPROVED");
+        assertThat(result.toString()).doesNotContain(result.temporaryPassword());
+        verify(audit).record(eq("000002"), eq("USER_PASSWORD_RESET"), eq("USER"), eq("000004"), eq(1L),
+            any());
+        verify(audit).record(eq("000002"), eq("ACCESS_REQUEST_RESET_PASSWORD"), eq("ACCESS_REQUEST"), eq("7"),
+            eq(1L), any());
+    }
+
+    @Test
+    void generatesDistinctPasswordsFromTheUnambiguousAlphabet() {
+        var seen = new java.util.HashSet<String>();
+        for (int i = 0; i < 200; i++) {
+            String password = AccessRequestService.generateTemporaryPassword();
+            assertThat(password).matches("[A-HJ-NP-Za-km-z2-9]{12}");
+            seen.add(password);
+        }
+        assertThat(seen).hasSize(200);
+    }
+
+    @Test
+    void refusesWithAStateConflictAndChangesNothingForEveryNonResettableRequest() {
+        when(access.boundary("000002")).thenReturn(GLOBAL);
+        AccessRequest resolved = passwordReset(1, "000004");
+        resolved.setStatus(AccessRequestStatus.REJECTED);
+        AccessRequest registration = registration(2);
+        AccessRequest noTarget = passwordReset(3, null);
+        AccessRequest sso = passwordReset(4, "000010");
+        AccessRequest locked = passwordReset(5, "000011");
+        for (AccessRequest row : List.of(resolved, registration, noTarget, sso, locked)) {
+            when(requests.findById(row.getId())).thenReturn(Optional.of(row));
+        }
+        UserAccount ssoUser = account("000010");
+        ssoUser.setAuthProvider(vn.com.coreacademy.identity.enums.AuthProvider.SSO);
+        UserAccount lockedUser = account("000011");
+        lockedUser.setStatus(vn.com.coreacademy.identity.enums.UserStatus.LOCKED);
+        when(access.manageableUser("000002", "000010")).thenReturn(ssoUser);
+        when(access.manageableUser("000002", "000011")).thenReturn(lockedUser);
+
+        for (long id = 1; id <= 5; id++) {
+            long requestId = id;
+            assertThatThrownBy(() -> service.resetPassword(requestId, null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                    e -> assertThat(e.getResponseCode()).isEqualTo(ResponseCode.CONFLICT));
+        }
+        assertThat(ssoUser.getPasswordHash()).isEqualTo("old-hash");
+        assertThat(lockedUser.getPasswordHash()).isEqualTo("old-hash");
+        verify(encoder, never()).encode(any());
+        verify(audit, never()).record(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void answersNotFoundForARequestOutsideTheBoundary() {
+        when(access.boundary("000002")).thenReturn(UNIT);
+        when(requests.findById(8L)).thenReturn(Optional.of(request(8, AccessRequestKind.PASSWORD_RESET, 9L, "000004")));
+        assertThatThrownBy(() -> service.resetPassword(8L, null)).isInstanceOfSatisfying(BusinessException.class,
+            e -> assertThat(e.getResponseCode()).isEqualTo(ResponseCode.RESOURCE_NOT_FOUND));
     }
 }

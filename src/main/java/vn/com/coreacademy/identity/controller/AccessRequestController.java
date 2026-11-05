@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +24,7 @@ import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.identity.dto.AccessRequestView;
 import vn.com.coreacademy.identity.dto.RejectAccessRequest;
+import vn.com.coreacademy.identity.dto.ResetPasswordResult;
 import vn.com.coreacademy.identity.service.AccessRequestService;
 
 @RestController
@@ -99,5 +101,25 @@ public class AccessRequestController {
     public ResponseEntity<BaseResponse<AccessRequestView>> approve(@PathVariable Long requestId,
         @Valid @RequestBody(required = false) RejectAccessRequest request) {
         return ResponseEntity.ok(BaseResponse.ok(requests.approve(requestId, request == null ? null : request.note())));
+    }
+
+    @PostMapping("/{requestId}/reset-password")
+    @Operation(
+        summary = "Cấp mật khẩu tạm cho yêu cầu quên mật khẩu",
+        description = """
+            Đặt lại mật khẩu của tài khoản mà yêu cầu đang chờ trỏ tới, kèm ghi chú không bắt buộc.
+            - Trả mật khẩu tạm đúng một lần (không lưu, không ghi nhật ký); người dùng phải đổi khi đăng nhập.
+            - Phiên cũ của tài khoản bị vô hiệu. Phản hồi không được lưu đệm (`Cache-Control: no-store`).
+            - Yêu cầu ngoài phạm vi trả `CORE-RESOURCE_NOT_FOUND`; yêu cầu đã xử lý, không phải quên mật khẩu,
+              không khớp tài khoản, hoặc tài khoản SSO, bị khóa, ngừng hoạt động trả `CORE-STATE_CONFLICT`.
+            """
+    )
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status để phân biệt thành công với lỗi nghiệp vụ.",
+        useReturnTypeSchema = true)
+    public ResponseEntity<BaseResponse<ResetPasswordResult>> resetPassword(@PathVariable Long requestId,
+        @Valid @RequestBody(required = false) RejectAccessRequest request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+            .body(BaseResponse.ok(requests.resetPassword(requestId, request == null ? null : request.note())));
     }
 }

@@ -1,5 +1,6 @@
 package vn.com.coreacademy.identity.service;
 
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
@@ -20,6 +22,10 @@ import vn.com.coreacademy.common.web.PageQuery;
 import vn.com.coreacademy.identity.constants.AccessRequestLimits;
 import vn.com.coreacademy.identity.constants.RoleCodes;
 import vn.com.coreacademy.identity.dto.AccessRequestView;
+import vn.com.coreacademy.identity.dto.ResetPasswordResult;
+import vn.com.coreacademy.identity.enums.AuthProvider;
+import vn.com.coreacademy.identity.enums.UserStatus;
+import vn.com.coreacademy.identity.security.PasswordPolicy;
 import vn.com.coreacademy.identity.entity.AccessRequest;
 import vn.com.coreacademy.identity.entity.RoleAssignment;
 import vn.com.coreacademy.identity.entity.UserAccount;
@@ -47,6 +53,10 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 public class AccessRequestService {
     /** A stand-in so {@code in :orgIds} is never empty for a global caller; no unit has this id. */
     private static final Set<Long> NO_ORG = Set.of(-1L);
+    /** No look-alike characters (0/O, 1/l/I), since the password is read out or typed from a message. */
+    private static final String TEMP_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    private static final int TEMP_PASSWORD_LENGTH = 12;
+    private static final SecureRandom RANDOM = new SecureRandom();
     private static final Set<String> SORT_FIELDS = Set.of("id", "createTime", "staffCode");
 
     private final AccessRequestRepository requests;
@@ -58,6 +68,7 @@ public class AccessRequestService {
     private final RoleRepository roles;
     private final RoleAssignmentRepository assignments;
     private final IdentityWriteLock writeLock;
+    private final PasswordEncoder passwordEncoder;
 
     public PageResponse<AccessRequestView> list(String kind, String status, String q, int page, int size,
                                                 String sort) {
@@ -181,6 +192,70 @@ public class AccessRequestService {
             request.getOrgId(), changes);
 
         return mapper.toView(request, unit.getName());
+    }
+
+    /**
+     * Resets the password of the account a pending password-reset request points at: a generated temporary
+     * password (hashed, forced change at next sign-in), a bumped authorization version so existing tokens stop
+     * working, and the request approved. The password is returned once and never logged or audited. Anything that
+     * is not a pending reset of an active LOCAL account in scope answers a state conflict.
+     */
+    @Transactional
+    public ResetPasswordResult resetPassword(Long requestId, String note) {
+        String actorId = SecurityContextUtils.getUserId();
+        writeLock.acquire();
+        Boundary boundary = access.boundary(actorId);
+        String trimmed = note == null ? null : note.trim();
+        if (trimmed != null && trimmed.length() > AccessRequestLimits.NOTE_MAX) {
+            throw BusinessException.validation("note", "TOO_LONG", "Ghi chú tối đa 500 ký tự.");
+        }
+
+        AccessRequest request = requests.findById(requestId)
+            .filter(row -> boundary.contains(row.getOrgId()))
+            .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
+        if (request.getStatus() != AccessRequestStatus.PENDING
+            || request.getKind() != AccessRequestKind.PASSWORD_RESET || request.getTargetUserId() == null) {
+            throw new BusinessException(ResponseCode.CONFLICT);
+        }
+
+        UserAccount user = access.manageableUser(actorId, request.getTargetUserId());
+        if (user.getAuthProvider() != AuthProvider.LOCAL || user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ResponseCode.CONFLICT);
+        }
+
+        String temporaryPassword = generateTemporaryPassword();
+        user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
+        user.setMustChangePassword(true);
+        user.setAuthorizationVersion(user.getAuthorizationVersion() + 1);
+        users.save(user);
+
+        request.setStatus(AccessRequestStatus.APPROVED);
+        request.setResolvedBy(actorId);
+        request.setResolvedTime(Instant.now());
+        request.setResolutionNote(trimmed == null || trimmed.isEmpty() ? null : trimmed);
+
+        audit.record(actorId, "USER_PASSWORD_RESET", "USER", user.getId(), user.getOrgId(),
+            Map.of("source", "ACCESS_REQUEST", "requestId", request.getId()));
+        Map<String, Object> changes = new LinkedHashMap<>();
+        changes.put("kind", request.getKind().name());
+        changes.put("staffCode", request.getStaffCode());
+        changes.put("status", request.getStatus().name());
+        changes.put("userId", user.getId());
+        audit.record(actorId, "ACCESS_REQUEST_RESET_PASSWORD", "ACCESS_REQUEST", String.valueOf(request.getId()),
+            request.getOrgId(), changes);
+
+        AccessRequestView view = mapper.toView(request, nameOf(orgNames(List.of(request)), request.getOrgId()));
+        return new ResetPasswordResult(view, temporaryPassword);
+    }
+
+    public static String generateTemporaryPassword() {
+        StringBuilder text = new StringBuilder(TEMP_PASSWORD_LENGTH);
+        for (int i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
+            text.append(TEMP_PASSWORD_ALPHABET.charAt(RANDOM.nextInt(TEMP_PASSWORD_ALPHABET.length())));
+        }
+        String password = text.toString();
+        PasswordPolicy.validate(password, "temporaryPassword");
+        return password;
     }
 
     /** Map.of() refuses a null key, and a request may have no unit. */
