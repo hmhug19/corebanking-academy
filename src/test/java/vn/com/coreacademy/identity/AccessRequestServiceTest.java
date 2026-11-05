@@ -22,7 +22,16 @@ import vn.com.coreacademy.identity.enums.AccessRequestKind;
 import vn.com.coreacademy.identity.enums.AccessRequestStatus;
 import vn.com.coreacademy.identity.mapper.AccessRequestMapperImpl;
 import vn.com.coreacademy.identity.repository.AccessRequestRepository;
+import vn.com.coreacademy.identity.entity.Role;
+import vn.com.coreacademy.identity.entity.RoleAssignment;
+import vn.com.coreacademy.identity.entity.UserAccount;
+import vn.com.coreacademy.identity.enums.ScopeType;
+import vn.com.coreacademy.identity.repository.RoleAssignmentRepository;
+import vn.com.coreacademy.identity.repository.RoleRepository;
+import vn.com.coreacademy.identity.repository.UserRepository;
 import vn.com.coreacademy.identity.service.AccessRequestService;
+import vn.com.coreacademy.identity.service.IdentityWriteLock;
+import org.mockito.ArgumentCaptor;
 import vn.com.coreacademy.identity.service.IdentityAccessPolicy;
 import vn.com.coreacademy.identity.service.IdentityAccessPolicy.Boundary;
 import vn.com.coreacademy.organization.entity.Organization;
@@ -48,8 +57,12 @@ class AccessRequestServiceTest {
     private final IdentityAccessPolicy access = mock(IdentityAccessPolicy.class);
     private final OrganizationRepository organizations = mock(OrganizationRepository.class);
     private final IdentityAuditService audit = mock(IdentityAuditService.class);
-    private final AccessRequestService service =
-        new AccessRequestService(requests, access, organizations, new AccessRequestMapperImpl(), audit);
+    private final UserRepository users = mock(UserRepository.class);
+    private final RoleRepository roles = mock(RoleRepository.class);
+    private final RoleAssignmentRepository assignments = mock(RoleAssignmentRepository.class);
+    private final IdentityWriteLock writeLock = mock(IdentityWriteLock.class);
+    private final AccessRequestService service = new AccessRequestService(requests, access, organizations,
+        new AccessRequestMapperImpl(), audit, users, roles, assignments, writeLock);
 
     @BeforeEach
     void signIn() {
@@ -169,5 +182,124 @@ class AccessRequestServiceTest {
     @Test
     void entityToStringNeverPrintsTheHash() {
         assertThat(request(1, AccessRequestKind.REGISTER, 1L, null).toString()).doesNotContain("secret-hash");
+    }
+
+    // ---- approve -------------------------------------------------------------------------------
+
+    private Organization unit(String type, String status) {
+        Organization org = new Organization();
+        org.setId(1L);
+        org.setName("Ban A");
+        org.setOrgType(type);
+        org.setStatus(status);
+        return org;
+    }
+
+    private Role learner() {
+        Role role = mock(Role.class);
+        when(role.getCode()).thenReturn("LEARNER");
+        when(role.isActive()).thenReturn(true);
+        return role;
+    }
+
+    private AccessRequest registration(long id) {
+        AccessRequest row = request(id, AccessRequestKind.REGISTER, 1L, null);
+        row.setStaffCode("000555");
+        row.setFullName("Lê Thị Bình");
+        row.setEmail("binh@example.test");
+        return row;
+    }
+
+    @Test
+    void approvesARegistrationByCreatingTheAccountWithTheChosenPasswordAndALearnerGrant() {
+        when(access.boundary("000002")).thenReturn(UNIT);
+        AccessRequest row = registration(5);
+        when(requests.findById(5L)).thenReturn(Optional.of(row));
+        when(organizations.findById(1L)).thenReturn(Optional.of(unit("UNIT", "active")));
+        Role learnerRole = learner();
+        when(assignments.save(any())).thenAnswer(call -> {
+            RoleAssignment saved = call.getArgument(0);
+            org.springframework.test.util.ReflectionTestUtils.setField(saved, "id", 11L);
+            return saved;
+        });
+        when(roles.findByCode("LEARNER")).thenReturn(Optional.of(learnerRole));
+
+        AccessRequestView view = service.approve(5L, "  Đúng đối tượng ");
+
+        ArgumentCaptor<UserAccount> user = ArgumentCaptor.forClass(UserAccount.class);
+        verify(users, org.mockito.Mockito.atLeastOnce()).save(user.capture());
+        UserAccount created = user.getAllValues().get(0);
+        assertThat(created.getId()).isEqualTo("000555");
+        assertThat(created.getUsername()).isEqualTo("000555");
+        assertThat(created.getPasswordHash()).isEqualTo("$2a$10$secret-hash");
+        assertThat(created.isMustChangePassword()).isFalse();
+        assertThat(created.getOrgId()).isEqualTo(1L);
+        ArgumentCaptor<RoleAssignment> grant = ArgumentCaptor.forClass(RoleAssignment.class);
+        verify(assignments).save(grant.capture());
+        assertThat(grant.getValue().getScopeType()).isEqualTo(ScopeType.OWN);
+        assertThat(grant.getValue().getOrgId()).isNull();
+        assertThat(row.getStatus()).isEqualTo(AccessRequestStatus.APPROVED);
+        assertThat(row.getPasswordHash()).isNull();
+        assertThat(row.getTargetUserId()).isEqualTo("000555");
+        assertThat(row.getResolvedBy()).isEqualTo("000002");
+        assertThat(row.getResolutionNote()).isEqualTo("Đúng đối tượng");
+        assertThat(view.status()).isEqualTo("APPROVED");
+        assertThat(view.accountFound()).isTrue();
+        verify(audit).record(eq("000002"), eq("ACCESS_REQUEST_APPROVE"), eq("ACCESS_REQUEST"), eq("5"), eq(1L), any());
+        verify(audit).record(eq("000002"), eq("USER_CREATED"), eq("USER"), eq("000555"), eq(1L), any());
+    }
+
+    @Test
+    void leavesTheRequestPendingWhenTheCodeWasTakenMeanwhile() {
+        when(access.boundary("000002")).thenReturn(GLOBAL);
+        AccessRequest row = registration(5);
+        when(requests.findById(5L)).thenReturn(Optional.of(row));
+        when(users.identifierExists("000555")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.approve(5L, null)).isInstanceOf(BusinessException.class);
+
+        assertThat(row.getStatus()).isEqualTo(AccessRequestStatus.PENDING);
+        assertThat(row.getPasswordHash()).isNotNull();
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void refusesToApproveAResolvedRequestAResetRequestOrOneOutsideTheScope() {
+        when(access.boundary("000002")).thenReturn(UNIT);
+        AccessRequest done = registration(6);
+        done.setStatus(AccessRequestStatus.REJECTED);
+        done.setPasswordHash(null);
+        when(requests.findById(6L)).thenReturn(Optional.of(done));
+        when(requests.findById(7L)).thenReturn(Optional.of(request(7, AccessRequestKind.PASSWORD_RESET, 1L, "000004")));
+        AccessRequest outside = registration(8);
+        outside.setOrgId(2L);
+        when(requests.findById(8L)).thenReturn(Optional.of(outside));
+
+        for (long id : new long[] {6L, 7L}) {
+            assertThatThrownBy(() -> service.approve(id, null)).isInstanceOfSatisfying(BusinessException.class,
+                e -> assertThat(e.getResponseCode()).isEqualTo(ResponseCode.CONFLICT));
+        }
+        assertThatThrownBy(() -> service.approve(8L, null)).isInstanceOfSatisfying(BusinessException.class,
+            e -> assertThat(e.getResponseCode()).isEqualTo(ResponseCode.RESOURCE_NOT_FOUND));
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void refusesWhenTheUnitIsNoLongerActive() {
+        when(access.boundary("000002")).thenReturn(GLOBAL);
+        when(requests.findById(5L)).thenReturn(Optional.of(registration(5)));
+        when(organizations.findById(1L)).thenReturn(Optional.of(unit("UNIT", "inactive")));
+        assertThatThrownBy(() -> service.approve(5L, null)).isInstanceOf(BusinessException.class);
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void rejectingARegistrationClearsItsPasswordHash() {
+        when(access.boundary("000002")).thenReturn(GLOBAL);
+        AccessRequest row = registration(5);
+        when(requests.findById(5L)).thenReturn(Optional.of(row));
+        when(organizations.findAllById(any())).thenReturn(List.of());
+        service.reject(5L, null);
+        assertThat(row.getPasswordHash()).isNull();
     }
 }

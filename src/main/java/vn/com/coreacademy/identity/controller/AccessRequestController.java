@@ -81,4 +81,23 @@ public class AccessRequestController {
         @Valid @RequestBody(required = false) RejectAccessRequest request) {
         return ResponseEntity.ok(BaseResponse.ok(requests.reject(requestId, request == null ? null : request.note())));
     }
+
+    @PostMapping("/{requestId}/approve")
+    @Operation(
+        summary = "Duyệt yêu cầu đăng ký của khách",
+        description = """
+            Duyệt một yêu cầu đăng ký đang chờ trong phạm vi quản lý, kèm ghi chú không bắt buộc.
+            - Tạo tài khoản với mật khẩu khách đã chọn (không phải đổi lại) và gán vai trò học viên, phạm vi OWN.
+            - Yêu cầu ngoài phạm vi trả `CORE-RESOURCE_NOT_FOUND`; yêu cầu đã xử lý hoặc không phải đăng ký trả
+              `CORE-STATE_CONFLICT`.
+            - Mã cán bộ đã bị dùng trong lúc chờ trả `IDENTITY-DUPLICATE_IDENTIFIER` và yêu cầu vẫn ở trạng thái chờ.
+            """
+    )
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status để phân biệt thành công với lỗi nghiệp vụ.",
+        useReturnTypeSchema = true)
+    public ResponseEntity<BaseResponse<AccessRequestView>> approve(@PathVariable Long requestId,
+        @Valid @RequestBody(required = false) RejectAccessRequest request) {
+        return ResponseEntity.ok(BaseResponse.ok(requests.approve(requestId, request == null ? null : request.note())));
+    }
 }
