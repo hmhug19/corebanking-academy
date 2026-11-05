@@ -301,6 +301,49 @@ class QuestionApiIT extends AssessmentIntegrationTest {
             "LEARNING-INVALID_REFERENCE");
     }
 
+    @Test
+    void ownCourseManagerAddsToTheProgramBankThroughTheCourseOnly() {
+        Course own = fixtures.course();
+        long program = jdbc.queryForObject("""
+            select program_id from learning_hub.course_revisions where revision_id = ?
+            """, Long.class, own.revisionId());
+        Map<String, Object> body = questionBody(own.id(), competency, "SINGLE", 0);
+        body.put("programId", program);
+        Map<String, Object> programOnly = new LinkedHashMap<>(body);
+        programOnly.remove("courseId");
+        Map<String, Object> otherProgram = new LinkedHashMap<>(body);
+        otherProgram.put("programId", jdbc.queryForObject("""
+            select program_id from learning_hub.course_revisions where revision_id = ?
+            """, Long.class, fixtures.course().revisionId()));
+
+        String grant = "user_id = ? AND scope = 'ORG' AND role_id = (SELECT role_id FROM learning_hub.roles"
+            + " WHERE code = 'INSTRUCTOR')";
+        Long org = jdbc.queryForObject("SELECT org_id FROM learning_hub.user_roles WHERE " + grant, Long.class,
+            INSTRUCTOR);
+        jdbc.update("UPDATE learning_hub.user_roles SET scope = 'OWN', org_id = NULL WHERE " + grant, INSTRUCTOR);
+        try {
+            JsonNode created = api.ok(INSTRUCTOR, api.post(body, URL));
+            long id = created.path("id").asLong();
+            assertThat(created.path("programId").asLong()).isEqualTo(program);
+            assertThat(created.path("courseId").asLong()).as("khóa nguồn giữ quyền sửa/xóa").isEqualTo(own.id());
+            JsonNode bank = api.ok(INSTRUCTOR, get(URL + "?programId={p}&courseId={c}", program, own.id()));
+            assertThat(bank.path("items").findValues("id").stream().map(JsonNode::asLong).toList()).contains(id);
+            api.ok(INSTRUCTOR, api.put(body, URL + "/{id}?expectedVersion={v}", id,
+                created.path("rowVersion").asLong()));
+
+            api.http(INSTRUCTOR, api.post(programOnly, URL), 403, "CORE-ACCESS_DENIED");
+            api.error(INSTRUCTOR, api.post(otherProgram, URL), "LEARNING-INVALID_REFERENCE");
+        } finally {
+            jdbc.update("""
+                UPDATE learning_hub.user_roles SET scope = 'ORG', org_id = ?
+                WHERE user_id = ? AND scope = 'OWN'
+                  AND role_id = (SELECT role_id FROM learning_hub.roles WHERE code = 'INSTRUCTOR')
+                """, org, INSTRUCTOR);
+        }
+        long shared = api.ok(ROOT, api.post(programOnly, URL)).path("id").asLong();
+        assertThat(api.ok(INSTRUCTOR, get(URL + "/{id}", shared)).path("courseId").isNull()).isTrue();
+    }
+
     private static Map<String, Object> option(Long id, String content, boolean correct) {
         Map<String, Object> option = new LinkedHashMap<>();
         option.put("id", id);

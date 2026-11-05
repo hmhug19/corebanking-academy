@@ -34,9 +34,10 @@ Mã trạng thái/loại dùng IN HOA (`ACTIVE`, `DRAFT`, `IN_PROGRESS`…) theo
 |---|---|
 | Đọc nhóm năng lực | Tài khoản đã đăng nhập |
 | Ghi nhóm năng lực | SUPER_ADMIN hoặc ADMIN phạm vi GLOBAL |
-| Ngân hàng chương trình | SUPER_ADMIN/GLOBAL hoặc ADMIN/INSTRUCTOR với GLOBAL/ORG bao phủ đơn vị sở hữu chương trình; không suy quyền ghi ngân hàng chung từ một khóa OWN/TEAM |
+| Ngân hàng chương trình | SUPER_ADMIN/GLOBAL hoặc ADMIN/INSTRUCTOR với GLOBAL/ORG bao phủ đơn vị sở hữu chương trình; không suy quyền ghi câu chỉ có `programId` từ một khóa OWN/TEAM |
+| Thêm câu qua khóa | `courseId` (kèm `programId` hoặc không) trên POST `/questions` và nhập Excel: caller quản lý khóa (mọi scope, kể cả OWN/TEAM); câu vào ngân hàng chương trình của revision mới nhất, giữ `courseId` làm khóa nguồn. `programId` gửi kèm phải đúng chương trình đó |
 | Chọn câu hỏi cho đề | `programId` + `courseId`: caller quản lý khóa, chương trình phải là chương trình của revision mới nhất và cùng đơn vị sở hữu; cho phép đọc câu hỏi dùng chung để lập đề |
-| API câu hỏi courseId cũ, bài thi | Giữ quyền quản lý khóa theo `LearningAccessPolicy`. Câu hỏi mới không có courseId được kiểm quyền bằng chương trình thực tế của câu |
+| Câu theo ID/bulk, bài thi | Câu có `courseId`: người quản lý khóa nguồn hoặc người quản lý chương trình sở hữu. Câu không có `courseId`: quyền chương trình thực tế của câu. Bài thi: quyền quản lý khóa theo `LearningAccessPolicy` |
 | `/me/**` | Vai trò LEARNER/OWN và lần học hợp lệ của khóa (khóa active, nguồn giao/tự đăng ký còn hiệu lực); lượt của người khác trả `ASSESSMENT-NOT_FOUND` |
 
 Module Assessment truy cập Learning qua adapter công khai `LearningAssessmentAccess`, không dùng repository Learning.
@@ -107,7 +108,9 @@ với `quizId` và `status` theo AND (ví dụ `status=VOIDED&graded=true` trả
 
 ## Quy tắc chính
 
-**Ngân hàng chương trình.** Câu hỏi mới gửi `programId`, không cần `courseId` hoặc `lessonId`.
+**Ngân hàng chương trình.** Câu hỏi dùng chung gửi `programId`, không cần `courseId` hoặc `lessonId`. Người quản lý
+khóa (ví dụ giảng viên OWN) thêm câu vào cùng ngân hàng bằng `courseId`, qua form hoặc nhập Excel; đây là đường
+được hỗ trợ, không phải tương thích cũ.
 `programId` trong summary/detail là chương trình sở hữu, không được chuyển khi sửa. ID danh mục lấy từ
 `GET /api/v1/training-catalog/programs?ownerOrgId&page&size` như form khóa học. `GET /questions?programId=...`
 trả toàn bộ câu hỏi trong chương trình qua phân trang, gồm câu tạo từ các khóa khác và câu không gắn khóa.
@@ -128,15 +131,17 @@ Ngưng sử dụng bằng PUT hoặc bulk-status đều bị từ chối nếu l
 
 DB đã chạy baseline cần [upgrade ngân hàng chương trình](../sql/upgrade/2026-11-04-program-question-bank.sql)
 trước backend mới. Backfill theo revision mới nhất, không đổi programme đã có; câu cũ chưa xác định được
-chương trình vẫn giữ lại qua API courseId cũ. Nhập/xuất Excel bằng courseId giữ nguyên contract cũ. Với câu có nguồn courseId cũ, API theo ID/bulk
-giữ quyền quản lý khóa đó; câu mới không có courseId luôn kiểm theo chương trình sở hữu.
+chương trình vẫn giữ lại qua API courseId. Nhập/xuất Excel bằng courseId giữ nguyên contract. Câu có `courseId`
+được người quản lý khóa đó hoặc người quản lý chương trình sở hữu sửa/xóa; câu không có `courseId` luôn kiểm theo
+chương trình sở hữu.
 
 **Câu hỏi.** Từ 2 tới 10 phương án; SINGLE đúng 1 đáp án đúng, MULTIPLE ít nhất 2. Mã để trống thì sinh `Q<ID>`.
 PUT gửi danh sách phương án đầy đủ: có `id` thì sửa tại chỗ, không `id` là phương án mới, phương án cũ vắng mặt
 bị xóa mềm (ID đã chụp vào đề không bị tái sử dụng). Câu đã từng phát đề mà đổi nội dung/giải thích/loại/phương
 án/đáp án thì `contentVersion` tăng; lượt cũ **không** tự chấm lại.
 
-**Đề.** Tạo ở DRAFT; mỗi khóa tối đa một FINAL_EXAM. Xuất bản khi số câu ACTIVE trong pool ≥ `questionCount` và
+**Đề.** Tạo ở DRAFT; mỗi khóa tối đa một FINAL_EXAM. Pool tối đa 2000 câu (`MAX_POOL_SIZE`), đủ đưa cả ngân hàng
+chương trình vào đề RANDOM_POOL. Xuất bản khi số câu ACTIVE trong pool ≥ `questionCount` và
 `closeAt` (nếu có) ở tương lai. Đề đã xuất bản vẫn sửa được nhưng phải còn đủ câu ACTIVE; thay đổi chỉ áp dụng cho
 lượt mới vì lượt đã chụp `timeLimitMinutes`, `passPercent`, `scoringMode`, `graceSeconds`, `maxScore` và đề.
 
