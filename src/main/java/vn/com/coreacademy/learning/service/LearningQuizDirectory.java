@@ -13,10 +13,18 @@ import java.util.Set;
  * nên Learning không import lớp nào của Assessment.
  */
 public interface LearningQuizDirectory {
-    /** Thông tin tối thiểu của đề: khóa sở hữu, trạng thái (DRAFT/PUBLISHED/CLOSED) và cờ xóa mềm. */
-    record QuizRef(Long quizId, Long courseId, String status, boolean deleted) {
+    /**
+     * Thông tin tối thiểu của đề: khóa sở hữu, trạng thái (DRAFT/PUBLISHED/CLOSED), cờ xóa mềm, loại đề và cấu hình
+     * làm bài (điểm đạt, số lượt thi, cho thi lại sau khi đạt) để chụp lại vào dòng bài thi cuối khóa.
+     */
+    record QuizRef(Long quizId, Long courseId, String status, boolean deleted, String quizType,
+                   BigDecimal passPercent, Integer maxAttempts, boolean allowRetakeAfterPass) {
         public boolean published() {
             return !deleted && "PUBLISHED".equals(status);
+        }
+
+        public boolean finalExam() {
+            return "FINAL_EXAM".equals(quizType);
         }
     }
 

@@ -58,6 +58,28 @@ public final class LearningRequests {
     public record VersionRequest(@NotNull @Min(0) Long expectedVersion) {
     }
 
+    /**
+     * Xuất bản kèm đối tượng giao và đơn vị được chia sẻ; hai danh sách bỏ trống hoặc null nghĩa là không có.
+     * Mỗi dòng giao chỉ có một đối tượng; các giá trị còn lại của lượt giao lấy từ bản vừa xuất bản.
+     */
+    public record PublishRequest(
+        @NotNull @Min(0) Long expectedVersion,
+        @Size(max = LearningLimits.MAX_PUBLISH_ASSIGNMENTS) List<@Valid @NotNull PublishAssignment> assignments,
+        @Size(max = LearningLimits.MAX_PUBLISH_SHARES) List<@NotNull @Positive Long> shareOrgIds) {
+        public PublishRequest {
+            assignments = assignments == null ? List.of() : assignments;
+            shareOrgIds = shareOrgIds == null ? List.of() : shareOrgIds;
+        }
+    }
+
+    public record PublishAssignment(
+        @NotNull Instant startAt,
+        Instant dueAt,
+        boolean reminderEnabled,
+        @Min(0) @Max(365) int reminderDaysBefore,
+        @NotNull @Valid TargetInput target) {
+    }
+
     public record CopyRequest(@NotBlank @Size(max = 50) String code) {
     }
 
@@ -65,7 +87,11 @@ public final class LearningRequests {
                               @NotNull @Pattern(regexp = CourseStatus.PATTERN) String status) {
     }
 
-    /** Nội dung bản nháp (mọi trường của {@link DraftRequest} trừ expectedVersion); dùng chung khi lưu nháp và khi tạo khóa. */
+    /**
+     * Nội dung bản nháp (mọi trường của {@link DraftRequest} trừ expectedVersion); dùng chung khi lưu nháp và khi tạo khóa.
+     * {@code finalQuizId} là bài kiểm tra cuối khóa (loại FINAL_EXAM của chính khóa); bỏ trống nghĩa là không yêu cầu
+     * và xóa lựa chọn cũ của bản nháp, như mọi trường khác của cây.
+     */
     public record DraftContent(
         @Positive Long programId,
         @Positive Long moduleId,
@@ -78,11 +104,12 @@ public final class LearningRequests {
         @Pattern(regexp = "#[0-9A-Fa-f]{6}") String coverColor,
         @NotNull @Size(max = 100) List<@NotBlank @Size(max = 2000) String> objectives,
         @NotNull @Size(max = 100) List<@Valid ChapterInput> chapters,
-        @Min(0) @Max(100000) int rewardPoints) {
+        @Min(0) @Max(100000) int rewardPoints,
+        @Positive Long finalQuizId) {
         /** Bản sao với tiêu đề khác; dùng khi tiêu đề của khóa lấy từ trường ngoài nội dung nháp. */
         public DraftContent withTitle(String newTitle) {
             return new DraftContent(programId, moduleId, newTitle, summary, level, defaultRequirement, coverAssetId,
-                coverIcon, coverColor, objectives, chapters, rewardPoints);
+                coverIcon, coverColor, objectives, chapters, rewardPoints, finalQuizId);
         }
     }
 
@@ -99,11 +126,12 @@ public final class LearningRequests {
         @Pattern(regexp = "#[0-9A-Fa-f]{6}") String coverColor,
         @NotNull @Size(max = 100) List<@NotBlank @Size(max = 2000) String> objectives,
         @NotNull @Size(max = 100) List<@Valid ChapterInput> chapters,
-        @Min(0) @Max(100000) int rewardPoints) {
+        @Min(0) @Max(100000) int rewardPoints,
+        @Positive Long finalQuizId) {
         /** Phần nội dung của payload, bỏ expectedVersion. */
         public DraftContent content() {
             return new DraftContent(programId, moduleId, title, summary, level, defaultRequirement, coverAssetId,
-                coverIcon, coverColor, objectives, chapters, rewardPoints);
+                coverIcon, coverColor, objectives, chapters, rewardPoints, finalQuizId);
         }
     }
 
