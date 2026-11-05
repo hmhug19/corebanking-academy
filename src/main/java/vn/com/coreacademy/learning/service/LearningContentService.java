@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
@@ -301,6 +302,42 @@ public class LearningContentService {
         record(actor.person().id(), AuditAction.COURSE_COPIED, target);
         repository.flush();
         return detail(target, revision);
+    }
+
+    /**
+     * Sao chép khóa vào một chương trình mới trong cùng transaction của việc sao chép chương trình: bản nháp,
+     * mã cấp sẵn, không copy assignment/share/enrollment. Người gọi đã giữ khóa ghi.
+     */
+    @Transactional
+    public Course copyIntoProgram(Course source, Long programId, String code) {
+        var actor = access.actor();
+        access.requireManage(actor, source);
+        Course target = new Course();
+        target.setCode(code);
+        target.setOwnerOrgId(source.getOwnerOrgId());
+        target.setOwnerTeamId(source.getOwnerTeamId());
+        target.setOwnerUserId(actor.person().id());
+        target.setLifecycleStatus(CourseStatus.ACTIVE);
+        target.setCopiedFromCourseId(source.getId());
+        repository.save(target, actor.person().id());
+        CourseRevision sourceRevision = selectRevision(source, null);
+        CourseRevision revision = newRevision(target, sourceRevision.getTitle(), actor.person().id(), 1);
+        cloneContent(target, sourceRevision, revision, actor.person().id(), false);
+        revision.setProgramId(programId);
+        repository.save(revision, actor.person().id());
+        record(actor.person().id(), AuditAction.COURSE_COPIED, target);
+        return target;
+    }
+
+    /** Mã còn trống dạng {@code <mã>-COPY}, {@code <mã>-COPY2}... trong giới hạn 50 ký tự. */
+    public String freeCopyCode(String code, Predicate<String> taken) {
+        for (int n = 1; ; n++) {
+            String suffix = n == 1 ? "-COPY" : "-COPY" + n;
+            String candidate = code.substring(0, Math.min(code.length(), 50 - suffix.length())) + suffix;
+            if (!taken.test(candidate)) {
+                return candidate;
+            }
+        }
     }
 
     @Transactional

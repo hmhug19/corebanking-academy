@@ -134,6 +134,20 @@ public class LearningCatalogController {
         return BaseResponse.ok(catalog.saveProgram(id, expectedVersion, request));
     }
 
+    @PostMapping("/programs/{id}/copy")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Sao chép chương trình",
+        description = """
+            Tạo chương trình nháp cùng lĩnh vực (mã gốc kèm -COPY, tên kèm "(bản sao)") và bản nháp của mọi khóa học
+            trong chương trình; không sao chép người học, đợt giao hay chia sẻ. Tất cả trong một transaction.
+            """
+    )
+    public BaseResponse<LearningViews.TrainingProgramView> copyProgram(@PathVariable @Positive Long id) {
+        return BaseResponse.ok(catalog.copyProgram(id));
+    }
+
     @GetMapping("/modules")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
