@@ -101,6 +101,15 @@ public interface UserRepository extends JpaRepository<UserAccount, String>, User
         """)
     boolean identifierExists(@Param("identifier") String identifier);
 
+    /** The account whose staff code or username equals {@code identifier}, ignoring case; at most one by the write rules. */
+    @Query("""
+        select u
+        from UserAccount u
+        where lower(u.id) = lower(:identifier)
+           or lower(u.username) = lower(:identifier)
+        """)
+    List<UserAccount> findByIdentifier(@Param("identifier") String identifier);
+
     Optional<UserAccount> findByUsername(String username);
 
     /**
