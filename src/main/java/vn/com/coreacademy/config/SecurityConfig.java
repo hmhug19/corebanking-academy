@@ -87,6 +87,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/auth/registration-units").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/register-request").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/auth/password-reset-request").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
                     "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll()

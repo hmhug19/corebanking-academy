@@ -19,9 +19,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.identity.dto.PasswordResetRequestForm;
 import vn.com.coreacademy.identity.dto.RegisterRequest;
 import vn.com.coreacademy.identity.dto.RegistrationResult;
 import vn.com.coreacademy.identity.dto.RegistrationUnit;
+import vn.com.coreacademy.identity.service.PasswordResetRequestService;
 import vn.com.coreacademy.identity.service.RegistrationService;
 
 /** The two public endpoints of self-registration; everything else about access requests needs a token. */
@@ -32,6 +34,7 @@ import vn.com.coreacademy.identity.service.RegistrationService;
 @RequiredArgsConstructor
 public class RegistrationController {
     private final RegistrationService registration;
+    private final PasswordResetRequestService passwordResets;
 
     @GetMapping("/registration-units")
     @SecurityRequirements
@@ -62,5 +65,23 @@ public class RegistrationController {
     public ResponseEntity<BaseResponse<RegistrationResult>> register(@Valid @RequestBody RegisterRequest request,
         HttpServletRequest http) {
         return ResponseEntity.ok(BaseResponse.ok(registration.register(http.getRemoteAddr(), request)));
+    }
+
+    @PostMapping("/password-reset-request")
+    @SecurityRequirements
+    @Operation(
+        summary = "Gửi yêu cầu cấp lại mật khẩu",
+        description = """
+            Công khai, giới hạn theo IP và theo mã cán bộ (429 khi vượt).
+            - Luôn trả cùng một thông báo, dù mã cán bộ có tài khoản hay không, hay đã có yêu cầu chờ.
+            - Quản trị viên xử lý từ danh sách yêu cầu và gửi mật khẩu tạm bằng kênh riêng.
+            """
+    )
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status để phân biệt thành công với lỗi nghiệp vụ.",
+        useReturnTypeSchema = true)
+    public ResponseEntity<BaseResponse<RegistrationResult>> passwordReset(
+        @Valid @RequestBody PasswordResetRequestForm request, HttpServletRequest http) {
+        return ResponseEntity.ok(BaseResponse.ok(passwordResets.request(http.getRemoteAddr(), request.staffCode())));
     }
 }
