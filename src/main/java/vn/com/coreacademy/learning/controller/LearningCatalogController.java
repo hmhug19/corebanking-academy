@@ -34,6 +34,21 @@ import vn.com.coreacademy.learning.service.LearningCatalogService;
 public class LearningCatalogController {
     private final LearningCatalogService catalog;
 
+    @GetMapping("/tree")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Cây danh mục đào tạo",
+        description = """
+            Lĩnh vực, chương trình và khóa học của một đơn vị trong một lần gọi, sắp theo sortNo rồi id.
+            Mỗi lĩnh vực và chương trình trả đủ trường (kể cả rowVersion) để cập nhật trạng thái bằng PUT.
+            Khóa chưa xếp chương trình không có trong cây.
+            """
+    )
+    public BaseResponse<LearningViews.CatalogTreeView> tree(@RequestParam @Positive Long ownerOrgId) {
+        return BaseResponse.ok(catalog.tree(ownerOrgId));
+    }
+
     @GetMapping("/fields")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)

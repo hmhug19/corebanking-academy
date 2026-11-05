@@ -118,6 +118,20 @@ public class LearningRepository {
             """, TrainingProgram.class, Map.of("org", orgId));
     }
 
+    /** Khóa của đơn vị kèm bản đang hiển thị (bản xuất bản, nếu chưa có thì bản mới nhất) đã xếp vào chương trình. */
+    public List<Object[]> treeCourses(Long orgId) {
+        return query("""
+            select c, r
+            from Course c, CourseRevision r
+            where r.courseId = c.id
+              and c.ownerOrgId = :org
+              and r.programId is not null
+              and r.id = coalesce(c.publishedRevisionId,
+                  (select max(x.id) from CourseRevision x where x.courseId = c.id))
+            order by c.id
+            """, Object[].class, Map.of("org", orgId));
+    }
+
     public List<BusinessModule> modules(Long fieldId) {
         return query("""
             select m
