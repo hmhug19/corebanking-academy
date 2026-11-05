@@ -1,5 +1,7 @@
 package vn.com.coreacademy.assessment;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -12,13 +14,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import vn.com.coreacademy.assessment.service.QuizAutoSubmitJob;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures.Course;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
+import vn.com.coreacademy.security.SecurityConstants;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
@@ -86,6 +91,90 @@ class QuizLessonCompletionIT extends AssessmentIntegrationTest {
                 completed_at, created_by, updated_by)
             VALUES (?, ?, 'completed', 100, now(), ?, ?)
             """, s.enrollmentId(), s.course().lessonId(), LEARNER, LEARNER);
+    }
+
+    private Setup finalOnly() {
+        Course course = fixtures.course(LEARNER);
+        long question = fixtures.question(course.id(), competency, "SINGLE", 0);
+        Map<String, Object> body = quizBody(course.id());
+        body.put("quizType", "FINAL_EXAM");
+        body.put("questionCount", 1);
+        long quizId = fixtures.quiz(body, List.of(question), true);
+        long enrollmentId = jdbc.queryForObject("""
+            SELECT enrollment_id FROM learning_hub.course_enrollments WHERE course_id = ? AND user_id = ?
+            """, Long.class, course.id(), LEARNER);
+        jdbc.update("UPDATE learning_hub.course_completion_rules SET final_quiz_id = ? WHERE revision_id = ?",
+            quizId, course.revisionId());
+        return new Setup(course, quizId, -1, enrollmentId);
+    }
+
+    private JsonNode completeContentThroughApi(Setup s) {
+        long blockId = jdbc.queryForObject("SELECT block_id FROM learning_hub.lesson_blocks WHERE lesson_id = ?",
+            Long.class, s.course().lessonId());
+        JsonNode session = learningCall(api.post(Map.of("enrollmentId", s.enrollmentId(), "blockId", blockId,
+            "takeover", true), "/api/v1/me/learning/sessions"));
+        return learningCall(api.put(Map.of("sessionId", session.path("sessionId").asText(),
+            "sessionFence", session.path("sessionFence").asLong(), "expectedVersion",
+            session.path("expectedVersion").asLong(), "sequence", session.path("lastAcceptedSequence").asLong() + 1,
+            "eventType", "CLOSE", "complete", true),
+            "/api/v1/me/learning/enrollments/{e}/blocks/{b}/progress", s.enrollmentId(), blockId));
+    }
+
+    /** Cookie media của phiên học yêu cầu claim auth-version như access token thật. */
+    private JsonNode learningCall(MockHttpServletRequestBuilder request) {
+        var response = api.raw(null, request.with(jwt().jwt(token -> token.subject(LEARNER)
+            .claim(SecurityConstants.AUTH_VERSION_CLAIM, 0L))));
+        try {
+            JsonNode body = json.readTree(response.getContentAsString(StandardCharsets.UTF_8));
+            assertThat(response.getStatus()).as(body.toPrettyString()).isEqualTo(200);
+            assertThat(body.path("status").asText()).as(body.toPrettyString()).isEqualTo("SUCCESS");
+            return body.path("data");
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    @Test
+    void finalExamNotInTheOutlineStillGatesCourseCompletionUntilPassed() {
+        Setup s = finalOnly();
+        JsonNode progress = completeContentThroughApi(s).path("enrollment");
+        assertThat(progress.path("status").asText()).isEqualTo("in_progress");
+        assertThat(progress.path("progressPercent").decimalValue()).isEqualByComparingTo("50");
+        assertThat(enrollment(s).get("completed_at")).isNull();
+        assertThat(attempt(s, false).path("passed").asBoolean()).isFalse();
+        assertThat(enrollment(s).get("status")).isNotEqualTo("completed");
+        assertThat(attempt(s, true).path("passed").asBoolean()).isTrue();
+        assertThat(enrollment(s)).containsEntry("status", "completed");
+        assertThat(enrollment(s).get("completed_at")).isNotNull();
+    }
+
+    @Test
+    void passingTheFinalExamFirstStillRequiresFinishingTheContent() {
+        Setup s = finalOnly();
+        attempt(s, true);
+        assertThat(enrollment(s).get("status")).isNotEqualTo("completed");
+        assertThat(completeContentThroughApi(s).path("enrollment").path("status").asText()).isEqualTo("completed");
+    }
+
+    @Test
+    void everyRequiredQuizMustPassButOptionalQuizzesDoNotBlockCompletion() {
+        Setup first = setup(Map.of());
+        long question = fixtures.question(first.course().id(), competency, "SINGLE", 0);
+        Map<String, Object> secondBody = quizBody(first.course().id());
+        secondBody.put("questionCount", 1);
+        long secondId = fixtures.quiz(secondBody, List.of(question), true);
+        Setup second = link(first.course(), secondId);
+        completeContentLesson(first);
+        attempt(first, true);
+        assertThat(enrollment(first).get("status")).isNotEqualTo("completed");
+        attempt(second, true);
+        assertThat(enrollment(first)).containsEntry("status", "completed");
+
+        Setup optional = setup(Map.of());
+        jdbc.update("UPDATE learning_hub.course_lessons SET is_required = false WHERE lesson_id = ?",
+            optional.quizLessonId());
+        assertThat(completeContentThroughApi(optional).path("enrollment").path("status").asText())
+            .isEqualTo("completed");
     }
 
     private Map<String, Object> lesson(Setup s) {

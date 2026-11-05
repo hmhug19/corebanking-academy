@@ -80,32 +80,38 @@ public class QuestionService {
     /** Tạo câu hỏi theo chương trình; courseId chỉ còn là đường tương thích cho client cũ. */
     @Transactional
     public AssessmentViews.QuestionDetail create(AssessmentRequests.QuestionRequest request) {
-        Bank bank;
-        if (request.programId() != null) {
-            var program = learning.requireManagedProgram(request.programId());
-            if (request.courseId() != null) {
-                learning.requireCourseProgramBank(request.courseId(), program.id());
-            }
-            bank = new Bank(program.id(), request.courseId(), program.ownerOrgId());
-        } else if (request.courseId() != null) {
-            bank = courseBank(learning.requireManagedCourse(request.courseId()));
-        } else {
-            throw BusinessException.validation("programId", "REQUIRED", "Chọn chương trình của ngân hàng câu hỏi.");
-        }
+        Bank bank = requireBank(request.courseId(), request.programId());
         String actor = learning.actor().person().id();
         lock.acquire();
         return detail(insert(bank, request, actor));
     }
 
+    /** Dùng cùng phạm vi và quyền của tạo câu hỏi cho cả lô Excel. */
+    Bank requireBank(Long courseId, Long programId) {
+        Bank bank;
+        if (programId != null) {
+            var program = learning.requireManagedProgram(programId);
+            if (courseId != null) {
+                learning.requireCourseProgramBank(courseId, program.id());
+            }
+            bank = new Bank(program.id(), courseId, program.ownerOrgId());
+        } else if (courseId != null) {
+            bank = courseBank(learning.requireManagedCourse(courseId));
+        } else {
+            throw BusinessException.validation("programId", "REQUIRED", "Chọn chương trình của ngân hàng câu hỏi.");
+        }
+        return bank;
+    }
+
     /**
      * Ghi câu hỏi mới sau khi kiểm tra tham chiếu, phương án và mã; dùng chung cho API tạo và nhập Excel. Bên gọi
-     * đã kiểm quyền khóa và giữ write lock trong transaction hiện tại.
+     * đã kiểm quyền ngân hàng và giữ write lock trong transaction hiện tại.
      */
     Question insert(ManagedCourse course, AssessmentRequests.QuestionRequest request, String actor) {
         return insert(courseBank(course), request, actor);
     }
 
-    private Question insert(Bank bank, AssessmentRequests.QuestionRequest request, String actor) {
+    Question insert(Bank bank, AssessmentRequests.QuestionRequest request, String actor) {
         validateReferences(bank.courseId(), request, null);
         List<AssessmentRequests.OptionInput> options = validateOptions(request, List.of());
         String code = blankToNull(request.code());
@@ -166,7 +172,7 @@ public class QuestionService {
         return overwrite(question, courseBank(course), request, actor);
     }
 
-    private Question overwrite(Question question, Bank bank, AssessmentRequests.QuestionRequest request,
+    Question overwrite(Question question, Bank bank, AssessmentRequests.QuestionRequest request,
                                String actor) {
         Long id = question.getId();
         if (request.programId() != null && !request.programId().equals(question.getProgramId())) {
@@ -274,7 +280,7 @@ public class QuestionService {
         return found;
     }
 
-    private record Bank(Long programId, Long courseId, Long ownerOrgId) {
+    record Bank(Long programId, Long courseId, Long ownerOrgId) {
     }
 
     private record BankKey(Long courseId, Long programId) {

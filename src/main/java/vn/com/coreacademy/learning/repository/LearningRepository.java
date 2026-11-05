@@ -49,6 +49,13 @@ import vn.com.coreacademy.learning.exception.LearningResponseCode;
 public class LearningRepository {
     private final EntityManager entityManager;
 
+    public boolean quizLinked(Long quizId) {
+        return entityManager.createQuery("select count(l) from CourseLesson l where l.quizId = :id", Long.class)
+            .setParameter("id", quizId).getSingleResult() > 0
+            || entityManager.createQuery("select count(r) from CourseCompletionRule r where r.finalQuizId = :id",
+                Long.class).setParameter("id", quizId).getSingleResult() > 0;
+    }
+
     public <T> T require(Class<T> type, Long id) {
         T value = id == null ? null : entityManager.find(type, id);
         if (value == null) {

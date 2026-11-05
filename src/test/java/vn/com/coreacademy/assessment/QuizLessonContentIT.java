@@ -125,6 +125,35 @@ class QuizLessonContentIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void persistsAndValidatesTheFinalExamCompletionRule() {
+        Course course = fixtures.course();
+        long question = fixtures.question(course.id(), competency, "SINGLE", 0);
+        Map<String, Object> finalBody = quizBody(course.id());
+        finalBody.put("quizType", "FINAL_EXAM");
+        finalBody.put("questionCount", 1);
+        long finalId = fixtures.quiz(finalBody, List.of(question), true);
+        JsonNode draft = newDraft(course);
+        Map<String, Object> body = draftBody(draft, List.of(textLesson()));
+        body.put("finalQuizId", finalId);
+        JsonNode saved = api.ok(INSTRUCTOR, api.put(body, "/api/v1/courses/{c}/revisions/{r}", course.id(),
+            draft.path("revision").path("id").asLong()));
+        assertThat(saved.path("finalQuizId").asLong()).isEqualTo(finalId);
+        assertThat(saved.path("completionRule").path("finalQuizId").asLong()).isEqualTo(finalId);
+        assertThat(publish(saved, course).path("finalQuizId").asLong()).isEqualTo(finalId);
+        api.error(INSTRUCTOR, api.delete("/api/v1/quizzes/{q}?expectedVersion={v}", finalId,
+            fixtures.quizVersion(finalId)), "ASSESSMENT-QUIZ_IN_USE");
+
+        JsonNode next = newDraft(course);
+        assertThat(next.path("finalQuizId").asLong()).isEqualTo(finalId);
+        Map<String, Object> wrong = draftBody(next, List.of(textLesson()));
+        wrong.put("finalQuizId", quiz(fixtures.course(), true));
+        api.error(INSTRUCTOR, api.put(wrong, "/api/v1/courses/{c}/revisions/{r}", course.id(),
+            next.path("revision").path("id").asLong()), "CORE-VALIDATION_FAILED");
+        JsonNode cleared = save(next, course, List.of(textLesson()));
+        assertThat(cleared.path("finalQuizId").isNull()).isTrue();
+    }
+
+    @Test
     void savesQuizLessonWithQuizOfTheSameCourse() {
         Course course = fixtures.course(LEARNER);
         long quizId = quiz(course, true);

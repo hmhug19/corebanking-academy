@@ -267,7 +267,7 @@ public class QuizService {
         lock.acquire();
 
         requireVersion(quiz, expectedVersion);
-        if (repository.quizHasAttempts(id)) {
+        if (repository.quizHasAttempts(id) || learning.quizLinked(id)) {
             throw new BusinessException(AssessmentResponseCode.QUIZ_IN_USE);
         }
         quiz.setDeleted(true);

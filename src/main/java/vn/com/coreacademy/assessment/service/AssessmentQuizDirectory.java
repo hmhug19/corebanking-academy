@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.AttemptStatus;
 import vn.com.coreacademy.assessment.dto.AssessmentViews.AttemptSummary;
 import vn.com.coreacademy.assessment.entity.Quiz;
 import vn.com.coreacademy.assessment.entity.QuizAttempt;
@@ -34,7 +35,15 @@ public class AssessmentQuizDirectory implements LearningQuizDirectory {
     @Transactional(readOnly = true)
     public Optional<QuizRef> find(Long quizId) {
         return quizzes.findById(quizId)
-            .map(q -> new QuizRef(q.getId(), q.getCourseId(), q.getStatus(), Boolean.TRUE.equals(q.getDeleted())));
+            .map(q -> new QuizRef(q.getId(), q.getCourseId(), q.getStatus(), Boolean.TRUE.equals(q.getDeleted()),
+                q.getQuizType()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasPassed(String userId, Long enrollmentId, Long quizId) {
+        return attempts.existsByUserIdAndEnrollmentIdAndQuizIdAndPassedTrueAndStatusIn(userId, enrollmentId, quizId,
+            List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED));
     }
 
     @Override

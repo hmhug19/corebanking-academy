@@ -48,6 +48,15 @@ Mở ảnh ở kích thước gốc để xem rõ tên cột.
 `video_watch_ranges` lưu các khoảng đã xem để tính coverage, không suy hoàn thành từ vị trí tua xa nhất.
 Quan hệ revision → `course_completion_rules` có tối đa một dòng cấu hình mỗi bản, được tạo khi tạo revision.
 
+`DraftRequest.finalQuizId` (nullable, số nguyên dương) chọn bài thi `FINAL_EXAM` cùng khóa để xét hoàn thành.
+`CourseDetail` trả cùng giá trị ở `finalQuizId` và `completionRule.finalQuizId`. Không gửi hoặc gửi `null` khi lưu toàn
+bộ bản nháp sẽ bỏ lựa chọn này; các bài quiz bắt buộc trong cây nội dung vẫn phải đạt. Khi xuất bản, đề đã chọn phải
+đang `PUBLISHED`. Sao chép revision cùng khóa giữ lựa chọn; sao chép thành khóa mới xóa liên kết bài thi.
+Backend đòi hoàn thành mọi bài học bắt buộc và đạt bài thi đã chọn, dựa trên kết quả của chính lần học hiện tại;
+không tính bài quiz tùy chọn và không tự thu hồi lịch sử hoàn thành đã cấp. Bài thi ngoài cây được tính thêm một
+thành phần tiến độ nên học xong nội dung chưa thể lên 100% khi còn thiếu bài thi. Migration DB hiện có:
+[`2026-11-05-required-final-quiz.sql`](../sql/upgrade/2026-11-05-required-final-quiz.sql).
+
 Các bảng `assessment_revisions` và `assessment_attempts` trong ảnh thể hiện **phần thiết kế tiếp theo,
 chưa triển khai**; không nằm trong DDL Learning hiện tại. `course_assessments` đã có bảng điểm nối,
 nhưng chưa có API Quiz Engine hoạt động. Phần này không phải bằng chứng hệ thống đã chấm thi.

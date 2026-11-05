@@ -34,4 +34,7 @@ public class CourseCompletionRule extends LearningRecord {
 
     @Column(name = "require_all_required_quizzes", nullable = false)
     private Boolean requireAllRequiredQuizzes = true;
+
+    @Column(name = "final_quiz_id")
+    private Long finalQuizId;
 }

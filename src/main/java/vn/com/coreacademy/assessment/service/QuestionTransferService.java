@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -41,13 +42,13 @@ import vn.com.coreacademy.assessment.importing.QuestionWorkbook.QuestionRow;
 import vn.com.coreacademy.assessment.repository.AssessmentRepository;
 import vn.com.coreacademy.assessment.repository.QuestionRepository;
 import vn.com.coreacademy.assessment.repository.custom.QuestionRepositoryCustom;
+import vn.com.coreacademy.assessment.service.QuestionService.Bank;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.dto.FieldViolation;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.validation.ValidationErrors;
 import vn.com.coreacademy.identity.constants.RoleCodes;
 import vn.com.coreacademy.learning.service.LearningAssessmentAccess;
-import vn.com.coreacademy.learning.service.LearningAssessmentAccess.ManagedCourse;
 import vn.com.coreacademy.learning.service.LearningWriteLock;
 
 /**
@@ -96,11 +97,16 @@ public class QuestionTransferService {
     /**
      * Parse tệp ngoài transaction. dryRun chỉ kiểm tra (không khóa, không ghi). Nhập thật giữ write lock, kiểm tra lại
      * quyền, tham chiếu, mã trùng rồi ghi toàn bộ cùng audit trong một transaction. overwrite=true cho phép ghi đè câu
-     * cùng mã trong cùng khóa; mặc định mã đã tồn tại là lỗi.
+     * cùng mã trong cùng chương trình; courseId cũ chỉ được ghi đè trong cùng khóa.
      */
     public AssessmentViews.QuestionImportResult importFile(Long courseId, MultipartFile file, boolean dryRun,
                                                           boolean overwrite) throws IOException {
-        learning.requireManagedCourse(courseId);
+        return importFile(courseId, null, file, dryRun, overwrite);
+    }
+
+    public AssessmentViews.QuestionImportResult importFile(Long courseId, Long programId, MultipartFile file,
+                                                          boolean dryRun, boolean overwrite) throws IOException {
+        questionService.requireBank(courseId, programId);
         Parsed parsed = workbook.read(file);
         var transaction = new TransactionTemplate(transactionManager);
         transaction.setReadOnly(dryRun);
@@ -108,9 +114,9 @@ public class QuestionTransferService {
             if (!dryRun) {
                 lock.acquire();
             }
-            ManagedCourse course = learning.requireManagedCourse(courseId);
+            Bank bank = questionService.requireBank(courseId, programId);
             String actor = learning.actor().person().id();
-            List<Planned> plan = validate(course, parsed, overwrite);
+            List<Planned> plan = validate(bank, programId != null, parsed, overwrite);
             int toUpdate = (int) plan.stream().filter(p -> p.target() != null).count();
             int toCreate = plan.size() - toUpdate;
             if (dryRun) {
@@ -118,12 +124,13 @@ public class QuestionTransferService {
             }
             for (Planned item : plan) {
                 if (item.target() == null) {
-                    questionService.insert(course, item.request(), actor);
+                    questionService.insert(bank, item.request(), actor);
                 } else {
-                    questionService.overwrite(item.target(), course, item.request(), actor);
+                    questionService.overwrite(item.target(), bank, item.request(), actor);
                 }
             }
-            audit.record(actor, AuditAction.QUESTIONS_IMPORTED, "course", course.id().toString(), course.ownerOrgId(),
+            audit.record(actor, AuditAction.QUESTIONS_IMPORTED, programId != null ? "program" : "course",
+                (programId != null ? bank.programId() : bank.courseId()).toString(), bank.ownerOrgId(),
                 Map.of("created", toCreate, "updated", toUpdate, "overwrite", overwrite));
             return new AssessmentViews.QuestionImportResult(false, plan.size(), toCreate, toUpdate, toCreate,
                 toUpdate);
@@ -174,7 +181,7 @@ public class QuestionTransferService {
         return workbook.write(rows);
     }
 
-    private List<Planned> validate(ManagedCourse course, Parsed parsed, boolean overwrite) {
+    private List<Planned> validate(Bank bank, boolean programScoped, Parsed parsed, boolean overwrite) {
         List<FieldViolation> errors = new ArrayList<>(parsed.errors());
         Map<String, Competency> competencies = repository.competenciesByCodes(parsed.rows().stream()
             .map(QuestionRow::competency).filter(code -> !code.isBlank()).distinct().toList()).stream()
@@ -188,7 +195,8 @@ public class QuestionTransferService {
         for (QuestionRow row : parsed.rows()) {
             int before = errors.size();
             String prefix = QuestionWorkbook.SHEET + "[" + row.row() + "]";
-            AssessmentRequests.QuestionRequest request = toRequest(course.id(), row, competencies, prefix, errors);
+            AssessmentRequests.QuestionRequest request = toRequest(bank, programScoped, row, competencies, prefix,
+                errors);
             Question target = null;
             if (!row.code().isBlank()) {
                 QuestionRow previous = seen.putIfAbsent(row.code(), row);
@@ -198,10 +206,13 @@ public class QuestionTransferService {
                         "Mã câu hỏi bị lặp trong tệp.");
                 }
                 Question found = existing.get(row.code());
-                if (found != null && (!overwrite || !found.getCourseId().equals(course.id()))) {
-                    issue(errors, prefix + ".ma", "ALREADY_EXISTS", found.getCourseId().equals(course.id())
-                        ? "Mã câu hỏi đã có trong khóa; chọn chế độ ghi đè để cập nhật."
-                        : "Mã câu hỏi đã được dùng ở khóa học khác.");
+                boolean sameBank = found != null && (programScoped
+                    ? Objects.equals(found.getProgramId(), bank.programId())
+                    : Objects.equals(found.getCourseId(), bank.courseId()));
+                if (found != null && (!overwrite || !sameBank)) {
+                    issue(errors, prefix + ".ma", "ALREADY_EXISTS", sameBank
+                        ? "Mã câu hỏi đã có trong phạm vi đã chọn; chọn chế độ ghi đè để cập nhật."
+                        : "Mã câu hỏi đã được dùng ở ngân hàng khác, không thể ghi đè.");
                 } else {
                     target = found;
                 }
@@ -218,7 +229,7 @@ public class QuestionTransferService {
     }
 
     /** Chuẩn hóa một dòng thành request API; lỗi gắn đúng cột Excel. Trả null nếu dòng không dựng được request. */
-    private AssessmentRequests.QuestionRequest toRequest(Long courseId, QuestionRow row,
+    private AssessmentRequests.QuestionRequest toRequest(Bank bank, boolean programScoped, QuestionRow row,
                                                          Map<String, Competency> competencies, String prefix,
                                                          List<FieldViolation> errors) {
         int before = errors.size();
@@ -265,9 +276,10 @@ public class QuestionTransferService {
         for (int i = 0; i < texts.size(); i++) {
             options.add(new AssessmentRequests.OptionInput(null, texts.get(i), answers.contains(i)));
         }
-        var request = new AssessmentRequests.QuestionRequest(courseId, null, competency.getId(),
+        var request = new AssessmentRequests.QuestionRequest(bank.courseId(), null, competency.getId(),
             row.code().isBlank() ? null : row.code(), type, row.content(),
-            row.explanation().isBlank() ? null : row.explanation(), difficulty, points, status, options);
+            row.explanation().isBlank() ? null : row.explanation(), difficulty, points, status, options,
+            programScoped ? bank.programId() : null);
         for (ConstraintViolation<AssessmentRequests.QuestionRequest> violation : validator.validate(request)) {
             String property = violation.getPropertyPath().toString().replaceAll("\\[\\d+].*", "");
             FieldViolation mapped = ValidationErrors.fromConstraint(property,

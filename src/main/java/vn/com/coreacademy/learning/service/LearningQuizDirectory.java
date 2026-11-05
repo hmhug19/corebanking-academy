@@ -14,9 +14,13 @@ import java.util.Set;
  */
 public interface LearningQuizDirectory {
     /** Thông tin tối thiểu của đề: khóa sở hữu, trạng thái (DRAFT/PUBLISHED/CLOSED) và cờ xóa mềm. */
-    record QuizRef(Long quizId, Long courseId, String status, boolean deleted) {
+    record QuizRef(Long quizId, Long courseId, String status, boolean deleted, String quizType) {
         public boolean published() {
             return !deleted && "PUBLISHED".equals(status);
+        }
+
+        public boolean finalExam() {
+            return "FINAL_EXAM".equals(quizType);
         }
     }
 
@@ -36,6 +40,9 @@ public interface LearningQuizDirectory {
     }
 
     Optional<QuizRef> find(Long quizId);
+
+    /** Chỉ xét lượt đã chấm đạt của chính lần ghi danh, không lấy điểm từ chu kỳ học cũ. */
+    boolean hasPassed(String userId, Long enrollmentId, Long quizId);
 
     /**
      * Số bài kiểm tra khác nhau (PUBLISHED, chưa xóa) mà mỗi học viên đã đạt: có ít nhất một lượt đã chấm với

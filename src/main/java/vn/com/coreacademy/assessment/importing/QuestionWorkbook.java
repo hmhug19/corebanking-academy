@@ -26,6 +26,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.util.CellRangeAddressList;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.Difficulty;
@@ -52,7 +53,7 @@ public class QuestionWorkbook {
     private static final int POINTS_COLUMN = 8;
     private static final List<String> GUIDE = List.of(
         "Hướng dẫn nhập ngân hàng câu hỏi (mỗi dòng sheet Questions là một câu hỏi, dòng 1 là tiêu đề):",
-        "ma: mã câu hỏi (văn bản, tối đa 50 ký tự). Để trống để hệ thống sinh Q<ID>. Trùng mã câu đã có trong khóa"
+        "ma: mã câu hỏi (văn bản, tối đa 50 ký tự). Để trống để hệ thống sinh Q<ID>. Trùng mã câu đã có trong phạm vi"
             + " sẽ báo lỗi, trừ khi chọn chế độ ghi đè.",
         "noi_dung: nội dung câu hỏi (bắt buộc).",
         "loai: SINGLE (một đáp án) hoặc MULTIPLE (nhiều đáp án); chấp nhận mot/nhieu.",
@@ -78,7 +79,11 @@ public class QuestionWorkbook {
     }
 
     public byte[] template() {
-        return write(List.of());
+        try (InputStream input = new ClassPathResource("assessment/question-import-template.xlsx").getInputStream()) {
+            return input.readAllBytes();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Cannot read question import template", exception);
+        }
     }
 
     /** Workbook gồm Instructions và Questions; dropdown cho cột mã cố định, cột còn lại định dạng văn bản. */

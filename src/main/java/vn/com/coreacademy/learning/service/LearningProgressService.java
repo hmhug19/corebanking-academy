@@ -67,6 +67,7 @@ public class LearningProgressService {
     private final LearningWriteLock lock;
     private final LearningMapper mapper;
     private final IdentityAuditService audit;
+    private final LearningQuizDirectory quizzes;
 
     public LearningDetails.EnrollmentDetail get(Long enrollmentId) {
         var actor = access.actor();
@@ -327,11 +328,18 @@ public class LearningProgressService {
             .collect(Collectors.toMap(LessonProgress::getLessonId, LessonProgress::getProgressPercent));
         BigDecimal sum = lessons.stream().map(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO))
             .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal percent = lessons.isEmpty() ? BigDecimal.ZERO
-            : sum.divide(BigDecimal.valueOf(lessons.size()), 3, RoundingMode.DOWN);
+        Long finalQuizId = finalQuizId(enrollment.getRevisionId());
+        boolean finalPassed = finalQuizId == null || quizzes.hasPassed(enrollment.getUserId(), enrollment.getId(),
+            finalQuizId);
+        boolean extraFinal = finalQuizId != null && lessons.stream()
+            .noneMatch(lesson -> finalQuizId.equals(lesson.getQuizId()));
+        int componentCount = lessons.size() + (extraFinal ? 1 : 0);
+        BigDecimal completed = sum.add(extraFinal && finalPassed ? HUNDRED : BigDecimal.ZERO);
+        BigDecimal percent = componentCount == 0 ? BigDecimal.ZERO
+            : completed.divide(BigDecimal.valueOf(componentCount), 3, RoundingMode.DOWN);
         boolean complete = !lessons.isEmpty() && lessons.stream()
             .allMatch(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0)
-            && repository.assessments(enrollment.getRevisionId()).isEmpty();
+            && finalPassed && repository.assessments(enrollment.getRevisionId()).isEmpty();
         enrollment.setProgressPercent(enrollment.getProgressPercent().max(percent));
         enrollment.setStatus(complete || enrollment.getCompletedAt() != null ? ProgressStatus.COMPLETED :
             ProgressStatus.IN_PROGRESS);
@@ -348,6 +356,7 @@ public class LearningProgressService {
         }
         repository.save(enrollment, actor);
     }
+
     /**
      * Học viên đạt đề của khóa: bài quiz trỏ tới đề đó trong phiên bản đã nhận lên 100%, rồi tính lại tiến độ khóa.
      * Không ném lỗi khi lần học không còn hiệu lực (đã rút hoặc không thuộc người này) vì bên gọi đang nằm trong
@@ -363,7 +372,7 @@ public class LearningProgressService {
         }
         List<CourseLesson> targets = repository.lessons(enrollment.getRevisionId()).stream()
             .filter(l -> LessonType.QUIZ.equals(l.getLessonType()) && quizId.equals(l.getQuizId())).toList();
-        if (targets.isEmpty()) {
+        if (targets.isEmpty() && !quizId.equals(finalQuizId(enrollment.getRevisionId()))) {
             return false;
         }
         Instant now = Instant.now();
@@ -385,8 +394,13 @@ public class LearningProgressService {
             repository.save(progress, userId);
         }
         repository.flush();
-        updateEnrollment(enrollment, targets.get(0).getId(), null, now, userId);
+        updateEnrollment(enrollment, targets.isEmpty() ? enrollment.getLastLessonId() : targets.get(0).getId(), null,
+            now, userId);
         return true;
+    }
+
+    private Long finalQuizId(Long revisionId) {
+        return repository.rules(revisionId).stream().findFirst().map(rule -> rule.getFinalQuizId()).orElse(null);
     }
 
     private String fingerprint(Long enrollmentId, Long blockId, LearningRequests.ProgressRequest request) {

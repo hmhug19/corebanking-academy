@@ -147,6 +147,7 @@ public class LearningContentService {
         // Bước 1: kiểm tra danh mục và quy mô.
         validateCatalog(course, draft.programId(), draft.moduleId(), false);
         validateDraftSize(draft);
+        validateFinalQuiz(course, draft.finalQuizId(), false);
 
         // Bước 2: kiểm tra tệp/quy tắc khối trước khi thay cây; lỗi bất kỳ rollback toàn bộ.
         if (draft.coverAssetId() != null) {
@@ -179,6 +180,7 @@ public class LearningContentService {
         writeTree(revision, draft, actor);
         CourseCompletionRule rule = repository.rules(revision.getId()).get(0);
         rule.setRewardPoints(draft.rewardPoints());
+        rule.setFinalQuizId(draft.finalQuizId());
         repository.save(rule, actor);
     }
 
@@ -415,6 +417,18 @@ public class LearningContentService {
         }
     }
 
+    private void validateFinalQuiz(Course course, Long quizId, boolean published) {
+        if (quizId == null) {
+            return;
+        }
+        var quiz = quizzes.find(quizId);
+        if (quiz.isEmpty() || quiz.get().deleted() || !quiz.get().finalExam()
+            || !course.getId().equals(quiz.get().courseId()) || (published && !quiz.get().published())) {
+            throw BusinessException.validation("finalQuizId", "INVALID_REFERENCE",
+                "Chọn bài thi cuối khóa của chính khóa này; đề phải được xuất bản trước khi xuất bản khóa.");
+        }
+    }
+
     private void validateBlockInput(Course course, LearningRequests.BlockInput block) {
         if ((CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()) && !BlockType.VIDEO.equals(block.blockType()))
             || (CompletionMode.PDF_END.equals(block.completionMode()) && !BlockType.PDF.equals(block.blockType()))
@@ -525,6 +539,7 @@ public class LearningContentService {
         }
         validateCatalog(course, revision.getProgramId(), revision.getModuleId(), true);
         var detail = detail(course, revision);
+        validateFinalQuiz(course, detail.finalQuizId(), true);
         long requiredLessons = 0;
         if (detail.chapters().isEmpty()) {
             throw new BusinessException(LearningResponseCode.NOT_PUBLISHABLE);
@@ -713,6 +728,7 @@ public class LearningContentService {
         resourceExtensions.forEach(extension -> extension.cloneResources(source.getId(), target.getId(), lessonIds));
         var rule = repository.rules(target.getId()).get(0);
         rule.setRewardPoints(payload.rewardPoints());
+        rule.setFinalQuizId(keepQuizLinks ? original.finalQuizId() : null);
         repository.save(rule, actor);
     }
 
