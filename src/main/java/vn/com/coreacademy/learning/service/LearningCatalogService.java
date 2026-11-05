@@ -1,5 +1,8 @@
 package vn.com.coreacademy.learning.service;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -11,9 +14,12 @@ import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.PageQuery;
 import vn.com.coreacademy.learning.constants.LearningCodes.AuditAction;
+import vn.com.coreacademy.learning.constants.LearningCodes.CatalogStatus;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.entity.BusinessModule;
+import vn.com.coreacademy.learning.entity.Course;
+import vn.com.coreacademy.learning.entity.CourseRevision;
 import vn.com.coreacademy.learning.entity.TrainingField;
 import vn.com.coreacademy.learning.entity.TrainingProgram;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
@@ -27,6 +33,8 @@ import vn.com.coreacademy.learning.repository.TrainingProgramRepository;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class LearningCatalogService {
+    private static final String COPY_SUFFIX = " (bản sao)";
+
     private final LearningRepository repository;
     private final TrainingFieldRepository fields;
     private final TrainingProgramRepository programs;
@@ -34,6 +42,7 @@ public class LearningCatalogService {
     private final LearningAccessPolicy access;
     private final LearningWriteLock lock;
     private final LearningMapper mapper;
+    private final LearningContentService content;
     private final IdentityAuditService audit;
 
     public PageResponse<LearningViews.TrainingFieldView> fields(Long orgId, int page, int size) {
@@ -48,6 +57,33 @@ public class LearningCatalogService {
         access.requireManage(actor, orgId, actor.person().teamId(), actor.person().id());
         return PageResponse.from(programs.findByOwnerOrgId(orgId,
             PageQuery.of(page, size, "id,asc", Set.of("id"))).map(mapper::view));
+    }
+
+    /** Cây lĩnh vực → chương trình → khóa học của một đơn vị, cùng quyền quản lý với các danh sách phẳng. */
+    public LearningViews.CatalogTreeView tree(Long orgId) {
+        var actor = access.actor();
+        access.requireManage(actor, orgId, actor.person().teamId(), actor.person().id());
+        Map<Long, List<LearningViews.CatalogTreeCourse>> coursesByProgram = new HashMap<>();
+        for (Object[] row : repository.treeCourses(orgId)) {
+            Course course = (Course) row[0];
+            CourseRevision revision = (CourseRevision) row[1];
+            coursesByProgram.computeIfAbsent(revision.getProgramId(), key -> new ArrayList<>())
+                .add(new LearningViews.CatalogTreeCourse(course.getId(), course.getCode(), revision.getTitle(),
+                    course.getLifecycleStatus(), course.getPublishedRevisionId() != null));
+        }
+        Map<Long, List<LearningViews.CatalogTreeProgram>> programsByField = new HashMap<>();
+        for (TrainingProgram program : repository.programs(orgId)) {
+            programsByField.computeIfAbsent(program.getFieldId(), key -> new ArrayList<>())
+                .add(new LearningViews.CatalogTreeProgram(program.getId(), program.getFieldId(),
+                    program.getOwnerOrgId(), program.getCode(), program.getName(), program.getDescription(),
+                    program.getStatus(), program.getSortNo(), program.getRowVersion(),
+                    coursesByProgram.getOrDefault(program.getId(), List.of())));
+        }
+        return new LearningViews.CatalogTreeView(repository.fields(orgId).stream()
+            .map(field -> new LearningViews.CatalogTreeField(field.getId(), field.getOwnerOrgId(), field.getCode(),
+                field.getName(), field.getDescription(), field.getStatus(), field.getSortNo(),
+                field.getRowVersion(), programsByField.getOrDefault(field.getId(), List.of())))
+            .toList());
     }
 
     public PageResponse<LearningViews.BusinessModuleView> modules(Long fieldId, int page, int size) {
@@ -120,6 +156,78 @@ public class LearningCatalogService {
             value.getOwnerOrgId(), Map.of());
         repository.flush();
         return mapper.view(value);
+    }
+
+    /** Xóa lĩnh vực trống; còn chương trình hoặc phân hệ thì từ chối để người dùng chuyển sang Lưu trữ. */
+    @Transactional
+    public void deleteField(Long id, Long version) {
+        var actor = access.actor();
+        TrainingField value = repository.require(TrainingField.class, id);
+        access.requireManage(actor, value.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        lock.acquire();
+        repository.refresh(value);
+        LearningContentService.version(value, version);
+        if (repository.fieldInUse(id)) {
+            throw new BusinessException(LearningResponseCode.CATALOG_IN_USE);
+        }
+        repository.remove(value);
+        audit.record(actor.person().id(), AuditAction.FIELD_DELETED, "training_field", id.toString(),
+            value.getOwnerOrgId(), Map.of());
+        repository.flush();
+    }
+
+    /** Xóa chương trình trống; còn khóa học hoặc câu hỏi thì từ chối để người dùng chuyển sang Lưu trữ. */
+    @Transactional
+    public void deleteProgram(Long id, Long version) {
+        var actor = access.actor();
+        TrainingProgram value = repository.require(TrainingProgram.class, id);
+        access.requireManage(actor, value.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        lock.acquire();
+        repository.refresh(value);
+        LearningContentService.version(value, version);
+        if (repository.programInUse(id)) {
+            throw new BusinessException(LearningResponseCode.CATALOG_IN_USE);
+        }
+        repository.remove(value);
+        audit.record(actor.person().id(), AuditAction.PROGRAM_DELETED, "training_program", id.toString(),
+            value.getOwnerOrgId(), Map.of());
+        repository.flush();
+    }
+
+    /** Sao chép chương trình thành bản nháp cùng lĩnh vực, kèm bản nháp của mọi khóa học của nó. */
+    @Transactional
+    public LearningViews.TrainingProgramView copyProgram(Long id) {
+        var actor = access.actor();
+        TrainingProgram source = repository.require(TrainingProgram.class, id);
+        access.requireManage(actor, source.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        lock.acquire();
+        repository.refresh(source);
+
+        TrainingProgram copy = new TrainingProgram();
+        copy.setFieldId(source.getFieldId());
+        copy.setOwnerOrgId(source.getOwnerOrgId());
+        copy.setCode(content.freeCopyCode(source.getCode(), code -> programs.existsByCodeIgnoreCaseAndIdNot(code, -1L)));
+        copy.setName(source.getName().substring(0, Math.min(source.getName().length(), 255 - COPY_SUFFIX.length()))
+            + COPY_SUFFIX);
+        copy.setDescription(source.getDescription());
+        copy.setStatus(CatalogStatus.DRAFT);
+        copy.setSortNo(source.getSortNo());
+        copy.setCopiedFromProgramId(source.getId());
+        repository.save(copy, actor.person().id());
+        repository.flush();
+
+        for (Object[] row : repository.treeCourses(source.getOwnerOrgId())) {
+            CourseRevision revision = (CourseRevision) row[1];
+            if (source.getId().equals(revision.getProgramId())) {
+                Course course = (Course) row[0];
+                content.copyIntoProgram(course, copy.getId(),
+                    content.freeCopyCode(course.getCode(), repository::courseCodeExists));
+                repository.flush();
+            }
+        }
+        audit.record(actor.person().id(), AuditAction.PROGRAM_COPIED, "training_program", copy.getId().toString(),
+            copy.getOwnerOrgId(), Map.of("sourceId", source.getId()));
+        return mapper.view(copy);
     }
 
     @Transactional

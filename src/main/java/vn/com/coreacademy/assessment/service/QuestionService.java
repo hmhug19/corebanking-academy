@@ -73,11 +73,15 @@ public class QuestionService {
 
     public AssessmentViews.QuestionDetail get(Long id) {
         Question question = requireQuestion(id);
-        questionBank(question, false);
+        questionBank(question);
         return detail(question);
     }
 
-    /** Tạo câu hỏi theo chương trình; courseId chỉ còn là đường tương thích cho client cũ. */
+    /**
+     * Tạo câu hỏi trong ngân hàng chương trình. Có courseId là đường của người quản lý khóa (kể cả scope OWN/TEAM):
+     * câu thuộc chương trình của revision mới nhất và giữ courseId làm nguồn, nên quyền sửa/xóa đi theo khóa đó.
+     * programId nếu gửi kèm phải đúng chương trình của khóa. Chỉ có programId thì cần quyền quản lý chương trình.
+     */
     @Transactional
     public AssessmentViews.QuestionDetail create(AssessmentRequests.QuestionRequest request) {
         Bank bank = requireBank(request.courseId(), request.programId());
@@ -89,14 +93,15 @@ public class QuestionService {
     /** Dùng cùng phạm vi và quyền của tạo câu hỏi cho cả lô Excel. */
     Bank requireBank(Long courseId, Long programId) {
         Bank bank;
-        if (programId != null) {
-            var program = learning.requireManagedProgram(programId);
-            if (courseId != null) {
-                learning.requireCourseProgramBank(courseId, program.id());
+        if (courseId != null) {
+            ManagedCourse course = learning.requireManagedCourse(courseId);
+            if (programId != null) {
+                learning.requireCourseProgramBank(course.id(), programId);
             }
-            bank = new Bank(program.id(), courseId, program.ownerOrgId());
-        } else if (courseId != null) {
-            bank = courseBank(learning.requireManagedCourse(courseId));
+            bank = courseBank(course);
+        } else if (programId != null) {
+            var program = learning.requireManagedProgram(programId);
+            bank = new Bank(program.id(), null, program.ownerOrgId());
         } else {
             throw BusinessException.validation("programId", "REQUIRED", "Chọn chương trình của ngân hàng câu hỏi.");
         }
@@ -153,7 +158,7 @@ public class QuestionService {
     public AssessmentViews.QuestionDetail update(Long id, Long expectedVersion,
                                                  AssessmentRequests.QuestionRequest request) {
         Question question = requireQuestion(id);
-        Bank bank = questionBank(question, request.programId() != null);
+        Bank bank = questionBank(question);
         String actor = learning.actor().person().id();
         lock.acquire();
 
@@ -294,20 +299,25 @@ public class QuestionService {
         return new Bank(learning.courseProgramId(course.id()), course.id(), course.ownerOrgId());
     }
 
-    private Bank questionBank(Question question, boolean programScope) {
-        if (programScope || question.getCourseId() == null) {
-            var program = learning.requireManagedProgram(question.getProgramId());
-            return new Bank(program.id(), question.getCourseId(), program.ownerOrgId());
+    /**
+     * Câu không có courseId thuộc riêng chương trình: cần quyền quản lý chương trình. Câu có courseId được người quản
+     * lý khóa nguồn hoặc người quản lý chương trình sở hữu thao tác (màn ngân hàng chương trình thấy cả câu từ khóa).
+     */
+    private Bank questionBank(Question question) {
+        Long courseId = question.getCourseId();
+        if (courseId != null && (question.getProgramId() == null || learning.canManageCourse(courseId))) {
+            ManagedCourse course = learning.requireManagedCourse(courseId);
+            return new Bank(question.getProgramId(), course.id(), course.ownerOrgId());
         }
-        ManagedCourse course = learning.requireManagedCourse(question.getCourseId());
-        return new Bank(question.getProgramId(), course.id(), course.ownerOrgId());
+        var program = learning.requireManagedProgram(question.getProgramId());
+        return new Bank(program.id(), courseId, program.ownerOrgId());
     }
 
-    /** Kiểm quyền mọi ngân hàng trước khi ghi; dữ liệu courseId cũ vẫn giữ đúng scope quản lý khóa. */
+    /** Kiểm quyền mọi ngân hàng trước khi ghi, cùng quy tắc với {@link #questionBank}. */
     private Map<BankKey, Bank> managedBanks(List<Question> questions) {
         Map<BankKey, Bank> banks = new LinkedHashMap<>();
         for (Question question : questions) {
-            banks.computeIfAbsent(BankKey.of(question), key -> questionBank(question, false));
+            banks.computeIfAbsent(BankKey.of(question), key -> questionBank(question));
         }
         return banks;
     }

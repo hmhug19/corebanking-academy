@@ -339,7 +339,7 @@ public class LearningProgressService {
             : completed.divide(BigDecimal.valueOf(componentCount), 3, RoundingMode.DOWN);
         boolean complete = !lessons.isEmpty() && lessons.stream()
             .allMatch(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0)
-            && finalPassed && repository.assessments(enrollment.getRevisionId()).isEmpty();
+            && finalPassed;
         enrollment.setProgressPercent(enrollment.getProgressPercent().max(percent));
         enrollment.setStatus(complete || enrollment.getCompletedAt() != null ? ProgressStatus.COMPLETED :
             ProgressStatus.IN_PROGRESS);
@@ -360,7 +360,9 @@ public class LearningProgressService {
     /**
      * Học viên đạt đề của khóa: bài quiz trỏ tới đề đó trong phiên bản đã nhận lên 100%, rồi tính lại tiến độ khóa.
      * Không ném lỗi khi lần học không còn hiệu lực (đã rút hoặc không thuộc người này) vì bên gọi đang nằm trong
-     * transaction chấm bài và điểm phải được giữ; trả false trong trường hợp đó và khi khóa không có bài quiz nào.
+     * transaction chấm bài và điểm phải được giữ; trả false trong trường hợp đó và khi đề không gắn với khóa (không có
+     * bài quiz trỏ tới và cũng không phải bài thi cuối khóa của phiên bản). Đề là bài thi cuối khóa thì luôn tính lại
+     * khóa dù không có bài quiz nào, vì đạt đề có thể là điều kiện còn thiếu để hoàn thành.
      * Tiến độ chỉ tăng nên chấm lại từ đạt xuống trượt không hạ bài học.
      */
     @Transactional
@@ -372,10 +374,16 @@ public class LearningProgressService {
         }
         List<CourseLesson> targets = repository.lessons(enrollment.getRevisionId()).stream()
             .filter(l -> LessonType.QUIZ.equals(l.getLessonType()) && quizId.equals(l.getQuizId())).toList();
-        if (targets.isEmpty() && !quizId.equals(finalQuizId(enrollment.getRevisionId()))) {
-            return false;
-        }
+        boolean finalExam = quizId.equals(finalQuizId(enrollment.getRevisionId()));
         Instant now = Instant.now();
+        if (targets.isEmpty()) {
+            if (!finalExam) {
+                return false;
+            }
+            // Đề là bài thi cuối khóa nhưng không bài quiz nào trỏ tới: chỉ cần tính lại khóa.
+            updateEnrollment(enrollment, enrollment.getLastLessonId(), enrollment.getLastBlockId(), now, userId);
+            return true;
+        }
         Map<Long, LessonProgress> existing = repository.lessonProgress(enrollmentId).stream()
             .collect(Collectors.toMap(LessonProgress::getLessonId, Function.identity(), (a, b) -> a));
         for (CourseLesson lesson : targets) {
@@ -394,13 +402,14 @@ public class LearningProgressService {
             repository.save(progress, userId);
         }
         repository.flush();
-        updateEnrollment(enrollment, targets.isEmpty() ? enrollment.getLastLessonId() : targets.get(0).getId(), null,
-            now, userId);
+        updateEnrollment(enrollment, targets.get(0).getId(), null, now, userId);
         return true;
     }
 
     private Long finalQuizId(Long revisionId) {
-        return repository.rules(revisionId).stream().findFirst().map(rule -> rule.getFinalQuizId()).orElse(null);
+        return repository.finalAssessment(revisionId).map(exam -> exam.getAssessmentRevisionId())
+            .orElseGet(() -> repository.rules(revisionId).stream().findFirst()
+                .map(rule -> rule.getFinalQuizId()).orElse(null));
     }
 
     private String fingerprint(Long enrollmentId, Long blockId, LearningRequests.ProgressRequest request) {

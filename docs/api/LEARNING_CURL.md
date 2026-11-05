@@ -388,6 +388,12 @@ curl --silent --show-error --request PUT "${BASE_URL}/api/v1/courses/${COURSE_ID
 JSON
 ```
 
+Bài kiểm tra cuối khóa: thêm `"finalQuizId": QUIZ_ID` vào thân PUT (hoặc `draft` của POST `/courses`). `QUIZ_ID` là đề
+`FINAL_EXAM` của đúng khóa (đề nháp được lưu, nhưng xuất bản đòi đề `PUBLISHED`, nếu không trả
+`LEARNING-FINAL_EXAM_UNPUBLISHED`). Bỏ trường hoặc gửi `null` là xóa bài thi cuối khóa; đề sai loại/khóa trả
+`LEARNING-QUIZ_INVALID` (lỗi trường `finalQuizId`). Response có `finalQuizId`. Học viên trên revision đó chỉ hoàn thành khóa
+khi đã làm xong bài bắt buộc và đạt đề (POST `/api/v1/me/quizzes/{quizId}/attempts` rồi `.../quiz-attempts/{id}/submit`).
+
 ## 13. Xuất bản khóa học
 
 Kiểm tra nội dung, danh mục và tài nguyên trước khi đóng băng revision. Không reset tiến độ cũ.
@@ -399,6 +405,36 @@ curl --silent --show-error --request POST "${BASE_URL}/api/v1/courses/${COURSE_I
   --data-binary @- <<JSON
 {
   "expectedVersion": ${REVISION_VERSION}
+}
+JSON
+```
+
+Xuất bản kèm giao học và chia sẻ trong một transaction (tối đa 20 dòng giao, 50 đơn vị). Lỗi ở dòng nào thì cả việc
+xuất bản bị hủy và `errors[0].field` là `assignments[i]` hoặc `shareOrgIds[j]`; xem [LEARNING.md](LEARNING.md).
+
+```bash
+curl --silent --show-error --request POST "${BASE_URL}/api/v1/courses/${COURSE_ID}/revisions/${REVISION_ID}/publish" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
+  --header "Content-Type: application/json" \
+  --data-binary @- <<JSON
+{
+  "expectedVersion": ${REVISION_VERSION},
+  "assignments": [
+    {
+      "startAt": "2026-11-10T00:00:00Z",
+      "dueAt": "2026-12-10T00:00:00Z",
+      "reminderEnabled": true,
+      "reminderDaysBefore": 3,
+      "target": { "targetType": "user", "userId": "${LEARNER_ID}", "includeDescendants": false }
+    },
+    {
+      "startAt": "2026-11-10T00:00:00Z",
+      "reminderEnabled": false,
+      "reminderDaysBefore": 0,
+      "target": { "targetType": "org", "orgId": ${ORG_ID}, "includeDescendants": true }
+    }
+  ],
+  "shareOrgIds": [${SHARED_ORG_ID}]
 }
 JSON
 ```

@@ -14,10 +14,12 @@ public final class LearningDetails {
 
     public record CourseDetail(LearningViews.CourseView course, LearningViews.CourseRevisionView revision,
                                List<LearningViews.CourseObjectiveView> objectives, List<ChapterDetail> chapters,
-                               LearningViews.CourseCompletionRuleView completionRule) {
-        @JsonProperty("finalQuizId")
-        public Long finalQuizId() {
-            return completionRule == null ? null : completionRule.finalQuizId();
+                               LearningViews.CourseCompletionRuleView completionRule, Long finalQuizId) {
+        public CourseDetail(LearningViews.CourseView course, LearningViews.CourseRevisionView revision,
+                            List<LearningViews.CourseObjectiveView> objectives, List<ChapterDetail> chapters,
+                            LearningViews.CourseCompletionRuleView completionRule) {
+            this(course, revision, objectives, chapters, completionRule,
+                completionRule == null ? null : completionRule.finalQuizId());
         }
     }
 

@@ -148,7 +148,7 @@ class QuizLessonContentIT extends AssessmentIntegrationTest {
         Map<String, Object> wrong = draftBody(next, List.of(textLesson()));
         wrong.put("finalQuizId", quiz(fixtures.course(), true));
         api.error(INSTRUCTOR, api.put(wrong, "/api/v1/courses/{c}/revisions/{r}", course.id(),
-            next.path("revision").path("id").asLong()), "CORE-VALIDATION_FAILED");
+            next.path("revision").path("id").asLong()), "LEARNING-QUIZ_INVALID");
         JsonNode cleared = save(next, course, List.of(textLesson()));
         assertThat(cleared.path("finalQuizId").isNull()).isTrue();
     }

@@ -5,7 +5,8 @@ public final class AssessmentLimits {
     public static final int MIN_OPTIONS = 2;
     public static final int MAX_OPTIONS = 10;
     public static final int MAX_QUESTION_TEXT = 10_000;
-    public static final int MAX_POOL_SIZE = 500;
+    /** Đủ cho cả ngân hàng một chương trình (gấp đôi một lần nhập Excel); đề RANDOM_POOL bốc từ toàn bộ pool. */
+    public static final int MAX_POOL_SIZE = 2000;
     public static final int MAX_QUESTION_COUNT = 200;
     public static final int MAX_TIME_LIMIT_MINUTES = 240;
     public static final int MAX_GRACE_SECONDS = 300;

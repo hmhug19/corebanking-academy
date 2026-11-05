@@ -34,9 +34,10 @@ Mã trạng thái/loại dùng IN HOA (`ACTIVE`, `DRAFT`, `IN_PROGRESS`…) theo
 |---|---|
 | Đọc nhóm năng lực | Tài khoản đã đăng nhập |
 | Ghi nhóm năng lực | SUPER_ADMIN hoặc ADMIN phạm vi GLOBAL |
-| Ngân hàng chương trình | SUPER_ADMIN/GLOBAL hoặc ADMIN/INSTRUCTOR với GLOBAL/ORG bao phủ đơn vị sở hữu chương trình; không suy quyền ghi ngân hàng chung từ một khóa OWN/TEAM |
+| Ngân hàng chương trình | SUPER_ADMIN/GLOBAL hoặc ADMIN/INSTRUCTOR với GLOBAL/ORG bao phủ đơn vị sở hữu chương trình; không suy quyền ghi câu chỉ có `programId` từ một khóa OWN/TEAM |
+| Thêm câu qua khóa | `courseId` (kèm `programId` hoặc không) trên POST `/questions` và nhập Excel: caller quản lý khóa (mọi scope, kể cả OWN/TEAM); câu vào ngân hàng chương trình của revision mới nhất, giữ `courseId` làm khóa nguồn. `programId` gửi kèm phải đúng chương trình đó |
 | Chọn câu hỏi cho đề | `programId` + `courseId`: caller quản lý khóa, chương trình phải là chương trình của revision mới nhất và cùng đơn vị sở hữu; cho phép đọc câu hỏi dùng chung để lập đề |
-| API câu hỏi courseId cũ, bài thi | Giữ quyền quản lý khóa theo `LearningAccessPolicy`. Câu hỏi mới không có courseId được kiểm quyền bằng chương trình thực tế của câu |
+| Câu theo ID/bulk, bài thi | Câu có `courseId`: người quản lý khóa nguồn hoặc người quản lý chương trình sở hữu. Câu không có `courseId`: quyền chương trình thực tế của câu. Bài thi: quyền quản lý khóa theo `LearningAccessPolicy` |
 | `/me/**` | Vai trò LEARNER/OWN và lần học hợp lệ của khóa (khóa active, nguồn giao/tự đăng ký còn hiệu lực); lượt của người khác trả `ASSESSMENT-NOT_FOUND` |
 
 Module Assessment truy cập Learning qua adapter công khai `LearningAssessmentAccess`, không dùng repository Learning.
@@ -107,7 +108,9 @@ với `quizId` và `status` theo AND (ví dụ `status=VOIDED&graded=true` trả
 
 ## Quy tắc chính
 
-**Ngân hàng chương trình.** Câu hỏi mới gửi `programId`, không cần `courseId` hoặc `lessonId`.
+**Ngân hàng chương trình.** Câu hỏi dùng chung gửi `programId`, không cần `courseId` hoặc `lessonId`. Người quản lý
+khóa (ví dụ giảng viên OWN) thêm câu vào cùng ngân hàng bằng `courseId`, qua form hoặc nhập Excel; đây là đường
+được hỗ trợ, không phải tương thích cũ.
 `programId` trong summary/detail là chương trình sở hữu, không được chuyển khi sửa. ID danh mục lấy từ
 `GET /api/v1/training-catalog/programs?ownerOrgId&page&size` như form khóa học. `GET /questions?programId=...`
 trả toàn bộ câu hỏi trong chương trình qua phân trang, gồm câu tạo từ các khóa khác và câu không gắn khóa.
@@ -128,8 +131,9 @@ Ngưng sử dụng bằng PUT hoặc bulk-status đều bị từ chối nếu l
 
 DB đã chạy baseline cần [upgrade ngân hàng chương trình](../sql/upgrade/2026-11-04-program-question-bank.sql)
 trước backend mới. Backfill theo revision mới nhất, không đổi programme đã có; câu cũ chưa xác định được
-chương trình vẫn giữ lại qua API courseId cũ. Nhập/xuất Excel bằng courseId giữ nguyên contract cũ. Với câu có nguồn courseId cũ, API theo ID/bulk
-giữ quyền quản lý khóa đó; câu mới không có courseId luôn kiểm theo chương trình sở hữu.
+chương trình vẫn giữ lại qua API courseId. Nhập/xuất Excel bằng courseId giữ nguyên contract. Câu có `courseId`
+được người quản lý khóa đó hoặc người quản lý chương trình sở hữu sửa/xóa; câu không có `courseId` luôn kiểm theo
+chương trình sở hữu.
 
 **Nhập Excel theo chương trình.** Chọn chương trình ở FE rồi gửi `programId` trong query của
 `POST /api/v1/questions/import`, multipart part `file`; không điền chương trình/khóa trong Excel.
@@ -151,7 +155,8 @@ PUT gửi danh sách phương án đầy đủ: có `id` thì sửa tại chỗ,
 bị xóa mềm (ID đã chụp vào đề không bị tái sử dụng). Câu đã từng phát đề mà đổi nội dung/giải thích/loại/phương
 án/đáp án thì `contentVersion` tăng; lượt cũ **không** tự chấm lại.
 
-**Đề.** Tạo ở DRAFT; mỗi khóa tối đa một FINAL_EXAM. Xuất bản khi số câu ACTIVE trong pool ≥ `questionCount` và
+**Đề.** Tạo ở DRAFT; mỗi khóa tối đa một FINAL_EXAM. Pool tối đa 2000 câu (`MAX_POOL_SIZE`), đủ đưa cả ngân hàng
+chương trình vào đề RANDOM_POOL. Xuất bản khi số câu ACTIVE trong pool ≥ `questionCount` và
 `closeAt` (nếu có) ở tương lai. Đề đã xuất bản vẫn sửa được nhưng phải còn đủ câu ACTIVE; thay đổi chỉ áp dụng cho
 lượt mới vì lượt đã chụp `timeLimitMinutes`, `passPercent`, `scoringMode`, `graceSeconds`, `maxScore` và đề.
 
@@ -239,7 +244,9 @@ xuống trượt không hạ bài học (chấm lại vốn chỉ áp dụng khi
 để đề nằm trong khóa không tự chặn chính nó.
 
 **Bài thi cuối khóa được chọn.** `DraftContent.finalQuizId` là ID một `FINAL_EXAM` cùng khóa, được lưu theo revision
-trong `course_completion_rules.final_quiz_id`; xuất bản yêu cầu đề đã `PUBLISHED`. Bài này phải đạt ngay cả khi không
+đồng bộ trong `course_completion_rules.final_quiz_id` và dòng `course_assessments` có `placement=final`.
+Khi đọc ưu tiên dòng liên kết, không có thì dùng cột điều kiện hoàn thành để giữ cấu hình cũ.
+Xuất bản yêu cầu đề đã `PUBLISHED`. Bài này phải đạt ngay cả khi không
 có trong cây bài học. Chỉ lượt `SUBMITTED`/`AUTO_SUBMITTED`, `passed=true`, đúng người và đúng `enrollmentId` mới được
 tính; lượt của lần học cũ hoặc `VOIDED` không được dùng thay. Không cộng hai lần khi đề cũng là bài quiz bắt buộc
 trong cây. Khóa chỉ hoàn thành sau khi mọi bài học bắt buộc và bài thi cuối đã đạt; bài quiz tùy chọn không chặn.
@@ -309,8 +316,8 @@ Mọi mốc thời gian của lượt thi được cắt về micro giây trư�
 
 ## Chưa làm / cần chốt
 
-- Gắn đề qua `course_assessments` (bảng điểm nối cũ) vẫn bị chặn khi xuất bản (`LEARNING-QUIZ_UNAVAILABLE`); đề gắn vào
-  khóa bằng bài học loại quiz hoặc `finalQuizId` của revision; không dùng bảng điểm nối cũ.
+- Liên kết `course_assessments` chỉ dùng `placement=final` qua `finalQuizId` của revision; chưa có API cho các vị trí
+  khác. Bài quiz trong cây nội dung tiếp tục dùng `course_lessons.quiz_id`.
 - Bài quiz không tự hạ về chưa hoàn thành khi chấm lại làm điểm giảm hoặc khi đề bị đóng sau đó (tiến độ chỉ tăng).
 - Chưa có `quiz_revision`: lượt mới của học viên khóa cũ dùng cấu hình đề hiện tại.
 - Chấm lại chưa áp dụng cho lượt đang làm (lượt đó chấm theo snapshot khi nộp; chạy lại chấm lại sau khi nộp).

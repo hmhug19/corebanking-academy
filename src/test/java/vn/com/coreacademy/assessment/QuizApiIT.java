@@ -5,6 +5,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.LongStream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -110,6 +111,14 @@ class QuizApiIT extends AssessmentIntegrationTest {
         JsonNode other = api.error(INSTRUCTOR, api.put(pool(q1, foreign),
             URL + "/{id}/questions?expectedVersion={v}", quizId, version), "ASSESSMENT-INVALID_REFERENCE");
         assertThat(other.path("errors").get(0).path("field").asText()).isEqualTo("items[1].questionId");
+        long[] wholeBank = LongStream.concat(LongStream.of(q1), LongStream.range(1, 2000).map(i -> 900_000_000L + i))
+            .toArray();
+        JsonNode overLimit = api.error(INSTRUCTOR, api.put(pool(wholeBank),
+            URL + "/{id}/questions?expectedVersion={v}", quizId, version), "ASSESSMENT-INVALID_REFERENCE");
+        assertThat(overLimit.path("errors").get(0).path("field").asText()).as("2000 câu qua được giới hạn pool")
+            .isEqualTo("items[1].questionId");
+        api.error(INSTRUCTOR, api.put(pool(LongStream.rangeClosed(1, 2001).toArray()),
+            URL + "/{id}/questions?expectedVersion={v}", quizId, version), "CORE-VALIDATION_FAILED");
 
         JsonNode pooled = api.ok(INSTRUCTOR, api.put(Map.of("items", List.of(
                 Map.of("questionId", q1, "sortNo", 0, "points", 2), Map.of("questionId", q2, "sortNo", 1))),

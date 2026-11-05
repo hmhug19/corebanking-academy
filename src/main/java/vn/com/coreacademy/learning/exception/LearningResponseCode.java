@@ -29,6 +29,8 @@ public enum LearningResponseCode implements ApiResponseCode {
         "Chưa thể thực hiện"),
     ASSET_CODEC_UNSUPPORTED("LEARNING-ASSET_CODEC_UNSUPPORTED", "Định dạng hoặc codec video chưa được hỗ trợ.",
         "Chưa thể thực hiện"),
+    CATALOG_IN_USE("LEARNING-CATALOG_IN_USE",
+        "Mục này còn nội dung bên trong nên không thể xóa. Hãy chuyển sang Lưu trữ.", "Chưa thể xóa"),
     ASSET_IN_USE("LEARNING-ASSET_IN_USE", "Tài nguyên còn được sử dụng trong nội dung học tập.", "Chưa thể thực hiện"),
     EXPORT_TOO_LARGE("LEARNING-EXPORT_TOO_LARGE", "Kết quả vượt giới hạn xuất %s dòng. Vui lòng thu hẹp bộ lọc."
             .formatted(String.format(Locale.ROOT, "%,d", LearningLimits.MAX_EXPORT_ROWS).replace(',', '.')),
@@ -61,6 +63,8 @@ public enum LearningResponseCode implements ApiResponseCode {
         "Bài kiểm tra không tồn tại, đã bị xóa hoặc không thuộc khóa học này.", "Bài kiểm tra chưa hợp lệ"),
     QUIZ_LESSON_UNLINKED("LEARNING-QUIZ_LESSON_UNLINKED",
         "Có bài học loại kiểm tra chưa chọn bài kiểm tra đã xuất bản của khóa học.", "Chưa thể xuất bản"),
+    FINAL_EXAM_UNPUBLISHED("LEARNING-FINAL_EXAM_UNPUBLISHED",
+        "Bài kiểm tra cuối khóa chưa xuất bản hoặc không còn hợp lệ.", "Chưa thể xuất bản"),
     ASSET_STORAGE_UNSUPPORTED("LEARNING-ASSET_STORAGE_UNSUPPORTED",
         "Tài nguyên chưa được chuyển sang kho S3. Vui lòng liên hệ quản trị viên.", "Tài nguyên chưa sẵn sàng"),
     ASSET_INVALID("LEARNING-ASSET_INVALID", "Tệp không hợp lệ, sai loại, vượt dung lượng hoặc thiếu metadata.",

@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,6 +34,21 @@ import vn.com.coreacademy.learning.service.LearningCatalogService;
 @RequiredArgsConstructor
 public class LearningCatalogController {
     private final LearningCatalogService catalog;
+
+    @GetMapping("/tree")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Cây danh mục đào tạo",
+        description = """
+            Lĩnh vực, chương trình và khóa học của một đơn vị trong một lần gọi, sắp theo sortNo rồi id.
+            Mỗi lĩnh vực và chương trình trả đủ trường (kể cả rowVersion) để cập nhật trạng thái bằng PUT.
+            Khóa chưa xếp chương trình không có trong cây.
+            """
+    )
+    public BaseResponse<LearningViews.CatalogTreeView> tree(@RequestParam @Positive Long ownerOrgId) {
+        return BaseResponse.ok(catalog.tree(ownerOrgId));
+    }
 
     @GetMapping("/fields")
     @ApiResponse(responseCode = "200",
@@ -76,6 +92,38 @@ public class LearningCatalogController {
         return BaseResponse.ok(catalog.saveField(id, expectedVersion, request));
     }
 
+    @DeleteMapping("/fields/{id}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Xóa lĩnh vực trống",
+        description = """
+            Chỉ xóa khi lĩnh vực không còn chương trình hay phân hệ; ngược lại trả LEARNING-CATALOG_IN_USE và
+            client chuyển sang Lưu trữ (PUT status=archived). expectedVersion chống xóa theo dữ liệu cũ.
+            """
+    )
+    public BaseResponse<Void> deleteField(@PathVariable @Positive Long id,
+                                          @RequestParam @Min(0) Long expectedVersion) {
+        catalog.deleteField(id, expectedVersion);
+        return BaseResponse.ok(null);
+    }
+
+    @DeleteMapping("/programs/{id}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Xóa chương trình trống",
+        description = """
+            Chỉ xóa khi chương trình không còn khóa học (kể cả bản nháp) hay câu hỏi trong ngân hàng; ngược lại trả
+            LEARNING-CATALOG_IN_USE và client chuyển sang Lưu trữ (PUT status=archived).
+            """
+    )
+    public BaseResponse<Void> deleteProgram(@PathVariable @Positive Long id,
+                                            @RequestParam @Min(0) Long expectedVersion) {
+        catalog.deleteProgram(id, expectedVersion);
+        return BaseResponse.ok(null);
+    }
+
     @GetMapping("/programs")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
@@ -117,6 +165,20 @@ public class LearningCatalogController {
     public BaseResponse<LearningViews.TrainingProgramView> updateProgram(@PathVariable @Positive Long id,
         @RequestParam @Min(0) Long expectedVersion, @Valid @RequestBody LearningRequests.CatalogRequest request) {
         return BaseResponse.ok(catalog.saveProgram(id, expectedVersion, request));
+    }
+
+    @PostMapping("/programs/{id}/copy")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Sao chép chương trình",
+        description = """
+            Tạo chương trình nháp cùng lĩnh vực (mã gốc kèm -COPY, tên kèm "(bản sao)") và bản nháp của mọi khóa học
+            trong chương trình; không sao chép người học, đợt giao hay chia sẻ. Tất cả trong một transaction.
+            """
+    )
+    public BaseResponse<LearningViews.TrainingProgramView> copyProgram(@PathVariable @Positive Long id) {
+        return BaseResponse.ok(catalog.copyProgram(id));
     }
 
     @GetMapping("/modules")

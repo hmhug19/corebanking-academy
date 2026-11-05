@@ -12,6 +12,8 @@ public final class LearningLimits {
     public static final int MAX_LEADERBOARD_LEARNERS = 5_000;
     public static final int MAX_LEADERBOARD_PAGE_SIZE = 100;
     public static final int MAX_ASSIGNMENT_TARGETS = 100;
+    public static final int MAX_PUBLISH_ASSIGNMENTS = 20;
+    public static final int MAX_PUBLISH_SHARES = 50;
     public static final int MAX_NOTES_PER_LESSON = 500;
     public static final int MAX_BOOKMARKS_PER_LESSON = 500;
     public static final int MAX_VIDEO_CHAPTERS = 50;

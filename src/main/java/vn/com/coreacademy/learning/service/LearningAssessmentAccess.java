@@ -154,6 +154,13 @@ public class LearningAssessmentAccess {
         return new ManagedCourse(course.getId(), course.getCode(), course.getOwnerOrgId());
     }
 
+    /** Như {@link #requireManagedCourse} nhưng trả kết quả thay vì từ chối, để bên gọi chọn đường kiểm quyền khác. */
+    public boolean canManageCourse(Long courseId) {
+        Course course = repository.require(Course.class, courseId);
+        return access.canManage(access.actor(), course.getOwnerOrgId(), course.getOwnerTeamId(),
+            course.getOwnerUserId());
+    }
+
     /** Bài học phải thuộc một phiên bản bất kỳ của khóa; ID bài đổi theo bản nháp nên chỉ dùng để gợi ý ôn tập. */
     public void requireLessonInCourse(Long lessonId, Long courseId) {
         CourseLesson lesson = repository.require(CourseLesson.class, lessonId);
