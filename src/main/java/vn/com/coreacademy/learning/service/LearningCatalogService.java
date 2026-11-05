@@ -158,6 +158,42 @@ public class LearningCatalogService {
         return mapper.view(value);
     }
 
+    /** Xóa lĩnh vực trống; còn chương trình hoặc phân hệ thì từ chối để người dùng chuyển sang Lưu trữ. */
+    @Transactional
+    public void deleteField(Long id, Long version) {
+        var actor = access.actor();
+        TrainingField value = repository.require(TrainingField.class, id);
+        access.requireManage(actor, value.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        lock.acquire();
+        repository.refresh(value);
+        LearningContentService.version(value, version);
+        if (repository.fieldInUse(id)) {
+            throw new BusinessException(LearningResponseCode.CATALOG_IN_USE);
+        }
+        repository.remove(value);
+        audit.record(actor.person().id(), AuditAction.FIELD_DELETED, "training_field", id.toString(),
+            value.getOwnerOrgId(), Map.of());
+        repository.flush();
+    }
+
+    /** Xóa chương trình trống; còn khóa học hoặc câu hỏi thì từ chối để người dùng chuyển sang Lưu trữ. */
+    @Transactional
+    public void deleteProgram(Long id, Long version) {
+        var actor = access.actor();
+        TrainingProgram value = repository.require(TrainingProgram.class, id);
+        access.requireManage(actor, value.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        lock.acquire();
+        repository.refresh(value);
+        LearningContentService.version(value, version);
+        if (repository.programInUse(id)) {
+            throw new BusinessException(LearningResponseCode.CATALOG_IN_USE);
+        }
+        repository.remove(value);
+        audit.record(actor.person().id(), AuditAction.PROGRAM_DELETED, "training_program", id.toString(),
+            value.getOwnerOrgId(), Map.of());
+        repository.flush();
+    }
+
     /** Sao chép chương trình thành bản nháp cùng lĩnh vực, kèm bản nháp của mọi khóa học của nó. */
     @Transactional
     public LearningViews.TrainingProgramView copyProgram(Long id) {

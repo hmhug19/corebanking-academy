@@ -390,12 +390,14 @@ public final class LearningCodes {
         public static final String COURSE_STATE_CHANGED = "LEARNING_COURSE_STATE_CHANGED";
         public static final String DRAFT_CREATED = "LEARNING_DRAFT_CREATED";
         public static final String DRAFT_SAVED = "LEARNING_DRAFT_SAVED";
+        public static final String FIELD_DELETED = "LEARNING_FIELD_DELETED";
         public static final String FIELD_SAVED = "LEARNING_FIELD_SAVED";
         public static final String GROUP_CREATED = "LEARNING_GROUP_CREATED";
         public static final String GROUP_MEMBERS_CHANGED = "LEARNING_GROUP_MEMBERS_CHANGED";
         public static final String MEDIA_RETRY_REQUESTED = "LEARNING_MEDIA_RETRY_REQUESTED";
         public static final String MODULE_SAVED = "LEARNING_MODULE_SAVED";
         public static final String PROGRAM_COPIED = "LEARNING_PROGRAM_COPIED";
+        public static final String PROGRAM_DELETED = "LEARNING_PROGRAM_DELETED";
         public static final String PROGRAM_SAVED = "LEARNING_PROGRAM_SAVED";
         public static final String SELF_ENROLLED = "LEARNING_SELF_ENROLLED";
         public static final String SESSION_TRANSFERRED = "LEARNING_SESSION_TRANSFERRED";

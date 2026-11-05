@@ -132,6 +132,22 @@ public class LearningRepository {
             """, Object[].class, Map.of("org", orgId));
     }
 
+    /** Lĩnh vực còn chương trình hoặc phân hệ thì không xóa được. */
+    public boolean fieldInUse(Long fieldId) {
+        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
+            select exists (select 1 from learning_hub.training_programs where field_id = :id)
+                or exists (select 1 from learning_hub.business_modules where field_id = :id)
+            """).setParameter("id", fieldId).getSingleResult());
+    }
+
+    /** Chương trình còn khóa học (mọi bản) hoặc câu hỏi trong ngân hàng thì không xóa được. */
+    public boolean programInUse(Long programId) {
+        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
+            select exists (select 1 from learning_hub.course_revisions where program_id = :id)
+                or exists (select 1 from learning_hub.questions where program_id = :id and not is_deleted)
+            """).setParameter("id", programId).getSingleResult());
+    }
+
     public List<BusinessModule> modules(Long fieldId) {
         return query("""
             select m

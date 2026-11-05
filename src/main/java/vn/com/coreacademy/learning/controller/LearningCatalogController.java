@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -89,6 +90,38 @@ public class LearningCatalogController {
     public BaseResponse<LearningViews.TrainingFieldView> updateField(@PathVariable @Positive Long id,
         @RequestParam @Min(0) Long expectedVersion, @Valid @RequestBody LearningRequests.CatalogRequest request) {
         return BaseResponse.ok(catalog.saveField(id, expectedVersion, request));
+    }
+
+    @DeleteMapping("/fields/{id}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Xóa lĩnh vực trống",
+        description = """
+            Chỉ xóa khi lĩnh vực không còn chương trình hay phân hệ; ngược lại trả LEARNING-CATALOG_IN_USE và
+            client chuyển sang Lưu trữ (PUT status=archived). expectedVersion chống xóa theo dữ liệu cũ.
+            """
+    )
+    public BaseResponse<Void> deleteField(@PathVariable @Positive Long id,
+                                          @RequestParam @Min(0) Long expectedVersion) {
+        catalog.deleteField(id, expectedVersion);
+        return BaseResponse.ok(null);
+    }
+
+    @DeleteMapping("/programs/{id}")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Xóa chương trình trống",
+        description = """
+            Chỉ xóa khi chương trình không còn khóa học (kể cả bản nháp) hay câu hỏi trong ngân hàng; ngược lại trả
+            LEARNING-CATALOG_IN_USE và client chuyển sang Lưu trữ (PUT status=archived).
+            """
+    )
+    public BaseResponse<Void> deleteProgram(@PathVariable @Positive Long id,
+                                            @RequestParam @Min(0) Long expectedVersion) {
+        catalog.deleteProgram(id, expectedVersion);
+        return BaseResponse.ok(null);
     }
 
     @GetMapping("/programs")
