@@ -45,7 +45,7 @@ class TrainingCatalogFunctionIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void theEntryPointsAtTheCatalogRouteRightBeforeCourseManagement() {
+    void theEntryPointsAtTheCatalogRouteRightAfterCourseManagement() {
         JsonNode entry = null;
         for (JsonNode function : functions(ADMIN)) {
             if (FUNCTION.equals(function.path("code").asText())) {
@@ -55,6 +55,6 @@ class TrainingCatalogFunctionIT extends AssessmentIntegrationTest {
         assertThat(entry).isNotNull();
         assertThat(entry.path("routePattern").asText()).isEqualTo("/admin/catalog");
         assertThat(entry.path("name").asText()).isEqualTo("Lĩnh vực và chương trình");
-        assertThat(entry.path("sortNo").asInt()).isLessThan(50).isGreaterThan(40);
+        assertThat(entry.path("sortNo").asInt()).isGreaterThan(50).isLessThan(60);
     }
 }

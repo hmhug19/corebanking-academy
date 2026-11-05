@@ -9,7 +9,7 @@ SET LOCAL lock_timeout = '5s';
 
 INSERT INTO learning_hub.functions(code, name, route_pattern, sort_no)
 SELECT v.code, v.name, v.route_pattern, v.sort_no
-FROM (VALUES ('TRAINING_CATALOG', 'Lĩnh vực và chương trình', '/admin/catalog', 45)) AS v(code, name, route_pattern, sort_no)
+FROM (VALUES ('TRAINING_CATALOG', 'Lĩnh vực và chương trình', '/admin/catalog', 55)) AS v(code, name, route_pattern, sort_no)
 WHERE NOT EXISTS (SELECT 1 FROM learning_hub.functions f WHERE f.code = v.code);
 
 INSERT INTO learning_hub.role_functions(role_id, function_id)
