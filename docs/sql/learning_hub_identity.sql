@@ -268,6 +268,7 @@ INSERT INTO learning_hub.functions(code, name, route_pattern, sort_no) VALUES
     ('LEARNING_PROGRESS'      , 'Tiến độ học tập'              , '/progress'         ,  30),
     ('QUIZ_TAKING'            , 'Làm bài kiểm tra'             , '/quiz'             ,  40),
     ('COURSE_MANAGEMENT'      , 'Quản lý khóa học'             , '/admin/courses'    ,  50),
+    ('TRAINING_CATALOG'       , 'Lĩnh vực và chương trình'     , '/admin/catalog'    ,  55),
     ('LESSON_MANAGEMENT'      , 'Quản lý bài giảng'            , '/admin/lessons'    ,  60),
     ('QUESTION_BANK'          , 'Ngân hàng câu hỏi'            , '/admin/questions'  ,  70),
     ('QUIZ_MANAGEMENT'        , 'Quản lý bài thi'              , '/admin/quizzes'    ,  80),
@@ -292,11 +293,13 @@ WHERE (r.code = 'LEARNER' AND f.code IN (
           'AI_ASSISTANT'
       ))
    OR (r.code = 'INSTRUCTOR' AND f.code IN (
-          'PROFILE', 'COURSE_MANAGEMENT', 'LESSON_MANAGEMENT', 'QUESTION_BANK', 'QUIZ_MANAGEMENT', 'REPORTING',
+          'PROFILE', 'TRAINING_CATALOG', 'COURSE_MANAGEMENT', 'LESSON_MANAGEMENT', 'QUESTION_BANK', 'QUIZ_MANAGEMENT',
+          'REPORTING',
           'AI_ASSISTANT'
       ))
    OR (r.code IN ('ADMIN', 'SUPER_ADMIN') AND f.code IN (
-          'PROFILE', 'USER_MANAGEMENT', 'ORGANIZATION_MANAGEMENT', 'ROLE_MANAGEMENT', 'COURSE_MANAGEMENT',
+          'PROFILE', 'USER_MANAGEMENT', 'ORGANIZATION_MANAGEMENT', 'ROLE_MANAGEMENT', 'TRAINING_CATALOG',
+          'COURSE_MANAGEMENT',
           'LESSON_MANAGEMENT', 'QUESTION_BANK', 'QUIZ_MANAGEMENT', 'COURSE_ASSIGNMENT', 'REPORTING', 'SYSTEM_AUDIT',
           'AI_ASSISTANT'
       ))

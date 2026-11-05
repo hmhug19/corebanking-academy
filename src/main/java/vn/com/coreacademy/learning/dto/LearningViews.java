@@ -22,6 +22,44 @@ public final class LearningViews {
         Instant updateTime) {
     }
 
+    /** Cây danh mục của một đơn vị: lĩnh vực, chương trình và khóa học, đủ để cập nhật mà không gọi thêm. */
+    public record CatalogTreeView(List<CatalogTreeField> fields) {
+    }
+
+    public record CatalogTreeField(
+        Long id,
+        Long ownerOrgId,
+        String code,
+        String name,
+        String description,
+        String status,
+        Integer sortNo,
+        Long rowVersion,
+        List<CatalogTreeProgram> programs) {
+    }
+
+    public record CatalogTreeProgram(
+        Long id,
+        Long fieldId,
+        Long ownerOrgId,
+        String code,
+        String name,
+        String description,
+        String status,
+        Integer sortNo,
+        Long rowVersion,
+        List<CatalogTreeCourse> courses) {
+    }
+
+    /** published: khóa đã có bản xuất bản; lifecycleStatus: active, paused hoặc archived. */
+    public record CatalogTreeCourse(
+        Long id,
+        String code,
+        String title,
+        String lifecycleStatus,
+        boolean published) {
+    }
+
     public record TrainingProgramView(
         Long id,
         Long fieldId,

@@ -118,6 +118,36 @@ public class LearningRepository {
             """, TrainingProgram.class, Map.of("org", orgId));
     }
 
+    /** Khóa của đơn vị kèm bản đang hiển thị (bản xuất bản, nếu chưa có thì bản mới nhất) đã xếp vào chương trình. */
+    public List<Object[]> treeCourses(Long orgId) {
+        return query("""
+            select c, r
+            from Course c, CourseRevision r
+            where r.courseId = c.id
+              and c.ownerOrgId = :org
+              and r.programId is not null
+              and r.id = coalesce(c.publishedRevisionId,
+                  (select max(x.id) from CourseRevision x where x.courseId = c.id))
+            order by c.id
+            """, Object[].class, Map.of("org", orgId));
+    }
+
+    /** Lĩnh vực còn chương trình hoặc phân hệ thì không xóa được. */
+    public boolean fieldInUse(Long fieldId) {
+        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
+            select exists (select 1 from learning_hub.training_programs where field_id = :id)
+                or exists (select 1 from learning_hub.business_modules where field_id = :id)
+            """).setParameter("id", fieldId).getSingleResult());
+    }
+
+    /** Chương trình còn khóa học (mọi bản) hoặc câu hỏi trong ngân hàng thì không xóa được. */
+    public boolean programInUse(Long programId) {
+        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
+            select exists (select 1 from learning_hub.course_revisions where program_id = :id)
+                or exists (select 1 from learning_hub.questions where program_id = :id and not is_deleted)
+            """).setParameter("id", programId).getSingleResult());
+    }
+
     public List<BusinessModule> modules(Long fieldId) {
         return query("""
             select m

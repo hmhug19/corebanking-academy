@@ -89,6 +89,13 @@ psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/20
 psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-03-lesson-player-modes.rollback.sql
 ```
 
+```bash
+# Menu "Lĩnh vực và chương trình" (TRAINING_CATALOG) cho ADMIN, SUPER_ADMIN, INSTRUCTOR; chạy lại an toàn.
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-05-training-catalog-function.sql
+# Rollback:
+psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-05-training-catalog-function.rollback.sql
+```
+
 ## Bổ sung Community
 
 [learning_hub_community.sql](learning_hub_community.sql) là baseline thủ công **51 bảng**, chạy một lần sau

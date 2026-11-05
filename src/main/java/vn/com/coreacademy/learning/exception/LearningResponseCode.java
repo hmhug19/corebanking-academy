@@ -29,6 +29,8 @@ public enum LearningResponseCode implements ApiResponseCode {
         "Chưa thể thực hiện"),
     ASSET_CODEC_UNSUPPORTED("LEARNING-ASSET_CODEC_UNSUPPORTED", "Định dạng hoặc codec video chưa được hỗ trợ.",
         "Chưa thể thực hiện"),
+    CATALOG_IN_USE("LEARNING-CATALOG_IN_USE",
+        "Mục này còn nội dung bên trong nên không thể xóa. Hãy chuyển sang Lưu trữ.", "Chưa thể xóa"),
     ASSET_IN_USE("LEARNING-ASSET_IN_USE", "Tài nguyên còn được sử dụng trong nội dung học tập.", "Chưa thể thực hiện"),
     EXPORT_TOO_LARGE("LEARNING-EXPORT_TOO_LARGE", "Kết quả vượt giới hạn xuất %s dòng. Vui lòng thu hẹp bộ lọc."
             .formatted(String.format(Locale.ROOT, "%,d", LearningLimits.MAX_EXPORT_ROWS).replace(',', '.')),
