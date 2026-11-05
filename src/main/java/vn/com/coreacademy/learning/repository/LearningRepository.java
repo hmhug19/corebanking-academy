@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.repository;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
@@ -220,6 +221,12 @@ public class LearningRepository {
             from CourseAssessment a
             where a.revisionId = :id
             """, CourseAssessment.class, Map.of("id", revisionId));
+    }
+
+    /** Dòng bài kiểm tra cuối khóa của revision (tối đa một); không có thì khóa không yêu cầu bài thi cuối. */
+    public Optional<CourseAssessment> finalAssessment(Long revisionId) {
+        return assessments(revisionId).stream()
+            .filter(a -> CourseAssessment.PLACEMENT_FINAL.equals(a.getPlacement())).findFirst();
     }
 
     public List<LearningGroup> groups(Long orgId) {

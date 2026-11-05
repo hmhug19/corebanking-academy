@@ -72,29 +72,34 @@ public final class AssessmentFixtures {
             "/api/v1/courses/{c}/revisions/{r}/publish", courseId, revisionId));
 
         if (learners.length > 0) {
-            List<Map<String, Object>> targets = new ArrayList<>();
-            for (String learner : learners) {
-                Map<String, Object> target = new HashMap<>();
-                target.put("targetType", "user");
-                target.put("userId", learner);
-                target.put("includeDescendants", false);
-                targets.add(target);
-            }
-            Map<String, Object> assign = new HashMap<>();
-            assign.put("revisionId", revisionId);
-            assign.put("assigningOrgId", org);
-            assign.put("title", "Đợt kiểm thử");
-            assign.put("startAt", "2020-01-01T00:00:00Z");
-            assign.put("dueAt", "2099-12-31T16:59:59Z");
-            assign.put("requirement", "mandatory");
-            assign.put("enrollmentMode", "continue");
-            assign.put("reminderEnabled", false);
-            assign.put("reminderDaysBefore", 0);
-            assign.put("idempotencyKey", unique("assign"));
-            assign.put("targets", targets);
-            api.ok(INSTRUCTOR, api.post(assign, "/api/v1/courses/{c}/assignments", courseId));
+            assign(courseId, revisionId, learners);
         }
         return new Course(courseId, revisionId, lessonId, org);
+    }
+
+    /** Giao phiên bản đã xuất bản của khóa cho các học viên chỉ định (mỗi người một lần học trên phiên bản đó). */
+    public void assign(long courseId, long revisionId, String... learners) {
+        List<Map<String, Object>> targets = new ArrayList<>();
+        for (String learner : learners) {
+            Map<String, Object> target = new HashMap<>();
+            target.put("targetType", "user");
+            target.put("userId", learner);
+            target.put("includeDescendants", false);
+            targets.add(target);
+        }
+        Map<String, Object> assign = new HashMap<>();
+        assign.put("revisionId", revisionId);
+        assign.put("assigningOrgId", orgId());
+        assign.put("title", "Đợt kiểm thử");
+        assign.put("startAt", "2020-01-01T00:00:00Z");
+        assign.put("dueAt", "2099-12-31T16:59:59Z");
+        assign.put("requirement", "mandatory");
+        assign.put("enrollmentMode", "continue");
+        assign.put("reminderEnabled", false);
+        assign.put("reminderDaysBefore", 0);
+        assign.put("idempotencyKey", unique("assign"));
+        assign.put("targets", targets);
+        api.ok(INSTRUCTOR, api.post(assign, "/api/v1/courses/{c}/assignments", courseId));
     }
 
     public long competency() {

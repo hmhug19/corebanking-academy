@@ -188,7 +188,7 @@ public class LearningSearchService {
             chapter.lessons().stream().map(lesson -> new LearningDetails.LessonDetail(lesson.lesson(), List.of()))
                 .toList())).toList();
         return new CourseDetail(detail.course(), detail.revision(), detail.objectives(), chapters,
-            detail.completionRule());
+            detail.completionRule(), detail.finalQuizId());
     }
 
     private void allowed(String field, String value, Set<String> options) {

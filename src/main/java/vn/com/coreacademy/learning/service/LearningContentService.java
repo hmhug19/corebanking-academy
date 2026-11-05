@@ -38,6 +38,7 @@ import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.entity.BlockAsset;
 import vn.com.coreacademy.learning.entity.BusinessModule;
 import vn.com.coreacademy.learning.entity.Course;
+import vn.com.coreacademy.learning.entity.CourseAssessment;
 import vn.com.coreacademy.learning.entity.CourseChapter;
 import vn.com.coreacademy.learning.entity.CourseCompletionRule;
 import vn.com.coreacademy.learning.entity.CourseLesson;
@@ -149,6 +150,7 @@ public class LearningContentService {
         validateDraftSize(draft);
 
         // Bước 2: kiểm tra tệp/quy tắc khối trước khi thay cây; lỗi bất kỳ rollback toàn bộ.
+        var finalQuiz = validateFinalQuiz(course, draft.finalQuizId());
         if (draft.coverAssetId() != null) {
             LearningAsset cover = usableAsset(course, draft.coverAssetId());
             if (!cover.getMimeType().startsWith(MediaMime.IMAGE_PREFIX)) {
@@ -180,6 +182,46 @@ public class LearningContentService {
         CourseCompletionRule rule = repository.rules(revision.getId()).get(0);
         rule.setRewardPoints(draft.rewardPoints());
         repository.save(rule, actor);
+        writeFinalAssessment(revision, finalQuiz.orElse(null), actor);
+    }
+
+    /**
+     * Đề được chọn làm bài kiểm tra cuối khóa phải tồn tại, chưa xóa, thuộc chính khóa và là loại FINAL_EXAM.
+     * Đề còn nháp vẫn được lưu; việc đề phải đã xuất bản chỉ bị chặn khi xuất bản khóa.
+     */
+    private Optional<LearningQuizDirectory.QuizRef> validateFinalQuiz(Course course, Long finalQuizId) {
+        if (finalQuizId == null) {
+            return Optional.empty();
+        }
+        var quiz = quizzes.find(finalQuizId);
+        if (quiz.isEmpty() || quiz.get().deleted() || !course.getId().equals(quiz.get().courseId())
+            || !quiz.get().finalExam()) {
+            throw BusinessException.field(LearningResponseCode.QUIZ_INVALID, "finalQuizId", "INVALID_VALUE",
+                LearningResponseCode.QUIZ_INVALID.getMessage());
+        }
+        return quiz;
+    }
+
+    /**
+     * Thay các dòng bài kiểm tra của revision bằng tối đa một dòng cuối khóa. Điểm đạt, số lượt thi và cho thi lại
+     * chỉ chụp từ đề tại thời điểm lưu để hiển thị; việc đạt hay không do chính đề quyết định.
+     */
+    private void writeFinalAssessment(CourseRevision revision, LearningQuizDirectory.QuizRef quiz, String actor) {
+        repository.assessments(revision.getId()).forEach(repository::remove);
+        if (quiz == null) {
+            return;
+        }
+        repository.flush();
+        CourseAssessment row = new CourseAssessment();
+        row.setRevisionId(revision.getId());
+        row.setAssessmentRevisionId(quiz.quizId());
+        row.setPlacement(CourseAssessment.PLACEMENT_FINAL);
+        row.setIsRequired(true);
+        row.setPassScorePercent(quiz.passPercent());
+        row.setMaxAttempts(quiz.maxAttempts());
+        row.setAllowRetake(quiz.allowRetakeAfterPass());
+        row.setSortNo(0);
+        repository.save(row, actor);
     }
 
     @Transactional
@@ -307,7 +349,9 @@ public class LearningContentService {
         var rules = repository.rules(revision.getId());
         return new LearningDetails.CourseDetail(mapper.view(course), mapper.view(revision),
             repository.objectives(revision.getId()).stream().map(mapper::view).toList(), tree,
-            rules.isEmpty() ? null : mapper.view(rules.get(0)));
+            rules.isEmpty() ? null : mapper.view(rules.get(0)),
+            repository.finalAssessment(revision.getId()).map(CourseAssessment::getAssessmentRevisionId)
+                .orElse(null));
     }
 
     public CourseRevision selectRevision(Course course, Long revisionId) {
@@ -559,8 +603,15 @@ public class LearningContentService {
         if (revision.getCoverAssetId() != null) {
             usableAsset(course, revision.getCoverAssetId());
         }
-        if (!repository.assessments(revision.getId()).isEmpty()) {
-            throw new BusinessException(LearningResponseCode.QUIZ_UNAVAILABLE);
+        // Bài thi cuối khóa (nếu có) phải là đề FINAL_EXAM đã xuất bản, chưa xóa, của chính khóa này.
+        var finalQuizId = repository.finalAssessment(revision.getId())
+            .map(CourseAssessment::getAssessmentRevisionId);
+        if (finalQuizId.isPresent()) {
+            var quiz = quizzes.find(finalQuizId.get());
+            if (quiz.isEmpty() || !quiz.get().published() || !quiz.get().finalExam()
+                || !course.getId().equals(quiz.get().courseId())) {
+                throw new BusinessException(LearningResponseCode.FINAL_EXAM_UNPUBLISHED);
+            }
         }
     }
 
@@ -692,7 +743,7 @@ public class LearningContentService {
             source.getTitle(), source.getSummary(), source.getLevel(), source.getDefaultRequirement(),
             source.getCoverAssetId(), source.getCoverIcon(), source.getCoverColor(),
             original.objectives().stream().map(LearningViews.CourseObjectiveView::description).toList(), chapters,
-            original.completionRule().rewardPoints());
+            original.completionRule().rewardPoints(), keepQuizLinks ? original.finalQuizId() : null);
         writeTree(target, payload, actor);
         repository.flush();
         var sourceLessons = repository.lessons(source.getId());
@@ -714,6 +765,8 @@ public class LearningContentService {
         var rule = repository.rules(target.getId()).get(0);
         rule.setRewardPoints(payload.rewardPoints());
         repository.save(rule, actor);
+        writeFinalAssessment(target, payload.finalQuizId() == null ? null
+            : quizzes.find(payload.finalQuizId()).orElse(null), actor);
     }
 
     private void record(String actor, String action, Course course) {

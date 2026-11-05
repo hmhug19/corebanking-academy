@@ -24,6 +24,12 @@ import lombok.Setter;
 @Entity
 @Table(name = "course_assessments", schema = "learning_hub")
 public class CourseAssessment extends LearningRecord {
+    /**
+     * Vị trí của bài kiểm tra cuối khóa. Với dòng này {@code assessment_revision_id} giữ ID của đề (đề không có
+     * phiên bản) và bài học hoàn thành khóa phải đạt đề đó.
+     */
+    public static final String PLACEMENT_FINAL = "final";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "link_id", nullable = false)
