@@ -29,4 +29,7 @@ public interface AccessRequestRepository extends JpaRepository<AccessRequest, Lo
     Page<AccessRequest> search(@Param("global") boolean global, @Param("orgIds") Collection<Long> orgIds,
         @Param("kind") AccessRequestKind kind, @Param("status") AccessRequestStatus status,
         @Param("q") String q, Pageable pageable);
+
+    boolean existsByKindAndStatusAndStaffCodeIgnoreCase(AccessRequestKind kind, AccessRequestStatus status,
+        String staffCode);
 }

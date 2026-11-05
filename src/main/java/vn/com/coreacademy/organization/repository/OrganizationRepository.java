@@ -23,6 +23,8 @@ public interface OrganizationRepository extends JpaRepository<Organization, Long
         """, nativeQuery = true)
     List<Long> findActiveAncestorIds(@Param("id") Long id);
 
+    List<Organization> findByOrgTypeAndStatusOrderBySortNoAscNameAsc(String orgType, String status);
+
     boolean existsByCodeIgnoreCaseAndIdNot(String code, Long id);
 
     @Query("""
