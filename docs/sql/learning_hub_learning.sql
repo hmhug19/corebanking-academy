@@ -778,6 +778,7 @@ CREATE TABLE learning_hub.course_completion_rules (
     revision_id bigint NOT NULL,
     require_all_required_lessons boolean NOT NULL,
     reward_points integer NOT NULL,
+    final_quiz_id bigint,
     created_by varchar(20) NOT NULL,
     updated_by varchar(20) NOT NULL,
     row_version bigint NOT NULL DEFAULT 0,
@@ -785,6 +786,7 @@ CREATE TABLE learning_hub.course_completion_rules (
     update_time timestamptz NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE learning_hub.course_completion_rules IS 'Điều kiện hoàn thành chung của bản khóa học. Quan hệ bằng cột ID thông thường; service kiểm tra toàn vẹn.';
+COMMENT ON COLUMN learning_hub.course_completion_rules.final_quiz_id IS 'Bài FINAL_EXAM bắt buộc đạt của revision; backend kiểm cùng khóa.';
 COMMENT ON COLUMN learning_hub.course_completion_rules.completion_rule_id IS 'ID tự tăng của bản ghi.';
 COMMENT ON COLUMN learning_hub.course_completion_rules.revision_id IS 'ID tham chiếu logic, không có FK; backend kiểm tra tồn tại và quyền.';
 COMMENT ON COLUMN learning_hub.course_completion_rules.require_all_required_lessons IS 'Thuộc tính requireAllRequiredLessons; xem docs/api/LEARNING.md.';

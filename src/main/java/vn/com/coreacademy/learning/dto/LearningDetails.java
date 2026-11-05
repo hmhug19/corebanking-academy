@@ -15,6 +15,12 @@ public final class LearningDetails {
     public record CourseDetail(LearningViews.CourseView course, LearningViews.CourseRevisionView revision,
                                List<LearningViews.CourseObjectiveView> objectives, List<ChapterDetail> chapters,
                                LearningViews.CourseCompletionRuleView completionRule, Long finalQuizId) {
+        public CourseDetail(LearningViews.CourseView course, LearningViews.CourseRevisionView revision,
+                            List<LearningViews.CourseObjectiveView> objectives, List<ChapterDetail> chapters,
+                            LearningViews.CourseCompletionRuleView completionRule) {
+            this(course, revision, objectives, chapters, completionRule,
+                completionRule == null ? null : completionRule.finalQuizId());
+        }
     }
 
     public record ChapterDetail(LearningViews.CourseChapterView chapter, List<LessonDetail> lessons) {

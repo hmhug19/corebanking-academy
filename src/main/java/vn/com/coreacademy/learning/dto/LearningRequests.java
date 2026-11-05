@@ -88,7 +88,8 @@ public final class LearningRequests {
     }
 
     /**
-     * Nội dung bản nháp (mọi trường của {@link DraftRequest} trừ expectedVersion); dùng chung khi lưu nháp và khi tạo khóa.
+     * Nội dung bản nháp (mọi trường của {@link DraftRequest} trừ expectedVersion); dùng chung khi lưu nháp và
+     * khi tạo khóa.
      * {@code finalQuizId} là bài kiểm tra cuối khóa (loại FINAL_EXAM của chính khóa); bỏ trống nghĩa là không yêu cầu
      * và xóa lựa chọn cũ của bản nháp, như mọi trường khác của cây.
      */
@@ -106,6 +107,13 @@ public final class LearningRequests {
         @NotNull @Size(max = 100) List<@Valid ChapterInput> chapters,
         @Min(0) @Max(100000) int rewardPoints,
         @Positive Long finalQuizId) {
+        public DraftContent(Long programId, Long moduleId, String title, String summary, String level,
+                            String defaultRequirement, Long coverAssetId, String coverIcon, String coverColor,
+                            List<String> objectives, List<ChapterInput> chapters, int rewardPoints) {
+            this(programId, moduleId, title, summary, level, defaultRequirement, coverAssetId, coverIcon, coverColor,
+                objectives, chapters, rewardPoints, null);
+        }
+
         /** Bản sao với tiêu đề khác; dùng khi tiêu đề của khóa lấy từ trường ngoài nội dung nháp. */
         public DraftContent withTitle(String newTitle) {
             return new DraftContent(programId, moduleId, newTitle, summary, level, defaultRequirement, coverAssetId,
@@ -128,6 +136,13 @@ public final class LearningRequests {
         @NotNull @Size(max = 100) List<@Valid ChapterInput> chapters,
         @Min(0) @Max(100000) int rewardPoints,
         @Positive Long finalQuizId) {
+        public DraftRequest(Long expectedVersion, Long programId, Long moduleId, String title, String summary,
+                            String level, String defaultRequirement, Long coverAssetId, String coverIcon,
+                            String coverColor, List<String> objectives, List<ChapterInput> chapters, int rewardPoints) {
+            this(expectedVersion, programId, moduleId, title, summary, level, defaultRequirement, coverAssetId,
+                coverIcon, coverColor, objectives, chapters, rewardPoints, null);
+        }
+
         /** Phần nội dung của payload, bỏ expectedVersion. */
         public DraftContent content() {
             return new DraftContent(programId, moduleId, title, summary, level, defaultRequirement, coverAssetId,

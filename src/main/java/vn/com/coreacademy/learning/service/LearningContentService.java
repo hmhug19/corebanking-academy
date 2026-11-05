@@ -182,6 +182,7 @@ public class LearningContentService {
         writeTree(revision, draft, actor);
         CourseCompletionRule rule = repository.rules(revision.getId()).get(0);
         rule.setRewardPoints(draft.rewardPoints());
+        rule.setFinalQuizId(draft.finalQuizId());
         repository.save(rule, actor);
         writeFinalAssessment(revision, finalQuiz.orElse(null), actor);
     }
@@ -388,7 +389,7 @@ public class LearningContentService {
             repository.objectives(revision.getId()).stream().map(mapper::view).toList(), tree,
             rules.isEmpty() ? null : mapper.view(rules.get(0)),
             repository.finalAssessment(revision.getId()).map(CourseAssessment::getAssessmentRevisionId)
-                .orElse(null));
+                .orElse(rules.isEmpty() ? null : rules.get(0).getFinalQuizId()));
     }
 
     public CourseRevision selectRevision(Course course, Long revisionId) {
@@ -641,10 +642,8 @@ public class LearningContentService {
             usableAsset(course, revision.getCoverAssetId());
         }
         // Bài thi cuối khóa (nếu có) phải là đề FINAL_EXAM đã xuất bản, chưa xóa, của chính khóa này.
-        var finalQuizId = repository.finalAssessment(revision.getId())
-            .map(CourseAssessment::getAssessmentRevisionId);
-        if (finalQuizId.isPresent()) {
-            var quiz = quizzes.find(finalQuizId.get());
+        if (detail.finalQuizId() != null) {
+            var quiz = quizzes.find(detail.finalQuizId());
             if (quiz.isEmpty() || !quiz.get().published() || !quiz.get().finalExam()
                 || !course.getId().equals(quiz.get().courseId())) {
                 throw new BusinessException(LearningResponseCode.FINAL_EXAM_UNPUBLISHED);
@@ -801,6 +800,7 @@ public class LearningContentService {
         resourceExtensions.forEach(extension -> extension.cloneResources(source.getId(), target.getId(), lessonIds));
         var rule = repository.rules(target.getId()).get(0);
         rule.setRewardPoints(payload.rewardPoints());
+        rule.setFinalQuizId(keepQuizLinks ? original.finalQuizId() : null);
         repository.save(rule, actor);
         writeFinalAssessment(target, payload.finalQuizId() == null ? null
             : quizzes.find(payload.finalQuizId()).orElse(null), actor);

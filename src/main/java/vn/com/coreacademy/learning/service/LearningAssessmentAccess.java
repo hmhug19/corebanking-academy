@@ -221,6 +221,10 @@ public class LearningAssessmentAccess {
         return progress.completeQuizLessons(userId, enrollmentId, quizId);
     }
 
+    public boolean quizLinked(Long quizId) {
+        return repository.quizLinked(quizId);
+    }
+
     /**
      * Ghi ngày học khi học viên bắt đầu hoặc nộp bài thi. Chờ giao dịch của bên gọi commit rồi mới ghi, và lỗi ghi
      * không làm hỏng lượt thi.

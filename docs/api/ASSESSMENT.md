@@ -4,7 +4,7 @@ Phạm vi P0: danh mục năng lực, ngân hàng câu hỏi, cấu hình bài t
 tục, lưu đáp án, nộp, chấm, xem kết quả) cùng job tự nộp khi hết giờ. P1: quản trị lượt thi (tra cứu, chi tiết,
 hủy lượt, nộp hộ), cấp/thu hồi lượt thêm, đổi trạng thái/xóa câu hỏi hàng loạt, đóng/xóa/xem thử đề, xóa nhóm
 năng lực, lịch sử và xuất CSV lượt thi của học viên, nhập/xuất Excel câu hỏi, báo cáo thi và chấm lại. Gắn bài thi
-vào điều kiện hoàn thành khóa học **chưa** triển khai.
+vào điều kiện hoàn thành khóa học qua bài học quiz bắt buộc và `finalQuizId` của phiên bản khóa học.
 
 Envelope, mã lỗi chung và phân trang theo [API_CONTRACT.md](API_CONTRACT.md). Mọi API yêu cầu đăng nhập.
 
@@ -84,7 +84,7 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 35 | GET `/api/v1/me/quiz-attempts/export?quizId&status&graded&sort` | Xuất CSV lượt thi của tôi, tối đa 10.000 dòng; cùng bộ lọc với danh sách |
 
 | 36 | GET `/api/v1/questions/import-template` | Tải mẫu Excel nhập câu hỏi |
-| 37 | POST `/api/v1/questions/import?courseId&dryRun&overwrite` | Kiểm tra (dryRun=true, mặc định) hoặc nhập câu hỏi từ .xlsx (part `file`) |
+| 37 | POST `/api/v1/questions/import?programId&dryRun&overwrite` | Kiểm tra (dryRun=true, mặc định) hoặc nhập .xlsx vào chương trình; courseId cũ vẫn tương thích (part `file`) |
 | 38 | GET `/api/v1/questions/export?courseId&q&competencyId&questionType&difficulty&status` | Xuất ngân hàng câu hỏi ra .xlsx cùng định dạng tệp nhập |
 | 39 | POST `/api/v1/quizzes/{id}/regrade` | Chấm lại sau khi sửa đáp án (`questionId`, `reason`, `dryRun` mặc định true) |
 | 40 | GET `/api/v1/reports/assessment/overview` | Tổng quan: lượt chấm, học viên, đạt, tỷ lệ đạt, điểm TB; theo đề và theo đơn vị |
@@ -134,6 +134,21 @@ trước backend mới. Backfill theo revision mới nhất, không đổi progr
 chương trình vẫn giữ lại qua API courseId. Nhập/xuất Excel bằng courseId giữ nguyên contract. Câu có `courseId`
 được người quản lý khóa đó hoặc người quản lý chương trình sở hữu sửa/xóa; câu không có `courseId` luôn kiểm theo
 chương trình sở hữu.
+
+**Nhập Excel theo chương trình.** Chọn chương trình ở FE rồi gửi `programId` trong query của
+`POST /api/v1/questions/import`, multipart part `file`; không điền chương trình/khóa trong Excel.
+Không cần chương trình có khóa học. Quyền ghi ngân hàng chương trình giống API tạo câu hỏi;
+`courseId` chỉ dùng cho client cũ. Nếu gửi cả hai ID, khóa phải thuộc đúng chương trình đã chọn.
+Mặc định `dryRun=true` chỉ kiểm tra; sau kiểm tra FE gửi lại chính file và tham số với `dryRun=false`.
+Response data: `{"dryRun":true,"rowCount":2,"toCreate":2,"toUpdate":0,"created":0,"updated":0}`.
+Nhập thành công trả `created/updated` thực tế và `dryRun=false`. Lỗi trả envelope
+`ASSESSMENT-IMPORT_INVALID` với `errors[].field` như `Questions[3].dap_an_dung`; không ghi cả lô.
+Tối đa 1.000 dòng, 5 MiB. Mã câu hỏi vẫn duy nhất toàn hệ thống; `overwrite=true` chỉ cập nhật
+mã cùng chương trình, giữ ID câu hỏi và snapshot lượt thi cũ; không ghi đè ngân hàng khác.
+Mẫu `GET /questions/import-template` gồm `Instructions` (hướng dẫn/ví dụ) và `Questions` trống.
+Mười cột: `ma,noi_dung,loai,phuong_an,dap_an_dung,giai_thich,do_kho,nhom_kien_thuc,diem,trang_thai`.
+Loại/độ khó/trạng thái có dropdown. Các phương án và đáp án dùng ký tự `|`; nhóm năng lực dùng mã,
+không dùng ID/tên. Mẫu đã định dạng tối đa dòng 1001; bỏ qua các dòng dữ liệu trống.
 
 **Câu hỏi.** Từ 2 tới 10 phương án; SINGLE đúng 1 đáp án đúng, MULTIPLE ít nhất 2. Mã để trống thì sinh `Q<ID>`.
 PUT gửi danh sách phương án đầy đủ: có `id` thì sửa tại chỗ, không `id` là phương án mới, phương án cũ vắng mặt
@@ -228,6 +243,16 @@ bài; lần học đã rút hoặc không còn thì bỏ qua và điểm vẫn �
 xuống trượt không hạ bài học (chấm lại vốn chỉ áp dụng khi điểm tăng). `requireLessonsCompleted` chỉ đếm bài `content`
 để đề nằm trong khóa không tự chặn chính nó.
 
+**Bài thi cuối khóa được chọn.** `DraftContent.finalQuizId` là ID một `FINAL_EXAM` cùng khóa, được lưu theo revision
+đồng bộ trong `course_completion_rules.final_quiz_id` và dòng `course_assessments` có `placement=final`.
+Khi đọc ưu tiên dòng liên kết, không có thì dùng cột điều kiện hoàn thành để giữ cấu hình cũ.
+Xuất bản yêu cầu đề đã `PUBLISHED`. Bài này phải đạt ngay cả khi không
+có trong cây bài học. Chỉ lượt `SUBMITTED`/`AUTO_SUBMITTED`, `passed=true`, đúng người và đúng `enrollmentId` mới được
+tính; lượt của lần học cũ hoặc `VOIDED` không được dùng thay. Không cộng hai lần khi đề cũng là bài quiz bắt buộc
+trong cây. Khóa chỉ hoàn thành sau khi mọi bài học bắt buộc và bài thi cuối đã đạt; bài quiz tùy chọn không chặn.
+Nộp tay, hết giờ, nộp hộ và chấm lại đều kích hoạt cùng luồng. Không xóa được đề đang gắn vào nội dung hoặc điều kiện
+hoàn thành (`ASSESSMENT-QUIZ_IN_USE`). Chạy `2026-11-05-required-final-quiz.sql` trước khi nâng backend.
+
 **Job tự nộp.** Mỗi `app.assessment.auto-submit-interval` (mặc định 1 phút) quét tối đa 100 lượt quá
 `deadlineAt + graceSeconds`, mỗi lượt một transaction có khóa dòng; chạy lại hoặc nhiều instance không chấm trùng.
 
@@ -291,8 +316,8 @@ Mọi mốc thời gian của lượt thi được cắt về micro giây trư�
 
 ## Chưa làm / cần chốt
 
-- Gắn đề qua `course_assessments` (bảng điểm nối cũ) vẫn bị chặn khi xuất bản (`LEARNING-QUIZ_UNAVAILABLE`); đề gắn vào
-  khóa bằng bài học loại quiz. Chưa có điều kiện "phải đạt đề X mới hoàn thành khóa" ngoài bài quiz bắt buộc.
+- Liên kết `course_assessments` chỉ dùng `placement=final` qua `finalQuizId` của revision; chưa có API cho các vị trí
+  khác. Bài quiz trong cây nội dung tiếp tục dùng `course_lessons.quiz_id`.
 - Bài quiz không tự hạ về chưa hoàn thành khi chấm lại làm điểm giảm hoặc khi đề bị đóng sau đó (tiến độ chỉ tăng).
 - Chưa có `quiz_revision`: lượt mới của học viên khóa cũ dùng cấu hình đề hiện tại.
 - Chấm lại chưa áp dụng cho lượt đang làm (lượt đó chấm theo snapshot khi nộp; chạy lại chấm lại sau khi nộp).

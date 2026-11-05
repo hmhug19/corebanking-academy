@@ -83,7 +83,12 @@ class QuestionTransferApiIT extends AssessmentIntegrationTest {
             sheet.getRow(0).forEach(cell -> headers.add(cell.getStringCellValue()));
             assertThat(headers).containsExactly("ma", "noi_dung", "loai", "phuong_an", "dap_an_dung", "giai_thich",
                 "do_kho", "nhom_kien_thuc", "diem", "trang_thai");
-            assertThat(sheet.getLastRowNum()).isZero();
+            assertThat(sheet.getLastRowNum()).isLessThanOrEqualTo(1000);
+            for (Row row : sheet) {
+                if (row.getRowNum() > 0) {
+                    row.forEach(cell -> assertThat(cell.toString()).isBlank());
+                }
+            }
         }
         api.http(LEARNER, get(URL + "/import-template"), 403, "CORE-ACCESS_DENIED");
     }
@@ -284,6 +289,72 @@ class QuestionTransferApiIT extends AssessmentIntegrationTest {
 
     private MockHttpServletRequestBuilder upload(long courseId, byte[] content, boolean dryRun, boolean overwrite) {
         return MockMvcRequestBuilders.multipart(URL + "/import?courseId={c}&dryRun={d}&overwrite={o}", courseId,
+            dryRun, overwrite).file(new MockMultipartFile("file", "cau-hoi.xlsx", XLSX, content));
+    }
+
+    @Test
+    void importsTheActualTemplateIntoAProgramWithoutAnyCourse() throws IOException {
+        Course course = fixtures.course();
+        long programId = jdbc.queryForObject(
+            "SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?", Long.class,
+            course.revisionId());
+        String code = unique("PROGRAM_EXCEL");
+        byte[] bytes = api.raw(ADMIN, get(URL + "/import-template")).getContentAsByteArray();
+        try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes));
+             var output = new ByteArrayOutputStream()) {
+            Row row = workbook.getSheet("Questions").createRow(1);
+            String[] values = row(code, "Câu hỏi dùng chung chương trình", "SINGLE", "Đúng|Sai", "A", "Giải thích",
+                "EASY", competencyCode, "1", "ACTIVE");
+            for (int i = 0; i < values.length; i++) {
+                row.createCell(i).setCellValue(values[i]);
+            }
+            workbook.write(output);
+            bytes = output.toByteArray();
+        }
+        JsonNode checked = api.ok(ADMIN, programUpload(programId, bytes, true, false));
+        assertThat(checked.path("toCreate").asInt()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions WHERE code = ?",
+            Integer.class, code)).isZero();
+        assertThat(api.ok(INSTRUCTOR, programUpload(programId, bytes, true, false))
+            .path("toCreate").asInt()).isEqualTo(1);
+        api.http(LEARNER, programUpload(programId, bytes, true, false), 403, "CORE-ACCESS_DENIED");
+        JsonNode imported = api.ok(ADMIN, programUpload(programId, bytes, false, false));
+        assertThat(imported.path("created").asInt()).isEqualTo(1);
+        JsonNode question = api.ok(ADMIN, get(URL + "?programId={p}&q={q}", programId, code))
+            .path("items").get(0);
+        assertThat(question.path("programId").asLong()).isEqualTo(programId);
+        assertThat(question.path("courseId").isNull()).isTrue();
+        api.error(ADMIN, programUpload(programId, bytes, true, false), "ASSESSMENT-IMPORT_INVALID");
+        JsonNode overwritten = api.ok(ADMIN, programUpload(programId, bytes, false, true));
+        assertThat(overwritten.path("updated").asInt()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT question_id FROM learning_hub.questions WHERE code = ?",
+            Long.class, code))
+            .isEqualTo(question.path("id").asLong());
+        Course other = fixtures.course();
+        long otherProgramId = jdbc.queryForObject(
+            "SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?", Long.class,
+            other.revisionId());
+        api.error(ADMIN, programUpload(otherProgramId, bytes, false, true), "ASSESSMENT-IMPORT_INVALID");
+    }
+
+    @Test
+    void programImportRejectsAllRowsWhenAnyRowIsInvalid() throws IOException {
+        Course course = fixtures.course();
+        long programId = jdbc.queryForObject(
+            "SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?", Long.class,
+            course.revisionId());
+        String code = unique("ATOMIC_PROGRAM");
+        byte[] file = xlsx(row(code, "Câu hợp lệ", "SINGLE", "A|B", "A", "", "", competencyCode, "", ""),
+            row("", "Câu sai đáp án", "MULTIPLE", "A|B", "A", "", "", competencyCode, "", ""));
+        JsonNode error = api.error(ADMIN, programUpload(programId, file, false, false), "ASSESSMENT-IMPORT_INVALID");
+        assertThat(error.path("errors").toString()).contains("Questions[3].dap_an_dung");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions WHERE code = ?",
+            Integer.class, code)).isZero();
+    }
+
+    private MockHttpServletRequestBuilder programUpload(long programId, byte[] content, boolean dryRun,
+                                                       boolean overwrite) {
+        return MockMvcRequestBuilders.multipart(URL + "/import?programId={p}&dryRun={d}&overwrite={o}", programId,
             dryRun, overwrite).file(new MockMultipartFile("file", "cau-hoi.xlsx", XLSX, content));
     }
 

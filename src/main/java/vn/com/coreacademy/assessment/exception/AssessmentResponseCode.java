@@ -33,7 +33,7 @@ public enum AssessmentResponseCode implements ApiResponseCode {
         "Chưa có kết quả"),
     QUESTION_IN_USE("ASSESSMENT-QUESTION_IN_USE",
         "Câu hỏi đang được dùng trong bài kiểm tra; chỉ có thể ngưng sử dụng.", "Chưa thể xóa"),
-    QUIZ_IN_USE("ASSESSMENT-QUIZ_IN_USE", "Bài kiểm tra đã có lượt thi; chỉ có thể đóng đề, không thể xóa.",
+    QUIZ_IN_USE("ASSESSMENT-QUIZ_IN_USE", "Bài kiểm tra đã có lượt thi hoặc đang gắn vào khóa học; không thể xóa.",
         "Chưa thể xóa"),
     COMPETENCY_IN_USE("ASSESSMENT-COMPETENCY_IN_USE",
         "Nhóm năng lực đang được gắn với câu hỏi hoặc có nhóm con; chỉ có thể ngưng sử dụng.", "Chưa thể xóa"),

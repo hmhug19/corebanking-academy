@@ -331,6 +331,10 @@ class CourseFinalExamIT extends AssessmentIntegrationTest {
     @Test
     void lessonsWithoutTheExamStayInProgressThenPassingTheExamCompletes() {
         WithExam exam = publishedWithExam(LEARNER);
+        jdbc.update("UPDATE learning_hub.course_completion_rules SET final_quiz_id = null WHERE revision_id = ?",
+            exam.revisionId());
+        api.error(INSTRUCTOR, ApiClient.delete("/api/v1/quizzes/{id}?expectedVersion={v}", exam.quizId(),
+            fixtures.quizVersion(exam.quizId())), "ASSESSMENT-QUIZ_IN_USE");
         long enrollment = enrollmentOf(exam.course().id(), LEARNER);
 
         finishLesson(LEARNER, enrollment, blockOf(exam.revisionId()));

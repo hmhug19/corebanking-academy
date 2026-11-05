@@ -424,7 +424,8 @@ public final class LearningViews {
         Integer rewardPoints,
         Long rowVersion,
         Instant createTime,
-        Instant updateTime) {
+        Instant updateTime,
+        Long finalQuizId) {
     }
 
     public record CourseAssessmentView(

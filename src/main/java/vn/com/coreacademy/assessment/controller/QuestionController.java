@@ -141,16 +141,19 @@ public class QuestionController {
     @Operation(
         summary = "Kiểm tra hoặc nhập câu hỏi từ Excel",
         description = """
-            Nhập tối đa 1000 câu vào ngân hàng của courseId từ tệp .xlsx tối đa 5 MiB (part file).
+            Nhập tối đa 1000 câu vào ngân hàng của programId từ tệp .xlsx tối đa 5 MiB (part file).
+            - Chọn chương trình ngoài tệp; courseId chỉ dành cho client cũ, không bắt buộc khi có programId.
             - dryRun=true (mặc định) chỉ kiểm tra; false kiểm tra lại và ghi toàn bộ cùng audit trong một transaction.
-            - overwrite=true ghi đè câu cùng mã trong cùng khóa; mặc định mã đã tồn tại là lỗi.
+            - overwrite=true ghi đè câu cùng mã trong cùng chương trình; không ghi đè ngân hàng khác.
             - Có lỗi thì không ghi dòng nào: ASSESSMENT-IMPORT_INVALID, errors.field = Questions[dòng Excel].cột.
             """
     )
-    public BaseResponse<AssessmentViews.QuestionImportResult> importFile(@RequestParam @Positive Long courseId,
+    public BaseResponse<AssessmentViews.QuestionImportResult> importFile(
+        @RequestParam(required = false) @Positive Long courseId,
+        @RequestParam(required = false) @Positive Long programId,
         @RequestPart MultipartFile file, @RequestParam(defaultValue = "true") boolean dryRun,
         @RequestParam(defaultValue = "false") boolean overwrite) throws IOException {
-        return BaseResponse.ok(transfer.importFile(courseId, file, dryRun, overwrite));
+        return BaseResponse.ok(transfer.importFile(courseId, programId, file, dryRun, overwrite));
     }
 
     @GetMapping(value = "/export", produces = {XLSX, MediaType.APPLICATION_JSON_VALUE})

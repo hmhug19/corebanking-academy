@@ -2,6 +2,10 @@
 
 ## Chạy local
 
+DB đã triển khai: chạy [`upgrade/2026-11-05-required-final-quiz.sql`](upgrade/2026-11-05-required-final-quiz.sql)
+trước backend nhận `finalQuizId`. File chỉ thêm cột nullable theo revision, chạy lại an toàn; không đổi lịch sử
+hoàn thành. Rollback cùng tên có hậu tố `.rollback.sql` sẽ từ chối khi còn cấu hình bài thi để tránh mất điều kiện.
+
 Chạy toàn bộ hệ thống trên máy dev, không dùng DB chung (`103.121.90.119`) hay S3 từ xa. Cần Docker, `psql`, Java 21, Maven,
 `ffmpeg`/`ffprobe` (video chỉ thành READY sau khi qua kiểm tra bằng `ffprobe`). `.env` hiện có không bị đổi: biến môi trường
 nạp từ `.env.local` luôn thắng phần import `.env` của `application.yml`.

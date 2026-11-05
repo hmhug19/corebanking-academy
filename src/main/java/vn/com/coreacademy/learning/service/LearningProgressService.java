@@ -321,20 +321,6 @@ public class LearningProgressService {
         return progress;
     }
 
-    /**
-     * Revision không có bài thi cuối khóa thì coi là đã đạt; ngược lại học viên phải đạt đề đó theo scoreMethod của
-     * đề (cùng nguồn điểm với màn tổng quan). Đề không còn trong danh sách đề đã xuất bản thì chưa đạt.
-     */
-    private boolean finalExamPassed(CourseEnrollment enrollment) {
-        var finalExam = repository.finalAssessment(enrollment.getRevisionId());
-        if (finalExam.isEmpty()) {
-            return true;
-        }
-        Long quizId = finalExam.get().getAssessmentRevisionId();
-        return quizzes.scores(enrollment.getUserId(), List.of(enrollment.getCourseId())).stream()
-            .anyMatch(score -> quizId.equals(score.quizId()) && score.passed());
-    }
-
     private void updateEnrollment(CourseEnrollment enrollment, Long lessonId, Long blockId, Instant now, String actor) {
         var lessons = repository.lessons(enrollment.getRevisionId()).stream().filter(CourseLesson::getIsRequired)
             .toList();
@@ -342,11 +328,18 @@ public class LearningProgressService {
             .collect(Collectors.toMap(LessonProgress::getLessonId, LessonProgress::getProgressPercent));
         BigDecimal sum = lessons.stream().map(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO))
             .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal percent = lessons.isEmpty() ? BigDecimal.ZERO
-            : sum.divide(BigDecimal.valueOf(lessons.size()), 3, RoundingMode.DOWN);
+        Long finalQuizId = finalQuizId(enrollment.getRevisionId());
+        boolean finalPassed = finalQuizId == null || quizzes.hasPassed(enrollment.getUserId(), enrollment.getId(),
+            finalQuizId);
+        boolean extraFinal = finalQuizId != null && lessons.stream()
+            .noneMatch(lesson -> finalQuizId.equals(lesson.getQuizId()));
+        int componentCount = lessons.size() + (extraFinal ? 1 : 0);
+        BigDecimal completed = sum.add(extraFinal && finalPassed ? HUNDRED : BigDecimal.ZERO);
+        BigDecimal percent = componentCount == 0 ? BigDecimal.ZERO
+            : completed.divide(BigDecimal.valueOf(componentCount), 3, RoundingMode.DOWN);
         boolean complete = !lessons.isEmpty() && lessons.stream()
             .allMatch(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0)
-            && finalExamPassed(enrollment);
+            && finalPassed;
         enrollment.setProgressPercent(enrollment.getProgressPercent().max(percent));
         enrollment.setStatus(complete || enrollment.getCompletedAt() != null ? ProgressStatus.COMPLETED :
             ProgressStatus.IN_PROGRESS);
@@ -363,6 +356,7 @@ public class LearningProgressService {
         }
         repository.save(enrollment, actor);
     }
+
     /**
      * Học viên đạt đề của khóa: bài quiz trỏ tới đề đó trong phiên bản đã nhận lên 100%, rồi tính lại tiến độ khóa.
      * Không ném lỗi khi lần học không còn hiệu lực (đã rút hoặc không thuộc người này) vì bên gọi đang nằm trong
@@ -380,8 +374,7 @@ public class LearningProgressService {
         }
         List<CourseLesson> targets = repository.lessons(enrollment.getRevisionId()).stream()
             .filter(l -> LessonType.QUIZ.equals(l.getLessonType()) && quizId.equals(l.getQuizId())).toList();
-        boolean finalExam = repository.finalAssessment(enrollment.getRevisionId())
-            .map(a -> quizId.equals(a.getAssessmentRevisionId())).orElse(false);
+        boolean finalExam = quizId.equals(finalQuizId(enrollment.getRevisionId()));
         Instant now = Instant.now();
         if (targets.isEmpty()) {
             if (!finalExam) {
@@ -411,6 +404,12 @@ public class LearningProgressService {
         repository.flush();
         updateEnrollment(enrollment, targets.get(0).getId(), null, now, userId);
         return true;
+    }
+
+    private Long finalQuizId(Long revisionId) {
+        return repository.finalAssessment(revisionId).map(exam -> exam.getAssessmentRevisionId())
+            .orElseGet(() -> repository.rules(revisionId).stream().findFirst()
+                .map(rule -> rule.getFinalQuizId()).orElse(null));
     }
 
     private String fingerprint(Long enrollmentId, Long blockId, LearningRequests.ProgressRequest request) {

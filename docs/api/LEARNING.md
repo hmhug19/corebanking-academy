@@ -48,6 +48,15 @@ Mở ảnh ở kích thước gốc để xem rõ tên cột.
 `video_watch_ranges` lưu các khoảng đã xem để tính coverage, không suy hoàn thành từ vị trí tua xa nhất.
 Quan hệ revision → `course_completion_rules` có tối đa một dòng cấu hình mỗi bản, được tạo khi tạo revision.
 
+`DraftRequest.finalQuizId` (nullable, số nguyên dương) chọn bài thi `FINAL_EXAM` cùng khóa để xét hoàn thành.
+Sau khi lưu nháp, `CourseDetail` trả cùng giá trị ở `finalQuizId` và `completionRule.finalQuizId`. Không gửi hoặc gửi `null` khi lưu toàn
+bộ bản nháp sẽ bỏ lựa chọn này; các bài quiz bắt buộc trong cây nội dung vẫn phải đạt. Khi xuất bản, đề đã chọn phải
+đang `PUBLISHED`. Sao chép revision cùng khóa giữ lựa chọn; sao chép thành khóa mới xóa liên kết bài thi.
+Backend đòi hoàn thành mọi bài học bắt buộc và đạt bài thi đã chọn, dựa trên kết quả của chính lần học hiện tại;
+không tính bài quiz tùy chọn và không tự thu hồi lịch sử hoàn thành đã cấp. Bài thi ngoài cây được tính thêm một
+thành phần tiến độ nên học xong nội dung chưa thể lên 100% khi còn thiếu bài thi. Migration DB hiện có:
+[`2026-11-05-required-final-quiz.sql`](../sql/upgrade/2026-11-05-required-final-quiz.sql).
+
 Các bảng `assessment_revisions` và `assessment_attempts` trong ảnh thể hiện **phần thiết kế tiếp theo,
 chưa triển khai**; không nằm trong DDL Learning hiện tại. `course_assessments` đã có bảng điểm nối,
 nhưng chưa có API Quiz Engine hoạt động (riêng dòng `placement=final` đang được dùng cho bài thi cuối khóa, xem mục bài kiểm tra cuối khóa bên dưới). Phần này không phải bằng chứng hệ thống đã chấm thi.
@@ -73,10 +82,10 @@ nhưng chưa có API Quiz Engine hoạt động (riêng dòng `placement=final` 
 - **Bài kiểm tra cuối khóa.** `CourseDetail` có thêm `finalQuizId` (nullable, ở cấp cao nhất, không đổi trường cũ). PUT `/courses/{id}/revisions/{revisionId}` và `draft` của POST `/courses` nhận thêm `finalQuizId` (tùy chọn):
   - Phải là đề `FINAL_EXAM` chưa xóa của đúng khóa này; đề thiếu, đã xóa, của khóa khác hoặc loại khác (ví dụ `PRACTICE`) trả `LEARNING-QUIZ_INVALID` với lỗi trường `finalQuizId`. Đề còn `DRAFT` vẫn được lưu; việc đề phải đã xuất bản chỉ bị chặn khi xuất bản.
   - **Lưu không gửi `finalQuizId` (hoặc null) là xóa bài thi cuối khóa của bản nháp**, như mọi trường khác của cây nháp. Máy khách cũ không biết trường này vì vậy sẽ xóa lựa chọn khi lưu.
-  - Lưu dùng `course_assessments` như hiện có, không đổi lược đồ: mỗi revision có tối đa một dòng, được thay mới ở mỗi lần lưu nháp với `placement=final`, `assessment_revision_id` = **ID đề** (đề không có phiên bản; cột chỉ mang tên cũ), `lesson_id=null`, `is_required=true`, `sort_no=0`, `opens_at`/`closes_at=null`; `pass_score_percent`, `max_attempts`, `allow_retake` chụp từ đề tại thời điểm lưu chỉ để hiển thị (đạt hay không do chính đề quyết định).
+  - Lưu đồng bộ `course_completion_rules.final_quiz_id` và dòng `course_assessments` có `placement=final`: mỗi revision có tối đa một dòng, được thay mới ở mỗi lần lưu nháp với `assessment_revision_id` = **ID đề** (đề không có phiên bản; cột chỉ mang tên cũ), `lesson_id=null`, `is_required=true`, `sort_no=0`, `opens_at`/`closes_at=null`; `pass_score_percent`, `max_attempts`, `allow_retake` chụp từ đề tại thời điểm lưu chỉ để hiển thị. Khi đọc, ưu tiên dòng `placement=final`; nếu chưa có thì dùng `final_quiz_id`, để giữ cấu hình của cả hai dạng dữ liệu. DB đang chạy cần migration `2026-11-05-required-final-quiz.sql` trước khi nâng backend.
   - Tạo bản nháp từ bản đã xuất bản giữ `finalQuizId`; sao chép khóa sang khóa mới xóa nó vì đề thuộc khóa cũ.
   - Xuất bản: đề phải `PUBLISHED`, chưa xóa, `FINAL_EXAM` và của khóa này, nếu không trả `LEARNING-FINAL_EXAM_UNPUBLISHED`. Mã `LEARNING-QUIZ_UNAVAILABLE` vẫn còn trong danh sách mã nhưng xuất bản không còn trả nó.
-  - Hoàn thành khóa: lần học trên revision có bài thi cuối chỉ hoàn thành khi mọi bài bắt buộc đạt 100% **và** học viên đã đạt đề đó (theo `scoreMethod` của đề, cùng nguồn với `/me/learning/progress/summary`), theo thứ tự nào cũng được: đạt đề kích hoạt tính lại khóa dù không có bài quiz nào trỏ tới đề. Hoàn thành chỉ tăng, chấm lại trượt về sau không hạ.
+  - Hoàn thành khóa: lần học trên revision có bài thi cuối chỉ hoàn thành khi mọi bài bắt buộc đạt 100% **và** có ít nhất một lượt của chính học viên, đúng `enrollmentId`, đã chấm `SUBMITTED`/`AUTO_SUBMITTED` với `passed=true`. Không dùng kết quả của lần học cũ hoặc lượt `VOIDED`. Theo thứ tự nào cũng được: đạt đề kích hoạt tính lại khóa dù không có bài quiz nào trỏ tới đề. Bài thi ngoài cây tính thêm một thành phần tiến độ; đề đã là bài quiz bắt buộc không bị cộng hai lần. Hoàn thành chỉ tăng, chấm lại trượt về sau không hạ.
   - Quy tắc thuộc về revision: lần học trên revision cũ hơn hoặc revision không có bài thi cuối khóa hoạt động như trước.
 - Thao tác ghi Learning dùng chung advisory transaction lock với Identity để bảo vệ grain và tham chiếu xuyên module khi chưa có UNIQUE/FK. Xóa team bị chặn nếu còn course, target hoặc snapshot học tập tham chiếu. Đây là lựa chọn ban đầu cho correctness; chưa benchmark tải lớn. Không mở rộng thành nhiều khóa trước khi đo và thiết kế thứ tự khóa.
 
