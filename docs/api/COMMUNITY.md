@@ -815,7 +815,7 @@ Các command trả tập hợp kèm version có shape rõ: C19 `data={contentVer
 Nếu caller A/M chỉ được biết tombstone, C/Q là union `TombstoneView={contentId,contentVersion,isDeleted,isHidden,reasonSafe,capabilities}`, không giữ title/body/asset cũ. Query param C25 có thêm reviewThreadId?; nếu truyền phải resolve đúng proposal rồi lọc thread trước count/page. C95/C96 trả link type liên module nhưng không nới quyền của source/target.
 
 
-### Question and article cover images
+### Question and article cover images 
 
 Question, article and lesson-learned drafts use the existing revision assets payload: one image with
 `usage: "cover"`. Upload through `/api/v1/community/assets/uploads`, send SHA-256 checked parts,
