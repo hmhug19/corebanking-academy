@@ -232,10 +232,14 @@ public class LearningProgressService {
                              LearningRequests.ProgressRequest request, Instant now, String actor) {
         LearningAsset asset = primaryAsset(enrollment.getRevisionId(), block.getId());
         BigDecimal duration = asset.getDurationSeconds();
-        if (duration == null || duration.signum() <= 0 || request.videoPositionSeconds() == null
-            || request.videoPositionSeconds().compareTo(duration) > 0) {
+        // Player báo currentTime với độ chính xác cao hơn duration đã lưu (ví dụ 11.136125 so với 11.136), nên vượt
+        // duration trong ngưỡng grace là hợp lệ và được kẹp về duration; vượt xa hơn mới là vị trí sai.
+        BigDecimal position = request.videoPositionSeconds();
+        if (duration == null || duration.signum() <= 0 || position == null
+            || position.compareTo(duration.add(LearningLimits.COVERAGE_GRACE_SECONDS)) > 0) {
             throw BusinessException.validation("videoPositionSeconds", "OUT_OF_RANGE", "Vị trí video chưa hợp lệ.");
         }
+        position = position.min(duration);
         boolean from = request.watchedFromSeconds() != null;
         boolean to = request.watchedToSeconds() != null;
         if (from != to) {
@@ -244,6 +248,10 @@ public class LearningProgressService {
         if (from) {
             BigDecimal start = request.watchedFromSeconds();
             BigDecimal end = request.watchedToSeconds();
+            if (end.compareTo(duration.add(LearningLimits.COVERAGE_GRACE_SECONDS)) <= 0) {
+                end = end.min(duration);
+                start = start.min(end);
+            }
             long elapsed = progress.getLastAccessAt() == null ? 0
                 : Duration.between(progress.getLastAccessAt(), now).toMillis();
             BigDecimal allowance = elapsed <= 0 || elapsed > media.getMaxEventGap().toMillis() ? BigDecimal.ZERO
@@ -252,13 +260,13 @@ public class LearningProgressService {
             if (progress.getLastVideoPositionSeconds() == null || end.compareTo(start) < 0
                 || end.compareTo(duration) > 0 || end.subtract(start).compareTo(allowance) > 0
                 || start.subtract(progress.getLastVideoPositionSeconds()).abs().compareTo(BigDecimal.ONE) > 0
-                || end.subtract(request.videoPositionSeconds()).abs().compareTo(BigDecimal.ONE) > 0) {
+                || end.subtract(position).abs().compareTo(BigDecimal.ONE) > 0) {
                 throw BusinessException.validation("watchedToSeconds", "OUT_OF_RANGE",
                     "Khoảng xem không khớp vị trí hoặc thời gian server; gửi heartbeat mở video trước.");
             }
             mergeRange(progress.getId(), start, end, actor);
         }
-        progress.setLastVideoPositionSeconds(request.videoPositionSeconds());
+        progress.setLastVideoPositionSeconds(position);
         BigDecimal watched = repository.watchRanges(progress.getId()).stream()
             .map(r -> r.getEndSecond().subtract(r.getStartSecond())).reduce(BigDecimal.ZERO, BigDecimal::add);
         progress.setWatchedSeconds(watched);
