@@ -88,6 +88,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/auth/registration-units").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/register-request").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/auth/password-reset-request").permitAll()
+                // WebSocket dùng vé ngắn hạn, một lần; interceptor từ chối handshake không có vé hợp lệ.
+                .requestMatchers(HttpMethod.GET, "/api/v1/chat-room/socket").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
                     "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll()
