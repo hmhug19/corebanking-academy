@@ -322,6 +322,14 @@ public class CommunityContentService {
     @Transactional(propagation = Propagation.MANDATORY)
     public void validatePublish(CommunityContent content, ContentRevision revision, Actor actor) {
         CommunityDocumentContext.validate(revision.getContextJson(), content.getKind(), true);
+        var covers = relations.assets(revision.getRevisionId()).stream()
+            .filter(asset -> "cover".equals(asset.getUsage())).toList();
+        if (covers.size() > 1 || covers.stream().anyMatch(cover -> {
+            var image = repository.require(CommunityAsset.class, cover.getAssetId());
+            return !"image".equals(image.getMediaType()) || image.getMediaCheckedAt() == null;
+        })) {
+            throw new BusinessException(CommunityResponseCode.INVALID_REFERENCE);
+        }
         if ("recording".equals(content.getKind())) {
             var primary = relations.assets(revision.getRevisionId()).stream()
                 .filter(value -> "primary_video".equals(value.getUsage())).toList();
@@ -797,12 +805,20 @@ public class CommunityContentService {
         var previousIds = relations.assets(revision.getRevisionId()).stream().map(RevisionAsset::getAssetId).distinct()
             .toList();
         List<AssetInput> inputs = requested == null ? List.of() : requested;
+        if (inputs.stream().filter(input -> "cover".equals(input.usage())).count() > 1) {
+            throw new BusinessException(CommunityResponseCode.INVALID_REFERENCE);
+        }
         Set<Long> ids = new HashSet<>();
         for (AssetInput input : inputs) {
             if (!ids.add(input.assetId())) {
                 throw new BusinessException(CommunityResponseCode.DUPLICATE);
             }
-            assetUsable(content, repository.require(CommunityAsset.class, input.assetId()), actor);
+            var asset = repository.require(CommunityAsset.class, input.assetId());
+            if ("cover".equals(input.usage())
+                && (!"image".equals(asset.getMediaType()) || asset.getMediaCheckedAt() == null)) {
+                throw new BusinessException(CommunityResponseCode.INVALID_REFERENCE);
+            }
+            assetUsable(content, asset, actor);
         }
         relations.assets(revision.getRevisionId()).forEach(repository::remove);
         for (AssetInput input : inputs) {

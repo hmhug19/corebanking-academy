@@ -57,7 +57,7 @@ public class CommunityCardService {
                     Boolean.TRUE.equals(row[10]),
                 duplicate, nullable(row[7]), card.publishedRevisionId(), Boolean.TRUE.equals(row[8]), nullable(row[5]),
                 Boolean.TRUE.equals(row[9]), editable && Boolean.TRUE.equals(row[19]),
-                row[20] == null ? null : row[20].toString());
+                row[20] == null ? null : row[20].toString(), nullable(row[21]));
         }).toList();
     }
 

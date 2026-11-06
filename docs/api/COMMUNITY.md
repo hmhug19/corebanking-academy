@@ -813,3 +813,18 @@ Các tên dưới đây là projection **whitelist**, không serialize toàn b�
 Các command trả tập hợp kèm version có shape rõ: C19 `data={contentVersion,items:TagView[]}`, C96 `data={contentVersion,items:LinkView[]}`, C89 `data={preferenceVersion,items:ExpertiseView[]}`, C106 `data={collectionVersion,item:CollectionItemView?}`, C124 `data={courseRevisionVersion,items:LearningResourceView[]}`. C13 RevisionDetail có thêm contentVersion của root. C03/C06/C09 và các create subtype dùng C hoặc Q đầy đủ để FE lấy cả contentVersion lẫn revisionVersion.
 
 Nếu caller A/M chỉ được biết tombstone, C/Q là union `TombstoneView={contentId,contentVersion,isDeleted,isHidden,reasonSafe,capabilities}`, không giữ title/body/asset cũ. Query param C25 có thêm reviewThreadId?; nếu truyền phải resolve đúng proposal rồi lọc thread trước count/page. C95/C96 trả link type liên module nhưng không nới quyền của source/target.
+
+
+### Question and article cover images
+
+Question, article and lesson-learned drafts use the existing revision assets payload: one image with
+`usage: "cover"`. Upload through `/api/v1/community/assets/uploads`, send SHA-256 checked parts,
+complete, then poll until `ready` before attaching the returned `assetId`. Save the full asset list
+to preserve other attachments; omit the cover entry to remove it. Multiple covers or an unverified
+non-image cover are rejected with `COMMUNITY-INVALID_REFERENCE`.
+
+List cards (including My posts and saved content) expose nullable `coverRevisionAssetId`.
+It selects the published revision when available, otherwise the authorized draft; editing a draft
+does not change the published cover. Read bytes through the authenticated, ACL-checked
+`GET /api/v1/community/revision-assets/{revisionAssetId}/content` endpoint. No public asset URL
+is exposed. A null/absent cover uses the frontend default image. No database migration is required.

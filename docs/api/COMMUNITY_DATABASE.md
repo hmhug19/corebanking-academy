@@ -1416,3 +1416,18 @@ Một người được nhắc tên trong revision hoặc bình luận.
 | `create_time` | `timestamptz` | Không | now() | Thời điểm tạo do DB sinh. |
 | `update_time` | `timestamptz` | Không | now() khi tạo; backend khi sửa | Thời điểm cập nhật do JPA lifecycle/backend quản lý. |
 | `row_version` | `bigint` | Không | 0 | Version chống ghi đè đồng thời; không phải revision_no của nội dung. |
+
+
+### Question and article cover images
+
+Question, article and lesson-learned drafts use the existing revision assets payload: one image with
+`usage: "cover"`. Upload through `/api/v1/community/assets/uploads`, send SHA-256 checked parts,
+complete, then poll until `ready` before attaching the returned `assetId`. Save the full asset list
+to preserve other attachments; omit the cover entry to remove it. Multiple covers or an unverified
+non-image cover are rejected with `COMMUNITY-INVALID_REFERENCE`.
+
+List cards (including My posts and saved content) expose nullable `coverRevisionAssetId`.
+It selects the published revision when available, otherwise the authorized draft; editing a draft
+does not change the published cover. Read bytes through the authenticated, ACL-checked
+`GET /api/v1/community/revision-assets/{revisionAssetId}/content` endpoint. No public asset URL
+is exposed. A null/absent cover uses the frontend default image. No database migration is required.

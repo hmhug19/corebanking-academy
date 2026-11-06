@@ -61,5 +61,6 @@ public interface CommunityMapper {
     @Mapping(target = "acceptedRevisionIsCurrent", ignore = true)
     @Mapping(target = "hasDraft", ignore = true)
     @Mapping(target = "occurredOn", ignore = true)
+    @Mapping(target = "coverRevisionAssetId", ignore = true)
     ContentCard card(CommunityContent content, ContentRevision revision);
 }

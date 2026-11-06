@@ -1182,6 +1182,52 @@ class CommunityApiIT {
         success(get(API + "/users/000005/badges"), "000004");
     }
 
+    @Test
+    void articleAndQuestionCardsUsePublishedCoversAndRejectInvalidCovers() throws Exception {
+        Long assetId = jdbc.queryForObject("""
+            insert into learning_hub.community_assets
+              (owner_org_id,uploaded_by,original_name,mime_type,size_bytes,media_type,status,media_checked_at,
+               upload_id,request_hash,upload_total_bytes,created_by,updated_by)
+            select org_id,'000005','cover.webp','image/webp',1,'image','ready',now(),
+              gen_random_uuid(),repeat('0',64),1,'000005','000005'
+            from learning_hub.users where user_id='000005' returning asset_id
+            """, Long.class);
+        var command = body("organization", List.of());
+        command.put("assets", List.of(Map.of("assetId", assetId, "usage", "cover", "sortNo", 0)));
+        JsonNode created = success(post(API + "/articles").content(json.writeValueAsString(command)), "000005");
+        long id = created.path("contentId").asLong();
+        long cover = created.path("draftRevision").path("assets").get(0).path("revisionAssetId").asLong();
+        assertThat(cover).isPositive();
+        publish(id, created, "000005");
+        JsonNode cards = success(get(API + "/articles").param("size", "100"), "000004");
+        assertThat(cards.path("items").findValues("coverRevisionAssetId"))
+            .anySatisfy(value -> assertThat(value.asLong()).isEqualTo(cover));
+
+        command.put("clientRequestId", UUID.randomUUID());
+        Long tagId = jdbc.queryForObject("select max(tag_id) from learning_hub.community_tags", Long.class);
+        command.put("tagIds", List.of(tagId));
+        JsonNode question = success(post(API + "/questions").content(json.writeValueAsString(command)), "000005");
+        long questionId = question.path("contentId").asLong();
+        long questionCover = question.path("draftRevision").path("assets").get(0).path("revisionAssetId").asLong();
+        assertThat(questionCover).isPositive();
+        publish(questionId, question, "000005");
+        JsonNode questions = success(get(API + "/questions").param("size", "100"), "000004");
+        assertThat(questions.path("items").findValues("coverRevisionAssetId"))
+            .anySatisfy(value -> assertThat(value.asLong()).isEqualTo(questionCover));
+
+        command.put("clientRequestId", UUID.randomUUID());
+        command.put("assets", List.of(Map.of("assetId", assetId, "usage", "cover", "sortNo", 0),
+            Map.of("assetId", assetId, "usage", "cover", "sortNo", 1)));
+        assertThat(response(post(API + "/articles").content(json.writeValueAsString(command)), "000005")
+            .path("status").asText()).isEqualTo("ERROR");
+
+        jdbc.update("update learning_hub.community_assets set media_type='video' where asset_id=?", assetId);
+        command.put("clientRequestId", UUID.randomUUID());
+        command.put("assets", List.of(Map.of("assetId", assetId, "usage", "cover", "sortNo", 0)));
+        assertThat(response(post(API + "/articles").content(json.writeValueAsString(command)), "000005")
+            .path("status").asText()).isEqualTo("ERROR");
+    }
+
     private JsonNode comment(long id, Long parent) throws Exception {
         var body = new HashMap<String, Object>();
         body.put("clientRequestId", UUID.randomUUID());

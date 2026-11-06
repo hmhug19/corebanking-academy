@@ -68,7 +68,14 @@ public class CommunityCardRepository {
               (c.author_user_id=:visibleUser or c.maintainer_user_id=:visibleUser),
               c.current_draft_revision_id is not null,
               (select r.context_json->'lessonLearned'->>'occurredOn' from learning_hub.community_content_revisions r
-                where r.revision_id=c.current_published_revision_id)
+                where r.revision_id=c.current_published_revision_id),
+              (select ra.revision_asset_id from learning_hub.community_revision_assets ra
+                join learning_hub.community_assets image on image.asset_id=ra.asset_id
+                where ra.revision_id=coalesce(c.current_published_revision_id,c.current_draft_revision_id)
+                  and ra.usage='cover' and image.media_type='image' and image.status='ready'
+                  and image.deleted_at is null and image.media_checked_at is not null
+                  and image.cleanup_status<>'deleting'
+                order by ra.sort_no,ra.revision_asset_id limit 1)
             from learning_hub.community_contents c
             left join learning_hub.community_answers a on a.content_id=c.content_id
             left join learning_hub.community_contents parent on parent.content_id=a.question_content_id

@@ -31,7 +31,7 @@ public final class ContentViews {
                               String resolutionStatus, long answerCount, Long acceptedAnswerId, boolean isDuplicate,
                               ContentRef duplicateTarget, Long questionId, Long revisionId, boolean isAccepted,
                               Long acceptedRevisionId, boolean acceptedRevisionIsCurrent, boolean hasDraft,
-                              String occurredOn) {
+                              String occurredOn, Long coverRevisionAssetId) {
     }
 
     public record ContentDetail(Long contentId, String kind, Long ownerOrgId, PersonRef author, PersonRef maintainer,
