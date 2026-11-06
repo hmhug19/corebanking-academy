@@ -1,4 +1,4 @@
-# Phòng học 2D realtime
+# Phòng học 3D/2D realtime
 
 Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-room` trong `lms-vip-pro-max`. Mọi tài khoản ACTIVE đã đổi mật khẩu tạm đều được vào phòng; tên hiển thị chỉ là nhãn, không thay thế danh tính đăng nhập. Không thêm bảng, seed, migration hoặc quyền quản trị.
 
@@ -16,23 +16,27 @@ Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-ro
 | Hướng | type | Nội dung |
 |---|---|---|
 | Client → server | `join` | `{name,color}`; tên 1–24 ký tự sau chuẩn hóa NFC/trim; màu `teal/slate/amber/blue/rose` |
-| Client → server | `move` | `{x,y}`; tọa độ dự đoán tại chân nhân vật, đơn vị pixel |
+| Client → server | `move` | `{x,y,facing?}`; tọa độ chân nhân vật theo pixel; `facing` là một trong tám hướng |
 | Client → server | `chat` | `{text}`; 1–280 ký tự, tối thiểu 750 ms giữa các tin |
 | Client → server | `ping` | Heartbeat; FE gửi mỗi 10 giây |
-| Server → client | `welcome` | `{id,players,history}`; id kết nối, danh sách người chơi và tối đa 100 tin gần nhất |
-| Server → client | `joined` | `{player}`; player gồm `id,name,color,x,y` |
-| Server → client | `moved` | `{id,x,y}`; vị trí đã qua kiểm tra tốc độ và đường đi |
+| Server → client | `welcome` | `{id,players,history:[]}`; danh sách người chơi, không phát lại tin nhắn. `history` rỗng chỉ giữ tương thích client cũ |
+| Server → client | `joined` | `{player}`; player gồm `id,name,color,x,y,facing` |
+| Server → client | `moved` | `{id,x,y,facing}`; vị trí đã qua kiểm tra tốc độ và đường đi |
 | Server → client | `correction` | `{x,y}`; vị trí sửa chỉ gửi cho người di chuyển không hợp lệ |
 | Server → client | `chat` | `{id,playerId,name,color,text,at}`; `at` là ISO UTC |
 | Server → client | `left` | `{id,name}` |
 | Server → client | `error` | `{message}`; lỗi packet/validation, không phản chiếu thông tin nội bộ |
 | Server → client | `pong` | Phản hồi heartbeat |
 
-Hitbox AABB tại chân nhân vật; biên phòng, bàn, ghế, bảng, kệ và cây đều chặn di chuyển. Server kiểm tra đoạn đường mỗi 4 px để chặn xuyên vật thể và ngân sách tốc độ để chặn teleport. Các nhân vật có thể đi ngang nhau. Client nội suy chuyển động người khác và tạm thay tên bằng nội dung chat trong 5,5 giây.
+Hitbox AABB tại chân nhân vật; biên phòng, bàn, ghế, bảng, kệ và cây đều chặn di chuyển. Server kiểm tra đoạn đường mỗi 4 px để chặn xuyên vật thể và ngân sách tốc độ để chặn teleport. Các nhân vật có thể đi ngang nhau. Hướng nhìn gồm `north`, `northeast`, `east`, `southeast`, `south`, `southwest`, `west`, `northwest`; client cũ bỏ qua field này vẫn hoạt động, server suy hướng từ dịch chuyển.
+
+FE mặc định dùng Three.js để dựng góc nhìn thứ nhất 3D, có thể chuyển sang bản đồ Phaser 2D ngay trong phòng mà không kết nối lại. Hai renderer dùng chung tọa độ, hitbox và hàm di chuyển. Chế độ 3D xoay bằng chuột khi nhấp vào phòng, kéo trên màn hình cảm ứng; WASD/phím mũi tên di chuyển tương đối theo hướng nhìn. Chế độ 2D di chuyển theo bản đồ và quay mặt theo tám hướng.
+
+Nhấn Enter hoặc “Nhắn tin” để mở ô nhập dưới cảnh, ngay trên dòng hướng dẫn. Enter gửi và đóng ô; Esc đóng ô hoặc thả chuột. Tin nhắn chỉ thay tên trên đầu nhân vật trong 5,5 giây rồi biến mất. Không có khung trò chuyện/lịch sử. Backend không lưu nội dung tin nhắn; chỉ broadcast tới người đã vào phòng tại thời điểm gửi. Người vào sau hoặc reconnect không nhận tin cũ, kể cả khi bong bóng còn hiện ở client khác.
 
 ## Cấu hình và triển khai
 
-Giữ Java/compiler, Docker và database theo cấu hình repository. Dependency thêm là `spring-boot-starter-websocket`, theo BOM hiện có. Mỗi instance giữ một phòng và tối đa 60 kết nối trong RAM; restart xóa người chơi/lịch sử. Khi reconnect, nhân vật xuất hiện lại ở lối vào. Chưa hỗ trợ chia sẻ phòng giữa nhiều replica.
+Giữ Java/compiler, Docker và database theo cấu hình repository. Dependency BE là `spring-boot-starter-websocket`, theo BOM hiện có. Mỗi instance giữ một phòng và tối đa 60 kết nối trong RAM; không có bộ đệm lịch sử chat. Khi reconnect, nhân vật xuất hiện lại ở lối vào. Chưa hỗ trợ chia sẻ phòng giữa nhiều replica. Deploy BE trước FE để ngừng giữ/phát lịch sử cả ở lớp giao thức; không chỉ ẩn lịch sử ở giao diện. Không cần migration database hoặc thay cấu hình Nginx đang hoạt động.
 
 Các property có mặc định tập trung tại `application.yml` và được validate bởi `ChatRoomProperties`:
 

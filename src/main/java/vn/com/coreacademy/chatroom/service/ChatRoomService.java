@@ -3,8 +3,6 @@ package vn.com.coreacademy.chatroom.service;
 import java.io.IOException;
 import java.text.Normalizer;
 import java.time.Instant;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,12 +30,13 @@ import vn.com.coreacademy.common.exception.BusinessException;
 @RequiredArgsConstructor
 public class ChatRoomService {
     private static final Set<String> COLORS = Set.of("teal", "slate", "amber", "blue", "rose");
+    private static final List<String> FACINGS = List.of("east", "southeast", "south", "southwest",
+        "west", "northwest", "north", "northeast");
     private final ObjectMapper json;
     private final ChatRoomMap map;
     private final ChatRoomTickets tickets;
     private final ChatRoomProperties properties;
     private final Map<String, Guest> guests = new LinkedHashMap<>();
-    private final Deque<Map<String, Object>> history = new ArrayDeque<>();
 
     private static class Guest {
         private final WebSocketSession session;
@@ -45,6 +44,7 @@ public class ChatRoomService {
         private final long connectedAt = System.currentTimeMillis();
         private volatile String name;
         private String color;
+        private String facing = "north";
         private double x;
         private double y;
         private double allowance = 30;
@@ -61,7 +61,8 @@ public class ChatRoomService {
         }
 
         private Map<String, Object> view() {
-            return Map.of("id", session.getId(), "name", name, "color", color, "x", x, "y", y);
+            return Map.of("id", session.getId(), "name", name, "color", color, "x", x, "y", y,
+                "facing", facing);
         }
     }
 
@@ -145,7 +146,7 @@ public class ChatRoomService {
         guest.y = map.layout().spawn().y() + (slot / 7 % 2) * 38;
         guest.lastMove = System.nanoTime();
         send(guest, Map.of("type", "welcome", "id", guest.session.getId(), "players", guests.values().stream()
-            .filter(g -> g.name != null).map(Guest::view).toList(), "history", history));
+            .filter(g -> g.name != null).map(Guest::view).toList(), "history", List.of()));
         broadcast(Map.of("type", "joined", "player", guest.view()));
     }
 
@@ -156,6 +157,11 @@ public class ChatRoomService {
         }
         double x = packet.path("x").asDouble();
         double y = packet.path("y").asDouble();
+        String facing = packet.path("facing").asText("");
+        if (packet.has("facing") && !FACINGS.contains(facing)) {
+            error(guest, "Hướng nhìn không hợp lệ.");
+            return;
+        }
         long now = System.nanoTime();
         guest.allowance = Math.min(50, guest.allowance + (now - guest.lastMove) / 1e9 * map.layout().speed());
         guest.lastMove = now;
@@ -165,9 +171,16 @@ public class ChatRoomService {
             return;
         }
         guest.allowance -= distance;
+        if (!facing.isEmpty()) {
+            guest.facing = facing;
+        } else if (distance > 0) {
+            int octant = Math.floorMod((int) Math.round(Math.atan2(y - guest.y, x - guest.x) / (Math.PI / 4)), 8);
+            guest.facing = FACINGS.get(octant);
+        }
         guest.x = x;
         guest.y = y;
-        broadcast(Map.of("type", "moved", "id", guest.session.getId(), "x", x, "y", y));
+        broadcast(Map.of("type", "moved", "id", guest.session.getId(), "x", x, "y", y,
+            "facing", guest.facing));
     }
 
     private void chat(Guest guest, JsonNode packet, long now) throws IOException {
@@ -184,10 +197,6 @@ public class ChatRoomService {
         var event = Map.<String, Object>of("type", "chat", "id", UUID.randomUUID().toString(),
             "playerId", guest.session.getId(), "name", guest.name, "color", guest.color,
             "text", text, "at", Instant.ofEpochMilli(now).toString());
-        history.addLast(event);
-        while (history.size() > ChatRoomLimits.HISTORY_SIZE) {
-            history.removeFirst();
-        }
         broadcast(event);
     }
 
