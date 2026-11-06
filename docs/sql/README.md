@@ -54,6 +54,12 @@ bản đã xuất bản để `hocvien` thấy bài quiz ngay mà không cần n
 
 ## Nâng cấp schema (upgrade)
 
+`2026-11-06-learning-completion.sql`: dừng BE ghi tiến độ, chạy sau upgrade bài thi cuối ngày 05/11,
+rồi triển khai BE/FE mới. Tính lại `course_enrollments.progress_percent` từ các bài bắt buộc theo đúng
+revision của từng lần học; không cộng bài thi cuối riêng, không đổi `status`/`completed_at`.
+Baseline mới đã có constraint và ý nghĩa mới. Rollback cùng tên tính lại theo công thức cũ từ dữ liệu
+hiện tại (không phải phục hồi snapshot), chạy cùng việc quay về BE/FE cũ. Không tự chạy SQL lúc startup.
+
 Script trong `docs/sql/upgrade/` dành cho DB đã chạy baseline; DB mới đã có thay đổi trong baseline nên không cần chạy.
 Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_STOP=1`, mật khẩu qua `PGPASSWORD`.
 

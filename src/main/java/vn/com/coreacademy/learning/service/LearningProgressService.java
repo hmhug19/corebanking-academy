@@ -76,7 +76,7 @@ public class LearningProgressService {
             content.detail(repository.require(Course.class, enrollment.getCourseId()),
                 repository.require(CourseRevision.class, enrollment.getRevisionId())),
             repository.lessonProgress(enrollmentId).stream().map(mapper::view).toList(),
-            repository.blockProgress(enrollmentId).stream().map(mapper::view).toList());
+            repository.blockProgress(enrollmentId).stream().map(mapper::view).toList(), completion(enrollment));
     }
 
     /** Client chỉ gửi tương tác; backend xác định %/trạng thái và kiểm tra quyền trên đúng lần học. */
@@ -340,12 +340,9 @@ public class LearningProgressService {
         Long finalQuizId = finalQuizId(enrollment.getRevisionId());
         boolean finalPassed = finalQuizId == null || quizzes.hasPassed(enrollment.getUserId(), enrollment.getId(),
             finalQuizId);
-        boolean extraFinal = finalQuizId != null && lessons.stream()
-            .noneMatch(lesson -> finalQuizId.equals(lesson.getQuizId()));
-        int componentCount = lessons.size() + (extraFinal ? 1 : 0);
-        BigDecimal completed = sum.add(extraFinal && finalPassed ? HUNDRED : BigDecimal.ZERO);
-        BigDecimal percent = componentCount == 0 ? BigDecimal.ZERO
-            : completed.divide(BigDecimal.valueOf(componentCount), 3, RoundingMode.DOWN);
+        // Tiến độ học chỉ gồm bài bắt buộc; bài thi cuối riêng là điều kiện, không phải một đơn vị nội dung.
+        BigDecimal percent = lessons.isEmpty() ? BigDecimal.ZERO
+            : sum.divide(BigDecimal.valueOf(lessons.size()), 3, RoundingMode.DOWN);
         boolean complete = !lessons.isEmpty() && lessons.stream()
             .allMatch(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0)
             && finalPassed;
@@ -419,6 +416,25 @@ public class LearningProgressService {
         return repository.finalAssessment(revisionId).map(exam -> exam.getAssessmentRevisionId())
             .orElseGet(() -> repository.rules(revisionId).stream().findFirst()
                 .map(rule -> rule.getFinalQuizId()).orElse(null));
+    }
+
+    /** Điều kiện của đúng revision/lần học; không dùng điểm tổng hợp từ chu kỳ học cũ. */
+    private LearningDetails.CompletionSummary completion(CourseEnrollment enrollment) {
+        var lessons = repository.lessons(enrollment.getRevisionId()).stream()
+            .filter(CourseLesson::getIsRequired).toList();
+        var values = repository.lessonProgress(enrollment.getId()).stream()
+            .collect(Collectors.toMap(LessonProgress::getLessonId, LessonProgress::getProgressPercent));
+        long done = lessons.stream()
+            .filter(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0).count();
+        boolean lessonsMet = !lessons.isEmpty() && done == lessons.size();
+        Long quizId = finalQuizId(enrollment.getRevisionId());
+        boolean passed = quizId != null && quizzes.hasPassed(enrollment.getUserId(), enrollment.getId(), quizId);
+        var examState = quizId == null ? LearningDetails.FinalExamState.NOT_REQUIRED
+            : passed ? LearningDetails.FinalExamState.PASSED
+            : quizzes.hasGradedAttempt(enrollment.getUserId(), enrollment.getId(), quizId)
+                ? LearningDetails.FinalExamState.NOT_PASSED : LearningDetails.FinalExamState.NOT_TAKEN;
+        return new LearningDetails.CompletionSummary(done, lessons.size(), lessonsMet, quizId, examState,
+            lessonsMet && (quizId == null || passed));
     }
 
     private String fingerprint(Long enrollmentId, Long blockId, LearningRequests.ProgressRequest request) {
