@@ -36,6 +36,19 @@ public final class LearningDetails {
     public record AssetDetail(LearningViews.BlockAssetView usage, LearningViews.LearningAssetView asset) {
     }
 
+    /**
+     * Một dòng danh sách đợt giao kèm khóa học, đối tượng và số liệu người nhận còn hiệu lực.
+     * completed đếm người có lần học đã hoàn thành; overdue đếm người chưa hoàn thành đã quá effectiveDueAt.
+     */
+    public record AssignmentSummary(LearningViews.CourseAssignmentView assignment, String courseCode,
+                                    String courseTitle, List<LearningViews.AssignmentTargetView> targets,
+                                    long people, long completed, int progressPercent, long overdue) {
+    }
+
+    /** Số học viên vừa được tạo nhắc học thủ công. */
+    public record RemindResult(int reminded) {
+    }
+
     public record AssignmentDetail(LearningViews.CourseAssignmentView assignment,
                                      List<LearningViews.AssignmentTargetView> targets,
                                      List<LearningViews.AssignmentRecipientView> recipients,

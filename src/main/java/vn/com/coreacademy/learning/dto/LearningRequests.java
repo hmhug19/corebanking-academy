@@ -240,6 +240,15 @@ public final class LearningRequests {
     public record RevokeRequest(@NotBlank @Size(max = 2000) String reason) {
     }
 
+    /** Lịch mới của đợt giao; thay toàn bộ các trường lịch, dueAt null nghĩa là không có hạn. */
+    public record AssignmentScheduleRequest(
+        @NotNull @Min(0) Long expectedVersion,
+        @NotNull Instant startAt,
+        Instant dueAt,
+        boolean reminderEnabled,
+        @Min(0) @Max(365) int reminderDaysBefore) {
+    }
+
     public record ProgressRequest(
         @NotNull UUID sessionId,
         @NotNull @Min(1) Long sessionFence,

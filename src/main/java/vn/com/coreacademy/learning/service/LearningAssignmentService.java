@@ -5,8 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -68,6 +70,8 @@ import vn.com.coreacademy.learning.repository.LearningRepository;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class LearningAssignmentService {
+    private static final Set<String> ASSIGNMENT_SORTS = Set.of("id", "startAt", "dueAt", "title");
+
     private final LearningRepository repository;
     private final LearningGroupRepository groups;
     private final CourseAssignmentRepository assignments;
@@ -215,6 +219,39 @@ public class LearningAssignmentService {
             PageQuery.of(page, size, "id,desc", Set.of("id"))).map(mapper::view));
     }
 
+    /**
+     * Danh sách đợt giao của một đơn vị qua mọi khóa, có thể lọc một khóa, kèm khóa học, đối tượng và số liệu người
+     * nhận. Đây là các đợt chính đơn vị đã tạo nên chỉ cần quyền quản lý đơn vị giao.
+     */
+    public PageResponse<LearningDetails.AssignmentSummary> listForOrg(Long assigningOrgId, Long courseId, int page,
+                                                                      int size, String sort) {
+        var actor = access.actor();
+        access.requireManage(actor, assigningOrgId, null, null);
+        var pageable = PageQuery.of(page, size, sort, ASSIGNMENT_SORTS);
+        var result = courseId == null
+            ? assignments.findByAssigningOrgId(assigningOrgId, pageable)
+            : assignments.findByCourseIdAndAssigningOrgId(courseId, assigningOrgId, pageable);
+        List<Long> ids = result.getContent().stream().map(CourseAssignment::getId).toList();
+        if (ids.isEmpty()) {
+            return PageResponse.from(result.map(value -> summary(value, null, Map.of(), Map.of())));
+        }
+
+        // Gom khóa học, đối tượng và số liệu cho cả trang để không truy vấn theo từng dòng.
+        Map<Long, Object[]> courses = new HashMap<>();
+        for (Object[] row : repository.assignmentCourses(ids)) {
+            courses.put((Long) row[0], row);
+        }
+        Map<Long, List<LearningViews.AssignmentTargetView>> targets = new HashMap<>();
+        for (AssignmentTarget target : repository.targets(ids)) {
+            targets.computeIfAbsent(target.getAssignmentId(), key -> new ArrayList<>()).add(mapper.view(target));
+        }
+        Map<Long, Object[]> counts = new HashMap<>();
+        for (Object[] row : repository.assignmentCounts(ids, Instant.now())) {
+            counts.put((Long) row[0], row);
+        }
+        return PageResponse.from(result.map(value -> summary(value, courses.get(value.getId()), targets, counts)));
+    }
+
     public LearningDetails.AssignmentDetail get(Long id) {
         CourseAssignment value = repository.require(CourseAssignment.class, id);
         requireAssignmentManager(access.actor(), value);
@@ -326,19 +363,123 @@ public class LearningAssignmentService {
         if (RecipientStatus.REVOKED.equals(recipient.getStatus())) {
             return mapper.view(recipient);
         }
-        // Chỉ thu hồi nghĩa vụ này; không xóa enrollment khi còn nguồn giao khác hoặc tự đăng ký.
-        recipient.setStatus(RecipientStatus.REVOKED);
-        recipient.setRevokedAt(Instant.now());
-        recipient.setRevokeReason(request.reason());
-        repository.save(recipient, actor.person().id());
-        for (LearningReminder reminder : repository.reminders(recipientId)) {
-            reminder.setStatus(ReminderStatus.CANCELLED);
-            repository.save(reminder, actor.person().id());
-        }
+        revokeRecipient(recipient, request.reason(), actor.person().id());
         audit.record(actor.person().id(), AuditAction.ASSIGNMENT_REVOKED, "assignment_recipient",
             recipientId.toString(), assignment.getAssigningOrgId(), Map.of());
         repository.flush();
         return mapper.view(recipient);
+    }
+
+    /**
+     * Đổi lịch đợt giao còn hiệu lực: cập nhật đợt và hạn riêng của mọi người nhận còn hiệu lực, hủy nhắc đang chờ rồi
+     * lập lại theo hạn mới. Người đã thu hồi giữ nguyên. Khóa học, đối tượng và yêu cầu không đổi qua thao tác này.
+     */
+    @Transactional
+    public LearningDetails.AssignmentDetail reschedule(Long id, LearningRequests.AssignmentScheduleRequest request) {
+        var actor = access.actor();
+        lock.acquire();
+        CourseAssignment assignment = repository.require(CourseAssignment.class, id);
+        requireAssignmentManager(actor, assignment);
+        requireActive(assignment);
+        LearningContentService.version(assignment, request.expectedVersion());
+        if (request.dueAt() != null && request.dueAt().isBefore(request.startAt())) {
+            throw BusinessException.validation("dueAt", "OUT_OF_RANGE", "Hạn hoàn thành phải sau thời điểm mở học.");
+        }
+        assignment.setStartAt(request.startAt());
+        assignment.setDueAt(request.dueAt());
+        assignment.setReminderEnabled(request.reminderEnabled());
+        assignment.setReminderDaysBefore(request.reminderDaysBefore());
+        repository.save(assignment, actor.person().id());
+
+        int changed = 0;
+        for (AssignmentRecipient recipient : repository.recipients(id)) {
+            if (!RecipientStatus.ACTIVE.equals(recipient.getStatus())) {
+                continue;
+            }
+            recipient.setEffectiveStartAt(request.startAt());
+            recipient.setEffectiveDueAt(request.dueAt());
+            repository.save(recipient, actor.person().id());
+            cancelPendingReminders(recipient.getId(), actor.person().id());
+            if (request.reminderEnabled() && request.dueAt() != null) {
+                createReminder(recipient, request.reminderDaysBefore(), actor.person().id());
+            }
+            changed++;
+        }
+        audit.record(actor.person().id(), AuditAction.ASSIGNMENT_RESCHEDULED, "course_assignment", id.toString(),
+            assignment.getAssigningOrgId(), Map.of("recipientCount", changed));
+        repository.flush();
+        return assignmentDetail(assignment);
+    }
+
+    /**
+     * Tạo nhắc học trong ứng dụng ngay cho người nhận còn hiệu lực chưa hoàn thành. Mỗi người chỉ được nhắc thủ công
+     * một lần mỗi ngày (Asia/Ho_Chi_Minh) cho một đợt; lần bấm lặp trong ngày không tạo thêm thông báo.
+     */
+    @Transactional
+    public LearningDetails.RemindResult remind(Long id) {
+        var actor = access.actor();
+        lock.acquire();
+        CourseAssignment assignment = repository.require(CourseAssignment.class, id);
+        requireAssignmentManager(actor, assignment);
+        requireActive(assignment);
+        if (assignment.getDueAt() == null) {
+            throw BusinessException.validation("dueAt", "REQUIRED", "Đợt giao không có hạn hoàn thành để nhắc học.");
+        }
+
+        Instant now = Instant.now();
+        LocalDate day = LearningActivityService.localDate(now);
+        Map<String, AssignmentRecipient> pending = new LinkedHashMap<>();
+        for (AssignmentRecipient recipient : repository.unfinishedRecipients(id)) {
+            pending.put("manual:recipient:" + recipient.getId() + ":" + day, recipient);
+        }
+        if (!pending.isEmpty()) {
+            repository.existingReminderKeys(pending.keySet()).forEach(pending::remove);
+        }
+        for (var entry : pending.entrySet()) {
+            AssignmentRecipient recipient = entry.getValue();
+            LearningReminder reminder = new LearningReminder();
+            reminder.setRecipientId(recipient.getId());
+            reminder.setScheduledAt(now);
+            reminder.setDueAtSnapshot(recipient.getEffectiveDueAt() == null
+                ? assignment.getDueAt() : recipient.getEffectiveDueAt());
+            reminder.setChannel(ReminderChannel.IN_APP);
+            reminder.setStatus(ReminderStatus.PENDING);
+            reminder.setAttemptCount(0);
+            reminder.setIdempotencyKey(entry.getKey());
+            repository.save(reminder, actor.person().id());
+        }
+        audit.record(actor.person().id(), AuditAction.ASSIGNMENT_REMINDED, "course_assignment", id.toString(),
+            assignment.getAssigningOrgId(), Map.of("recipientCount", pending.size()));
+        repository.flush();
+        return new LearningDetails.RemindResult(pending.size());
+    }
+
+    /**
+     * Thu hồi cả đợt giao: mọi người nhận còn hiệu lực bị thu hồi với cùng lý do và hủy nhắc đang chờ. Lần học, điểm
+     * và tiến độ được giữ như thu hồi từng người. Gọi lại với đợt đã thu hồi trả kết quả hiện tại.
+     */
+    @Transactional
+    public LearningDetails.AssignmentDetail revokeAssignment(Long id, LearningRequests.RevokeRequest request) {
+        var actor = access.actor();
+        lock.acquire();
+        CourseAssignment assignment = repository.require(CourseAssignment.class, id);
+        requireAssignmentManager(actor, assignment);
+        if (AssignmentStatus.REVOKED.equals(assignment.getStatus())) {
+            return assignmentDetail(assignment);
+        }
+        int revoked = 0;
+        for (AssignmentRecipient recipient : repository.recipients(id)) {
+            if (RecipientStatus.ACTIVE.equals(recipient.getStatus())) {
+                revokeRecipient(recipient, request.reason(), actor.person().id());
+                revoked++;
+            }
+        }
+        assignment.setStatus(AssignmentStatus.REVOKED);
+        repository.save(assignment, actor.person().id());
+        audit.record(actor.person().id(), AuditAction.ASSIGNMENT_WITHDRAWN, "course_assignment", id.toString(),
+            assignment.getAssigningOrgId(), Map.of("recipientCount", revoked));
+        repository.flush();
+        return assignmentDetail(assignment);
     }
 
     @Transactional
@@ -525,6 +666,47 @@ public class LearningAssignmentService {
 
     private void requireAssignmentManager(Actor actor, CourseAssignment assignment) {
         access.requireManage(actor, assignment.getAssigningOrgId(), null, assignment.getAssignedBy());
+    }
+
+    private void requireActive(CourseAssignment assignment) {
+        if (!AssignmentStatus.ACTIVE.equals(assignment.getStatus())) {
+            throw new BusinessException(LearningResponseCode.CONFLICT);
+        }
+    }
+
+    // Chỉ thu hồi nghĩa vụ này; không xóa enrollment khi còn nguồn giao khác hoặc tự đăng ký.
+    private void revokeRecipient(AssignmentRecipient recipient, String reason, String actor) {
+        recipient.setStatus(RecipientStatus.REVOKED);
+        recipient.setRevokedAt(Instant.now());
+        recipient.setRevokeReason(reason);
+        repository.save(recipient, actor);
+        for (LearningReminder reminder : repository.reminders(recipient.getId())) {
+            reminder.setStatus(ReminderStatus.CANCELLED);
+            repository.save(reminder, actor);
+        }
+    }
+
+    // Nhắc đã gửi giữ lịch sử; chỉ nhắc chưa đến lượt bị hủy khi lịch đổi.
+    private void cancelPendingReminders(Long recipientId, String actor) {
+        for (LearningReminder reminder : repository.reminders(recipientId)) {
+            if (ReminderStatus.PENDING.equals(reminder.getStatus())) {
+                reminder.setStatus(ReminderStatus.CANCELLED);
+                repository.save(reminder, actor);
+            }
+        }
+    }
+
+    private LearningDetails.AssignmentSummary summary(CourseAssignment value, Object[] course,
+                                                      Map<Long, List<LearningViews.AssignmentTargetView>> targets,
+                                                      Map<Long, Object[]> counts) {
+        Object[] count = counts.get(value.getId());
+        long people = count == null ? 0 : (Long) count[1];
+        long completed = count == null ? 0 : (Long) count[2];
+        long overdue = count == null ? 0 : (Long) count[3];
+        int percent = people == 0 ? 0 : (int) (completed * 100 / people);
+        return new LearningDetails.AssignmentSummary(mapper.view(value), course == null ? null : (String) course[1],
+            course == null ? null : (String) course[2], targets.getOrDefault(value.getId(), List.of()), people,
+            completed, percent, overdue);
     }
 
     private void requirePublished(Course course, CourseRevision revision) {

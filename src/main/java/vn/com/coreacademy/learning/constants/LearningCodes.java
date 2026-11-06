@@ -197,6 +197,8 @@ public final class LearningCodes {
 
     public static final class AssignmentStatus {
         public static final String ACTIVE = "active";
+        /** Cả đợt giao đã bị thu hồi; không sửa lịch hoặc nhắc học thêm. */
+        public static final String REVOKED = "revoked";
 
         private AssignmentStatus() {
         }
@@ -380,7 +382,10 @@ public final class LearningCodes {
     public static final class AuditAction {
         public static final String ASSET_DELETED = "LEARNING_ASSET_DELETED";
         public static final String ASSET_UPLOADED = "LEARNING_ASSET_UPLOADED";
+        public static final String ASSIGNMENT_REMINDED = "LEARNING_ASSIGNMENT_REMINDED";
+        public static final String ASSIGNMENT_RESCHEDULED = "LEARNING_ASSIGNMENT_RESCHEDULED";
         public static final String ASSIGNMENT_REVOKED = "LEARNING_ASSIGNMENT_REVOKED";
+        public static final String ASSIGNMENT_WITHDRAWN = "LEARNING_ASSIGNMENT_WITHDRAWN";
         public static final String COURSE_ASSIGNED = "LEARNING_COURSE_ASSIGNED";
         public static final String COURSE_COMPLETED = "LEARNING_COURSE_COMPLETED";
         public static final String COURSE_COPIED = "LEARNING_COURSE_COPIED";
