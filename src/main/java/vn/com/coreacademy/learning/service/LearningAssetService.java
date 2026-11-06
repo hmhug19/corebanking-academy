@@ -40,6 +40,7 @@ public class LearningAssetService {
     private final LearningRepository repository;
     private final LearningAccessPolicy access;
     private final LearningAssignmentService assignments;
+    private final LearningSearchService search;
     private final LearningWriteLock lock;
     private final LearningMapper mapper;
     private final IdentityAuditService audit;
@@ -124,10 +125,13 @@ public class LearningAssetService {
                 allowed |= access.canManage(actor, course.getOwnerOrgId(), course.getOwnerTeamId(),
                     course.getOwnerUserId());
             }
+            boolean learner = access.isLearner(actor);
             for (var revision : repository.assetCovers(assetId)) {
                 Course course = repository.require(Course.class, revision.getCourseId());
                 allowed |= access.canManage(actor, course.getOwnerOrgId(), course.getOwnerTeamId(),
                     course.getOwnerUserId());
+                // Ảnh bìa là một phần của thẻ khóa: học viên thấy revision này trong danh mục thì được xem.
+                allowed = allowed || learner && search.seesRevision(actor, course.getId(), revision.getId());
             }
         }
         if (!allowed || !AssetStatus.READY.equals(asset.getStatus()) || Boolean.TRUE.equals(asset.getIsDeleted())) {

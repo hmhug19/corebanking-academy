@@ -61,10 +61,11 @@ public final class LearningDetails {
                               Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
                               Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds, Long fieldId,
                               String fieldName, String programName, String moduleName, boolean failed,
-                              BigDecimal bestScorePercent, RatingSummary rating) {
+                              BigDecimal bestScorePercent, RatingSummary rating, Long coverAssetId) {
         /**
          * Dạng không có rating cho truy vấn search: Hibernate dựng thẻ từ các cột của câu SQL, còn điểm đánh giá của
-         * khóa do service điền theo từng trang bằng withRating.
+         * khóa do service điền theo từng trang bằng withRating. coverAssetId là ảnh bìa của đúng revision trên thẻ;
+         * ai thấy thẻ thì đọc được ảnh đó qua /learning-assets/{id}/content.
          */
         public CourseCard(Long courseId, Long revisionId, String code, String title, Long programId,
                           Long moduleId, String level, String requirement, String publicationState,
@@ -76,13 +77,13 @@ public final class LearningDetails {
                           Long completedRequiredLessonCount, Long requiredLessonCount, String deadlineStatus,
                           Long mediaAssetId, Integer lastPdfPage, BigDecimal lastVideoPositionSeconds, Long fieldId,
                           String fieldName, String programName, String moduleName, boolean failed,
-                          BigDecimal bestScorePercent) {
+                          BigDecimal bestScorePercent, Long coverAssetId) {
             this(courseId, revisionId, code, title, programId, moduleId, level, requirement, publicationState,
                 lifecycleStatus, lessonCount, durationSeconds, assignedCount, enrollmentId, learningStatus,
                 progressPercent, dueAt, assigned, overdue, updateTime, cycleNo, startedAt, lastAccessAt,
                 completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount, requiredLessonCount,
                 deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId, fieldName,
-                programName, moduleName, failed, bestScorePercent, null);
+                programName, moduleName, failed, bestScorePercent, null, coverAssetId);
         }
 
         /**
@@ -104,7 +105,7 @@ public final class LearningDetails {
                 learningStatus, progressPercent, dueAt, assigned, overdue, updateTime, cycleNo, startedAt,
                 lastAccessAt, completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount,
                 requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId,
-                fieldName, programName, moduleName, failed, score, rating);
+                fieldName, programName, moduleName, failed, score, rating, coverAssetId);
         }
 
         /**
@@ -117,7 +118,7 @@ public final class LearningDetails {
                 learningStatus, progressPercent, dueAt, assigned, overdue, updateTime, cycleNo, startedAt,
                 lastAccessAt, completedAt, lastLessonId, lastBlockId, completedRequiredLessonCount,
                 requiredLessonCount, deadlineStatus, mediaAssetId, lastPdfPage, lastVideoPositionSeconds, fieldId,
-                fieldName, programName, moduleName, failed, bestScorePercent, courseRating);
+                fieldName, programName, moduleName, failed, bestScorePercent, courseRating, coverAssetId);
         }
     }
 

@@ -98,9 +98,14 @@ public class LearningAccessPolicy {
     }
 
     public void requireLearner(Actor actor) {
-        if (actor.grants().stream().noneMatch(g -> RoleCodes.LEARNER.equals(g.roleCode())
-            && g.scope().type() == ScopeType.OWN)) {
+        if (!isLearner(actor)) {
             throw new AccessDeniedException("Learner role required");
         }
+    }
+
+    /** Có vai trò học viên (LEARNER, phạm vi OWN). */
+    public boolean isLearner(Actor actor) {
+        return actor.grants().stream().anyMatch(g -> RoleCodes.LEARNER.equals(g.roleCode())
+            && g.scope().type() == ScopeType.OWN);
     }
 }
