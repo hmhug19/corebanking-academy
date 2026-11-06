@@ -503,8 +503,7 @@ Lưu ý khi tích hợp:
 
 Dưới nội dung bài, học viên (`LEARNER`, scope `OWN`) đánh giá bài từ 1 đến 5 sao, gửi nhận xét **công khai** cho học viên
 của bài, hỏi giảng viên và báo nội dung không phù hợp; hai loại sau chỉ người gửi thấy. Vai trò khác nhận 403
-`CORE-ACCESS_DENIED`. Ngoài phạm vi: hộp thư của giảng viên, trả lời và xử lý (`status`, `reply` đã có trong bảng nhưng chưa
-API nào ghi).
+`CORE-ACCESS_DENIED`. Giảng viên xem câu hỏi và báo nội dung trên các khóa mình quản lý, và trả lời, ở mục "Hộp thư giảng viên" bên dưới.
 
 | API | Trách nhiệm |
 |---|---|
@@ -548,9 +547,21 @@ Quy tắc:
   nhận xét của mình.
 - **Điểm đánh giá của khóa (F5)**: trung bình các đánh giá bài học còn sống có cùng `course_id`, qua mọi phiên bản, làm
   tròn một chữ số, nên đánh giá không mất khi khóa có phiên bản mới.
-- Không có thông báo cho giảng viên; nhận xét, câu hỏi và đánh giá không tính là ngày học của chuỗi ngày học.
+- Thông báo cho giảng viên là số câu hỏi và báo nội dung còn `status = new` trên khóa họ quản lý (xem `GET /instructor/feedback/summary`), tính khi đọc, không có bảng thông báo riêng; trả lời là đã xử lý. Nhận xét, câu hỏi và đánh giá không tính là ngày học của chuỗi ngày học.
 - Schema: `docs/sql/upgrade/2026-11-04-lesson-feedback.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
   backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu bảng); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
+
+#### Hộp thư giảng viên
+
+| API | Trách nhiệm |
+|---|---|
+| GET `/api/v1/instructor/feedback?status&page&size` | `PageResponse<InstructorFeedbackView>`, mới nhất trước; `status` (`new`, `answered`, `resolved`) bỏ trống là mọi trạng thái; `size` mặc định 20, tối đa 100 |
+| GET `/api/v1/instructor/feedback/summary` | `{ newCount }`: số câu hỏi và báo nội dung chưa trả lời; `0` với người không quản lý khóa nào |
+| POST `/api/v1/instructor/feedback/{feedbackId}/reply` | Body `{ reply, resolve? }` → `FeedbackView` |
+
+- `InstructorFeedbackView { id, kind, text, anchor, status, reply, replyTime, createTime, lessonId, lessonTitle, courseId, courseCode, courseTitle, authorName }`; `kind` chỉ là `question` hoặc `report`. Nhận xét và đánh giá không hiện ở đây.
+- **Phạm vi xem** giống tìm kiếm khóa `MANAGE`: toàn cục, đơn vị, nhóm hoặc khóa do chính caller tạo. Người không quản lý khóa nào nhận trang rỗng, không phải 403.
+- **Trả lời**: người gọi phải quản lý đúng khóa chứa bài, nếu không là 403. `reply` cắt khoảng trắng, 1 đến 1.000 ký tự (`CORE-VALIDATION_FAILED` field `reply`). `status` thành `answered`, hoặc `resolved` khi `resolve = true`. Trả lời lại thay nội dung cũ. Nhận xét hoặc mục không tồn tại là `LEARNING-NOT_FOUND`. Chạy dưới khóa advisory `lesson-feedback-reply:{id}`.
 
 ### Chứng nhận
 
