@@ -61,7 +61,16 @@ public final class LearningDetails {
 
     public record EnrollmentDetail(LearningViews.CourseEnrollmentView enrollment, CourseDetail content,
                                      List<LearningViews.LessonProgressView> lessons,
-                                     List<LearningViews.BlockProgressView> blocks) {
+                                     List<LearningViews.BlockProgressView> blocks, CompletionSummary completion) {
+    }
+
+    public enum FinalExamState {
+        NOT_REQUIRED, NOT_TAKEN, NOT_PASSED, PASSED
+    }
+
+    /** Đánh giá hiện tại; enrollment.status/completedAt giữ lịch sử hoàn thành đã được công nhận. */
+    public record CompletionSummary(long completedRequiredLessons, long requiredLessons, boolean lessonsSatisfied,
+                                    Long finalQuizId, FinalExamState finalExamStatus, boolean allSatisfied) {
     }
 
     public record CourseCard(Long courseId, Long revisionId, String code, String title, Long programId,

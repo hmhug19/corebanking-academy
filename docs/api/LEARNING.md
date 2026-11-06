@@ -4,6 +4,22 @@ Triển khai backend cho danh mục, tạo/sửa/sao chép/xuất bản khóa h�
 
 ## Trạng thái kho tài nguyên
 
+### Tiến độ học và điều kiện hoàn thành
+
+`progressPercent` của lần học/thẻ khóa là trung bình tiến độ các bài bắt buộc, làm tròn xuống ba chữ số;
+bài thi cuối riêng không được cộng vào mẫu số. Bài quiz nằm trong danh sách bài bắt buộc vẫn là một bài học.
+100% tiến độ học chưa đồng nghĩa `status=completed`: cần đạt bài thi cuối khóa của đúng revision/lần học nếu có.
+Khóa xuất bản phải có ít nhất một bài bắt buộc. Nội dung tùy chọn không làm giảm tiến độ bắt buộc.
+
+GET chi tiết lần học trả thêm `completion`: `completedRequiredLessons`, `requiredLessons`,
+`lessonsSatisfied`, `finalQuizId`, `finalExamStatus` (`NOT_REQUIRED`, `NOT_TAKEN`, `NOT_PASSED`, `PASSED`),
+`allSatisfied`. Thi đã đạt nghĩa là có ít nhất một lượt SUBMITTED/AUTO_SUBMITTED đạt trên đúng enrollment;
+lượt chu kỳ cũ không được dùng. `allSatisfied` là đánh giá điều kiện hiện tại, còn `enrollment.status/completedAt`
+giữ lịch sử đã công nhận (chấm lại không tự thu hồi hoàn thành). FE hiển thị hai thông tin riêng, không tự tính kết quả.
+Cấu hình dùng `course_completion_rules` và liên kết bài thi cuối theo revision; chưa thêm survey/attendance.
+Giữ tên kỹ thuật cột/API `progress_percent`/`progressPercent`; đổi ý nghĩa được triển khai đồng bộ bằng script
+`docs/sql/upgrade/2026-11-06-learning-completion.sql` và BE/FE mới.
+
 File upload mới được lưu trong AIStor/S3 private, không lưu local lâu dài và không fallback khi S3 lỗi. BE local dùng endpoint AIStor Ubuntu truy cập được từ máy chạy BE; endpoint phải được người vận hành công bố hoặc cấp đường kết nối phù hợp. API upload/content giữ nguyên; không trả key/credential/public URL. Cấu hình, staging disk và nghiệm thu thật xem [triển khai AIStor](../operations/DEPLOY_UBUNTU.md#aistor-integration). Chưa deploy hoặc migrate dữ liệu server trong thay đổi source này.
 
 ### Contract tải tài nguyên

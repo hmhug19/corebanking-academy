@@ -2,6 +2,21 @@
 
 Tài liệu này giúp nhóm theo dõi phạm vi đã kiểm, các lỗi và phần cần kiểm tiếp. Đây là tài liệu chia sẻ, không lưu mật khẩu, token, cookie, dữ liệu cá nhân hay URL ký truy cập media.
 
+## Thay đổi source 06/11/2026 — tiến độ học và hoàn thành khóa
+
+- Phạm vi: tiến độ khóa là trung bình tiến độ bài bắt buộc, không cộng bài thi cuối riêng; API chi tiết lần học
+  trả điều kiện theo đúng revision/enrollment. FE hiển thị tiến độ học riêng với kết quả khóa và trạng thái bài thi.
+- SQL: cập nhật baseline, thêm upgrade/rollback `2026-11-06-learning-completion`. Chưa thực thi SQL hoặc deploy.
+  Dừng BE ghi tiến độ trước khi upgrade và triển khai BE/FE đồng bộ. Tên cột/API tiến độ được giữ, ý nghĩa đã đổi.
+- PASS: BE compile và test-compile; FE lint, typecheck và build production; 45 test contract learner;
+  139 test FE thuộc course, lesson và progress. Chưa chạy toàn bộ `npm run check`.
+- NOT_RUN: 18 integration test BE bị SKIPPED vì không có Docker/PostgreSQL test; chưa kiểm SQL trên DB thật,
+  chưa retest UI với BE mới. Build/typecheck/lint không thay thế các bước này.
+- Môi trường kiểm FE hiện dùng Node 26.13.0, ngoài engines Node 22/24 khai báo trong package.json.
+  Vitest trả exit 0 và toàn bộ 139 assertion đạt nhưng stderr có lỗi `Receiver must be an instance of class URL`;
+  cần chạy lại trên Node được hỗ trợ trước nghiệm thu. Không thay dependency/runtime trong phạm vi sửa tiến độ.
+- Chỉ mở rộng test trong file hiện có, không sinh thêm file test.
+
 ## Phạm vi và cách đọc
 
 - Baseline `2026-11-06.1`: 103 case về danh mục đào tạo, biên soạn khóa, media, giao khóa, tiến độ, dashboard, báo cáo và phân quyền liên quan.

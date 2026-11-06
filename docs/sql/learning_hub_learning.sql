@@ -642,7 +642,9 @@ COMMENT ON COLUMN learning_hub.course_enrollments.started_at IS 'Thuộc tính s
 COMMENT ON COLUMN learning_hub.course_enrollments.last_access_at IS 'Thuộc tính lastAccessAt; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.course_enrollments.completed_at IS 'Thuộc tính completedAt; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.course_enrollments.status IS 'Thuộc tính status; xem docs/api/LEARNING.md.';
-COMMENT ON COLUMN learning_hub.course_enrollments.progress_percent IS 'Thuộc tính progressPercent; xem docs/api/LEARNING.md.';
+COMMENT ON COLUMN learning_hub.course_enrollments.progress_percent IS 'Tiến độ học: trung bình tiến độ bài bắt buộc, không cộng bài thi cuối riêng; 100% không đồng nghĩa hoàn thành khóa.';
+ALTER TABLE learning_hub.course_enrollments ADD CONSTRAINT ck_enrollment_learning_progress
+    CHECK (progress_percent BETWEEN 0 AND 100);
 COMMENT ON COLUMN learning_hub.course_enrollments.last_lesson_id IS 'ID tham chiếu logic, không có FK; backend kiểm tra tồn tại và quyền.';
 COMMENT ON COLUMN learning_hub.course_enrollments.last_block_id IS 'ID tham chiếu logic, không có FK; backend kiểm tra tồn tại và quyền.';
 COMMENT ON COLUMN learning_hub.course_enrollments.created_by IS 'Mã cán bộ tạo bản ghi.';
