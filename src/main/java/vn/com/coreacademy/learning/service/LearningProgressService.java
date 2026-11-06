@@ -221,7 +221,8 @@ public class LearningProgressService {
                 return HUNDRED;
             }
         }
-        if (CompletionMode.OPEN.equals(block.getCompletionMode())
+        if ((CompletionMode.OPEN.equals(block.getCompletionMode())
+            && (!BlockType.ATTACHMENT.equals(block.getBlockType()) || request.complete()))
             || (CompletionMode.MANUAL.equals(block.getCompletionMode()) && request.complete())) {
             return HUNDRED;
         }

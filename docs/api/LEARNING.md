@@ -68,6 +68,7 @@ nhưng chưa có API Quiz Engine hoạt động (riêng dòng `placement=final` 
 - Swagger khai báo HTTP 200 cùng schema DTO cho từng API JSON; kiểm tra `status=SUCCESS` hoặc `ERROR` trong body. Tải tài nguyên trả binary HTTP 200, hoặc 206 khi dùng Range hợp lệ, không bọc BaseResponse.
 - POST `/courses` nhận thêm `draft` (tùy chọn): nội dung bản nháp như PUT `/courses/{id}/revisions/{revisionId}` nhưng không có `expectedVersion` (`programId`, `moduleId`, `title`, `summary`, `level`, `defaultRequirement`, `coverAssetId`, `coverIcon`, `coverColor`, `objectives`, `chapters`, `rewardPoints`, `finalQuizId`). Có `draft` thì khóa, revision 1 và cả cây nội dung được ghi trong một transaction với cùng kiểm tra như lưu nháp; lỗi bất kỳ rollback toàn bộ nên không để lại khóa rỗng (mã `code` vẫn còn trống). `draft.title` ưu tiên hơn `title` ngoài. Không có `draft` thì giữ nguyên hành vi cũ. Response vẫn là `CourseDetail`, `revision.rowVersion` dùng ngay làm `expectedVersion` cho lần lưu kế tiếp. Audit chỉ ghi `COURSE_CREATED`.
 - Phân trang page từ 0, size 1..100. Danh sách khóa hỗ trợ q, fieldId, programId, moduleId, level, requirement, learningStatus, state và sort=id/title/updateTime/dueAt,asc|desc. Scope được tính từ grant hiện tại và lọc trước pagination/count.
+- Bộ lọc quản lý `state=draft|published` lọc trạng thái revision; `state=paused|archived` lọc lifecycle của khóa.
 - Read model entity scalar dùng id làm khóa hiển thị. expectedVersion lấy rowVersion của đúng bản ghi: nội dung dùng revision, đổi lifecycle dùng course, thay thành viên dùng group, tiến độ dùng block_progress (chưa có dòng: 0).
 - Lưu draft bằng PUT thay toàn bộ cây và cấp lại ID con; lấy lại ID sau mỗi lần lưu. Published revision bất biến; draft/copy tạo cây độc lập, không reset enrollment cũ.
 - Giao học kích hoạt ngay và chốt người nhận kể cả startAt trong tương lai. Tối đa 500 người/đợt. Cùng khóa/bản/lần học giữ một enrollment; nhiều nguồn giữ đủ recipients/target_sources. Retake không cho tạo khi còn lần học đang mở, cần chính sách đóng kỳ riêng nếu muốn chuyển.
@@ -146,6 +147,9 @@ Bộ lọc của danh sách học viên: GET `/me/learning/courses` và `/me/lea
 khóa caller có đợt giao còn hiệu lực, cùng biểu thức với cờ assigned của thẻ), `failed` (true chỉ lấy khóa trong tập
 failed ở trên, false loại các khóa đó) và `overdue` (catalog nhận thêm; courses đã có). `/me/learning/progress/export`
 nhận cùng bộ lọc với `/courses`. Các bộ lọc kết hợp được với nhau và với `learningStatus`; mỗi bộ lọc true/false.
+Trên thẻ học viên, `assigned`, nghĩa vụ bắt buộc và `dueAt` chỉ xét recipient còn hiệu lực đã đến `effectiveStartAt`;
+nếu chỉ có lượt giao tương lai thì không lấy hạn tương lai làm hạn hiện hành. Với `/me/learning/courses`, lọc
+`requirement=mandatory` yêu cầu có nghĩa vụ bắt buộc hiện hành; lọc loại khóa trong catalog vẫn theo contract tìm kiếm catalog.
 
 GET `/me/learning/facets` trả `{ fields[], programs[], modules[] }`, mỗi mục `{ id, code, name }`; chương trình và phân
 hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong `/catalog` dùng (cùng quy tắc nhìn thấy, gồm
@@ -293,6 +297,10 @@ Ví dụ lưu trang PDF (expectedVersion lấy từ session hoặc response ti�
   Credit tối đa theo 2x và đồng hồ server giữa heartbeat liên tiếp, gap trên 30 giây không được backfill coverage.
 - Video chạm ngưỡng thì block hoàn thành; PDF manual cần xác nhận, pdf_end chỉ chứng minh mở trang cuối.
   Bài cần đủ các block required; khóa cần đủ bài required. Bài quiz chỉ hoàn thành khi học viên đạt đề trỏ tới (không có block để tự đánh dấu).
+- Với block `attachment` có completion mode `open`, mở block hoặc gửi `OPEN` chưa tự hoàn thành. Client gửi sự kiện
+  `COMPLETE` với `complete=true` sau khi tải thành công; BE kiểm tra session, quyền và áp dụng progress như các sự kiện khác.
+  Đối với các loại block khác dùng mode `open`, hành vi hoàn thành khi mở vẫn giữ nguyên. Khối đã hoàn thành không bị hạ
+  khi mở lại hoặc lần tải sau gặp lỗi.
 - Block mới gắn media_asset_id. Legacy dùng block_assets primary khi scalar còn NULL; nếu hai nguồn lệch thì báo
   MEDIA_CHANGED, không chọn file tùy ý. Thay file tạo asset/revision mới, giữ tiến độ của enrollment revision cũ.
 
@@ -303,6 +311,8 @@ video/iframe src dùng cookie media, không đưa JWT vào URL. Cookie sống t�
 không vượt hạn JWT gốc; lease thực 60 giây vẫn được kiểm trên mỗi request. HTTPS đặt Secure; proxy cần truyền đúng scheme.
 Media token chỉ được dùng trên GET/HEAD content hoặc gateway authorization, không cấp quyền gọi API ghi/auth/me.
 Học viên tải nội dung cần đúng enrollmentId/blockId, quyền còn hiệu lực và media token gắn session/fence hiện hành.
+FE cùng origin tải attachment qua GET content với cả `blockId` và `enrollmentId` dùng cookie media, không gửi Bearer
+access token trên request này; nếu gửi cả hai, resolver ưu tiên Bearer và access token thông thường không thay được media token.
 CORS cho media/session/progress cho phép credentials với origin cấu hình cụ thể, không dùng wildcard.
 FE khác port nhưng cùng site cần credentials:include/withCredentials; SameSite=Strict không dành cho nhúng khác site.
 PDF content dùng X-Frame-Options=SAMEORIGIN; muốn iframe hoạt động hãy proxy FE/API về cùng origin.
