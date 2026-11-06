@@ -76,10 +76,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
     public Page<CourseCard> search(CourseSearch filter, Pageable pageable) {
         NativeSearchQuery sql = new NativeSearchQuery(COURSE_BASE + """
             left join lateral (
-                select case when count(*) filter (where ar.effective_start_at <= current_timestamp) > 0
-                       then min(ar.effective_due_at) filter (where ar.effective_start_at <= current_timestamp)
-                       else (array_agg(ar.effective_due_at order by ar.effective_start_at, ar.recipient_id)
-                           filter (where ar.effective_start_at > current_timestamp))[1] end as due_at,
+                select min(ar.effective_due_at) as due_at,
                        bool_or(ar.requirement = :codeMandatory and ar.effective_start_at <= current_timestamp) as
                        mandatory,
                        count(*) > 0 as assigned
@@ -87,6 +84,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                 join learning_hub.course_assignments a on a.assignment_id = ar.assignment_id
                     and a.status = :codeAssignmentActive
                 where ar.enrollment_id = e.enrollment_id and ar.status = :codeRecipientActive
+                  and ar.effective_start_at <= current_timestamp
             ) obligations on true
             left join lateral (
                 select count(*) as lesson_count, coalesce(sum(l.estimated_duration_seconds), 0) as duration,
@@ -151,6 +149,9 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
         if (filter.requirement() != null) {
             sql.and("(case when obligations.mandatory then :codeMandatory else r.default_requirement end) = :req");
             sql.bind("req", filter.requirement());
+            if (SearchMode.MINE.equals(filter.mode()) && Requirement.MANDATORY.equals(filter.requirement())) {
+                sql.and("coalesce(obligations.mandatory, false)");
+            }
         }
         if (filter.learningStatus() != null) {
             sql.and("coalesce(e.status, :codeNotStarted) = :learningStatus");
@@ -158,7 +159,9 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             sql.bind("codeNotStarted", ProgressStatus.NOT_STARTED);
         }
         if (filter.publicationState() != null) {
-            sql.and("r.state = :state");
+            sql.and((CourseStatus.PAUSED.equals(filter.publicationState())
+                || CourseStatus.ARCHIVED.equals(filter.publicationState()))
+                ? "c.lifecycle_status = :state" : "r.state = :state");
             sql.bind("state", filter.publicationState());
         }
         if (filter.assigned() != null) {
