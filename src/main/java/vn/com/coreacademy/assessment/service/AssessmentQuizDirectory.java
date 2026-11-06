@@ -49,6 +49,13 @@ public class AssessmentQuizDirectory implements LearningQuizDirectory {
 
     @Override
     @Transactional(readOnly = true)
+    public boolean hasGradedAttempt(String userId, Long enrollmentId, Long quizId) {
+        return attempts.existsByUserIdAndEnrollmentIdAndQuizIdAndStatusIn(userId, enrollmentId, quizId,
+            List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Set<Long> failedFinalExamCourseIds(String userId) {
         return attempts.failedFinalExamCourseIds(userId);
     }

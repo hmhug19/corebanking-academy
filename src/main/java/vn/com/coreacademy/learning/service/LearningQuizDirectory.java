@@ -48,6 +48,8 @@ public interface LearningQuizDirectory {
     /** Chỉ xét lượt đã chấm đạt của chính lần ghi danh, không lấy điểm từ chu kỳ học cũ. */
     boolean hasPassed(String userId, Long enrollmentId, Long quizId);
 
+    boolean hasGradedAttempt(String userId, Long enrollmentId, Long quizId);
+
     /**
      * Số bài kiểm tra khác nhau (PUBLISHED, chưa xóa) mà mỗi học viên đã đạt: có ít nhất một lượt đã chấm với
      * passed = true. Một truy vấn gom theo học viên; học viên chưa đạt bài nào không có trong kết quả và userIds rỗng

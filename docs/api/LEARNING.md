@@ -4,6 +4,22 @@ Triển khai backend cho danh mục, tạo/sửa/sao chép/xuất bản khóa h�
 
 ## Trạng thái kho tài nguyên
 
+### Tiến độ học và điều kiện hoàn thành
+
+`progressPercent` của lần học/thẻ khóa là trung bình tiến độ các bài bắt buộc, làm tròn xuống ba chữ số;
+bài thi cuối riêng không được cộng vào mẫu số. Bài quiz nằm trong danh sách bài bắt buộc vẫn là một bài học.
+100% tiến độ học chưa đồng nghĩa `status=completed`: cần đạt bài thi cuối khóa của đúng revision/lần học nếu có.
+Khóa xuất bản phải có ít nhất một bài bắt buộc. Nội dung tùy chọn không làm giảm tiến độ bắt buộc.
+
+GET chi tiết lần học trả thêm `completion`: `completedRequiredLessons`, `requiredLessons`,
+`lessonsSatisfied`, `finalQuizId`, `finalExamStatus` (`NOT_REQUIRED`, `NOT_TAKEN`, `NOT_PASSED`, `PASSED`),
+`allSatisfied`. Thi đã đạt nghĩa là có ít nhất một lượt SUBMITTED/AUTO_SUBMITTED đạt trên đúng enrollment;
+lượt chu kỳ cũ không được dùng. `allSatisfied` là đánh giá điều kiện hiện tại, còn `enrollment.status/completedAt`
+giữ lịch sử đã công nhận (chấm lại không tự thu hồi hoàn thành). FE hiển thị hai thông tin riêng, không tự tính kết quả.
+Cấu hình dùng `course_completion_rules` và liên kết bài thi cuối theo revision; chưa thêm survey/attendance.
+Giữ tên kỹ thuật cột/API `progress_percent`/`progressPercent`; đổi ý nghĩa được triển khai đồng bộ bằng script
+`docs/sql/upgrade/2026-11-06-learning-completion.sql` và BE/FE mới.
+
 File upload mới được lưu trong AIStor/S3 private, không lưu local lâu dài và không fallback khi S3 lỗi. BE local dùng endpoint AIStor Ubuntu truy cập được từ máy chạy BE; endpoint phải được người vận hành công bố hoặc cấp đường kết nối phù hợp. API upload/content giữ nguyên; không trả key/credential/public URL. Cấu hình, staging disk và nghiệm thu thật xem [triển khai AIStor](../operations/DEPLOY_UBUNTU.md#aistor-integration). Chưa deploy hoặc migrate dữ liệu server trong thay đổi source này.
 
 ### Contract tải tài nguyên
@@ -64,13 +80,15 @@ nhưng chưa có API Quiz Engine hoạt động (riêng dòng `placement=final` 
 ## Contract chung
 
 - Business API dưới /api/v1, JWT hiện có; envelope BaseResponse giữ SUCCESS/ERROR và messageCode. Validation/lỗi nghiệp vụ trả HTTP 200/ERROR, thiếu xác thực 401, thiếu quyền 403, lỗi hệ thống 500.
-- 46 operation công khai, Swagger tại /swagger-ui.html. [Bộ cURL và thứ tự kiểm tra](LEARNING_CURL.md), [Postman collection](../postman/learning.postman_collection.json).
+- 50 operation công khai, Swagger tại /swagger-ui.html. [Bộ cURL và thứ tự kiểm tra](LEARNING_CURL.md), [Postman collection](../postman/learning.postman_collection.json).
 - Swagger khai báo HTTP 200 cùng schema DTO cho từng API JSON; kiểm tra `status=SUCCESS` hoặc `ERROR` trong body. Tải tài nguyên trả binary HTTP 200, hoặc 206 khi dùng Range hợp lệ, không bọc BaseResponse.
 - POST `/courses` nhận thêm `draft` (tùy chọn): nội dung bản nháp như PUT `/courses/{id}/revisions/{revisionId}` nhưng không có `expectedVersion` (`programId`, `moduleId`, `title`, `summary`, `level`, `defaultRequirement`, `coverAssetId`, `coverIcon`, `coverColor`, `objectives`, `chapters`, `rewardPoints`, `finalQuizId`). Có `draft` thì khóa, revision 1 và cả cây nội dung được ghi trong một transaction với cùng kiểm tra như lưu nháp; lỗi bất kỳ rollback toàn bộ nên không để lại khóa rỗng (mã `code` vẫn còn trống). `draft.title` ưu tiên hơn `title` ngoài. Không có `draft` thì giữ nguyên hành vi cũ. Response vẫn là `CourseDetail`, `revision.rowVersion` dùng ngay làm `expectedVersion` cho lần lưu kế tiếp. Audit chỉ ghi `COURSE_CREATED`.
 - Phân trang page từ 0, size 1..100. Danh sách khóa hỗ trợ q, fieldId, programId, moduleId, level, requirement, learningStatus, state và sort=id/title/updateTime/dueAt,asc|desc. Scope được tính từ grant hiện tại và lọc trước pagination/count.
+- Bộ lọc quản lý `state=draft|published` lọc trạng thái revision; `state=paused|archived` lọc lifecycle của khóa.
 - Read model entity scalar dùng id làm khóa hiển thị. expectedVersion lấy rowVersion của đúng bản ghi: nội dung dùng revision, đổi lifecycle dùng course, thay thành viên dùng group, tiến độ dùng block_progress (chưa có dòng: 0).
 - Lưu draft bằng PUT thay toàn bộ cây và cấp lại ID con; lấy lại ID sau mỗi lần lưu. Published revision bất biến; draft/copy tạo cây độc lập, không reset enrollment cũ.
 - Giao học kích hoạt ngay và chốt người nhận kể cả startAt trong tương lai. Tối đa 500 người/đợt. Cùng khóa/bản/lần học giữ một enrollment; nhiều nguồn giữ đủ recipients/target_sources. Retake không cho tạo khi còn lần học đang mở, cần chính sách đóng kỳ riêng nếu muốn chuyển.
+- Quản lý đợt giao sau khi tạo (API 37–40): danh sách theo đơn vị giao chỉ cần quyền quản lý `assigningOrgId`, lọc `courseId` tùy chọn, sort `id|startAt|dueAt|title`; mỗi dòng kèm `courseCode`, `courseTitle` (tên bản đã giao), `targets`, `people` (người nhận active), `completed` (lần học `completed`), `progressPercent` (completed*100/people, làm tròn xuống) và `overdue` (chưa hoàn thành, `effectiveDueAt` đã qua). Đổi lịch thay `startAt/dueAt/reminderEnabled/reminderDaysBefore` cho đợt và mọi người nhận active, hủy nhắc `pending` rồi lập lại; cần `expectedVersion` của đợt. Nhắc học ngay tạo nhắc in-app cho người nhận active chưa hoàn thành, tối đa một lần mỗi người mỗi ngày Asia/Ho_Chi_Minh (khóa `manual:recipient:{id}:{yyyy-MM-dd}`); đợt không có hạn trả lỗi validation `dueAt`. Thu hồi cả đợt chuyển `status=revoked`, thu hồi mọi người nhận active với cùng lý do, hủy nhắc; enrollment/điểm/tiến độ giữ nguyên. Đợt đã thu hồi không đổi lịch/nhắc được (`LEARNING-CONFLICT`); gọi thu hồi lại trả kết quả hiện tại.
 - enrollment_origin giữ nguồn tạo lần học ban đầu; self_enrolled_at ghi nhận quyền tự đăng ký riêng nếu học viên đăng ký thêm sau khi đã được giao. Thu hồi giao không xóa quyền tự đăng ký còn hợp lệ và không viết lại nguồn ban đầu.
 - Date/time trong JSON là ISO-8601 có offset hoặc Z. API nhận thời điểm đầy đủ; FE quy đổi ngày chọn sang cuối ngày Asia/Bangkok khi cần. Thời lượng lưu giây.
 - Nội dung text hiện hỗ trợ Markdown/plain, từ chối HTML. FE phải render an toàn và sanitize Markdown/link theo ngữ cảnh; API không cung cấp HTML đã sanitize.
@@ -145,6 +163,9 @@ Bộ lọc của danh sách học viên: GET `/me/learning/courses` và `/me/lea
 khóa caller có đợt giao còn hiệu lực, cùng biểu thức với cờ assigned của thẻ), `failed` (true chỉ lấy khóa trong tập
 failed ở trên, false loại các khóa đó) và `overdue` (catalog nhận thêm; courses đã có). `/me/learning/progress/export`
 nhận cùng bộ lọc với `/courses`. Các bộ lọc kết hợp được với nhau và với `learningStatus`; mỗi bộ lọc true/false.
+Trên thẻ học viên, `assigned`, nghĩa vụ bắt buộc và `dueAt` chỉ xét recipient còn hiệu lực đã đến `effectiveStartAt`;
+nếu chỉ có lượt giao tương lai thì không lấy hạn tương lai làm hạn hiện hành. Với `/me/learning/courses`, lọc
+`requirement=mandatory` yêu cầu có nghĩa vụ bắt buộc hiện hành; lọc loại khóa trong catalog vẫn theo contract tìm kiếm catalog.
 
 GET `/me/learning/facets` trả `{ fields[], programs[], modules[] }`, mỗi mục `{ id, code, name }`; chương trình và phân
 hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong `/catalog` dùng (cùng quy tắc nhìn thấy, gồm
@@ -292,6 +313,10 @@ Ví dụ lưu trang PDF (expectedVersion lấy từ session hoặc response ti�
   Credit tối đa theo 2x và đồng hồ server giữa heartbeat liên tiếp, gap trên 30 giây không được backfill coverage.
 - Video chạm ngưỡng thì block hoàn thành; PDF manual cần xác nhận, pdf_end chỉ chứng minh mở trang cuối.
   Bài cần đủ các block required; khóa cần đủ bài required. Bài quiz chỉ hoàn thành khi học viên đạt đề trỏ tới (không có block để tự đánh dấu).
+- Với block `attachment` có completion mode `open`, mở block hoặc gửi `OPEN` chưa tự hoàn thành. Client gửi sự kiện
+  `COMPLETE` với `complete=true` sau khi tải thành công; BE kiểm tra session, quyền và áp dụng progress như các sự kiện khác.
+  Đối với các loại block khác dùng mode `open`, hành vi hoàn thành khi mở vẫn giữ nguyên. Khối đã hoàn thành không bị hạ
+  khi mở lại hoặc lần tải sau gặp lỗi.
 - Block mới gắn media_asset_id. Legacy dùng block_assets primary khi scalar còn NULL; nếu hai nguồn lệch thì báo
   MEDIA_CHANGED, không chọn file tùy ý. Thay file tạo asset/revision mới, giữ tiến độ của enrollment revision cũ.
 
@@ -302,6 +327,8 @@ video/iframe src dùng cookie media, không đưa JWT vào URL. Cookie sống t�
 không vượt hạn JWT gốc; lease thực 60 giây vẫn được kiểm trên mỗi request. HTTPS đặt Secure; proxy cần truyền đúng scheme.
 Media token chỉ được dùng trên GET/HEAD content hoặc gateway authorization, không cấp quyền gọi API ghi/auth/me.
 Học viên tải nội dung cần đúng enrollmentId/blockId, quyền còn hiệu lực và media token gắn session/fence hiện hành.
+FE cùng origin tải attachment qua GET content với cả `blockId` và `enrollmentId` dùng cookie media, không gửi Bearer
+access token trên request này; nếu gửi cả hai, resolver ưu tiên Bearer và access token thông thường không thay được media token.
 CORS cho media/session/progress cho phép credentials với origin cấu hình cụ thể, không dùng wildcard.
 FE khác port nhưng cùng site cần credentials:include/withCredentials; SameSite=Strict không dành cho nhúng khác site.
 PDF content dùng X-Frame-Options=SAMEORIGIN; muốn iframe hoạt động hãy proxy FE/API về cùng origin.
@@ -714,6 +741,10 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 | 34 | POST `/api/v1/me/learning/reminders/{reminderId}/read` | Đánh dấu đã đọc nhắc học |
 | 35 | POST `/api/v1/learning-assets` | Upload tài nguyên |
 | 36 | GET `/api/v1/learning-assets/{assetId}/content` | Tải tài nguyên |
+| 37 | GET `/api/v1/learning-assignments` | Danh sách đợt giao của đơn vị qua mọi khóa, kèm số liệu người nhận |
+| 38 | PUT `/api/v1/learning-assignments/{assignmentId}/schedule` | Đổi lịch đợt giao |
+| 39 | POST `/api/v1/learning-assignments/{assignmentId}/remind` | Nhắc học ngay |
+| 40 | POST `/api/v1/learning-assignments/{assignmentId}/revoke` | Thu hồi cả đợt giao |
 
 ### Xuất bản kèm đối tượng giao và chia sẻ
 

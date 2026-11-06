@@ -339,12 +339,22 @@ class CourseFinalExamIT extends AssessmentIntegrationTest {
 
         finishLesson(LEARNER, enrollment, blockOf(exam.revisionId()));
         assertThat(status(enrollment)).isNotEqualTo("completed");
+        JsonNode detail = asUser(LEARNER, get(LEARNING + "/enrollments/{id}", enrollment));
+        assertThat(detail.path("enrollment").path("progressPercent").decimalValue())
+            .isEqualByComparingTo("100");
+        assertThat(detail.path("completion").path("lessonsSatisfied").asBoolean()).isTrue();
+        assertThat(detail.path("completion").path("finalExamStatus").asText()).isEqualTo("NOT_TAKEN");
+        assertThat(detail.path("completion").path("allSatisfied").asBoolean()).isFalse();
         assertThat(attempt(LEARNER, exam.quizId(), false).path("passed").asBoolean()).isFalse();
         assertThat(status(enrollment)).isNotEqualTo("completed");
+        assertThat(asUser(LEARNER, get(LEARNING + "/enrollments/{id}", enrollment))
+            .path("completion").path("finalExamStatus").asText()).isEqualTo("NOT_PASSED");
 
         assertThat(attempt(LEARNER, exam.quizId(), true).path("passed").asBoolean()).isTrue();
 
         assertThat(status(enrollment)).isEqualTo("completed");
+        assertThat(asUser(LEARNER, get(LEARNING + "/enrollments/{id}", enrollment))
+            .path("completion").path("allSatisfied").asBoolean()).isTrue();
         assertThat(jdbc.queryForObject("SELECT completed_at FROM learning_hub.course_enrollments"
             + " WHERE enrollment_id = ?", Object.class, enrollment)).isNotNull();
     }

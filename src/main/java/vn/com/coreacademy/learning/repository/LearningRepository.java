@@ -1,5 +1,7 @@
 package vn.com.coreacademy.learning.repository;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -349,6 +351,67 @@ public class LearningRepository {
             where r.assignmentId = :id
             order by r.userId
             """, AssignmentRecipient.class, Map.of("id", assignmentId));
+    }
+
+    public List<AssignmentTarget> targets(Collection<Long> assignmentIds) {
+        return query("""
+            select t
+            from AssignmentTarget t
+            where t.assignmentId in :ids
+            order by t.assignmentId, t.id
+            """, AssignmentTarget.class, Map.of("ids", assignmentIds));
+    }
+
+    /** Mã khóa và tên của đúng bản đã giao cho mỗi đợt: [assignmentId, course code, revision title]. */
+    public List<Object[]> assignmentCourses(Collection<Long> assignmentIds) {
+        return query("""
+            select a.id, c.code, v.title
+            from CourseAssignment a, Course c, CourseRevision v
+            where a.id in :ids
+            and c.id = a.courseId
+            and v.id = a.revisionId
+            """, Object[].class, Map.of("ids", assignmentIds));
+    }
+
+    /**
+     * Số người nhận còn hiệu lực theo đợt giao: [assignmentId, people, completed, overdue]. Hoàn thành theo trạng thái
+     * lần học gắn với người nhận; quá hạn là chưa hoàn thành mà effectiveDueAt đã qua thời điểm now.
+     */
+    public List<Object[]> assignmentCounts(Collection<Long> assignmentIds, Instant now) {
+        return query("""
+            select r.assignmentId,
+                count(r.id),
+                sum(case when e.status = :completed then 1 else 0 end),
+                sum(case when e.status <> :completed and r.effectiveDueAt < :now then 1 else 0 end)
+            from AssignmentRecipient r, CourseEnrollment e
+            where r.enrollmentId = e.id
+            and r.assignmentId in :ids
+            and r.status = :active
+            group by r.assignmentId
+            """, Object[].class, Map.of("ids", assignmentIds, "completed", ProgressStatus.COMPLETED, "now", now,
+            "active", RecipientStatus.ACTIVE));
+    }
+
+    /** Người nhận còn hiệu lực và chưa hoàn thành lần học: đối tượng của nhắc học thủ công. */
+    public List<AssignmentRecipient> unfinishedRecipients(Long assignmentId) {
+        return query("""
+            select r
+            from AssignmentRecipient r, CourseEnrollment e
+            where r.enrollmentId = e.id
+            and r.assignmentId = :id
+            and r.status = :active
+            and e.status <> :completed
+            order by r.userId
+            """, AssignmentRecipient.class, Map.of("id", assignmentId, "active", RecipientStatus.ACTIVE,
+            "completed", ProgressStatus.COMPLETED));
+    }
+
+    public List<String> existingReminderKeys(Collection<String> keys) {
+        return query("""
+            select m.idempotencyKey
+            from LearningReminder m
+            where m.idempotencyKey in :keys
+            """, String.class, Map.of("keys", keys));
     }
 
     public List<RecipientTargetSource> sources(Long assignmentId) {

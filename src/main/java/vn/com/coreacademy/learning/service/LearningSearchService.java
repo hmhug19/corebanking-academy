@@ -19,6 +19,7 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.PageQuery;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
+import vn.com.coreacademy.learning.constants.LearningCodes.CourseStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.Level;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
@@ -91,7 +92,8 @@ public class LearningSearchService {
         allowed("level", level, Level.VALUES);
         allowed("requirement", requirement, Requirement.VALUES);
         allowed("learningStatus", learningStatus, ProgressStatus.SEARCHABLE_VALUES);
-        allowed("state", state, RevisionState.VALUES);
+        allowed("state", state, Set.of(RevisionState.DRAFT, RevisionState.PUBLISHED,
+            CourseStatus.PAUSED, CourseStatus.ARCHIVED));
         var scope = access.searchScope(actor);
         var filter = new CourseSearch(mode, actor.person().id(), actor.person().orgId(),
             identity.activeAncestorIds(actor.person().orgId()), scope, q, fieldId, programId, moduleId, level,
