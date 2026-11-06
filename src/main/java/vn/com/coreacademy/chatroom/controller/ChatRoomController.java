@@ -14,7 +14,7 @@ import vn.com.coreacademy.common.dto.BaseResponse;
 @RestController
 @RequestMapping("/api/v1/chat-room")
 @RequiredArgsConstructor
-@Tag(name = "Chat room", description = "Phòng học 2D cho người dùng đã đăng nhập")
+@Tag(name = "Chat room", description = "Phòng học 3D/2D cho người dùng đã đăng nhập")
 public class ChatRoomController {
     private final ChatRoomMap map;
     private final ChatRoomTickets tickets;
