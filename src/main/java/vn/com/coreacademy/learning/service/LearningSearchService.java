@@ -177,6 +177,15 @@ public class LearningSearchService {
         return new LearnerCourse(card, card.enrollmentId() == null ? withoutBlocks(detail) : detail);
     }
 
+    /**
+     * Học viên đang thấy đúng revision này của khóa trong danh mục (bản đã nhận hoặc bản xuất bản), theo cùng quy tắc
+     * nhìn thấy của danh sách. Dùng cho ảnh bìa: ai thấy thẻ khóa thì được xem ảnh bìa của bản trên thẻ.
+     */
+    public boolean seesRevision(Actor actor, Long courseId, Long revisionId) {
+        var cards = repository.search(catalogFilter(actor, courseId, Set.of()), PageRequest.of(0, 1, Sort.by("id")));
+        return !cards.isEmpty() && revisionId.equals(cards.getContent().get(0).revisionId());
+    }
+
     private CourseSearch catalogFilter(Actor actor, Long courseId, Set<Long> failedCourseIds) {
         return new CourseSearch(SearchMode.CATALOG, actor.person().id(), actor.person().orgId(),
             identity.activeAncestorIds(actor.person().orgId()), access.searchScope(actor), null, null, null, null,

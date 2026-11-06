@@ -44,7 +44,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             ) e on true
             join lateral (
                 select x.revision_id, x.program_id, x.module_id, x.level, x.title, x.default_requirement,
-                       x.state, x.update_time
+                       x.state, x.update_time, x.cover_asset_id
                 from learning_hub.course_revisions x
                 where x.course_id = c.course_id
                   and (:mode = :codeManage or x.revision_id = coalesce(e.revision_id, c.published_revision_id))
@@ -205,7 +205,8 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                         when obligations.due_at < current_timestamp then :codeOverdueActive
                         else :codeOnTimeActive end,
                    resume.media_asset_id, resume.last_pdf_page, resume.last_video_position_seconds,
-                   f.field_id, f.name, p.name, m.name, c.course_id in (:failedIds), cast(null as numeric)
+                   f.field_id, f.name, p.name, m.name, c.course_id in (:failedIds), cast(null as numeric),
+                   r.cover_asset_id
             """, CourseCard.class, pageable, Map.of("id", "c.course_id", "title", "r.title",
                 "updateTime", "r.update_time", "dueAt", "obligations.due_at", "progressPercent", "e.progress_percent",
                 "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at", "completedAt", "e.completed_at"));
