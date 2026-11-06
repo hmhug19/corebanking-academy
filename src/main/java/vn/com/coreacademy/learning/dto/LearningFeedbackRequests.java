@@ -18,6 +18,12 @@ public final class LearningFeedbackRequests {
         @NotNull Integer stars) {
     }
 
+    public record ReplyFeedback(
+        @Schema(description = "Nội dung trả lời sau khi cắt khoảng trắng đầu cuối, 1 đến 1000 ký tự.")
+        @NotNull String reply,
+        @Schema(description = "true: đặt trạng thái resolved; không gửi hoặc false: answered.") Boolean resolve) {
+    }
+
     @Schema(description = "Vị trí neo như ghi chú; mọi loại phản hồi gửi kèm vị trí hiện tại, none khi không có.")
     public record SendFeedback(
         @Schema(description = "comment | question | report.")
