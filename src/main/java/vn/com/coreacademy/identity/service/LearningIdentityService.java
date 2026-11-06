@@ -51,6 +51,15 @@ public class LearningIdentityService {
         return new Person(user.getId(), user.getFullName(), user.getOrgId(), user.getTeamId());
     }
 
+    /** Kiểm tra lại phiên phòng học từ danh tính tin cậy đã gắn với vé WebSocket, không nhận ID từ packet. */
+    public void requireChatRoomSession(String userId, long authorizationVersion) {
+        var user = policy.current(userId);
+        if (user.getAuthorizationVersion() != authorizationVersion) {
+            throw new BusinessException(ResponseCode.UNAUTHORIZED);
+        }
+        policy.requirePasswordChanged(user);
+    }
+
     /** Tên hiển thị theo lô cho một trang kết quả; mã không tồn tại bị bỏ qua. */
     public Map<String, String> fullNames(Collection<String> ids) {
         Map<String, String> names = new HashMap<>();

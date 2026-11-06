@@ -31,6 +31,7 @@ vn.com.coreacademy
 ├── learning                        # Danh mục, nội dung, giao học, tài nguyên và tiến độ
 ├── knowledge                       # Kho tri thức Trợ lý AI: tải lên, worker nền, RAG cục bộ (Ollama + pgvector)
 ├── assistant                       # Trợ lý nhanh: vòng lặp agent có công cụ (Ollama), yêu cầu chờ xác nhận
+├── chatroom                        # Phòng học 2D: vé WebSocket, hiện diện, di chuyển/va chạm và chat trong RAM
 ├── assessment                      # Quiz Engine P0: câu hỏi, cấu hình đề, lượt thi, chấm và job tự nộp
 └── reporting / ...                 # Phạm vi nghiệp vụ chưa triển khai
 ```
@@ -57,6 +58,9 @@ trạng thái từng nhóm nằm ở đầu contract, cách gọi tại [COMMUNI
 Baseline chưa được chạy trên server.
 
 ## Ranh giới xử lý
+
+Phòng học 2D ở `/chat-room` dùng cùng phiên đăng nhập với LMS, cấp vé ngắn hạn dùng một lần qua HTTP
+rồi kết nối WebSocket trong cùng backend. Contract và giới hạn một instance tại [CHAT_ROOM.md](api/CHAT_ROOM.md).
 
 ```text
 HTTP → controller (request/validation/caller)
