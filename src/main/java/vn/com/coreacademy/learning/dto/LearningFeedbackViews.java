@@ -30,6 +30,18 @@ public final class LearningFeedbackViews {
                                Instant replyTime, Instant createTime) {
     }
 
+    @Schema(description = "Câu hỏi hoặc báo nội dung của học viên trên khóa người gọi quản lý, kèm bài, khóa và người "
+        + "gửi; status là new | answered | resolved.")
+    public record InstructorFeedbackView(Long id, String kind, String text, Anchor anchor, String status,
+                                         String reply, Instant replyTime, Instant createTime, Long lessonId,
+                                         String lessonTitle, Long courseId, String courseCode, String courseTitle,
+                                         String authorName) {
+    }
+
+    @Schema(description = "Số câu hỏi và báo nội dung chưa được trả lời (status=new) trên các khóa người gọi quản lý.")
+    public record InstructorFeedbackSummary(long newCount) {
+    }
+
     @Schema(description = "rating là null khi bài chưa có đánh giá, myStars là null khi người gọi chưa đánh giá; "
         + "comments là trang đầu của nhận xét; mine là câu hỏi và báo nội dung của người gọi, mới nhất trước.")
     public record LessonFeedbackView(RatingSummary rating, Integer myStars, PageResponse<CommentView> comments,
