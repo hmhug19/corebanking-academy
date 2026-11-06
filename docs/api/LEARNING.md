@@ -64,13 +64,14 @@ nhưng chưa có API Quiz Engine hoạt động (riêng dòng `placement=final` 
 ## Contract chung
 
 - Business API dưới /api/v1, JWT hiện có; envelope BaseResponse giữ SUCCESS/ERROR và messageCode. Validation/lỗi nghiệp vụ trả HTTP 200/ERROR, thiếu xác thực 401, thiếu quyền 403, lỗi hệ thống 500.
-- 46 operation công khai, Swagger tại /swagger-ui.html. [Bộ cURL và thứ tự kiểm tra](LEARNING_CURL.md), [Postman collection](../postman/learning.postman_collection.json).
+- 50 operation công khai, Swagger tại /swagger-ui.html. [Bộ cURL và thứ tự kiểm tra](LEARNING_CURL.md), [Postman collection](../postman/learning.postman_collection.json).
 - Swagger khai báo HTTP 200 cùng schema DTO cho từng API JSON; kiểm tra `status=SUCCESS` hoặc `ERROR` trong body. Tải tài nguyên trả binary HTTP 200, hoặc 206 khi dùng Range hợp lệ, không bọc BaseResponse.
 - POST `/courses` nhận thêm `draft` (tùy chọn): nội dung bản nháp như PUT `/courses/{id}/revisions/{revisionId}` nhưng không có `expectedVersion` (`programId`, `moduleId`, `title`, `summary`, `level`, `defaultRequirement`, `coverAssetId`, `coverIcon`, `coverColor`, `objectives`, `chapters`, `rewardPoints`, `finalQuizId`). Có `draft` thì khóa, revision 1 và cả cây nội dung được ghi trong một transaction với cùng kiểm tra như lưu nháp; lỗi bất kỳ rollback toàn bộ nên không để lại khóa rỗng (mã `code` vẫn còn trống). `draft.title` ưu tiên hơn `title` ngoài. Không có `draft` thì giữ nguyên hành vi cũ. Response vẫn là `CourseDetail`, `revision.rowVersion` dùng ngay làm `expectedVersion` cho lần lưu kế tiếp. Audit chỉ ghi `COURSE_CREATED`.
 - Phân trang page từ 0, size 1..100. Danh sách khóa hỗ trợ q, fieldId, programId, moduleId, level, requirement, learningStatus, state và sort=id/title/updateTime/dueAt,asc|desc. Scope được tính từ grant hiện tại và lọc trước pagination/count.
 - Read model entity scalar dùng id làm khóa hiển thị. expectedVersion lấy rowVersion của đúng bản ghi: nội dung dùng revision, đổi lifecycle dùng course, thay thành viên dùng group, tiến độ dùng block_progress (chưa có dòng: 0).
 - Lưu draft bằng PUT thay toàn bộ cây và cấp lại ID con; lấy lại ID sau mỗi lần lưu. Published revision bất biến; draft/copy tạo cây độc lập, không reset enrollment cũ.
 - Giao học kích hoạt ngay và chốt người nhận kể cả startAt trong tương lai. Tối đa 500 người/đợt. Cùng khóa/bản/lần học giữ một enrollment; nhiều nguồn giữ đủ recipients/target_sources. Retake không cho tạo khi còn lần học đang mở, cần chính sách đóng kỳ riêng nếu muốn chuyển.
+- Quản lý đợt giao sau khi tạo (API 37–40): danh sách theo đơn vị giao chỉ cần quyền quản lý `assigningOrgId`, lọc `courseId` tùy chọn, sort `id|startAt|dueAt|title`; mỗi dòng kèm `courseCode`, `courseTitle` (tên bản đã giao), `targets`, `people` (người nhận active), `completed` (lần học `completed`), `progressPercent` (completed*100/people, làm tròn xuống) và `overdue` (chưa hoàn thành, `effectiveDueAt` đã qua). Đổi lịch thay `startAt/dueAt/reminderEnabled/reminderDaysBefore` cho đợt và mọi người nhận active, hủy nhắc `pending` rồi lập lại; cần `expectedVersion` của đợt. Nhắc học ngay tạo nhắc in-app cho người nhận active chưa hoàn thành, tối đa một lần mỗi người mỗi ngày Asia/Ho_Chi_Minh (khóa `manual:recipient:{id}:{yyyy-MM-dd}`); đợt không có hạn trả lỗi validation `dueAt`. Thu hồi cả đợt chuyển `status=revoked`, thu hồi mọi người nhận active với cùng lý do, hủy nhắc; enrollment/điểm/tiến độ giữ nguyên. Đợt đã thu hồi không đổi lịch/nhắc được (`LEARNING-CONFLICT`); gọi thu hồi lại trả kết quả hiện tại.
 - enrollment_origin giữ nguồn tạo lần học ban đầu; self_enrolled_at ghi nhận quyền tự đăng ký riêng nếu học viên đăng ký thêm sau khi đã được giao. Thu hồi giao không xóa quyền tự đăng ký còn hợp lệ và không viết lại nguồn ban đầu.
 - Date/time trong JSON là ISO-8601 có offset hoặc Z. API nhận thời điểm đầy đủ; FE quy đổi ngày chọn sang cuối ngày Asia/Bangkok khi cần. Thời lượng lưu giây.
 - Nội dung text hiện hỗ trợ Markdown/plain, từ chối HTML. FE phải render an toàn và sanitize Markdown/link theo ngữ cảnh; API không cung cấp HTML đã sanitize.
@@ -714,6 +715,10 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 | 34 | POST `/api/v1/me/learning/reminders/{reminderId}/read` | Đánh dấu đã đọc nhắc học |
 | 35 | POST `/api/v1/learning-assets` | Upload tài nguyên |
 | 36 | GET `/api/v1/learning-assets/{assetId}/content` | Tải tài nguyên |
+| 37 | GET `/api/v1/learning-assignments` | Danh sách đợt giao của đơn vị qua mọi khóa, kèm số liệu người nhận |
+| 38 | PUT `/api/v1/learning-assignments/{assignmentId}/schedule` | Đổi lịch đợt giao |
+| 39 | POST `/api/v1/learning-assignments/{assignmentId}/remind` | Nhắc học ngay |
+| 40 | POST `/api/v1/learning-assignments/{assignmentId}/revoke` | Thu hồi cả đợt giao |
 
 ### Xuất bản kèm đối tượng giao và chia sẻ
 

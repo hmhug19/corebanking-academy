@@ -7,4 +7,6 @@ import vn.com.coreacademy.learning.entity.CourseAssignment;
 
 public interface CourseAssignmentRepository extends JpaRepository<CourseAssignment, Long> {
     Page<CourseAssignment> findByCourseIdAndAssigningOrgId(Long courseId, Long assigningOrgId, Pageable pageable);
+
+    Page<CourseAssignment> findByAssigningOrgId(Long assigningOrgId, Pageable pageable);
 }

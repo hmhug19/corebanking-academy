@@ -1503,6 +1503,152 @@
       ]
     },
     {
+      "name": "37. Danh sách đợt giao của đơn vị",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assignments?assigningOrgId={{orgId}}&page=0&size=20&sort=id,desc",
+        "description": "Đợt giao do đơn vị tạo qua mọi khóa, kèm số người, hoàn thành, quá hạn."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "38. Đổi lịch đợt giao",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assignments/{{assignmentId}}/schedule",
+        "description": "Áp dụng cho mọi người nhận còn hiệu lực; lập lại nhắc hạn.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"expectedVersion\": {{assignmentVersion}},\n  \"startAt\": \"2026-11-10T00:00:00+07:00\",\n  \"dueAt\": \"2026-12-10T17:00:00+07:00\",\n  \"reminderEnabled\": true,\n  \"reminderDaysBefore\": 3\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "39. Nhắc học ngay",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assignments/{{assignmentId}}/remind",
+        "description": "Nhắc in-app cho người chưa hoàn thành; tối đa một lần mỗi người mỗi ngày."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "40. Thu hồi cả đợt giao",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{instructorToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/v1/learning-assignments/{{assignmentId}}/revoke",
+        "description": "Không xóa enrollment/điểm/tiến độ; đợt chuyển sang revoked.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"Thu hồi đợt giao theo yêu cầu người kiểm thử.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP thành công', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+              "const response = pm.response.json();",
+              "pm.test('Nghiệp vụ SUCCESS', () => pm.expect(response.status).to.eql('SUCCESS'));",
+              "const d = response.data;",
+              "if (response.status === 'SUCCESS' && d) {",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "37. Thư viện tài nguyên",
       "request": {
         "method": "GET",

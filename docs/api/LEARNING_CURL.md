@@ -737,6 +737,59 @@ curl --silent --show-error --request GET "${BASE_URL}/api/v1/learning-assets/${A
   --output tai-lieu-tai-ve.pdf
 ```
 
+## 37. Danh sách đợt giao của đơn vị
+
+Đọc đợt giao do đơn vị tạo qua mọi khóa; bỏ `courseId` để lấy tất cả.
+
+```bash
+curl --silent --show-error --request GET \
+  "${BASE_URL}/api/v1/learning-assignments?assigningOrgId=${ORG_ID}&page=0&size=20&sort=dueAt,asc" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}"
+```
+
+## 38. Đổi lịch đợt giao
+
+Lấy `expectedVersion` từ `assignment.rowVersion`; áp dụng cho mọi người nhận còn hiệu lực.
+
+```bash
+curl --silent --show-error --request PUT "${BASE_URL}/api/v1/learning-assignments/${ASSIGNMENT_ID}/schedule" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
+  --header "Content-Type: application/json" \
+  --data-binary @- <<JSON
+{
+  "expectedVersion": ${ASSIGNMENT_VERSION},
+  "startAt": "2026-11-10T00:00:00+07:00",
+  "dueAt": "2026-12-10T17:00:00+07:00",
+  "reminderEnabled": true,
+  "reminderDaysBefore": 3
+}
+JSON
+```
+
+## 39. Nhắc học ngay
+
+Tạo nhắc in-app cho người chưa hoàn thành; gọi lại trong cùng ngày trả `reminded=0`.
+
+```bash
+curl --silent --show-error --request POST "${BASE_URL}/api/v1/learning-assignments/${ASSIGNMENT_ID}/remind" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}"
+```
+
+## 40. Thu hồi cả đợt giao
+
+Không xóa enrollment/điểm/tiến độ; đợt chuyển sang `revoked`.
+
+```bash
+curl --silent --show-error --request POST "${BASE_URL}/api/v1/learning-assignments/${ASSIGNMENT_ID}/revoke" \
+  --header "Authorization: Bearer ${INSTRUCTOR_TOKEN}" \
+  --header "Content-Type: application/json" \
+  --data-binary @- <<JSON
+{
+  "reason": "Thu hồi đợt giao theo yêu cầu người kiểm thử."
+}
+JSON
+```
+
 ## Kiểm tra lỗi quan trọng
 
 - Bỏ header Authorization: HTTP 401 với envelope lỗi.
