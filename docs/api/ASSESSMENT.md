@@ -80,7 +80,7 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 31 | DELETE `/api/v1/quizzes/{id}?expectedVersion` | Xóa mềm đề chưa từng có lượt thi |
 | 32 | GET `/api/v1/quizzes/{id}/preview` | Bốc thử một đề kèm đáp án; không tạo lượt |
 | 33 | POST `/api/v1/quiz-attempts/{attemptId}/force-submit` | Quản trị nộp hộ lượt đang làm |
-| 34 | GET `/api/v1/me/quiz-attempts?quizId&status&graded&page&size&sort` | Mọi lượt thi của tôi; sort `id/startedAt/submittedAt`; `graded=true` chỉ lấy lượt đã chấm |
+| 34 | GET `/api/v1/me/quiz-attempts?quizId&status&graded&q&passed&from&to&page&size&sort` | Mọi lượt thi của tôi; `q` tìm tên bài, `passed` lọc kết quả; `from` bao gồm và `to` loại trừ theo thời điểm nộp (ISO-8601); sort `id/startedAt/submittedAt`; `graded=true` chỉ lấy lượt đã chấm |
 | 35 | GET `/api/v1/me/quiz-attempts/export?quizId&status&graded&sort` | Xuất CSV lượt thi của tôi, tối đa 10.000 dòng; cùng bộ lọc với danh sách |
 
 | 36 | GET `/api/v1/questions/import-template` | Tải mẫu Excel nhập câu hỏi |

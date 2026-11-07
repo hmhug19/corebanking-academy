@@ -1,5 +1,8 @@
 package vn.com.coreacademy.learning.controller;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,6 +21,7 @@ import vn.com.coreacademy.learning.dto.LearningAnalytics;
 import vn.com.coreacademy.learning.dto.LearningDashboard;
 import vn.com.coreacademy.learning.service.LearningAnalyticsService;
 import vn.com.coreacademy.learning.service.LearningDashboardService;
+import vn.com.coreacademy.learning.service.LearningWeeklyActivityService;
 
 @RestController
 @RequestMapping("/api/v1/me/learning/dashboard")
@@ -29,6 +33,7 @@ public class LearningDashboardController {
     private final LearningDashboardService dashboard;
     private final LearningAnalyticsService learning;
     private final AssessmentDashboardService assessment;
+    private final LearningWeeklyActivityService weeklyActivity;
 
     @GetMapping
     @ApiResponse(responseCode = "200", useReturnTypeSchema = true)
@@ -52,6 +57,14 @@ public class LearningDashboardController {
         @RequestParam(defaultValue = "BEST") String method, @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size) {
         return BaseResponse.ok(assessment.competencies(method, page, size));
+    }
+
+    @GetMapping("/activity/weekly")
+    @ApiResponse(responseCode = "200", useReturnTypeSchema = true)
+    @Operation(summary = "Hoạt động học theo tuần", description = "Số ngày có hoạt động học của người đăng nhập, theo tuần từ thứ Hai và múi giờ Việt Nam.")
+    public BaseResponse<LearningWeeklyActivityService.WeeklyActivity> weeklyActivity(
+        @RequestParam(defaultValue = "8") @Min(1) @Max(52) int weeks) {
+        return BaseResponse.ok(weeklyActivity.get(weeks));
     }
 
     @GetMapping("/programs")

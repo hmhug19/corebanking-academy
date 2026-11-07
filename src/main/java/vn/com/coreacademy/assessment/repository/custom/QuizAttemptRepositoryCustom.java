@@ -20,7 +20,11 @@ public interface QuizAttemptRepositoryCustom {
      * userId luôn là caller do service xác định; quizId/status là filter tùy chọn. gradedOnly chỉ giữ lượt đã chấm
      * (SUBMITTED, AUTO_SUBMITTED) và kết hợp với status theo AND.
      */
-    record MineFilter(String userId, Long quizId, String status, boolean gradedOnly) {
+    record MineFilter(String userId, Long quizId, String status, boolean gradedOnly, String q, Boolean passed,
+                      Instant from, Instant to) {
+        public MineFilter(String userId, Long quizId, String status, boolean gradedOnly) {
+            this(userId, quizId, status, gradedOnly, null, null, null, null);
+        }
     }
 
     Page<AssessmentViews.MyAttemptRow> searchMine(MineFilter filter, Pageable page);
