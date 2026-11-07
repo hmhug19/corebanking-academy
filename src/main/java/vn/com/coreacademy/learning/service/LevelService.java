@@ -6,9 +6,11 @@ import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.learning.constants.LearningCodes.ReminderKind;
 import vn.com.coreacademy.learning.dto.GamificationConfig;
 import vn.com.coreacademy.learning.dto.LearningLevelViews.LevelStep;
 import vn.com.coreacademy.learning.dto.LearningLevelViews.MyLevel;
+import vn.com.coreacademy.learning.repository.GamificationNoticeRepository;
 import vn.com.coreacademy.learning.repository.LearningPointsRepository;
 import vn.com.coreacademy.learning.repository.LevelRepository;
 import vn.com.coreacademy.learning.repository.XpLedgerRepository;
@@ -32,6 +34,7 @@ public class LevelService {
         new LevelStep(6, "Chuyên gia Core Banking", 7000));
 
     private final LevelRepository levels;
+    private final GamificationNoticeRepository notices;
     private final LearningPointsRepository points;
     private final XpLedgerRepository config;
     private final LearningAccessPolicy access;
@@ -79,8 +82,13 @@ public class LevelService {
     private MyLevel refresh(String userId, long total, List<LevelStep> ladder) {
         int computed = ladder.stream().filter(step -> step.minXp() <= total).mapToInt(LevelStep::level).max()
             .orElse(1);
+        Integer before = levels.storedLevel(userId).orElse(null);
         int stored = levels.raise(userId, computed);
-        return view(stored, total, ladder);
+        MyLevel view = view(stored, total, ladder);
+        if (before != null && stored > before) {
+            notices.create(userId, ReminderKind.LEVEL_UP, view.name(), "level:" + userId + ":" + stored);
+        }
+        return view;
     }
 
     static MyLevel view(int level, long xp, List<LevelStep> ladder) {

@@ -28,7 +28,7 @@ public class LearningReminder extends LearningRecord {
     @Column(name = "reminder_id", nullable = false)
     private Long id;
 
-    @Column(name = "recipient_id", nullable = false)
+    @Column(name = "recipient_id")
     private Long recipientId;
 
     @Column(name = "scheduled_at", nullable = false)
@@ -54,4 +54,16 @@ public class LearningReminder extends LearningRecord {
 
     @Column(name = "idempotency_key", length = 100, nullable = false)
     private String idempotencyKey;
+
+    /** DEADLINE (mặc định), BADGE_EARNED hoặc LEVEL_UP; xem LearningCodes.ReminderKind. */
+    @Column(name = "kind", length = 20, nullable = false)
+    private String kind = "DEADLINE";
+
+    /** Người nhận thông báo gamification; null với nhắc hạn. */
+    @Column(name = "user_id", length = 20)
+    private String userId;
+
+    /** Tên huy hiệu hoặc tên cấp của thông báo gamification. */
+    @Column(name = "subject", length = 200)
+    private String subject;
 }

@@ -15,6 +15,7 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.learning.constants.LearningCodes.AssignmentStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.RecipientStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ReminderKind;
 import vn.com.coreacademy.learning.constants.LearningCodes.ReminderStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.entity.AssignmentRecipient;
@@ -480,6 +481,20 @@ public class LearningRepository {
             where r.recipientId = :id
             order by r.id
             """, LearningReminder.class, Map.of("id", recipientId));
+    }
+
+    /** Thông báo gamification chưa bỏ đi của một người, mới nhất trước. */
+    public List<LearningReminder> notices(String userId) {
+        return entityManager.createQuery("""
+            select m
+            from LearningReminder m
+            where m.userId = :user
+            and m.kind <> :deadline
+            and m.status = :pending
+            order by m.id desc
+            """, LearningReminder.class).setParameter("user", userId)
+            .setParameter("deadline", ReminderKind.DEADLINE)
+            .setParameter("pending", ReminderStatus.PENDING).setMaxResults(50).getResultList();
     }
 
     public List<LearningReminder> dueReminders(String userId) {

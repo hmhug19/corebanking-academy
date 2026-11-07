@@ -17,11 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.learning.constants.LearningCodes.BadgeRule;
 import vn.com.coreacademy.learning.constants.LearningCodes.BadgeSource;
 import vn.com.coreacademy.learning.constants.LearningCodes.BadgeStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.ReminderKind;
 import vn.com.coreacademy.learning.dto.LearningBadgeViews.BadgeProgress;
 import vn.com.coreacademy.learning.dto.LearningBadgeViews.BadgeView;
 import vn.com.coreacademy.learning.dto.LearningBadgeViews.MyBadges;
 import vn.com.coreacademy.learning.repository.BadgeRepository;
 import vn.com.coreacademy.learning.repository.BadgeRepository.Definition;
+import vn.com.coreacademy.learning.repository.GamificationNoticeRepository;
 import vn.com.coreacademy.learning.repository.LearningStreakRepository;
 
 /**
@@ -35,6 +37,7 @@ import vn.com.coreacademy.learning.repository.LearningStreakRepository;
 @RequiredArgsConstructor
 public class BadgeService {
     private final BadgeRepository repository;
+    private final GamificationNoticeRepository notices;
     private final LearningStreakRepository streaks;
     private final LearningAccessPolicy access;
 
@@ -85,6 +88,8 @@ public class BadgeService {
         for (Definition definition : candidates) {
             if (metrics.qualifiers(definition).contains(userId)
                 && repository.award(userId, definition.badgeId(), BadgeSource.EVENT)) {
+                notices.create(userId, ReminderKind.BADGE_EARNED, definition.name(),
+                    "badge:" + userId + ":" + definition.badgeId());
                 awarded++;
             }
         }

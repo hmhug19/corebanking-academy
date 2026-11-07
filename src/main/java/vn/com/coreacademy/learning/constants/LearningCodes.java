@@ -221,6 +221,16 @@ public final class LearningCodes {
         }
     }
 
+    /** Loại một dòng trong dòng nhắc học: nhắc hạn, hoặc thông báo gamification (huy hiệu, lên cấp). */
+    public static final class ReminderKind {
+        public static final String DEADLINE = "DEADLINE";
+        public static final String BADGE_EARNED = "BADGE_EARNED";
+        public static final String LEVEL_UP = "LEVEL_UP";
+
+        private ReminderKind() {
+        }
+    }
+
     public static final class ReminderChannel {
         public static final String IN_APP = "in_app";
 

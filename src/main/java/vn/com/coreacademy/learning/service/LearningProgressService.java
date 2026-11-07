@@ -179,7 +179,33 @@ public class LearningProgressService {
     public List<LearningViews.LearningReminderView> reminders() {
         var actor = access.actor();
         access.requireLearner(actor);
-        return repository.dueReminders(actor.person().id()).stream().map(mapper::view).toList();
+        List<LearningReminder> due = repository.dueReminders(actor.person().id());
+        List<LearningReminder> notices = repository.notices(actor.person().id());
+        return java.util.stream.Stream.concat(due.stream(), notices.stream()).map(mapper::view).toList();
+    }
+
+    /** Đánh dấu thông báo gamification đã hiện toast: sentAt được ghi, thông báo vẫn nằm trong dòng nhắc học. */
+    @Transactional
+    public LearningViews.LearningReminderView markReminderSeen(Long id) {
+        var actor = access.actor();
+        access.requireLearner(actor);
+        lock.acquire();
+        LearningReminder reminder = repository.require(LearningReminder.class, id);
+        requireOwner(reminder, actor.person().id());
+        if (reminder.getSentAt() == null) {
+            reminder.setSentAt(Instant.now());
+            repository.save(reminder, actor.person().id());
+            repository.flush();
+        }
+        return mapper.view(reminder);
+    }
+
+    private void requireOwner(LearningReminder reminder, String userId) {
+        String owner = reminder.getRecipientId() == null ? reminder.getUserId()
+            : repository.require(AssignmentRecipient.class, reminder.getRecipientId()).getUserId();
+        if (!userId.equals(owner)) {
+            throw new AccessDeniedException("Reminder owner denied");
+        }
     }
 
     @Transactional
@@ -188,11 +214,7 @@ public class LearningProgressService {
         access.requireLearner(actor);
         lock.acquire();
         LearningReminder reminder = repository.require(LearningReminder.class, id);
-        var recipient = repository.require(AssignmentRecipient.class,
-            reminder.getRecipientId());
-        if (!actor.person().id().equals(recipient.getUserId())) {
-            throw new AccessDeniedException("Reminder owner denied");
-        }
+        requireOwner(reminder, actor.person().id());
         reminder.setStatus(ReminderStatus.SENT);
         reminder.setSentAt(Instant.now());
         repository.save(reminder, actor.person().id());

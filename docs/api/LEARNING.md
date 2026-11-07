@@ -740,8 +740,9 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 | 30 | GET `/api/v1/me/learning/catalog` | Danh mục khóa học của học viên |
 | 31 | GET `/api/v1/me/learning/enrollments/{enrollmentId}` | Xem nội dung và vị trí tiếp tục học |
 | 32 | PUT `/api/v1/me/learning/enrollments/{enrollmentId}/blocks/{blockId}/progress` | Ghi tương tác học và tổng hợp tiến độ |
-| 33 | GET `/api/v1/me/learning/reminders` | Thông báo nhắc học đến hạn |
+| 33 | GET `/api/v1/me/learning/reminders` | Dòng thông báo của học viên: nhắc hạn (`kind = DEADLINE`) và thông báo gamification chưa đọc (`BADGE_EARNED`, `LEVEL_UP`, mới nhất trước, `subject` là tên huy hiệu hoặc tên cấp, `recipientId` null). Thông báo chỉ tạo khi đạt do sự kiện: trao bù huy hiệu khi tạo huy hiệu không tạo thông báo, lần đầu có cấp (cấp 1) cũng không; mỗi (người, huy hiệu) và mỗi (người, cấp) một thông báo |
 | 34 | POST `/api/v1/me/learning/reminders/{reminderId}/read` | Đánh dấu đã đọc nhắc học |
+| 34a | POST `/api/v1/me/learning/reminders/{reminderId}/seen` | Ghi `sentAt` khi toast của thông báo đã hiện; thông báo vẫn nằm trong dòng cho đến khi đọc; ghi lại không đổi gì; người khác nhận 403 |
 | 35 | POST `/api/v1/learning-assets` | Upload tài nguyên |
 | 36 | GET `/api/v1/learning-assets/{assetId}/content` | Tải tài nguyên |
 | 37 | GET `/api/v1/learning-assignments` | Danh sách đợt giao của đơn vị qua mọi khóa, kèm số liệu người nhận |
