@@ -46,6 +46,8 @@ FILES=(
   learning_hub_learning.sql
   learning_hub_media_progress.sql
   learning_hub_assessment.sql
+  upgrade/2026-11-07-flashcards.sql
+  upgrade/2026-11-07-personal-flashcards.sql
   learning_hub_knowledge.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql

@@ -31,6 +31,7 @@ import vn.com.coreacademy.assessment.entity.QuizQuestion;
 import vn.com.coreacademy.assessment.exception.AssessmentResponseCode;
 import vn.com.coreacademy.assessment.mapper.AssessmentMapper;
 import vn.com.coreacademy.assessment.repository.AssessmentRepository;
+import vn.com.coreacademy.assessment.repository.FlashcardRepository;
 import vn.com.coreacademy.assessment.repository.QuizRepository;
 import vn.com.coreacademy.assessment.repository.custom.QuizRepositoryCustom;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
@@ -50,6 +51,7 @@ public class QuizService {
     private final LearningAssessmentAccess learning;
     private final AssessmentRepository repository;
     private final QuizRepository quizzes;
+    private final FlashcardRepository flashcards;
     private final AssessmentMapper mapper;
     private final LearningWriteLock lock;
     private final IdentityAuditService audit;
@@ -104,10 +106,10 @@ public class QuizService {
      */
     @Transactional
     public AssessmentViews.QuizDetail update(Long id, Long expectedVersion, AssessmentRequests.QuizRequest request) {
+        lock.acquire();
         Quiz quiz = requireQuiz(id);
         ManagedCourse course = learning.requireManagedCourse(quiz.getCourseId());
         String actor = learning.actor().person().id();
-        lock.acquire();
 
         requireVersion(quiz, expectedVersion);
         if (request.courseId() != null && !request.courseId().equals(quiz.getCourseId())) {
@@ -115,6 +117,7 @@ public class QuizService {
                 "Không thể chuyển bài kiểm tra sang khóa khác.");
         }
         validateConfig(course.id(), id, request);
+        requirePrivatePool(request.quizType(), repository.pool(id).stream().map(QuizQuestion::getQuestionId).toList());
         if (QuizStatus.PUBLISHED.equals(quiz.getStatus())
             && repository.activePoolSize(id) < request.questionCount()) {
             throw new BusinessException(AssessmentResponseCode.QUIZ_NOT_READY);
@@ -131,13 +134,14 @@ public class QuizService {
     @Transactional
     public AssessmentViews.QuizDetail replacePool(Long id, Long expectedVersion,
                                                   AssessmentRequests.PoolRequest request) {
+        lock.acquire();
         Quiz quiz = requireQuiz(id);
         ManagedCourse course = learning.requireManagedCourse(quiz.getCourseId());
         String actor = learning.actor().person().id();
-        lock.acquire();
 
         requireVersion(quiz, expectedVersion);
         List<AssessmentRequests.PoolItem> items = request.items();
+        requirePrivatePool(quiz.getQuizType(), items.stream().map(AssessmentRequests.PoolItem::questionId).toList());
         Map<Long, Question> found = repository.questions(items.stream().map(AssessmentRequests.PoolItem::questionId)
             .toList()).stream().collect(Collectors.toMap(Question::getId, Function.identity()));
         Set<Long> seen = new HashSet<>();
@@ -187,10 +191,10 @@ public class QuizService {
     /** Xuất bản (hoặc mở lại đề đã đóng) khi pool đủ câu ACTIVE và thời gian đóng còn ở tương lai. */
     @Transactional
     public AssessmentViews.QuizDetail publish(Long id, AssessmentRequests.VersionRequest request) {
+        lock.acquire();
         Quiz quiz = requireQuiz(id);
         ManagedCourse course = learning.requireManagedCourse(quiz.getCourseId());
         String actor = learning.actor().person().id();
-        lock.acquire();
 
         requireVersion(quiz, request.expectedVersion());
         if (QuizStatus.PUBLISHED.equals(quiz.getStatus())) {
@@ -198,6 +202,7 @@ public class QuizService {
         }
         Long programId = learning.courseProgramId(quiz.getCourseId());
         List<Long> questionIds = repository.pool(id).stream().map(QuizQuestion::getQuestionId).toList();
+        requirePrivatePool(quiz.getQuizType(), questionIds);
         if (repository.questions(questionIds).stream().anyMatch(question -> question.getProgramId() != null
             && !question.getProgramId().equals(programId))) {
             throw BusinessException.field(AssessmentResponseCode.INVALID_REFERENCE, "items", "INVALID_VALUE",
@@ -316,6 +321,13 @@ public class QuizService {
             throw new BusinessException(AssessmentResponseCode.NOT_FOUND);
         }
         return quiz;
+    }
+
+    private void requirePrivatePool(String quizType, List<Long> questionIds) {
+        if (QuizType.FINAL_EXAM.equals(quizType) && flashcards.previouslyPublished(questionIds)) {
+            throw BusinessException.validation("items", "FLASHCARD_ALREADY_PUBLISHED",
+                "Đề thi cuối khóa có câu hỏi đã từng công bố đáp án qua flashcard.");
+        }
     }
 
     private static void requireVersion(Quiz quiz, Long expectedVersion) {

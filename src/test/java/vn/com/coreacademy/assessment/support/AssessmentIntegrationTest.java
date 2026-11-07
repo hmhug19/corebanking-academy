@@ -33,7 +33,7 @@ import org.testcontainers.utility.MountableFile;
  * <ul>
  *   <li>Mặc định (CI): Testcontainers image pgvector, giống KnowledgeIntegrationTest.</li>
  *   <li>{@code -Dit.postgres.url=jdbc:postgresql://host:port/postgres} (máy không có Docker): tạo lại database
- *   {@code coreacademy_assessment_it} trên server đó và chạy 5 file SQL. Nếu server không có pgvector, cột vector
+ *   {@code coreacademy_assessment_it} trên server đó và chạy các file SQL. Nếu server không có pgvector, cột vector
  *   của knowledge được tạo dạng real[] (entity không ánh xạ cột này) để ddl-auto=validate vẫn kiểm toàn bộ entity.</li>
  * </ul>
  * Không có cả hai thì test bị bỏ qua (không fail). Properties ghi đè .env nên test không chạm database khác.
@@ -49,7 +49,7 @@ public abstract class AssessmentIntegrationTest {
     private static final String DATABASE = "coreacademy_assessment_it";
     private static final List<String> SCRIPTS = List.of("learning_hub_identity.sql", "learning_hub_learning.sql",
         "learning_hub_media_progress.sql", "learning_hub_knowledge.sql", "learning_hub_assessment.sql",
-        "learning_hub_community.sql", "learning_hub_reporting.sql");
+        "upgrade/2026-11-07-flashcards.sql", "upgrade/2026-11-07-personal-flashcards.sql", "learning_hub_community.sql", "learning_hub_reporting.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */
     static final class DatabaseAvailable implements ExecutionCondition {
@@ -76,7 +76,7 @@ public abstract class AssessmentIntegrationTest {
                 DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
             for (int i = 0; i < SCRIPTS.size(); i++) {
                 postgres.withCopyFileToContainer(MountableFile.forHostPath("docs/sql/" + SCRIPTS.get(i)),
-                    "/docker-entrypoint-initdb.d/0" + (i + 1) + "-" + SCRIPTS.get(i));
+                    "/docker-entrypoint-initdb.d/0" + (i + 1) + "-" + Path.of(SCRIPTS.get(i)).getFileName());
             }
             postgres.start();
             return new Target(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
