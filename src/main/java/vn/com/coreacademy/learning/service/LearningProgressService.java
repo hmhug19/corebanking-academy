@@ -40,6 +40,7 @@ import vn.com.coreacademy.learning.entity.AssignmentRecipient;
 import vn.com.coreacademy.learning.entity.BlockProgress;
 import vn.com.coreacademy.learning.entity.Course;
 import vn.com.coreacademy.learning.entity.CourseChapter;
+import vn.com.coreacademy.learning.entity.CourseCompletionRule;
 import vn.com.coreacademy.learning.entity.CourseEnrollment;
 import vn.com.coreacademy.learning.entity.CourseLesson;
 import vn.com.coreacademy.learning.entity.CourseRevision;
@@ -68,6 +69,7 @@ public class LearningProgressService {
     private final LearningMapper mapper;
     private final IdentityAuditService audit;
     private final LearningQuizDirectory quizzes;
+    private final XpLedgerService xp;
 
     public LearningDetails.EnrollmentDetail get(Long enrollmentId) {
         var actor = access.actor();
@@ -323,10 +325,16 @@ public class LearningProgressService {
         progress.setLastAccessAt(now);
         if (ProgressStatus.COMPLETED.equals(progress.getStatus()) && progress.getCompletedAt() == null) {
             progress.setCompletedAt(now);
+            xp.lessonCompleted(enrollment.getUserId(), lessonKey(lesson), now);
         }
         repository.save(progress, actor);
         repository.flush();
         return progress;
+    }
+
+    /** Định danh bài của sổ XP: bài gốc nếu là bản sao, để học lại ở bản khác của khóa không được tính thêm. */
+    private static Long lessonKey(CourseLesson lesson) {
+        return lesson.getSourceLessonId() != null ? lesson.getSourceLessonId() : lesson.getId();
     }
 
     private void updateEnrollment(CourseEnrollment enrollment, Long lessonId, Long blockId, Instant now, String actor) {
@@ -361,6 +369,9 @@ public class LearningProgressService {
             enrollment.setCompletedAt(now);
             audit.record(actor, AuditAction.COURSE_COMPLETED, "course_enrollment", enrollment.getId().toString(),
                 enrollment.getOrgIdSnapshot(), Map.of("revisionId", enrollment.getRevisionId()));
+            int reward = repository.rules(enrollment.getRevisionId()).stream()
+                .mapToInt(CourseCompletionRule::getRewardPoints).max().orElse(0);
+            xp.courseCompleted(enrollment.getUserId(), enrollment.getCourseId(), reward, now);
         }
         repository.save(enrollment, actor);
     }
@@ -405,6 +416,7 @@ public class LearningProgressService {
             }
             if (progress.getCompletedAt() == null) {
                 progress.setCompletedAt(now);
+                xp.lessonCompleted(userId, lessonKey(lesson), now);
             }
             progress.setLastAccessAt(now);
             repository.save(progress, userId);

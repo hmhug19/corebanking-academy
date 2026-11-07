@@ -289,6 +289,19 @@ public final class LearningCodes {
         }
     }
 
+    /** Loại nguồn của dòng sổ XP, ghi ở xp_ledger.source_kind. */
+    public static final class XpSource {
+        public static final String LESSON = "LESSON";
+        public static final String QUIZ_PASS = "QUIZ_PASS";
+        public static final String QUIZ_FIRST_TRY_BONUS = "QUIZ_FIRST_TRY_BONUS";
+        public static final String COURSE = "COURSE";
+        public static final String COMMUNITY = "COMMUNITY";
+        public static final String ADJUSTMENT = "ADJUSTMENT";
+
+        private XpSource() {
+        }
+    }
+
     /** Loại neo của ghi chú và đánh dấu, ghi ở anchor_type; đánh dấu chỉ nhận pdf và video. */
     public static final class AnchorType {
         public static final String NONE = "none";

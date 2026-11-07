@@ -118,6 +118,10 @@ public class AttemptGrader {
      * tương tự. Tiến độ chỉ tăng, không bao giờ hạ.
      */
     private void completeQuizLesson(QuizAttempt attempt) {
+        if (Boolean.TRUE.equals(attempt.getPassed())) {
+            learning.quizPassedXp(attempt.getUserId(), attempt.getQuizId(), attempt.getAttemptNo(),
+                attempt.getScorePercent(), attempt.getSubmittedAt());
+        }
         if (Boolean.TRUE.equals(attempt.getPassed()) && attempt.getEnrollmentId() != null) {
             learning.quizPassed(attempt.getUserId(), attempt.getEnrollmentId(), attempt.getQuizId());
         }
