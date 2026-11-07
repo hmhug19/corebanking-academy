@@ -50,6 +50,85 @@ class QuizApiIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void flashcardsKeepAnswersSeparateAndProtectFinalExamQuestions() {
+        Course course = fixtures.course(LEARNER);
+        long question = fixtures.question(course.id(), competency, "SINGLE", 0);
+        String managed = "/api/v1/courses/{c}/flashcards";
+        String study = "/api/v1/me/courses/{c}/flashcards";
+        long version = api.ok(INSTRUCTOR, get("/api/v1/questions/{id}", question)).findValue("rowVersion").asLong();
+        JsonNode published = api.ok(INSTRUCTOR, api.put(Map.of("status", "PUBLISHED", "questionVersion", version),
+            managed + "/{q}", course.id(), question));
+        assertThat(published.get(0).path("current").asBoolean()).isTrue();
+
+        JsonNode card = api.ok(LEARNER, get(study, course.id())).get(0);
+        long cardId = card.path("id").asLong();
+        assertThat(cardId).isPositive();
+        assertThat(card.has("options")).isFalse();
+        assertThat(card.has("explanation")).isFalse();
+        assertThat(api.ok(LEARNER, get(study + "/{id}/answer?questionVersion={v}", course.id(), cardId, version))
+            .path("options").get(0).asText()).isEqualTo("Phương án A");
+
+        api.ok(LEARNER, api.patch(Map.of("questionVersion", version, "rating", "AGAIN"),
+            study + "/{id}/progress", course.id(), cardId));
+        api.ok(LEARNER, api.patch(Map.of("questionVersion", version, "starred", true),
+            study + "/{id}/progress", course.id(), cardId));
+        JsonNode reviewed = api.ok(LEARNER, get(study, course.id())).get(0);
+        assertThat(reviewed.path("reviewStatus").asText()).isEqualTo("AGAIN");
+        assertThat(reviewed.path("starred").asBoolean()).isTrue();
+
+        api.ok(INSTRUCTOR, api.put(Map.of("status", "WITHDRAWN"), managed + "/{q}", course.id(), question));
+        assertThat(api.ok(LEARNER, get(study, course.id())).isEmpty()).isTrue();
+        api.error(LEARNER, get(study + "/{id}/answer?questionVersion={v}", course.id(), cardId, version),
+            "ASSESSMENT-NOT_FOUND");
+
+        Map<String, Object> exam = quizBody(course.id());
+        exam.put("quizType", "FINAL_EXAM");
+        JsonNode quiz = api.ok(INSTRUCTOR, api.post(exam, URL)).path("quiz");
+        api.error(INSTRUCTOR, api.put(pool(question), URL + "/{id}/questions?expectedVersion={v}",
+            quiz.path("id").asLong(), quiz.path("rowVersion").asLong()), "CORE-VALIDATION_FAILED");
+
+        long protectedQuestion = fixtures.question(course.id(), competency, "SINGLE", 1);
+        api.ok(INSTRUCTOR, api.put(pool(protectedQuestion), URL + "/{id}/questions?expectedVersion={v}",
+            quiz.path("id").asLong(), quiz.path("rowVersion").asLong()));
+        long protectedVersion = api.ok(INSTRUCTOR, get("/api/v1/questions/{id}", protectedQuestion))
+            .findValue("rowVersion").asLong();
+        JsonNode rejected = api.error(INSTRUCTOR, api.put(Map.of("status", "PUBLISHED", "questionVersion",
+            protectedVersion), managed + "/{q}", course.id(), protectedQuestion), "CORE-VALIDATION_FAILED");
+        assertThat(rejected.path("errors").get(0).path("code").asText()).isEqualTo("FINAL_EXAM_QUESTION");
+    }
+
+    @Test
+    void personalDeckIsPrivateAndRetainsStudyProgress() {
+        String url = "/api/v1/me/flashcard-decks";
+        JsonNode deck = api.ok(LEARNER, api.post(Map.of("name", "Ôn tập cá nhân"), url));
+        long deckId = deck.path("id").asLong();
+        JsonNode card = api.ok(LEARNER, api.post(Map.of("prompt", "Câu hỏi", "answer", "Đáp án"),
+            url + "/{id}/cards", deckId));
+        long cardId = card.path("id").asLong();
+        api.ok(LEARNER, api.patch(Map.of("rating", "KNOWN", "starred", true),
+            url + "/{id}/cards/{card}/progress", deckId, cardId));
+        JsonNode saved = api.ok(LEARNER, get(url + "/{id}/cards", deckId)).get(0);
+        assertThat(saved.path("reviewStatus").asText()).isEqualTo("KNOWN");
+        assertThat(saved.path("starred").asBoolean()).isTrue();
+        api.error(INSTRUCTOR, get(url + "/{id}/cards", deckId), "ASSESSMENT-NOT_FOUND");
+        api.ok(LEARNER, delete(url + "/{id}", deckId));
+    }
+
+    @Test
+    void personalCardsBatchCreatesAllOrRejectsInvalidInput() {
+        String url = "/api/v1/me/flashcard-decks";
+        long deckId = api.ok(LEARNER, api.post(Map.of("name", "Ôn hàng loạt"), url)).path("id").asLong();
+        JsonNode created = api.ok(LEARNER, api.post(Map.of("items", List.of(
+            Map.of("prompt", "Một", "answer", "A"), Map.of("prompt", "Hai", "answer", "B"))),
+            url + "/{id}/cards/batch", deckId));
+        assertThat(created.size()).isEqualTo(2);
+        api.error(LEARNER, api.post(Map.of("items", List.of(
+            Map.of("prompt", "Ba", "answer", "C"), Map.of("prompt", "", "answer", "D"))),
+            url + "/{id}/cards/batch", deckId), "CORE-VALIDATION_FAILED");
+        assertThat(api.ok(LEARNER, get(url + "/{id}/cards", deckId)).size()).isEqualTo(2);
+    }
+
+    @Test
     void createStartsAsDraftWithFullConfig() {
         Course course = fixtures.course();
         Map<String, Object> body = quizBody(course.id());

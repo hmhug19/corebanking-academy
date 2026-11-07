@@ -27,6 +27,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 2 | `learning_hub_learning.sql` | 30 bảng Learning (gồm `learning_activity_days`, `lesson_notes`, `lesson_bookmarks`, `lesson_feedback`) |
 | 3 | `learning_hub_media_progress.sql` | Extension media/tiến độ |
 | 4 | `learning_hub_assessment.sql` | Quiz Engine; cần Identity + Learning, nằm trước Knowledge/Community |
+| 4a | `upgrade/2026-11-07-flashcards.sql` | Flashcard, trạng thái ôn và đánh dấu theo học viên |
 | 5 | `learning_hub_knowledge.sql` | pgvector (image `pgvector/pgvector:pg16`) |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
@@ -54,14 +55,18 @@ bản đã xuất bản để `hocvien` thấy bài quiz ngay mà không cần n
 
 ## Nâng cấp schema (upgrade)
 
+Bộ thẻ cá nhân cần chạy thêm [2026-11-07-personal-flashcards.sql](upgrade/2026-11-07-personal-flashcards.sql) sau script flashcard. Script tạo hai bảng mới, chạy một lần, giữ dữ liệu thẻ đã công bố.
+
+Chạy [2026-11-07-flashcards.sql](upgrade/2026-11-07-flashcards.sql) một lần sau Assessment để tạo bảng flashcard và tiến độ ôn. Script khởi tạo local đã chạy file này. Khi quay về bản ứng dụng cũ, giữ hai bảng để bảo toàn tiến độ và lịch sử công bố đáp án.
+
 `2026-11-06-learning-completion.sql`: dừng BE ghi tiến độ, chạy sau upgrade bài thi cuối ngày 05/11,
 rồi triển khai BE/FE mới. Tính lại `course_enrollments.progress_percent` từ các bài bắt buộc theo đúng
 revision của từng lần học; không cộng bài thi cuối riêng, không đổi `status`/`completed_at`.
 Baseline mới đã có constraint và ý nghĩa mới. Rollback cùng tên tính lại theo công thức cũ từ dữ liệu
 hiện tại (không phải phục hồi snapshot), chạy cùng việc quay về BE/FE cũ. Không tự chạy SQL lúc startup.
 
-Script trong `docs/sql/upgrade/` dành cho DB đã chạy baseline; DB mới đã có thay đổi trong baseline nên không cần chạy.
-Mỗi upgrade có rollback đi kèm. Chạy toàn bộ file với `-v ON_ERROR_STOP=1`, mật khẩu qua `PGPASSWORD`.
+Script trong `docs/sql/upgrade/` dành cho DB đã chạy baseline. Với DB mới, làm theo thứ tự ở bảng khởi tạo local.
+Chạy toàn bộ file với `-v ON_ERROR_STOP=1`, mật khẩu qua `PGPASSWORD`. Xem hướng dẫn rollback của từng upgrade.
 
 | Upgrade | Nội dung | Rollback |
 |---|---|---|

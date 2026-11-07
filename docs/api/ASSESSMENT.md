@@ -321,3 +321,21 @@ Mọi mốc thời gian của lượt thi được cắt về micro giây trư�
 - Bài quiz không tự hạ về chưa hoàn thành khi chấm lại làm điểm giảm hoặc khi đề bị đóng sau đó (tiến độ chỉ tăng).
 - Chưa có `quiz_revision`: lượt mới của học viên khóa cũ dùng cấu hình đề hiện tại.
 - Chấm lại chưa áp dụng cho lượt đang làm (lượt đó chấm theo snapshot khi nộp; chạy lại chấm lại sau khi nộp).
+
+## Flashcard ôn tập
+
+| API | Mục đích |
+|---|---|
+| `GET /api/v1/courses/{courseId}/flashcards` | Xem trạng thái duyệt của thẻ trong khóa thuộc phạm vi quản lý |
+| `PUT /api/v1/courses/{courseId}/flashcards/{questionId}` | Lưu nháp, công bố hoặc thu hồi bằng `status` tương ứng `DRAFT`, `PUBLISHED`, `WITHDRAWN`. Khi công bố, gửi `questionVersion` bằng `rowVersion` của câu hỏi đã duyệt |
+| `GET /api/v1/me/courses/{courseId}/flashcards` | Lấy mặt trước và trạng thái cá nhân của các thẻ trong khóa học viên có quyền học |
+| `GET /api/v1/me/courses/{courseId}/flashcards/{cardId}/answer?questionVersion=...` | Lấy đáp án đúng và giải thích khi lật thẻ |
+| `PATCH /api/v1/me/courses/{courseId}/flashcards/{cardId}/progress` | Gửi `questionVersion` và ít nhất một trong hai trường `rating` (`AGAIN`, `KNOWN`) hoặc `starred` |
+
+Câu hỏi đã sửa phải được duyệt lại trước khi học viên thấy phiên bản mới. Câu hỏi đã từng công bố đáp án qua flashcard, kể cả đã thu hồi, không được đưa vào đề thi cuối khóa. Câu hỏi đã thuộc đề thi cuối khóa không được công bố qua flashcard.
+
+### Bộ flashcard cá nhân
+
+Chạy `upgrade/2026-11-07-personal-flashcards.sql` sau script flashcard trước khi triển khai. Các API `/api/v1/me/flashcard-decks` hỗ trợ GET/POST bộ thẻ, PUT/DELETE bộ theo ID, GET/POST thẻ trong bộ, PUT/DELETE thẻ và PATCH trạng thái ôn hoặc đánh dấu. Chủ sở hữu được xác định từ phiên đăng nhập. Các thao tác sửa nội dung đặt lại trạng thái ôn của thẻ. Khóa học và nhóm kiến thức có thể được truyền qua API khi tạo hoặc sửa.
+
+API `POST /api/v1/me/flashcard-decks/{deckId}/cards/batch` nhận `items` gồm 1–100 thẻ với `prompt`, `answer`, `competencyId` tùy chọn. Tất cả thẻ được lưu cùng giao dịch.
