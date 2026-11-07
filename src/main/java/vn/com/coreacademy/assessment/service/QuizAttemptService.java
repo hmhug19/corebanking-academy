@@ -240,14 +240,19 @@ public class QuizAttemptService {
 
     /** Mọi lượt của caller qua các đề (trang Tiến độ); chỉ dữ liệu của chính caller. */
     public PageResponse<AssessmentViews.MyAttemptRow> mine(Long quizId, String status, Boolean graded, int page,
-                                                           int size, String sort) {
-        var filter = mineFilter(quizId, status, graded);
+                                                           int size, String sort, String q, Boolean passed, Instant from, Instant to) {
+        var filter = mineFilter(quizId, status, graded, q, passed, from, to);
         return PageResponse.from(attemptRepository.searchMine(filter, PageQuery.of(page, size, sort, MINE_SORTS)));
+    }
+
+    public PageResponse<AssessmentViews.MyAttemptRow> mine(Long quizId, String status, Boolean graded, int page,
+                                                           int size, String sort) {
+        return mine(quizId, status, graded, page, size, sort, null, null, null, null);
     }
 
     /** CSV tối đa MAX_EXPORT_ROWS dòng, UTF-8 BOM; ô bắt đầu bằng ký tự công thức được vô hiệu hóa. */
     public byte[] exportMine(Long quizId, String status, Boolean graded, String sort) {
-        var filter = mineFilter(quizId, status, graded);
+        var filter = mineFilter(quizId, status, graded, null, null, null, null);
         Sort order = PageQuery.of(0, 1, sort, MINE_SORTS).getSort();
         var rows = attemptRepository.searchMine(filter,
             PageRequest.of(0, AssessmentLimits.MAX_EXPORT_ROWS + 1, order)).getContent();
@@ -260,13 +265,17 @@ public class QuizAttemptService {
             row.totalQuestions(), row.scorePercent(), row.passed()}).toList());
     }
 
-    private QuizAttemptRepositoryCustom.MineFilter mineFilter(Long quizId, String status, Boolean graded) {
+    private QuizAttemptRepositoryCustom.MineFilter mineFilter(Long quizId, String status, Boolean graded, String q, Boolean passed,
+                                                               Instant from, Instant to) {
         if (status != null && !Set.of(AttemptStatus.IN_PROGRESS, AttemptStatus.SUBMITTED,
             AttemptStatus.AUTO_SUBMITTED, AttemptStatus.VOIDED).contains(status)) {
             throw BusinessException.validation("status", "INVALID_VALUE", "Giá trị không hợp lệ.");
         }
+        if (from != null && to != null && !from.isBefore(to)) {
+            throw BusinessException.validation("to", "INVALID_VALUE", "Khoảng thời gian không hợp lệ.");
+        }
         return new QuizAttemptRepositoryCustom.MineFilter(learning.actor().person().id(), quizId, status,
-            Boolean.TRUE.equals(graded));
+            Boolean.TRUE.equals(graded), q, passed, from, to);
     }
 
     private QuizAttempt createAttempt(Quiz quiz, StudyingLearner learner, int attemptNo, Instant now,

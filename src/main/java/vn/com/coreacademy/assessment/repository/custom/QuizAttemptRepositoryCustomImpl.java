@@ -76,6 +76,23 @@ public class QuizAttemptRepositoryCustomImpl implements QuizAttemptRepositoryCus
             sql.and("a.status in (:graded)");
             sql.bind("graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED));
         }
+        String term = NativeSearchQuery.containsPattern(filter.q());
+        if (term != null) {
+            sql.and("lower(z.title) like :term escape '!'");
+            sql.bind("term", term);
+        }
+        if (filter.passed() != null) {
+            sql.and("a.passed = :passed");
+            sql.bind("passed", filter.passed());
+        }
+        if (filter.from() != null) {
+            sql.and("a.submitted_at >= :from");
+            sql.bind("from", filter.from());
+        }
+        if (filter.to() != null) {
+            sql.and("a.submitted_at < :to");
+            sql.bind("to", filter.to());
+        }
         return sql.page(entityManager, """
             select a.attempt_id, a.quiz_id, z.title, z.course_id, a.attempt_no, a.status, a.submit_type,
                    a.started_at, a.submitted_at, a.total_questions, a.correct_count, a.score_percent, a.passed

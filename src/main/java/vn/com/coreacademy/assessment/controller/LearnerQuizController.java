@@ -1,10 +1,12 @@
 package vn.com.coreacademy.assessment.controller;
 
+import java.time.Instant;
 import java.util.List;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -135,8 +137,12 @@ public class LearnerQuizController {
         @RequestParam(required = false) Boolean graded,
         @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
         @Parameter(description = "id | startedAt | submittedAt, kèm ,asc hoặc ,desc")
-        @RequestParam(defaultValue = "startedAt,desc") String sort) {
-        return BaseResponse.ok(attempts.mine(quizId, status, graded, page, size, sort));
+        @RequestParam(defaultValue = "startedAt,desc") String sort,
+        @RequestParam(required = false) @Size(max = 100) String q,
+        @RequestParam(required = false) Boolean passed,
+        @RequestParam(required = false) Instant from,
+        @RequestParam(required = false) Instant to) {
+        return BaseResponse.ok(attempts.mine(quizId, status, graded, page, size, sort, q, passed, from, to));
     }
 
     @GetMapping(value = "/quiz-attempts/export", produces = {"text/csv", MediaType.APPLICATION_JSON_VALUE})
