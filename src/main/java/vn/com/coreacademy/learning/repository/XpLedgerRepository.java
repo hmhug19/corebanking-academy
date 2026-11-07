@@ -71,6 +71,56 @@ public class XpLedgerRepository {
             .executeUpdate() > 0;
     }
 
+    /**
+     * Ghi XP cộng đồng cho các đóng góp được chấp nhận hoặc hữu ích (accepted_answer, received_upvote) chưa có dòng.
+     * Mỗi đóng góp một dòng, mã nguồn là nội dung + lý do + người thực hiện nên chấp nhận lại sau khi bỏ chấp nhận
+     * không ghi thêm. Mỗi người tối đa cap XP mỗi ngày Asia/Ho_Chi_Minh, tính theo thời điểm đóng góp; phần vượt
+     * trần không ghi dòng nào. contentId null là xét mọi nội dung. Trả số dòng đã ghi.
+     */
+    public int awardCommunity(Long contentId, int xp, int cap, long configVersionId) {
+        return entityManager.createNativeQuery("""
+            with pending as (
+              select distinct on (ref) user_id, occurred_at, ref from (
+                select e.user_id, e.occurred_at, e.contribution_event_id,
+                       e.content_id::text || ':' || e.reason_code || ':' || o.actor_user_id as ref
+                from learning_hub.community_contribution_events e
+                join learning_hub.community_outbox_events o on o.event_id = e.source_event_id
+                where e.points_delta > 0 and e.reason_code in ('accepted_answer', 'received_upvote')
+                  and o.actor_user_id is not null
+                  and (cast(:content as bigint) is null or e.content_id = cast(:content as bigint))
+                  and not exists (select 1 from learning_hub.community_contribution_events r
+                                  where r.reverses_event_id = e.contribution_event_id)
+              ) x
+              order by ref, occurred_at, contribution_event_id
+            ), ranked as (
+              select p.user_id, p.occurred_at, p.ref,
+                     (p.occurred_at at time zone 'Asia/Ho_Chi_Minh')::date as day,
+                     row_number() over (partition by p.user_id, (p.occurred_at at time zone 'Asia/Ho_Chi_Minh')::date
+                                        order by p.occurred_at, p.ref) as rn
+              from pending p
+              where not exists (select 1 from learning_hub.xp_ledger l where l.user_id = p.user_id
+                                and l.source_kind = 'COMMUNITY' and l.source_ref = p.ref)
+            )
+            insert into learning_hub.xp_ledger (user_id, amount, occurred_at, source_kind, source_ref,
+                config_version_id)
+            select r.user_id, least(:xp, :cap - coalesce(prior.total, 0) - :xp * (r.rn - 1)), r.occurred_at,
+                   'COMMUNITY', r.ref, :version
+            from ranked r
+            left join lateral (
+              select sum(l.amount) as total from learning_hub.xp_ledger l
+              where l.user_id = r.user_id and l.source_kind = 'COMMUNITY'
+                and (l.occurred_at at time zone 'Asia/Ho_Chi_Minh')::date = r.day
+            ) prior on true
+            where least(:xp, :cap - coalesce(prior.total, 0) - :xp * (r.rn - 1)) > 0
+            on conflict (user_id, source_kind, source_ref) do nothing
+            """)
+            .setParameter("content", contentId)
+            .setParameter("xp", xp)
+            .setParameter("cap", cap)
+            .setParameter("version", configVersionId)
+            .executeUpdate();
+    }
+
     private static Number number(Object value) {
         return (Number) value;
     }

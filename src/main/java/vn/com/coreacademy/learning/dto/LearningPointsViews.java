@@ -6,12 +6,12 @@ public final class LearningPointsViews {
     private LearningPointsViews() {
     }
 
-    /** Bốn nguồn XP; chuỗi ngày không cộng XP nên không có phần chuỗi. */
-    public record PointParts(long lessons, long quizzes, long firstTryBonus, long courses) {
+    /** Các nguồn XP; chuỗi ngày không cộng XP nên không có phần chuỗi. */
+    public record PointParts(long lessons, long quizzes, long firstTryBonus, long courses, long community) {
     }
 
     /**
-     * XP của một người; total luôn bằng tổng bốn phần. streakDays là chuỗi hiện tại tính theo ngày làm việc, chỉ để
+     * XP của một người; total luôn bằng tổng các phần. streakDays là chuỗi hiện tại tính theo ngày làm việc, chỉ để
      * hiển thị.
      */
     public record MyPoints(long total, PointParts parts, int streakDays) {

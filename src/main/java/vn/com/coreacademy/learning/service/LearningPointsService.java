@@ -17,7 +17,7 @@ import vn.com.coreacademy.learning.repository.LearningPointsRepository;
 
 /**
  * XP của người học đọc từ sổ ghi XP chỉ cộng thêm, nên đổi trọng số, xóa khóa hay đổi nội dung không làm XP đã nhận
- * thay đổi. Bốn phần: bài học, bài kiểm tra đạt, thưởng đạt ngay lần đầu và khóa học; chuỗi ngày không cộng XP. Quy
+ * thay đổi. Các phần: bài học, bài kiểm tra đạt, thưởng đạt ngay lần đầu, khóa học và cộng đồng; chuỗi ngày không cộng XP. Quy
  * tắc nằm ở server; client chỉ hiển thị.
  */
 @Service
@@ -50,9 +50,9 @@ public class LearningPointsService {
             Map<String, Long> own = sums.getOrDefault(userId, Map.of());
             PointParts parts = new PointParts(own.getOrDefault(XpSource.LESSON, 0L),
                 own.getOrDefault(XpSource.QUIZ_PASS, 0L), own.getOrDefault(XpSource.QUIZ_FIRST_TRY_BONUS, 0L),
-                own.getOrDefault(XpSource.COURSE, 0L));
+                own.getOrDefault(XpSource.COURSE, 0L), own.getOrDefault(XpSource.COMMUNITY, 0L));
             result.put(userId, new MyPoints(parts.lessons() + parts.quizzes() + parts.firstTryBonus()
-                + parts.courses(), parts, streakDays.getOrDefault(userId, 0)));
+                + parts.courses() + parts.community(), parts, streakDays.getOrDefault(userId, 0)));
         }
         return result;
     }

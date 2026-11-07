@@ -63,6 +63,19 @@ public class XpLedgerService {
         append(userId, rewardPoints, at, XpSource.COURSE, String.valueOf(courseId), currentConfig());
     }
 
+    /**
+     * Đóng góp cộng đồng được chấp nhận hoặc hữu ích của một nội dung (hoặc mọi nội dung khi contentId null): mỗi
+     * đóng góp một dòng với XP cộng đồng của phiên bản đang áp dụng, mỗi người tối đa trần ngày.
+     */
+    public int communityContributions(Long contentId) {
+        GamificationConfig config = currentConfig();
+        if (config.communityXp() <= 0 || config.communityDailyCap() <= 0) {
+            return 0;
+        }
+        return repository.awardCommunity(contentId, config.communityXp(), config.communityDailyCap(),
+            config.versionId());
+    }
+
     private void append(String userId, int amount, Instant at, String kind, String ref, GamificationConfig config) {
         if (amount > 0) {
             repository.append(userId, amount, at, kind, ref, config.versionId(), null);

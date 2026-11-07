@@ -34,6 +34,7 @@ import vn.com.coreacademy.community.repository.CommunityJobRepository;
 import vn.com.coreacademy.community.repository.CommunityRepository;
 import vn.com.coreacademy.identity.service.IdentityWriteLock;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
+import vn.com.coreacademy.learning.service.XpLedgerService;
 
 /** Lease/dedup bền vững trong DB; retry reconcile trạng thái nguồn hiện tại, không cộng điểm mù theo thứ tự event. */
 @Component
@@ -49,6 +50,7 @@ public class CommunityOutboxWorker {
     private final CommunityFanoutService delivery;
     private final CommunityContributionRepository contributions;
     private final CommunityBadgeRepository badges;
+    private final XpLedgerService xpLedger;
     private final IdentityAuditService audit;
     private final CommunityPolicy policy;
     private final LearningIdentityService identity;
@@ -254,6 +256,8 @@ public class CommunityOutboxWorker {
             } else {
                 contributions.reconcile(event.getOwnerOrgId(), id, event.getEventId(), properties.getWorkerUserId());
             }
+            // Cùng giao dịch với việc ghi điểm đóng góp: XP cộng đồng của nội dung này được ghi vào sổ XP.
+            xpLedger.communityContributions(id);
             return null;
         });
         if (indexContent) {
