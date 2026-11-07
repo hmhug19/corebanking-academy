@@ -20,8 +20,10 @@ import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardScope;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningPointsViews;
+import vn.com.coreacademy.learning.dto.LearningStreakViews;
 import vn.com.coreacademy.learning.service.LearningLeaderboardService;
 import vn.com.coreacademy.learning.service.LearningPointsService;
+import vn.com.coreacademy.learning.service.LearningStreakService;
 
 @RestController
 @RequestMapping(value = "/api/v1/me/learning", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -32,6 +34,7 @@ import vn.com.coreacademy.learning.service.LearningPointsService;
 public class LearningLeaderboardController {
     private final LearningPointsService points;
     private final LearningLeaderboardService leaderboard;
+    private final LearningStreakService streaks;
 
     @GetMapping("/points")
     @ApiResponse(responseCode = "200",
@@ -46,6 +49,24 @@ public class LearningLeaderboardController {
     )
     public BaseResponse<LearningPointsViews.MyPoints> points() {
         return BaseResponse.ok(points.mine());
+    }
+
+    @GetMapping("/streak")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Chuỗi ngày học và lịch nhiệt của tôi",
+        description = """
+            Chuỗi tính theo ngày làm việc và dữ liệu lịch nhiệt 26 tuần (Asia/Ho_Chi_Minh).
+            - Ngày đủ điều kiện khi có ít nhất một bài học hoàn thành hoặc một bài kiểm tra đã nộp; mở bài hay mở trang
+              không tính.
+            - Cuối tuần và ngày nghỉ của lịch chung không tính vào chuỗi và không làm đứt chuỗi; ngày làm bù là ngày làm
+              việc. Học vào ngày nghỉ vẫn có số bài ở lịch nhưng không thêm gì cho chuỗi.
+            - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
+            """
+    )
+    public BaseResponse<LearningStreakViews.MyStreak> streak() {
+        return BaseResponse.ok(streaks.mine());
     }
 
     @GetMapping("/leaderboard")
