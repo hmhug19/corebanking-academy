@@ -27,6 +27,7 @@ public class XpLedgerService {
 
     private final XpLedgerRepository repository;
     private final LearningPointsProperties seed;
+    private final LevelService levels;
 
     /** Phiên bản cấu hình đang áp dụng; lần đầu tiên được gieo từ app.learning.points.*. */
     public GamificationConfig currentConfig() {
@@ -78,7 +79,9 @@ public class XpLedgerService {
 
     private void append(String userId, int amount, Instant at, String kind, String ref, GamificationConfig config) {
         if (amount > 0) {
-            repository.append(userId, amount, at, kind, ref, config.versionId(), null);
+            if (repository.append(userId, amount, at, kind, ref, config.versionId(), null)) {
+                levels.refresh(userId);
+            }
         }
     }
 }

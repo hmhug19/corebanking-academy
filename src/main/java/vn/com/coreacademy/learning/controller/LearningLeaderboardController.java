@@ -19,11 +19,13 @@ import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardScope;
 import vn.com.coreacademy.learning.constants.LearningLimits;
+import vn.com.coreacademy.learning.dto.LearningLevelViews;
 import vn.com.coreacademy.learning.dto.LearningPointsViews;
 import vn.com.coreacademy.learning.dto.LearningStreakViews;
 import vn.com.coreacademy.learning.service.LearningLeaderboardService;
 import vn.com.coreacademy.learning.service.LearningPointsService;
 import vn.com.coreacademy.learning.service.LearningStreakService;
+import vn.com.coreacademy.learning.service.LevelService;
 
 @RestController
 @RequestMapping(value = "/api/v1/me/learning", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -35,6 +37,7 @@ public class LearningLeaderboardController {
     private final LearningPointsService points;
     private final LearningLeaderboardService leaderboard;
     private final LearningStreakService streaks;
+    private final LevelService levels;
 
     @GetMapping("/points")
     @ApiResponse(responseCode = "200",
@@ -50,6 +53,23 @@ public class LearningLeaderboardController {
     )
     public BaseResponse<LearningPointsViews.MyPoints> points() {
         return BaseResponse.ok(points.mine());
+    }
+
+    @GetMapping("/level")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Cấp độ của tôi",
+        description = """
+            Cấp theo tổng XP và bậc thang đang áp dụng (mặc định 6 cấp, từ "Giao dịch viên tập sự" đến "Chuyên gia Core Banking").
+            - level là cấp cao nhất từng đạt, không bao giờ giảm, kể cả khi quản trị nâng ngưỡng.
+            - xpToNext và progressPercent là null ở cấp cao nhất.
+            - Cấp độ không mở quyền hay thay đổi giao việc nào.
+            - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
+            """
+    )
+    public BaseResponse<LearningLevelViews.MyLevel> level() {
+        return BaseResponse.ok(levels.mine());
     }
 
     @GetMapping("/streak")

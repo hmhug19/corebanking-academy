@@ -1113,3 +1113,30 @@ CREATE INDEX idx_lesson_feedback_lesson_kind ON learning_hub.lesson_feedback (le
 CREATE INDEX idx_lesson_feedback_course_rating ON learning_hub.lesson_feedback (course_id) WHERE kind = 'rating' AND NOT is_deleted;
 
 COMMIT;
+
+CREATE TABLE learning_hub.gamification_levels (
+    version_id bigint NOT NULL,
+    level_no integer NOT NULL,
+    name varchar(100) NOT NULL,
+    min_xp integer NOT NULL,
+    CONSTRAINT pk_gamification_levels PRIMARY KEY (version_id, level_no),
+    CONSTRAINT ck_gamification_levels CHECK (level_no >= 1 AND min_xp >= 0)
+);
+COMMENT ON TABLE learning_hub.gamification_levels IS 'Bậc thang cấp độ của một phiên bản cấu hình; bất biến cùng phiên bản. Cấp 1 bắt đầu từ 0 XP.';
+COMMENT ON COLUMN learning_hub.gamification_levels.version_id IS 'Phiên bản cấu hình (gamification_config_versions.version_id, ID logic không FK).';
+COMMENT ON COLUMN learning_hub.gamification_levels.level_no IS 'Số cấp, từ 1.';
+COMMENT ON COLUMN learning_hub.gamification_levels.name IS 'Tên cấp hiển thị cho học viên.';
+COMMENT ON COLUMN learning_hub.gamification_levels.min_xp IS 'Tổng XP tối thiểu để đạt cấp này.';
+
+CREATE TABLE learning_hub.learner_levels (
+    user_id varchar(20) PRIMARY KEY,
+    level_no integer NOT NULL,
+    reached_at timestamptz NOT NULL DEFAULT now(),
+    update_time timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_learner_levels CHECK (level_no >= 1)
+);
+COMMENT ON TABLE learning_hub.learner_levels IS 'Cấp cao nhất học viên từng đạt; chỉ tăng, không bao giờ giảm dù bậc thang được nâng ngưỡng.';
+COMMENT ON COLUMN learning_hub.learner_levels.user_id IS 'Mã cán bộ học viên (ID logic không FK).';
+COMMENT ON COLUMN learning_hub.learner_levels.level_no IS 'Cấp cao nhất đã đạt.';
+COMMENT ON COLUMN learning_hub.learner_levels.reached_at IS 'Lúc đạt cấp hiện tại.';
+COMMENT ON COLUMN learning_hub.learner_levels.update_time IS 'Lần cập nhật gần nhất.';
