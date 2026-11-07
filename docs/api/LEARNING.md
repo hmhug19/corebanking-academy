@@ -381,13 +381,16 @@ vượt 10.000 dòng báo lỗi rõ thay vì cắt im lặng. API summary độc
 
 ### Điểm học tập và bảng xếp hạng
 
-Điểm tính **khi đọc** từ dữ liệu gốc, không lưu tổng, nên không lệch khỏi tiến độ. Chỉ học viên (`LEARNER`, scope `OWN`)
+XP đọc từ sổ ghi XP (`xp_ledger`, chỉ cộng thêm, một dòng mỗi lần nhận XP), không tính lại từ tiến độ nên xóa hoặc đổi khóa, đề không làm mất XP đã nhận. Chỉ học viên (`LEARNER`, scope `OWN`)
 có điểm; vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Hạng phụ thuộc phạm vi nên không nằm trong `/points`.
 
 | API | Trách nhiệm |
 |---|---|
-| GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, courses, streak }, streakDays }` của caller |
-| GET `/me/learning/leaderboard?scope=team\|org\|all&page&size` | `LeaderboardPage { page: PageResponse<LeaderboardRow>, me: LeaderboardRow }`; `scope` mặc định `org`, `page` mặc định 0, `size` mặc định 20, tối đa 100 |
+| GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, firstTryBonus, courses }, streakDays }` của caller |
+| GET `/me/learning/leaderboard?scope=team\|org\|all&period=week\|month\|all&offset` | `Leaderboard { period, offset, from, to, top, me, above, gapToAbove }`; `scope` mặc định `org`, `period` mặc định `month`, `offset` mặc định 0 (lùi về tuần/tháng trước, bỏ qua khi `period=all`); không phân trang, không tổng số người |
+| GET `/me/learning/leaderboard/units?period=week\|month\|all&offset` | `UnitLeaderboard { period, offset, from, to, top, myUnit, myUnitTooSmall }`; `UnitRow { rank, orgId, unitName, averageXp, participationPercent, mine }`. Chỉ đơn vị từ 5 học viên được xếp hạng; `averageXp` = XP trung bình mỗi học viên có XP trong kỳ, `participationPercent` = % học viên có ít nhất một ngày học đủ điều kiện; top 10 + đơn vị của người gọi, không trả các hạng cuối; `myUnit` null và `myUnitTooSmall` true khi đơn vị chưa đủ 5 học viên; đồng điểm chung hạng |
+| GET `/me/learning/preferences` | `LearnerPreferences { showOnLeaderboard }` của chính người gọi, mặc định `true`; chỉ học viên |
+| PUT `/me/learning/preferences` | Body `{ showOnLeaderboard }` (bắt buộc). `false`: người khác không thấy tên trên bảng cá nhân và hạng khép lại (không có dòng "Ẩn danh"); chính học viên vẫn thấy hạng mình sẽ có nếu hiện; XP vẫn tính vào đơn vị. Chỉ sửa được tùy chọn của chính mình; trả giá trị đang áp dụng |
 
 `LeaderboardRow { rank, userId, fullName, teamName, points, streakDays, me }`. `points` bằng `total` của `/points` cho cùng
 người, nên thẻ điểm và bảng không lệch nhau.
@@ -398,27 +401,87 @@ Bảng xếp hạng (`/leaderboard`):
   (`UserRepository.findLearningCandidates`, dùng lại qua `LearningIdentityService.rankableLearners`). `team` là nhóm của
   caller, `org` là đơn vị của caller (không gồm đơn vị con), `all` là mọi học viên đủ điều kiện trong hệ thống, kể cả đơn vị
   khác (xem tên người của đơn vị khác là quyết định nghiệp vụ, mặc định bật như mockup "Toàn hệ thống").
-- **Thứ tự**: điểm giảm dần, cùng điểm xếp theo họ tên (Collator `vi`) rồi mã cán bộ. Cùng điểm chung hạng và hạng kế
+- **Kỳ**: XP của kỳ là tổng các dòng sổ XP có `occurred_at` trong kỳ theo giờ Asia/Ho_Chi_Minh; `week` là thứ Hai đến Chủ nhật,
+  `month` là tháng dương lịch, `all` là mọi lúc (khớp thẻ XP). `from`/`to` là ngày đầu và ngày cuối của kỳ (null khi `all`).
+- **Trả về**: `top` là tối đa 10 người đầu; `me` là dòng của caller; khi caller ngoài top 10, `above` là 1-2 người ngay
+  trên caller và `gapToAbove` là XP còn thiếu để vượt người gần nhất có XP cao hơn. Trong top 10 thì dòng của caller nằm
+  ngay trong `top` (`me = true`), `above` rỗng và `gapToAbove` null.
+- **Thứ tự**: XP giảm dần, cùng điểm xếp theo họ tên (Collator `vi`) rồi mã cán bộ. Cùng điểm chung hạng và hạng kế
   tiếp nhảy cóc (1, 1, 3). Người 0 điểm nằm cuối, cũng theo tên, và chung một hạng.
-- **`me`** là dòng của caller (`me = true`), luôn có kể cả khi không nằm trong trang; `rank` của `me` tính trong đúng phạm
-  vi đang xem. Caller chưa thuộc nhóm nào xem `team` nhận trang rỗng, `me.rank = null` và `me.teamName = null`.
-- Điểm của cả phạm vi được tính rồi mới phân trang vì hạng phụ thuộc điểm của mọi người: một truy vấn gom cho mỗi phần
-  điểm và một lần gọi cổng quiz, không truy vấn theo từng người. Phạm vi vượt 5.000 học viên trả `LEARNING-LEADERBOARD_TOO_LARGE`.
+- **`me`** là dòng của caller (`me = true`), luôn có kể cả khi không nằm trong top; `rank` của `me` tính trong đúng phạm
+  vi đang xem. Caller chưa thuộc nhóm nào xem `team` nhận `top` rỗng, `me.rank = null` và `me.teamName = null`.
+- Điểm của cả phạm vi được tính rồi mới phân trang vì hạng phụ thuộc điểm của mọi người: một truy vấn gom tổng theo nguồn từ sổ XP
+  và một truy vấn chuỗi cho cả phạm vi, không truy vấn theo từng người. Phạm vi vượt 5.000 học viên trả `LEARNING-LEADERBOARD_TOO_LARGE`.
   Đo trên PostgreSQL 16 (Testcontainers, dữ liệu tổng hợp 60 ngày học, 5 lần học × 12 bài hoàn thành, 3 đề đạt mỗi
   người): 7 người của bộ demo 3 ms, 500 người 57 ms, 4.900 người 540 ms cho điểm và 618 ms cho cả API. Nếu phạm vi
   thực tế vượt vài nghìn người, cân nhắc bảng tổng hợp hằng đêm thay vì tính khi đọc.
-- Lỗi: `scope` ngoài `team|org|all`, `size` ngoài 1-100 hoặc `page` âm trả `CORE-VALIDATION_FAILED`; vai trò không phải
+- Lỗi: `scope` ngoài `team|org|all`, `period` ngoài `week|month|all` hoặc `offset` âm hoặc quá 520 trả `CORE-VALIDATION_FAILED`; vai trò không phải
   học viên trả 403 `CORE-ACCESS_DENIED`.
 
-Bốn phần của điểm và trọng số (cấu hình `app.learning.points.*` trong `application.yml`, ghi đè bằng biến môi trường
-`APP_LEARNING_POINTS_LESSON`, `_QUIZ_PASS`, `_STREAK_DAY`, `_STREAK_CAP`; đổi trọng số làm điểm của mọi người đổi theo):
+Huy hiệu (`GET /me/learning/badges`): `MyBadges { earned: BadgeView[], notEarned: BadgeView[] }`, `BadgeView { badgeId, name,
+description, icon, condition, earnedAt, retired, progress }`. Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
 
-| Phần | Công thức | Trọng số mặc định |
+- **Năm loại luật** (bảng `badge_definitions`, `rule_type` + `param_n` hoặc `param_program_id`): `COURSES_COMPLETED{n}` (số khóa
+  khác nhau đã hoàn thành), `PROGRAM_COMPLETED{programId}` (mọi khóa đã xuất bản của chương trình, chương trình phải có ít
+  nhất một khóa), `FIRST_TRY_PERFECT{n}` (số đề đạt 100% ngay lượt đầu), `ASSIGNED_BEFORE_DEADLINE{n}` (số đợt giao hoàn
+  thành khóa trước hoặc đúng hạn; đợt không có hạn hoặc đã thu hồi không tính), `STREAK_WORKING_DAYS{n}` (chuỗi dài nhất theo
+  ngày làm việc). `HOURS_LEARNED` được dành riêng, chưa xây.
+- **Kiểm tra theo sự kiện**: `XpLedgerService` gọi `BadgeService.evaluate` trong giao dịch của sự kiện: bài học xong → chuỗi;
+  đạt đề → đạt 100% lần đầu và chuỗi; xong khóa → số khóa, chương trình, trước hạn. Mỗi (người, huy hiệu) một dòng ở
+  `user_badges` nên lặp sự kiện không trao hai lần; `source = EVENT` (sẽ có thông báo, ticket sau).
+- **Trao bù khi tạo huy hiệu**: `BadgeService.backfill(badgeId)` trao âm thầm (`source = BACKFILL`, không thông báo) cho mọi người
+  đã đủ điều kiện; chạy lại không trao thêm. Lần đọc huy hiệu đầu tiên tạo bộ khởi đầu (khóa đầu tiên, 10 khóa, mỗi chương trình
+  đã xuất bản một huy hiệu, 100% lần đầu x3, trước hạn x3, chuỗi 5/20/60 ngày làm việc) rồi trao bù.
+- **Không bao giờ thu hồi**: huy hiệu ngừng dùng (`status = retired`) không được trao và không trao bù nữa nhưng người đã nhận giữ
+  nguyên và thấy `retired = true`; người chưa nhận không thấy nó.
+- `progress { done, total }` chỉ có ở huy hiệu chương trình chưa nhận ("x/y khóa"); `condition` là câu điều kiện tiếng Việt do
+  server dựng. `icon` là tên biểu tượng Lucide.
+- Schema: `docs/sql/upgrade/2026-11-07-badges.sql` phải chạy **trước khi triển khai backend**.
+
+Quản lý huy hiệu (chỉ quản trị hệ thống: ADMIN hoặc SUPER_ADMIN phạm vi GLOBAL, vai trò khác nhận 403), gốc
+`/api/v1/admin/learning/badges`; `AdminBadgeView { badgeId, code, name, description, icon, ruleType, paramN, paramProgramId,
+programName, condition, status, locked, holders, backfillStatus, backfillTotal, backfillDone }`:
+- `GET` liệt kê mọi huy hiệu (kể cả `retired`). `POST` tạo, `PUT /{badgeId}` sửa (`SaveBadge { name ≤100, description ≤300, icon
+  Lucide ^[a-z0-9-]{1,50}$, ruleType, paramN 1..1000 hoặc paramProgramId }`; luật `PROGRAM_COMPLETED` cần chương trình tồn tại,
+  bốn luật còn lại cần `paramN`). Sai là `CORE-VALIDATION_FAILED` trên đúng trường. Mã (`code`) do server sinh (`CUSTOM_…`).
+- **Khóa luật**: `locked = holders > 0`. Đổi `ruleType/paramN/paramProgramId` của huy hiệu đã có người nhận là
+  `CORE-VALIDATION_FAILED` (`ruleType`, `LOCKED`); tên, mô tả, biểu tượng vẫn sửa được. Đổi luật khi chưa ai nhận thì trao bù lại.
+- **Trao bù nền**: `POST` trả ngay với `backfillStatus = RUNNING`; `BadgeBackfillJob` (một luồng) tìm người đủ điều kiện rồi trao
+  từng lô 200 người, mỗi lô một giao dịch kèm cập nhật `backfillDone/backfillTotal`, nên client thấy tiến độ bằng cách đọc lại
+  `GET`. Kết thúc là `DONE`, lỗi là `FAILED`; trao âm thầm (không thông báo). Khởi động lại giữa chừng thì lần khởi động sau chạy
+  lại các huy hiệu còn `RUNNING`. Huy hiệu bị ngừng dùng giữa chừng thì dừng trao.
+- `POST /{badgeId}/retire` ngừng dùng: không trao nữa, người đã nhận giữ huy hiệu; gọi lại không đổi. Không có `badgeId`:
+  `LEARNING-NOT_FOUND`.
+- Audit: `BADGE_CREATED`, `BADGE_UPDATED`, `BADGE_RETIRED` (entity `badge`, id huy hiệu).
+- Schema: `docs/sql/upgrade/2026-11-07-badge-backfill-progress.sql` (ba cột tiến độ ở `badge_definitions`) phải chạy **trước khi
+  triển khai backend**.
+
+Báo cáo tác động gamification, `GET /api/v1/reports/learning/gamification-impact?from&to&orgId` và `.../export` (CSV).
+Phạm vi là phạm vi báo cáo của người gọi (SUPER_ADMIN, ADMIN, INSTRUCTOR, REPORT_VIEWER theo grant GLOBAL/ORG/TEAM; vai trò khác
+403); server chốt học viên trong phạm vi, `orgId` chỉ thu hẹp thêm (ngoài phạm vi thì 0 học viên). Chỉ số tổng hợp, không có dòng
+theo người, cả trên màn hình lẫn CSV (CSV dựng từ chính `ImpactReport`, mỗi dòng `Nhóm, Chỉ số, Giá trị` là một số trên màn hình):
+- `from/to` là ngày giờ Việt Nam, cả hai bao gồm; mặc định 28 ngày kết thúc hôm nay, tối đa 366 ngày (sai là `CORE-VALIDATION_FAILED`).
+- `weeklyActive`: học viên có dòng sổ XP (trừ `ADJUSTMENT`) trong tuần (thứ Hai là đầu tuần) và trong kỳ.
+- `assigned`: lần giao chưa thu hồi có `effective_start_at` trong kỳ; `completed` là lần học `completed`; `completedOnTime` là xong
+  trước hạn hoặc không có hạn; tỷ lệ là phần trăm một chữ số thập phân, `null` khi không có mẫu.
+- `launchedAt` là `create_time` của phiên bản cấu hình 1; `comparison` là hai cửa sổ liền kề 28 ngày trước/sau mốc đó (không phụ
+  thuộc kỳ đã chọn), `after = null` nếu chưa qua ngày nào; `weeklyActiveLearners` là số (học viên, tuần) hoạt động chia số tuần.
+- `xpBySource`, `badges` (huy hiệu còn dùng kể cả 0 lượt, và huy hiệu đã ngừng có lượt trong kỳ), `levels` (học viên chưa có dòng
+  cấp tính vào cấp 1), `optOut` (số người tắt hiển thị tên trên số học viên, không phụ thuộc kỳ).
+- Tối đa 5.000 học viên (`LEARNING-LEADERBOARD_TOO_LARGE`), giống bảng xếp hạng.
+
+Bốn nguồn XP và trọng số (phiên bản cấu hình 1 gieo từ `app.learning.points.*`, biến môi trường `APP_LEARNING_POINTS_LESSON`,
+`_QUIZ_PASS`; từ đó trọng số nằm ở `gamification_config_versions` và đổi trọng số chỉ áp dụng từ lúc đổi, không đổi XP cũ):
+
+| Phần | Nguồn | Trọng số mặc định |
 |---|---|---|
-| `lessons` | trọng số × số bài học khác nhau có `lesson_progress.status = completed` | 5 / bài |
-| `quizzes` | trọng số × số đề PUBLISHED, chưa xóa, khác nhau có ít nhất một lượt đã chấm (`SUBMITTED`, `AUTO_SUBMITTED`) với `passed = true` | 30 / đề |
-| `courses` | tổng `course_completion_rules.reward_points` của phiên bản trong lần học hoàn thành gần nhất (`cycle_no` lớn nhất) của từng khóa | theo khóa |
-| `streak` | trọng số × `min(streakDays, trần)` | 10 / ngày, trần 30 ngày |
+| `lessons` | `LESSON`: mỗi bài học gốc hoàn thành một lần | 5 / bài |
+| `quizzes` | `QUIZ_PASS`: mỗi đề đạt một lần | 30 / đề |
+| `firstTryBonus` | `QUIZ_FIRST_TRY_BONUS`: đề đạt ngay lượt 1 với điểm từ ngưỡng | 20 / đề, ngưỡng 90% |
+| `courses` | `COURSE`: thưởng của khóa khi hoàn thành, một lần mỗi khóa | theo khóa |
+
+Chuỗi ngày học không còn cộng XP. `streakDays` là chuỗi hiện tại theo ngày làm việc (xem `/me/learning/streak`), chỉ để hiển thị.
+Lịch sử trước khi có sổ được chuyển bằng `docs/sql/upgrade/2026-11-07-xp-ledger-backfill.sql` (chạy lại không ghi hai lần).
 
 Quy tắc:
 
@@ -430,9 +493,7 @@ Quy tắc:
 - **Khóa tính một lần**: học lại một khóa không cộng thêm điểm thưởng; lần học đang học dở hoặc đã rút không có điểm thưởng.
 - **Đề tính một lần** dù đạt nhiều lượt; đề chưa xuất bản hoặc đã xóa không tính. Điểm đề đi qua cổng
   `LearningQuizDirectory.passedQuizCounts`, Learning không đọc bảng của Assessment.
-- **Chuỗi ngày học** (`streakDays`) là số ngày liên tiếp kết thúc ở ngày học gần nhất, và chỉ tính khi ngày đó là hôm nay
-  hoặc hôm qua (giờ `Asia/Ho_Chi_Minh`); bỏ một ngày trọn vẹn thì chuỗi về 0. Điểm chuỗi bị chặn bởi trần, còn
-  `streakDays` thì không.
+- **Chuỗi ngày học** (`streakDays`) lấy từ chuỗi theo ngày làm việc của `/me/learning/streak` và không cộng XP.
 - **Ngày học** ghi vào `learning_activity_days` khi một trong các thao tác sau thành công: mở phiên học
   (`POST /me/learning/sessions`), ghi tiến độ khối (`PUT .../blocks/{blockId}/progress`), bắt đầu hoặc nộp bài thi. Mỗi
   người mỗi ngày một dòng, kiểm tra dưới khóa advisory theo người dùng. Ghi nhận chạy sau khi thao tác commit, trong giao
@@ -737,8 +798,9 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 | 30 | GET `/api/v1/me/learning/catalog` | Danh mục khóa học của học viên |
 | 31 | GET `/api/v1/me/learning/enrollments/{enrollmentId}` | Xem nội dung và vị trí tiếp tục học |
 | 32 | PUT `/api/v1/me/learning/enrollments/{enrollmentId}/blocks/{blockId}/progress` | Ghi tương tác học và tổng hợp tiến độ |
-| 33 | GET `/api/v1/me/learning/reminders` | Thông báo nhắc học đến hạn |
+| 33 | GET `/api/v1/me/learning/reminders` | Dòng thông báo của học viên: nhắc hạn (`kind = DEADLINE`) và thông báo gamification chưa đọc (`BADGE_EARNED`, `LEVEL_UP`, mới nhất trước, `subject` là tên huy hiệu hoặc tên cấp, `recipientId` null). Thông báo chỉ tạo khi đạt do sự kiện: trao bù huy hiệu khi tạo huy hiệu không tạo thông báo, lần đầu có cấp (cấp 1) cũng không; mỗi (người, huy hiệu) và mỗi (người, cấp) một thông báo |
 | 34 | POST `/api/v1/me/learning/reminders/{reminderId}/read` | Đánh dấu đã đọc nhắc học |
+| 34a | POST `/api/v1/me/learning/reminders/{reminderId}/seen` | Ghi `sentAt` khi toast của thông báo đã hiện; thông báo vẫn nằm trong dòng cho đến khi đọc; ghi lại không đổi gì; người khác nhận 403 |
 | 35 | POST `/api/v1/learning-assets` | Upload tài nguyên |
 | 36 | GET `/api/v1/learning-assets/{assetId}/content` | Tải tài nguyên |
 | 37 | GET `/api/v1/learning-assignments` | Danh sách đợt giao của đơn vị qua mọi khóa, kèm số liệu người nhận |

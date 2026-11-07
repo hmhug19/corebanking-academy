@@ -184,6 +184,20 @@ public class LearningLearnerController {
         return BaseResponse.ok(progress.reminders());
     }
 
+    @PostMapping("/reminders/{reminderId}/seen")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Đánh dấu thông báo đã hiện toast",
+        description = """
+            Ghi sentAt của một thông báo (nhắc hạn hoặc thông báo huy hiệu/lên cấp) của chính người gọi; thông báo vẫn
+            nằm trong dòng nhắc học cho đến khi đọc. Ghi lại lần nữa không đổi gì. Người khác nhận 403.
+            """
+    )
+    public BaseResponse<LearningViews.LearningReminderView> seen(@PathVariable @Positive Long reminderId) {
+        return BaseResponse.ok(progress.markReminderSeen(reminderId));
+    }
+
     @PostMapping("/reminders/{reminderId}/read")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)

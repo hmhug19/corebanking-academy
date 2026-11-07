@@ -40,6 +40,7 @@ import vn.com.coreacademy.learning.entity.AssignmentRecipient;
 import vn.com.coreacademy.learning.entity.BlockProgress;
 import vn.com.coreacademy.learning.entity.Course;
 import vn.com.coreacademy.learning.entity.CourseChapter;
+import vn.com.coreacademy.learning.entity.CourseCompletionRule;
 import vn.com.coreacademy.learning.entity.CourseEnrollment;
 import vn.com.coreacademy.learning.entity.CourseLesson;
 import vn.com.coreacademy.learning.entity.CourseRevision;
@@ -68,6 +69,7 @@ public class LearningProgressService {
     private final LearningMapper mapper;
     private final IdentityAuditService audit;
     private final LearningQuizDirectory quizzes;
+    private final XpLedgerService xp;
 
     public LearningDetails.EnrollmentDetail get(Long enrollmentId) {
         var actor = access.actor();
@@ -177,7 +179,33 @@ public class LearningProgressService {
     public List<LearningViews.LearningReminderView> reminders() {
         var actor = access.actor();
         access.requireLearner(actor);
-        return repository.dueReminders(actor.person().id()).stream().map(mapper::view).toList();
+        List<LearningReminder> due = repository.dueReminders(actor.person().id());
+        List<LearningReminder> notices = repository.notices(actor.person().id());
+        return java.util.stream.Stream.concat(due.stream(), notices.stream()).map(mapper::view).toList();
+    }
+
+    /** Đánh dấu thông báo gamification đã hiện toast: sentAt được ghi, thông báo vẫn nằm trong dòng nhắc học. */
+    @Transactional
+    public LearningViews.LearningReminderView markReminderSeen(Long id) {
+        var actor = access.actor();
+        access.requireLearner(actor);
+        lock.acquire();
+        LearningReminder reminder = repository.require(LearningReminder.class, id);
+        requireOwner(reminder, actor.person().id());
+        if (reminder.getSentAt() == null) {
+            reminder.setSentAt(Instant.now());
+            repository.save(reminder, actor.person().id());
+            repository.flush();
+        }
+        return mapper.view(reminder);
+    }
+
+    private void requireOwner(LearningReminder reminder, String userId) {
+        String owner = reminder.getRecipientId() == null ? reminder.getUserId()
+            : repository.require(AssignmentRecipient.class, reminder.getRecipientId()).getUserId();
+        if (!userId.equals(owner)) {
+            throw new AccessDeniedException("Reminder owner denied");
+        }
     }
 
     @Transactional
@@ -186,11 +214,7 @@ public class LearningProgressService {
         access.requireLearner(actor);
         lock.acquire();
         LearningReminder reminder = repository.require(LearningReminder.class, id);
-        var recipient = repository.require(AssignmentRecipient.class,
-            reminder.getRecipientId());
-        if (!actor.person().id().equals(recipient.getUserId())) {
-            throw new AccessDeniedException("Reminder owner denied");
-        }
+        requireOwner(reminder, actor.person().id());
         reminder.setStatus(ReminderStatus.SENT);
         reminder.setSentAt(Instant.now());
         repository.save(reminder, actor.person().id());
@@ -324,10 +348,16 @@ public class LearningProgressService {
         progress.setLastAccessAt(now);
         if (ProgressStatus.COMPLETED.equals(progress.getStatus()) && progress.getCompletedAt() == null) {
             progress.setCompletedAt(now);
+            xp.lessonCompleted(enrollment.getUserId(), lessonKey(lesson), now);
         }
         repository.save(progress, actor);
         repository.flush();
         return progress;
+    }
+
+    /** Định danh bài của sổ XP: bài gốc nếu là bản sao, để học lại ở bản khác của khóa không được tính thêm. */
+    private static Long lessonKey(CourseLesson lesson) {
+        return lesson.getSourceLessonId() != null ? lesson.getSourceLessonId() : lesson.getId();
     }
 
     private void updateEnrollment(CourseEnrollment enrollment, Long lessonId, Long blockId, Instant now, String actor) {
@@ -359,6 +389,9 @@ public class LearningProgressService {
             enrollment.setCompletedAt(now);
             audit.record(actor, AuditAction.COURSE_COMPLETED, "course_enrollment", enrollment.getId().toString(),
                 enrollment.getOrgIdSnapshot(), Map.of("revisionId", enrollment.getRevisionId()));
+            int reward = repository.rules(enrollment.getRevisionId()).stream()
+                .mapToInt(CourseCompletionRule::getRewardPoints).max().orElse(0);
+            xp.courseCompleted(enrollment.getUserId(), enrollment.getCourseId(), reward, now);
         }
         repository.save(enrollment, actor);
     }
@@ -403,6 +436,7 @@ public class LearningProgressService {
             }
             if (progress.getCompletedAt() == null) {
                 progress.setCompletedAt(now);
+                xp.lessonCompleted(userId, lessonKey(lesson), now);
             }
             progress.setLastAccessAt(now);
             repository.save(progress, userId);

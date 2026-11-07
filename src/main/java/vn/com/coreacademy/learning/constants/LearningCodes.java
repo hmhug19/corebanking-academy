@@ -221,6 +221,16 @@ public final class LearningCodes {
         }
     }
 
+    /** Loại một dòng trong dòng nhắc học: nhắc hạn, hoặc thông báo gamification (huy hiệu, lên cấp). */
+    public static final class ReminderKind {
+        public static final String DEADLINE = "DEADLINE";
+        public static final String BADGE_EARNED = "BADGE_EARNED";
+        public static final String LEVEL_UP = "LEVEL_UP";
+
+        private ReminderKind() {
+        }
+    }
+
     public static final class ReminderChannel {
         public static final String IN_APP = "in_app";
 
@@ -279,6 +289,17 @@ public final class LearningCodes {
         }
     }
 
+    /** Kỳ xếp hạng; week là thứ Hai-Chủ nhật, month là tháng dương lịch, cả hai theo Asia/Ho_Chi_Minh. */
+    public static final class LeaderboardPeriod {
+        public static final String WEEK = "week";
+        public static final String MONTH = "month";
+        public static final String ALL = "all";
+        public static final String PATTERN = WEEK + "|" + MONTH + "|" + ALL;
+
+        private LeaderboardPeriod() {
+        }
+    }
+
     /** Hoạt động đầu tiên trong ngày, ghi ở learning_activity_days.first_source. */
     public static final class ActivitySource {
         public static final String SESSION = "session";
@@ -286,6 +307,60 @@ public final class LearningCodes {
         public static final String QUIZ = "quiz";
 
         private ActivitySource() {
+        }
+    }
+
+    /** Loại nguồn của dòng sổ XP, ghi ở xp_ledger.source_kind. */
+    public static final class XpSource {
+        public static final String LESSON = "LESSON";
+        public static final String QUIZ_PASS = "QUIZ_PASS";
+        public static final String QUIZ_FIRST_TRY_BONUS = "QUIZ_FIRST_TRY_BONUS";
+        public static final String COURSE = "COURSE";
+        public static final String COMMUNITY = "COMMUNITY";
+        public static final String ADJUSTMENT = "ADJUSTMENT";
+
+        private XpSource() {
+        }
+    }
+
+    /** Loại luật của huy hiệu. HOURS_LEARNED được dành riêng và chưa xây. */
+    public static final class BadgeRule {
+        public static final String COURSES_COMPLETED = "COURSES_COMPLETED";
+        public static final String PROGRAM_COMPLETED = "PROGRAM_COMPLETED";
+        public static final String FIRST_TRY_PERFECT = "FIRST_TRY_PERFECT";
+        public static final String ASSIGNED_BEFORE_DEADLINE = "ASSIGNED_BEFORE_DEADLINE";
+        public static final String STREAK_WORKING_DAYS = "STREAK_WORKING_DAYS";
+        public static final java.util.Set<String> ALL = java.util.Set.of(COURSES_COMPLETED, PROGRAM_COMPLETED,
+            FIRST_TRY_PERFECT, ASSIGNED_BEFORE_DEADLINE, STREAK_WORKING_DAYS);
+
+        private BadgeRule() {
+        }
+    }
+
+    public static final class BadgeStatus {
+        public static final String ACTIVE = "active";
+        public static final String RETIRED = "retired";
+
+        private BadgeStatus() {
+        }
+    }
+
+    /** Nguồn của một lần nhận huy hiệu: EVENT có thông báo, BACKFILL (trao bù khi tạo huy hiệu) thì không. */
+    public static final class BadgeSource {
+        public static final String EVENT = "EVENT";
+        public static final String BACKFILL = "BACKFILL";
+
+        private BadgeSource() {
+        }
+    }
+
+    /** Loại ngày ngoại lệ của lịch làm việc, ghi ở working_calendar_days.day_type. */
+    public static final class CalendarDayType {
+        public static final String HOLIDAY = "HOLIDAY";
+        public static final String MAKEUP_WORKDAY = "MAKEUP_WORKDAY";
+        public static final java.util.Set<String> ALL = java.util.Set.of(HOLIDAY, MAKEUP_WORKDAY);
+
+        private CalendarDayType() {
         }
     }
 

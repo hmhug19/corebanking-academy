@@ -368,6 +368,8 @@ public final class LearningViews {
         Integer attemptCount,
         String lastErrorCode,
         String idempotencyKey,
+        String kind,
+        String subject,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {

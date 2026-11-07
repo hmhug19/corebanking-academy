@@ -1,6 +1,7 @@
 package vn.com.coreacademy.learning.service;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
@@ -45,6 +46,7 @@ public class LearningAssessmentAccess {
     private final LearningIdentityService identity;
     private final LearningProgressService progress;
     private final LearningActivityService activity;
+    private final XpLedgerService xp;
 
     public record ManagedCourse(Long id, String code, Long ownerOrgId) {
     }
@@ -219,6 +221,15 @@ public class LearningAssessmentAccess {
     @Transactional
     public boolean quizPassed(String userId, Long enrollmentId, Long quizId) {
         return progress.completeQuizLessons(userId, enrollmentId, quizId);
+    }
+
+    /**
+     * Ghi XP của lượt thi đạt vào sổ XP trong transaction chấm bài của bên gọi: XP đạt đề một lần cho mỗi đề, thêm
+     * thưởng khi là lượt đầu của người này trên đề và điểm từ ngưỡng. Chấm lại từ trượt sang đạt cũng đi qua đây.
+     */
+    @Transactional
+    public void quizPassedXp(String userId, Long quizId, int attemptNo, BigDecimal scorePercent, Instant at) {
+        xp.quizPassed(userId, quizId, attemptNo, scorePercent, at);
     }
 
     public boolean quizLinked(Long quizId) {

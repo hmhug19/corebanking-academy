@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assessment.service;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -189,6 +190,10 @@ public class RegradeService {
         outcome.answer().setCorrect(outcome.newExact());
         outcome.answer().setScoreAwarded(outcome.newScore());
         AttemptGrader.applyTotals(attempt, outcome.newRaw(), outcome.newCorrectCount());
+        if (Boolean.TRUE.equals(attempt.getPassed())) {
+            learning.quizPassedXp(attempt.getUserId(), attempt.getQuizId(), attempt.getAttemptNo(),
+                attempt.getScorePercent(), Instant.now());
+        }
         if (Boolean.TRUE.equals(attempt.getPassed()) && attempt.getEnrollmentId() != null) {
             // Chấm lại chỉ tăng điểm; từ trượt sang đạt thì bài quiz của khóa được hoàn thành như khi nộp bài.
             learning.quizPassed(attempt.getUserId(), attempt.getEnrollmentId(), attempt.getQuizId());
