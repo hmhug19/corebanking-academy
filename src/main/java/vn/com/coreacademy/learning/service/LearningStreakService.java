@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +38,18 @@ public class LearningStreakService {
         var actor = access.actor();
         access.requireLearner(actor);
         return streak(actor.person().id(), LearningActivityService.localDate(Instant.now()));
+    }
+
+    /** Chuỗi hiện tại của nhiều người, mỗi người đủ một giá trị (0 khi chưa có ngày nào); today là ngày VN của bên gọi. */
+    public Map<String, Integer> currentStreaks(Collection<String> userIds, LocalDate today) {
+        Map<String, Set<LocalDate>> days = repository.qualifyingDays(userIds);
+        Map<LocalDate, String> calendar = repository.calendar();
+        Map<String, Integer> result = new HashMap<>();
+        for (String userId : userIds) {
+            result.put(userId, WorkingDayStreak.compute(days.getOrDefault(userId, Set.of()), calendar, today)
+                .current());
+        }
+        return result;
     }
 
     /** today là ngày Asia/Ho_Chi_Minh của bên gọi. */

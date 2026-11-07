@@ -40,9 +40,10 @@ public class LearningLeaderboardController {
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
     @Operation(
-        summary = "Điểm học tập của tôi",
+        summary = "XP của tôi",
         description = """
-            Điểm tính khi đọc từ bài học hoàn thành, bài kiểm tra đạt, khóa hoàn thành và chuỗi ngày học.
+            XP đọc từ sổ ghi XP, chia theo nguồn: bài học, bài kiểm tra đạt, thưởng đạt ngay lần đầu và khóa học.
+            - Chuỗi ngày học không cộng XP; streakDays là chuỗi hiện tại theo ngày làm việc, chỉ để hiển thị.
             - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
             - Không có hạng: hạng phụ thuộc phạm vi và nằm ở bảng xếp hạng.
             """

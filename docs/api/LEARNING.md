@@ -355,12 +355,12 @@ vượt 10.000 dòng báo lỗi rõ thay vì cắt im lặng. API summary độc
 
 ### Điểm học tập và bảng xếp hạng
 
-Điểm tính **khi đọc** từ dữ liệu gốc, không lưu tổng, nên không lệch khỏi tiến độ. Chỉ học viên (`LEARNER`, scope `OWN`)
+XP đọc từ sổ ghi XP (`xp_ledger`, chỉ cộng thêm, một dòng mỗi lần nhận XP), không tính lại từ tiến độ nên xóa hoặc đổi khóa, đề không làm mất XP đã nhận. Chỉ học viên (`LEARNER`, scope `OWN`)
 có điểm; vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Hạng phụ thuộc phạm vi nên không nằm trong `/points`.
 
 | API | Trách nhiệm |
 |---|---|
-| GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, courses, streak }, streakDays }` của caller |
+| GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, firstTryBonus, courses }, streakDays }` của caller |
 | GET `/me/learning/leaderboard?scope=team\|org\|all&page&size` | `LeaderboardPage { page: PageResponse<LeaderboardRow>, me: LeaderboardRow }`; `scope` mặc định `org`, `page` mặc định 0, `size` mặc định 20, tối đa 100 |
 
 `LeaderboardRow { rank, userId, fullName, teamName, points, streakDays, me }`. `points` bằng `total` của `/points` cho cùng
@@ -376,23 +376,26 @@ Bảng xếp hạng (`/leaderboard`):
   tiếp nhảy cóc (1, 1, 3). Người 0 điểm nằm cuối, cũng theo tên, và chung một hạng.
 - **`me`** là dòng của caller (`me = true`), luôn có kể cả khi không nằm trong trang; `rank` của `me` tính trong đúng phạm
   vi đang xem. Caller chưa thuộc nhóm nào xem `team` nhận trang rỗng, `me.rank = null` và `me.teamName = null`.
-- Điểm của cả phạm vi được tính rồi mới phân trang vì hạng phụ thuộc điểm của mọi người: một truy vấn gom cho mỗi phần
-  điểm và một lần gọi cổng quiz, không truy vấn theo từng người. Phạm vi vượt 5.000 học viên trả `LEARNING-LEADERBOARD_TOO_LARGE`.
+- Điểm của cả phạm vi được tính rồi mới phân trang vì hạng phụ thuộc điểm của mọi người: một truy vấn gom tổng theo nguồn từ sổ XP
+  và một truy vấn chuỗi cho cả phạm vi, không truy vấn theo từng người. Phạm vi vượt 5.000 học viên trả `LEARNING-LEADERBOARD_TOO_LARGE`.
   Đo trên PostgreSQL 16 (Testcontainers, dữ liệu tổng hợp 60 ngày học, 5 lần học × 12 bài hoàn thành, 3 đề đạt mỗi
   người): 7 người của bộ demo 3 ms, 500 người 57 ms, 4.900 người 540 ms cho điểm và 618 ms cho cả API. Nếu phạm vi
   thực tế vượt vài nghìn người, cân nhắc bảng tổng hợp hằng đêm thay vì tính khi đọc.
 - Lỗi: `scope` ngoài `team|org|all`, `size` ngoài 1-100 hoặc `page` âm trả `CORE-VALIDATION_FAILED`; vai trò không phải
   học viên trả 403 `CORE-ACCESS_DENIED`.
 
-Bốn phần của điểm và trọng số (cấu hình `app.learning.points.*` trong `application.yml`, ghi đè bằng biến môi trường
-`APP_LEARNING_POINTS_LESSON`, `_QUIZ_PASS`, `_STREAK_DAY`, `_STREAK_CAP`; đổi trọng số làm điểm của mọi người đổi theo):
+Bốn nguồn XP và trọng số (phiên bản cấu hình 1 gieo từ `app.learning.points.*`, biến môi trường `APP_LEARNING_POINTS_LESSON`,
+`_QUIZ_PASS`; từ đó trọng số nằm ở `gamification_config_versions` và đổi trọng số chỉ áp dụng từ lúc đổi, không đổi XP cũ):
 
-| Phần | Công thức | Trọng số mặc định |
+| Phần | Nguồn | Trọng số mặc định |
 |---|---|---|
-| `lessons` | trọng số × số bài học khác nhau có `lesson_progress.status = completed` | 5 / bài |
-| `quizzes` | trọng số × số đề PUBLISHED, chưa xóa, khác nhau có ít nhất một lượt đã chấm (`SUBMITTED`, `AUTO_SUBMITTED`) với `passed = true` | 30 / đề |
-| `courses` | tổng `course_completion_rules.reward_points` của phiên bản trong lần học hoàn thành gần nhất (`cycle_no` lớn nhất) của từng khóa | theo khóa |
-| `streak` | trọng số × `min(streakDays, trần)` | 10 / ngày, trần 30 ngày |
+| `lessons` | `LESSON`: mỗi bài học gốc hoàn thành một lần | 5 / bài |
+| `quizzes` | `QUIZ_PASS`: mỗi đề đạt một lần | 30 / đề |
+| `firstTryBonus` | `QUIZ_FIRST_TRY_BONUS`: đề đạt ngay lượt 1 với điểm từ ngưỡng | 20 / đề, ngưỡng 90% |
+| `courses` | `COURSE`: thưởng của khóa khi hoàn thành, một lần mỗi khóa | theo khóa |
+
+Chuỗi ngày học không còn cộng XP. `streakDays` là chuỗi hiện tại theo ngày làm việc (xem `/me/learning/streak`), chỉ để hiển thị.
+Lịch sử trước khi có sổ được chuyển bằng `docs/sql/upgrade/2026-11-07-xp-ledger-backfill.sql` (chạy lại không ghi hai lần).
 
 Quy tắc:
 
@@ -404,9 +407,7 @@ Quy tắc:
 - **Khóa tính một lần**: học lại một khóa không cộng thêm điểm thưởng; lần học đang học dở hoặc đã rút không có điểm thưởng.
 - **Đề tính một lần** dù đạt nhiều lượt; đề chưa xuất bản hoặc đã xóa không tính. Điểm đề đi qua cổng
   `LearningQuizDirectory.passedQuizCounts`, Learning không đọc bảng của Assessment.
-- **Chuỗi ngày học** (`streakDays`) là số ngày liên tiếp kết thúc ở ngày học gần nhất, và chỉ tính khi ngày đó là hôm nay
-  hoặc hôm qua (giờ `Asia/Ho_Chi_Minh`); bỏ một ngày trọn vẹn thì chuỗi về 0. Điểm chuỗi bị chặn bởi trần, còn
-  `streakDays` thì không.
+- **Chuỗi ngày học** (`streakDays`) lấy từ chuỗi theo ngày làm việc của `/me/learning/streak` và không cộng XP.
 - **Ngày học** ghi vào `learning_activity_days` khi một trong các thao tác sau thành công: mở phiên học
   (`POST /me/learning/sessions`), ghi tiến độ khối (`PUT .../blocks/{blockId}/progress`), bắt đầu hoặc nộp bài thi. Mỗi
   người mỗi ngày một dòng, kiểm tra dưới khóa advisory theo người dùng. Ghi nhận chạy sau khi thao tác commit, trong giao

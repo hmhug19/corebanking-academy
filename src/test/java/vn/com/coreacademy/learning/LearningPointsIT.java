@@ -1,15 +1,23 @@
 package vn.com.coreacademy.learning;
 
+import java.sql.SQLException;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.List;
 import java.util.Map;
+
+import javax.sql.DataSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
@@ -19,7 +27,6 @@ import vn.com.coreacademy.learning.config.LearningPointsProperties;
 import vn.com.coreacademy.learning.dto.LearningPointsViews.MyPoints;
 import vn.com.coreacademy.learning.dto.LearningPointsViews.PointParts;
 import vn.com.coreacademy.learning.service.LearningPointsService;
-import vn.com.coreacademy.learning.service.LearningQuizDirectory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
@@ -34,6 +41,8 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.quizBody;
  */
 class LearningPointsIT extends AssessmentIntegrationTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 11, 1);
+    private static final LocalDate TODAY_2030 = LocalDate.of(2030, 1, 8);
+    private static final AtomicInteger CYCLES = new AtomicInteger(100);
 
     @Autowired
     private MockMvc mvc;
@@ -51,7 +60,7 @@ class LearningPointsIT extends AssessmentIntegrationTest {
     private LearningPointsProperties weights;
 
     @Autowired
-    private LearningQuizDirectory quizDirectory;
+    private DataSource dataSource;
 
     private ApiClient api;
     private AssessmentFixtures fixtures;
@@ -69,37 +78,29 @@ class LearningPointsIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void weightsComeFromConfiguration() {
+    void theSeedWeightsOfConfigVersionOne() {
         assertThat(weights.getLesson()).isEqualTo(5);
         assertThat(weights.getQuizPass()).isEqualTo(30);
-        assertThat(weights.getStreakDay()).isEqualTo(10);
-        assertThat(weights.getStreakCap()).isEqualTo(30);
     }
 
     @Test
-    void aLessonCompletedInTwoCyclesOnTwoRevisionsCountsOnce() {
-        long first = lessonOf(course.revisionId()).get(0);
-        long secondRevision = publishNewRevision();
-        long second = lessonOf(secondRevision).get(0);
-        assertThat(sourceOf(second)).as("a clone points to the original lesson").isEqualTo(first);
-        long thirdRevision = publishNewRevision();
-        long third = lessonOf(thirdRevision).get(0);
-        assertThat(sourceOf(third)).as("not to the previous copy").isEqualTo(first);
+    void pointsAreTheLedgerSumsBySource() {
+        String user = "PT-LEDGER";
+        ledger(user, "LESSON", "a", 5);
+        ledger(user, "LESSON", "b", 5);
+        ledger(user, "QUIZ_PASS", "q1", 30);
+        ledger(user, "QUIZ_FIRST_TRY_BONUS", "q1", 20);
+        ledger(user, "COURSE", "c1", 40);
 
-        String user = "PT-LESSONS";
-        lessonDone(enrollment(user, course.id(), course.revisionId(), 1, "completed"), first);
-        lessonDone(enrollment(user, course.id(), secondRevision, 2, "completed"), second);
-        lessonDone(enrollment(user, course.id(), thirdRevision, 3, "in_progress"), third);
-        assertThat(parts(user).lessons()).isEqualTo(5);
+        MyPoints result = points.scores(List.of(user, "PT-NOBODY"), TODAY).get(user);
 
-        // Một bài khác hẳn thì tính thêm.
-        long other = insertLesson(course.revisionId());
-        lessonDone(enrollment(user, course.id(), course.revisionId(), 4, "in_progress"), other);
-        assertThat(parts(user).lessons()).isEqualTo(10);
+        assertThat(result.parts()).isEqualTo(new PointParts(10, 30, 20, 40));
+        assertThat(result.total()).isEqualTo(100);
+        assertThat(points.scores(List.of("PT-NOBODY"), TODAY).get("PT-NOBODY").total()).isZero();
     }
 
     @Test
-    void aLessonThatIsOnlyStartedEarnsNothing() {
+    void aLessonThatIsOnlyStartedEarnsNothingAndTheStreakEarnsNoXp() {
         String user = "PT-STARTED";
         long enrollment = enrollment(user, course.id(), course.revisionId(), 1, "in_progress");
         jdbc.update("""
@@ -107,116 +108,26 @@ class LearningPointsIT extends AssessmentIntegrationTest {
                 updated_by)
             values (?, ?, 'in_progress', 60, ?, ?)
             """, enrollment, course.lessonId(), user, user);
+        // Ngày học liên tiếp không sinh XP: chỉ sổ ghi XP mới có điểm.
+        activity("PT-DAYS", 3);
 
         assertThat(points.scores(List.of(user), TODAY).get(user).total()).isZero();
+        assertThat(points.scores(List.of("PT-DAYS"), TODAY).get("PT-DAYS").total()).isZero();
     }
 
     @Test
-    void aCourseCompletedTwiceCountsItsLatestRewardOnce() {
-        long secondRevision = publishNewRevision();
-        reward(course.revisionId(), 50);
-        reward(secondRevision, 70);
-        Course other = fixtures.course();
-        reward(other.revisionId(), 20);
+    void streakDaysAreWorkingDaysAndSkipTheWeekend() {
+        // 2030-01-08 là thứ Ba; thứ Sáu 01-04 và thứ Hai 01-07 nối liền qua cuối tuần.
+        String user = "PT-STREAK";
+        String idle = "PT-IDLE";
+        activityOn(user, TODAY_2030, TODAY_2030.minusDays(1), TODAY_2030.minusDays(4));
+        activityOn(idle, TODAY_2030.minusDays(3));
 
-        String user = "PT-COURSES";
-        enrollment(user, course.id(), course.revisionId(), 1, "completed");
-        enrollment(user, course.id(), secondRevision, 2, "completed");
-        enrollment(user, other.id(), other.revisionId(), 1, "completed");
-        // Lần học đang học dở hoặc đã rút không cho điểm thưởng.
-        enrollment(user, course.id(), secondRevision, 3, "in_progress");
-        Course dropped = fixtures.course();
-        reward(dropped.revisionId(), 1000);
-        enrollment(user, dropped.id(), dropped.revisionId(), 1, "withdrawn");
+        Map<String, MyPoints> result = points.scores(List.of(user, idle, "PT-NONE"), TODAY_2030);
 
-        assertThat(parts(user).courses()).isEqualTo(90);
-    }
-
-    @Test
-    void aQuizCountsOncePublishedAndPassed() {
-        long passedTwice = quiz(true);
-        long failedOnly = quiz(true);
-        long unpublished = quiz(false);
-        long deleted = quiz(true);
-        long passedOnceMore = quiz(true);
-        jdbc.update("update learning_hub.quizzes set is_deleted = true where quiz_id = ?", deleted);
-        String user = "PT-QUIZZES";
-        attempt(user, passedTwice, 1, "SUBMITTED", true);
-        attempt(user, passedTwice, 2, "AUTO_SUBMITTED", true);
-        attempt(user, failedOnly, 1, "SUBMITTED", false);
-        attempt(user, unpublished, 1, "SUBMITTED", true);
-        attempt(user, deleted, 1, "SUBMITTED", true);
-        attempt(user, passedOnceMore, 1, "SUBMITTED", true);
-        attempt(user, passedOnceMore, 2, "VOIDED", true);
-
-        assertThat(quizDirectory.passedQuizCounts(List.of(user, "PT-NOBODY"))).containsExactly(Map.entry(user, 2));
-        assertThat(quizDirectory.passedQuizCounts(List.of())).isEmpty();
-        assertThat(parts(user).quizzes()).isEqualTo(60);
-    }
-
-    @Test
-    void streakEndsTodayOrYesterdayAndStopsAtAGap() {
-        activity("PT-TODAY", TODAY);
-        activity("PT-YESTERDAY", TODAY.minusDays(1));
-        activity("PT-GAP", TODAY, TODAY.minusDays(1), TODAY.minusDays(3), TODAY.minusDays(4), TODAY.minusDays(5));
-        activity("PT-STALE", TODAY.minusDays(2), TODAY.minusDays(3));
-        activity("PT-TWICE", TODAY, TODAY, TODAY.minusDays(1));
-
-        Map<String, MyPoints> result = points.scores(List.of("PT-TODAY", "PT-YESTERDAY", "PT-GAP", "PT-STALE",
-            "PT-TWICE", "PT-NONE"), TODAY);
-
-        assertThat(result.get("PT-TODAY").streakDays()).isEqualTo(1);
-        assertThat(result.get("PT-YESTERDAY").streakDays()).as("not dropped until a day is missed").isEqualTo(1);
-        assertThat(result.get("PT-GAP").streakDays()).isEqualTo(2);
-        assertThat(result.get("PT-GAP").parts().streak()).isEqualTo(20);
-        assertThat(result.get("PT-STALE").streakDays()).isZero();
-        assertThat(result.get("PT-TWICE").streakDays()).as("two rows of one day are one day").isEqualTo(2);
-        assertThat(result.get("PT-NONE").total()).isZero();
-    }
-
-    @Test
-    void theStreakPointsStopAtTheCapButTheStreakKeepsCounting() {
-        LocalDate[] days = new LocalDate[40];
-        for (int i = 0; i < days.length; i++) {
-            days[i] = TODAY.minusDays(i);
-        }
-        activity("PT-LONG", days);
-
-        MyPoints result = points.scores(List.of("PT-LONG"), TODAY).get("PT-LONG");
-
-        assertThat(result.streakDays()).isEqualTo(40);
-        assertThat(result.parts().streak()).isEqualTo(300);
-        assertThat(result.total()).isEqualTo(300);
-    }
-
-    @Test
-    void theStreakFollowsTheLocalDayAcrossMidnight() {
-        activity("PT-MIDNIGHT", LocalDate.of(2026, 10, 30));
-
-        assertThat(points.scores(List.of("PT-MIDNIGHT"), LocalDate.of(2026, 10, 30)).get("PT-MIDNIGHT")
-            .streakDays()).isEqualTo(1);
-        assertThat(points.scores(List.of("PT-MIDNIGHT"), LocalDate.of(2026, 10, 31)).get("PT-MIDNIGHT")
-            .streakDays()).as("00:30 local on the 31st: yesterday still counts").isEqualTo(1);
-        assertThat(points.scores(List.of("PT-MIDNIGHT"), LocalDate.of(2026, 11, 1)).get("PT-MIDNIGHT")
-            .streakDays()).as("a whole day missed").isZero();
-    }
-
-    @Test
-    void totalIsTheSumOfAllFourParts() {
-        String user = "PT-ALL";
-        long first = lessonOf(course.revisionId()).get(0);
-        lessonDone(enrollment(user, course.id(), course.revisionId(), 1, "completed"), first);
-        reward(course.revisionId(), 40);
-        attempt(user, quiz(true), 1, "SUBMITTED", true);
-        activity(user, TODAY, TODAY.minusDays(1), TODAY.minusDays(2));
-
-        MyPoints result = points.scores(List.of(user), TODAY).get(user);
-
-        assertThat(result.parts().lessons()).isEqualTo(5);
-        assertThat(result.parts().quizzes()).isEqualTo(30);
-        assertThat(result.parts().courses()).isEqualTo(40);
-        assertThat(result.parts().streak()).isEqualTo(30);
-        assertThat(result.total()).isEqualTo(105);
+        assertThat(result.get(user).streakDays()).isEqualTo(3);
+        assertThat(result.get(idle).streakDays()).as("a working day missed").isZero();
+        assertThat(result.get("PT-NONE").streakDays()).isZero();
     }
 
     @Test
@@ -225,11 +136,68 @@ class LearningPointsIT extends AssessmentIntegrationTest {
 
         assertThat(mine.fieldNames()).toIterable().containsExactly("total", "parts", "streakDays");
         assertThat(mine.path("parts").fieldNames()).toIterable()
-            .containsExactly("lessons", "quizzes", "courses", "streak");
+            .containsExactly("lessons", "quizzes", "firstTryBonus", "courses");
         assertThat(mine.path("total").asLong()).isEqualTo(mine.path("parts").path("lessons").asLong()
-            + mine.path("parts").path("quizzes").asLong() + mine.path("parts").path("courses").asLong()
-            + mine.path("parts").path("streak").asLong());
+            + mine.path("parts").path("quizzes").asLong() + mine.path("parts").path("firstTryBonus").asLong()
+            + mine.path("parts").path("courses").asLong());
         api.http(ADMIN, get("/api/v1/me/learning/points"), 403, "CORE-ACCESS_DENIED");
+    }
+
+    @Test
+    void theBackfillReplaysHistoryOnceAndKeepsXpWhenTheSourceIsRemoved() {
+        String user = "PT-MIGRATE";
+        // Bài học: cùng một bài gốc hoàn thành ở hai lần học chỉ cho 5 XP; một bài khác thêm 5.
+        long first = lessonOf(course.revisionId()).get(0);
+        lessonDone(enrollment(user, course.id(), course.revisionId(), 1, "completed"), first);
+        lessonDone(enrollment(user, course.id(), course.revisionId(), 2, "in_progress"), first);
+        long other = insertLesson(course.revisionId());
+        lessonDone(enrollment(user, course.id(), course.revisionId(), 3, "in_progress"), other);
+        reward(course.revisionId(), 40);
+        // Đề đạt lần đầu với 100% được thêm thưởng; đề đạt lần hai thì không; đề chưa xuất bản không tính.
+        long firstTry = quiz(true);
+        long secondTry = quiz(true);
+        long unpublished = quiz(false);
+        attempt(user, firstTry, 1, "SUBMITTED", true, 100);
+        attempt(user, secondTry, 1, "SUBMITTED", false, 20);
+        attempt(user, secondTry, 2, "SUBMITTED", true, 100);
+        attempt(user, unpublished, 1, "SUBMITTED", true, 100);
+
+        runBackfill();
+
+        assertThat(parts(user)).isEqualTo(new PointParts(10, 60, 20, 40));
+        assertThat(parts(user).lessons() + parts(user).quizzes() + parts(user).firstTryBonus()
+            + parts(user).courses()).as("old points without the streak part").isEqualTo(130);
+        assertThat(jdbc.queryForObject("select count(*) from learning_hub.xp_ledger where user_id = ?"
+            + " and reason = 'migration'", Integer.class, user)).isEqualTo(6);
+
+        runBackfill();
+        assertThat(parts(user)).as("a rerun writes nothing twice").isEqualTo(new PointParts(10, 60, 20, 40));
+
+        // Xóa mềm đề, rút khóa và xóa bài không làm mất XP đã có.
+        jdbc.update("update learning_hub.quizzes set is_deleted = true where quiz_id = ?", firstTry);
+        jdbc.update("update learning_hub.course_enrollments set status = 'withdrawn' where user_id = ?", user);
+        assertThat(parts(user)).isEqualTo(new PointParts(10, 60, 20, 40));
+    }
+
+    private void runBackfill() {
+        try (var connection = dataSource.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, new FileSystemResource(
+                "docs/sql/upgrade/2026-11-07-xp-ledger-backfill.sql"));
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void ledger(String user, String kind, String ref, int amount) {
+        jdbc.update("""
+            insert into learning_hub.gamification_config_versions (version_no, lesson_xp, quiz_pass_xp,
+                first_try_bonus_xp, first_try_threshold_percent, community_xp, community_daily_cap)
+            values (1, 5, 30, 20, 90, 10, 30) on conflict (version_no) do nothing
+            """);
+        jdbc.update("""
+            insert into learning_hub.xp_ledger (user_id, amount, occurred_at, source_kind, source_ref, config_version_id)
+            select ?, ?, now(), ?, ?, version_id from learning_hub.gamification_config_versions where version_no = 1
+            """, user, amount, kind, ref);
     }
 
     private PointParts parts(String user) {
@@ -293,20 +261,34 @@ class LearningPointsIT extends AssessmentIntegrationTest {
         return fixtures.quiz(quizBody(course.id()), questions, publish);
     }
 
-    private void attempt(String user, long quizId, int attemptNo, String status, boolean passed) {
+    private void attempt(String user, long quizId, int attemptNo, String status, boolean passed, int scorePercent) {
         jdbc.update("""
             insert into learning_hub.quiz_attempts (quiz_id, user_id, enrollment_id, attempt_no, status, started_at,
                 deadline_at, submitted_at, graded_at, time_limit_minutes, pass_percent, scoring_mode, grace_seconds,
-                total_questions, max_score, passed)
+                total_questions, max_score, raw_score, score_percent, passed)
             values (?, ?, 0, ?, ?, now() - interval '1 hour', now() + interval '1 hour', now(), now(), 30, 70,
-                'ALL_OR_NOTHING', 0, 1, 1, ?)
-            """, quizId, user, attemptNo, status, passed);
+                'ALL_OR_NOTHING', 0, 1, 100, ?, ?, ?)
+            """, quizId, user, attemptNo, status, scorePercent, scorePercent, passed);
     }
 
-    private void activity(String user, LocalDate... days) {
+    /** Một bài học hoàn thành mỗi ngày, count ngày liên tiếp kết thúc hôm nay. */
+    private void activity(String user, int count) {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+        for (int i = 0; i < count; i++) {
+            activityOn(user, today.minusDays(i));
+        }
+    }
+
+    private void activityOn(String user, LocalDate... days) {
         for (LocalDate day : days) {
-            jdbc.update("insert into learning_hub.learning_activity_days (user_id, activity_date, first_source)"
-                + " values (?, ?, 'session')", user, day);
+            long enrollment = enrollment(user, course.id(), course.revisionId(), CYCLES.incrementAndGet(),
+                "in_progress");
+            Instant at = day.atTime(12, 0).atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant();
+            jdbc.update("""
+                insert into learning_hub.lesson_progress (enrollment_id, lesson_id, status, progress_percent,
+                    completed_at, created_by, updated_by)
+                values (?, ?, 'completed', 100, ?, 'PT', 'PT')
+                """, enrollment, insertLesson(course.revisionId()), java.sql.Timestamp.from(at));
         }
     }
 }

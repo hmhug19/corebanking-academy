@@ -1,7 +1,6 @@
 package vn.com.coreacademy.learning;
 
 import java.text.Collator;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -17,7 +16,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
-import vn.com.coreacademy.learning.service.LearningActivityService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
@@ -28,7 +26,7 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER_2
 
 /**
  * Bảng xếp hạng trên ba học viên của bộ seed Identity (cùng một đơn vị, ba nhóm khác nhau) cùng một học viên ở đơn
- * vị khác. Điểm được dựng bằng ngày học, nên mỗi ca xóa nguồn điểm của các test khác trong database dùng chung.
+ * vị khác. Điểm được dựng bằng dòng sổ XP, nên mỗi ca xóa sổ XP và nguồn điểm của các test khác trong database dùng chung.
  */
 class LearningLeaderboardIT extends AssessmentIntegrationTest {
     private static final String URL = "/api/v1/me/learning/leaderboard";
@@ -48,7 +46,7 @@ class LearningLeaderboardIT extends AssessmentIntegrationTest {
     @BeforeEach
     void cleanPointsAndAddALearnerOfAnotherOrg() {
         api = new ApiClient(mvc, json);
-        jdbc.update("delete from learning_hub.learning_activity_days");
+        jdbc.execute("truncate learning_hub.xp_ledger");
         jdbc.update("delete from learning_hub.lesson_progress");
         jdbc.update("delete from learning_hub.quiz_attempts");
         jdbc.update("update learning_hub.course_enrollments set status = 'in_progress' where status = 'completed'");
@@ -86,7 +84,7 @@ class LearningLeaderboardIT extends AssessmentIntegrationTest {
         assertThat(ranks(items)).as("1, 1, 3").containsExactly(1, 1, 3);
         assertThat(points(items)).containsExactly(30L, 30L, 0L);
         assertThat(items.get(2).path("userId").asText()).as("the zero-point user is last").isEqualTo("000005");
-        assertThat(items.get(0).path("streakDays").asInt()).isEqualTo(3);
+        assertThat(items.get(0).path("streakDays").asInt()).as("no lesson done, so no working-day streak").isZero();
         assertThat(items.get(0).path("teamName").asText()).isNotBlank();
         assertThat(names(items.get(0), items.get(1))).as("ties are ordered by name")
             .isSortedAccordingTo(Collator.getInstance(Locale.forLanguageTag("vi")));
@@ -190,10 +188,20 @@ class LearningLeaderboardIT extends AssessmentIntegrationTest {
         assertThat(board.path("me").path("streakDays").asInt()).isEqualTo(card.path("streakDays").asInt());
     }
 
+    /** count ngày học, mỗi ngày 10 XP, ghi thẳng vào sổ XP. */
     private void days(String user, int count) {
+        jdbc.update("""
+            insert into learning_hub.gamification_config_versions (version_no, lesson_xp, quiz_pass_xp,
+                first_try_bonus_xp, first_try_threshold_percent, community_xp, community_daily_cap)
+            values (1, 5, 30, 20, 90, 10, 30) on conflict (version_no) do nothing
+            """);
         for (int i = 0; i < count; i++) {
-            jdbc.update("insert into learning_hub.learning_activity_days (user_id, activity_date, first_source)"
-                + " values (?, ?, 'session')", user, LearningActivityService.localDate(Instant.now()).minusDays(i));
+            jdbc.update("""
+                insert into learning_hub.xp_ledger (user_id, amount, occurred_at, source_kind, source_ref,
+                    config_version_id)
+                select ?, 10, now(), 'LESSON', ?, version_id from learning_hub.gamification_config_versions
+                where version_no = 1
+                """, user, "lb-" + i);
         }
     }
 
