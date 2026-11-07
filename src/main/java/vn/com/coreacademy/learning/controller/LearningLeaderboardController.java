@@ -26,6 +26,7 @@ import vn.com.coreacademy.learning.dto.LearningPointsViews;
 import vn.com.coreacademy.learning.dto.LearningStreakViews;
 import vn.com.coreacademy.learning.service.BadgeService;
 import vn.com.coreacademy.learning.service.LearningLeaderboardService;
+import vn.com.coreacademy.learning.service.LearningUnitLeaderboardService;
 import vn.com.coreacademy.learning.service.LearningPointsService;
 import vn.com.coreacademy.learning.service.LearningStreakService;
 import vn.com.coreacademy.learning.service.LevelService;
@@ -42,6 +43,7 @@ public class LearningLeaderboardController {
     private final LearningStreakService streaks;
     private final LevelService levels;
     private final BadgeService badges;
+    private final LearningUnitLeaderboardService units;
 
     @GetMapping("/points")
     @ApiResponse(responseCode = "200",
@@ -109,6 +111,28 @@ public class LearningLeaderboardController {
     )
     public BaseResponse<LearningBadgeViews.MyBadges> badges() {
         return BaseResponse.ok(badges.mine());
+    }
+
+    @GetMapping("/leaderboard/units")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Bảng xếp hạng đơn vị",
+        description = """
+            Xếp hạng đơn vị theo XP trung bình mỗi học viên đang hoạt động trong kỳ, kèm tỷ lệ tham gia.
+            - period: week, month (mặc định) hoặc all theo giờ Asia/Ho_Chi_Minh; offset lùi về tuần hoặc tháng trước.
+            - Chỉ đơn vị từ 5 học viên trở lên được xếp hạng. Trả top 10 và đơn vị của người gọi (myUnit); khi đơn vị của
+              người gọi chưa đủ 5 học viên, myUnit là null và myUnitTooSmall là true. Không bao giờ trả các hạng cuối.
+            - Học viên tắt hiển thị tên trên bảng vẫn được tính vào đơn vị.
+            - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
+            """
+    )
+    public BaseResponse<LearningPointsViews.UnitLeaderboard> unitLeaderboard(
+        @Parameter(description = "week | month | all")
+        @RequestParam(defaultValue = LeaderboardPeriod.MONTH) @Pattern(regexp = LeaderboardPeriod.PATTERN)
+        String period,
+        @RequestParam(defaultValue = "0") @Min(0) @Max(LearningLimits.MAX_LEADERBOARD_OFFSET) int offset) {
+        return BaseResponse.ok(units.units(period, offset));
     }
 
     @GetMapping("/leaderboard")

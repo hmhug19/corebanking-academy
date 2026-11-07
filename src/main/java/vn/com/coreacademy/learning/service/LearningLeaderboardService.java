@@ -1,7 +1,6 @@
 package vn.com.coreacademy.learning.service;
 
 import java.text.Collator;
-import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -18,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Person;
-import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardPeriod;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardScope;
 import vn.com.coreacademy.learning.constants.LearningCodes.TargetType;
 import vn.com.coreacademy.learning.constants.LearningLimits;
@@ -54,17 +52,13 @@ public class LearningLeaderboardService {
         access.requireLearner(actor);
         Person caller = actor.person();
         LocalDate today = LearningActivityService.localDate(Instant.now());
-        boolean all = LeaderboardPeriod.ALL.equals(period);
-        int back = all ? 0 : offset;
-        LocalDate from = all ? null : start(period, today, back);
-        LocalDate next = all ? null : start(period, today, back - 1);
-        LocalDate to = all ? null : next.minusDays(1);
+        LeaderboardRange range = LeaderboardRange.of(period, offset, today);
         List<Person> members = members(scope, caller);
 
         Set<String> ids = new HashSet<>();
         members.forEach(person -> ids.add(person.id()));
         ids.add(caller.id());
-        Map<String, Long> sums = points.sumsBetween(ids, instant(from), instant(next));
+        Map<String, Long> sums = points.sumsBetween(ids, range.fromInstant(), range.endInstant());
 
         Collator collator = Collator.getInstance(Locale.forLanguageTag("vi"));
         List<Ranked> ranked = new ArrayList<>(members.stream()
@@ -121,18 +115,7 @@ public class LearningLeaderboardService {
                 }
             }
         }
-        return new Leaderboard(period, back, from, to, top, me, above, gap);
-    }
-
-    /** Ngày đầu của kỳ lùi back kỳ so với kỳ chứa today (back âm là kỳ sau). */
-    static LocalDate start(String period, LocalDate today, int back) {
-        return LeaderboardPeriod.WEEK.equals(period)
-            ? today.with(DayOfWeek.MONDAY).minusWeeks(back)
-            : today.withDayOfMonth(1).minusMonths(back);
-    }
-
-    private static Instant instant(LocalDate day) {
-        return day == null ? null : day.atStartOfDay(LearningActivityService.ZONE).toInstant();
+        return new Leaderboard(period, range.offset(), range.from(), range.to(), top, me, above, gap);
     }
 
     private List<Person> members(String scope, Person caller) {

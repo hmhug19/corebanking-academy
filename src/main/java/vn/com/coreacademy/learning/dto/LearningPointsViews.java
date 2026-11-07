@@ -2,6 +2,8 @@ package vn.com.coreacademy.learning.dto;
 
 import java.util.List;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 public final class LearningPointsViews {
     private LearningPointsViews() {
     }
@@ -35,5 +37,28 @@ public final class LearningPointsViews {
     public record Leaderboard(String period, int offset, java.time.LocalDate from, java.time.LocalDate to,
                               List<LeaderboardRow> top, LeaderboardRow me, List<LeaderboardRow> above,
                               Long gapToAbove) {
+    }
+
+    /**
+     * Một đơn vị trên bảng đơn vị. averageXp là XP trung bình mỗi học viên đang hoạt động trong kỳ (học viên có ít nhất
+     * một dòng sổ XP trong kỳ), participationPercent là phần trăm học viên của đơn vị có ít nhất một ngày đủ điều kiện
+     * trong kỳ. rank dùng hạng đồng điểm (1, 1, 3).
+     */
+    public record UnitRow(
+        @Schema(description = "Hạng, đồng điểm chung hạng.") int rank,
+        @Schema(description = "ID đơn vị.") long orgId,
+        @Schema(description = "Tên đơn vị.") String unitName,
+        @Schema(description = "XP trung bình mỗi học viên đang hoạt động, một chữ số thập phân.") double averageXp,
+        @Schema(description = "Phần trăm học viên có ít nhất một ngày học trong kỳ, 0-100.") int participationPercent,
+        @Schema(description = "Đơn vị của người gọi.") boolean mine) {
+    }
+
+    /**
+     * Bảng đơn vị của một kỳ: top 10 đơn vị từ 5 học viên trở lên và đơn vị của người gọi. myUnit là null khi người gọi
+     * không thuộc đơn vị nào hoặc đơn vị chưa đủ 5 học viên (myUnitTooSmall = true); không bao giờ trả các hạng cuối.
+     * from và to là ngày đầu và ngày cuối của kỳ (null khi period=all).
+     */
+    public record UnitLeaderboard(String period, int offset, java.time.LocalDate from, java.time.LocalDate to,
+                                  List<UnitRow> top, UnitRow myUnit, boolean myUnitTooSmall) {
     }
 }
