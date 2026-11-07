@@ -94,7 +94,7 @@ class LearningPointsIT extends AssessmentIntegrationTest {
 
         MyPoints result = points.scores(List.of(user, "PT-NOBODY"), TODAY).get(user);
 
-        assertThat(result.parts()).isEqualTo(new PointParts(10, 30, 20, 40, 0));
+        assertThat(result.parts()).isEqualTo(new PointParts(10, 30, 20, 40, 0, 0));
         assertThat(result.total()).isEqualTo(100);
         assertThat(points.scores(List.of("PT-NOBODY"), TODAY).get("PT-NOBODY").total()).isZero();
     }
@@ -136,10 +136,10 @@ class LearningPointsIT extends AssessmentIntegrationTest {
 
         assertThat(mine.fieldNames()).toIterable().containsExactly("total", "parts", "streakDays");
         assertThat(mine.path("parts").fieldNames()).toIterable()
-            .containsExactly("lessons", "quizzes", "firstTryBonus", "courses", "community");
+            .containsExactly("lessons", "quizzes", "firstTryBonus", "courses", "community", "adjustments");
         assertThat(mine.path("total").asLong()).isEqualTo(mine.path("parts").path("lessons").asLong()
             + mine.path("parts").path("quizzes").asLong() + mine.path("parts").path("firstTryBonus").asLong()
-            + mine.path("parts").path("courses").asLong() + mine.path("parts").path("community").asLong());
+            + mine.path("parts").path("courses").asLong() + mine.path("parts").path("community").asLong() + mine.path("parts").path("adjustments").asLong());
         api.http(ADMIN, get("/api/v1/me/learning/points"), 403, "CORE-ACCESS_DENIED");
     }
 
@@ -164,19 +164,19 @@ class LearningPointsIT extends AssessmentIntegrationTest {
 
         runBackfill();
 
-        assertThat(parts(user)).isEqualTo(new PointParts(10, 60, 20, 40, 0));
+        assertThat(parts(user)).isEqualTo(new PointParts(10, 60, 20, 40, 0, 0));
         assertThat(parts(user).lessons() + parts(user).quizzes() + parts(user).firstTryBonus()
             + parts(user).courses()).as("old points without the streak part").isEqualTo(130);
         assertThat(jdbc.queryForObject("select count(*) from learning_hub.xp_ledger where user_id = ?"
             + " and reason = 'migration'", Integer.class, user)).isEqualTo(6);
 
         runBackfill();
-        assertThat(parts(user)).as("a rerun writes nothing twice").isEqualTo(new PointParts(10, 60, 20, 40, 0));
+        assertThat(parts(user)).as("a rerun writes nothing twice").isEqualTo(new PointParts(10, 60, 20, 40, 0, 0));
 
         // Xóa mềm đề, rút khóa và xóa bài không làm mất XP đã có.
         jdbc.update("update learning_hub.quizzes set is_deleted = true where quiz_id = ?", firstTry);
         jdbc.update("update learning_hub.course_enrollments set status = 'withdrawn' where user_id = ?", user);
-        assertThat(parts(user)).isEqualTo(new PointParts(10, 60, 20, 40, 0));
+        assertThat(parts(user)).isEqualTo(new PointParts(10, 60, 20, 40, 0, 0));
     }
 
     private void runBackfill() {

@@ -71,6 +71,24 @@ public class XpLedgerRepository {
             .executeUpdate() > 0;
     }
 
+    /** Ghi dòng điều chỉnh (số có dấu) với lý do; trả entry_id. Mã nguồn là UUID mới nên không bao giờ trùng. */
+    public long appendAdjustment(String userId, int amount, Instant occurredAt, String sourceRef,
+                                 long configVersionId, String reason) {
+        return ((Number) entityManager.createNativeQuery("""
+            insert into learning_hub.xp_ledger (user_id, amount, occurred_at, source_kind, source_ref,
+                config_version_id, reason)
+            values (:user, :amount, :at, 'ADJUSTMENT', :ref, :version, :reason)
+            returning entry_id
+            """)
+            .setParameter("user", userId)
+            .setParameter("amount", amount)
+            .setParameter("at", occurredAt)
+            .setParameter("ref", sourceRef)
+            .setParameter("version", configVersionId)
+            .setParameter("reason", reason)
+            .getSingleResult()).longValue();
+    }
+
     /**
      * Ghi XP cộng đồng cho các đóng góp được chấp nhận hoặc hữu ích (accepted_answer, received_upvote) chưa có dòng.
      * Mỗi đóng góp một dòng, mã nguồn là nội dung + lý do + người thực hiện nên chấp nhận lại sau khi bỏ chấp nhận

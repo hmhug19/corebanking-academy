@@ -7,7 +7,8 @@ public final class LearningPointsViews {
     }
 
     /** Các nguồn XP; chuỗi ngày không cộng XP nên không có phần chuỗi. */
-    public record PointParts(long lessons, long quizzes, long firstTryBonus, long courses, long community) {
+    public record PointParts(long lessons, long quizzes, long firstTryBonus, long courses, long community,
+                             long adjustments) {
     }
 
     /**

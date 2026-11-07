@@ -50,9 +50,10 @@ public class LearningPointsService {
             Map<String, Long> own = sums.getOrDefault(userId, Map.of());
             PointParts parts = new PointParts(own.getOrDefault(XpSource.LESSON, 0L),
                 own.getOrDefault(XpSource.QUIZ_PASS, 0L), own.getOrDefault(XpSource.QUIZ_FIRST_TRY_BONUS, 0L),
-                own.getOrDefault(XpSource.COURSE, 0L), own.getOrDefault(XpSource.COMMUNITY, 0L));
+                own.getOrDefault(XpSource.COURSE, 0L), own.getOrDefault(XpSource.COMMUNITY, 0L),
+                own.getOrDefault(XpSource.ADJUSTMENT, 0L));
             result.put(userId, new MyPoints(parts.lessons() + parts.quizzes() + parts.firstTryBonus()
-                + parts.courses() + parts.community(), parts, streakDays.getOrDefault(userId, 0)));
+                + parts.courses() + parts.community() + parts.adjustments(), parts, streakDays.getOrDefault(userId, 0)));
         }
         return result;
     }
