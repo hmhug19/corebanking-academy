@@ -1,6 +1,6 @@
 package vn.com.coreacademy.learning.dto;
 
-import vn.com.coreacademy.common.dto.PageResponse;
+import java.util.List;
 
 public final class LearningPointsViews {
     private LearningPointsViews() {
@@ -26,7 +26,14 @@ public final class LearningPointsViews {
                                  int streakDays, boolean me) {
     }
 
-    /** page là trang xếp hạng; me là dòng của người gọi, luôn có kể cả khi không nằm trong trang. */
-    public record LeaderboardPage(PageResponse<LeaderboardRow> page, LeaderboardRow me) {
+    /**
+     * Bảng xếp hạng một kỳ. top là tối đa 10 người đầu; me là dòng của người gọi, luôn có (rank null nếu không thuộc
+     * phạm vi). Khi me nằm ngoài top, above là 1-2 người ngay trên me và gapToAbove là số XP còn thiếu để vượt người
+     * gần nhất có XP cao hơn (null khi không có). Không có phân trang và không có tổng số người. from và to là ngày
+     * đầu và ngày cuối của kỳ (null khi period=all).
+     */
+    public record Leaderboard(String period, int offset, java.time.LocalDate from, java.time.LocalDate to,
+                              List<LeaderboardRow> top, LeaderboardRow me, List<LeaderboardRow> above,
+                              Long gapToAbove) {
     }
 }

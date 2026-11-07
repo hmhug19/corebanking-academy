@@ -361,7 +361,7 @@ có điểm; vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Hạng phụ thuộ
 | API | Trách nhiệm |
 |---|---|
 | GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, firstTryBonus, courses }, streakDays }` của caller |
-| GET `/me/learning/leaderboard?scope=team\|org\|all&page&size` | `LeaderboardPage { page: PageResponse<LeaderboardRow>, me: LeaderboardRow }`; `scope` mặc định `org`, `page` mặc định 0, `size` mặc định 20, tối đa 100 |
+| GET `/me/learning/leaderboard?scope=team\|org\|all&period=week\|month\|all&offset` | `Leaderboard { period, offset, from, to, top, me, above, gapToAbove }`; `scope` mặc định `org`, `period` mặc định `month`, `offset` mặc định 0 (lùi về tuần/tháng trước, bỏ qua khi `period=all`); không phân trang, không tổng số người |
 
 `LeaderboardRow { rank, userId, fullName, teamName, points, streakDays, me }`. `points` bằng `total` của `/points` cho cùng
 người, nên thẻ điểm và bảng không lệch nhau.
@@ -372,16 +372,21 @@ Bảng xếp hạng (`/leaderboard`):
   (`UserRepository.findLearningCandidates`, dùng lại qua `LearningIdentityService.rankableLearners`). `team` là nhóm của
   caller, `org` là đơn vị của caller (không gồm đơn vị con), `all` là mọi học viên đủ điều kiện trong hệ thống, kể cả đơn vị
   khác (xem tên người của đơn vị khác là quyết định nghiệp vụ, mặc định bật như mockup "Toàn hệ thống").
-- **Thứ tự**: điểm giảm dần, cùng điểm xếp theo họ tên (Collator `vi`) rồi mã cán bộ. Cùng điểm chung hạng và hạng kế
+- **Kỳ**: XP của kỳ là tổng các dòng sổ XP có `occurred_at` trong kỳ theo giờ Asia/Ho_Chi_Minh; `week` là thứ Hai đến Chủ nhật,
+  `month` là tháng dương lịch, `all` là mọi lúc (khớp thẻ XP). `from`/`to` là ngày đầu và ngày cuối của kỳ (null khi `all`).
+- **Trả về**: `top` là tối đa 10 người đầu; `me` là dòng của caller; khi caller ngoài top 10, `above` là 1-2 người ngay
+  trên caller và `gapToAbove` là XP còn thiếu để vượt người gần nhất có XP cao hơn. Trong top 10 thì dòng của caller nằm
+  ngay trong `top` (`me = true`), `above` rỗng và `gapToAbove` null.
+- **Thứ tự**: XP giảm dần, cùng điểm xếp theo họ tên (Collator `vi`) rồi mã cán bộ. Cùng điểm chung hạng và hạng kế
   tiếp nhảy cóc (1, 1, 3). Người 0 điểm nằm cuối, cũng theo tên, và chung một hạng.
-- **`me`** là dòng của caller (`me = true`), luôn có kể cả khi không nằm trong trang; `rank` của `me` tính trong đúng phạm
-  vi đang xem. Caller chưa thuộc nhóm nào xem `team` nhận trang rỗng, `me.rank = null` và `me.teamName = null`.
+- **`me`** là dòng của caller (`me = true`), luôn có kể cả khi không nằm trong top; `rank` của `me` tính trong đúng phạm
+  vi đang xem. Caller chưa thuộc nhóm nào xem `team` nhận `top` rỗng, `me.rank = null` và `me.teamName = null`.
 - Điểm của cả phạm vi được tính rồi mới phân trang vì hạng phụ thuộc điểm của mọi người: một truy vấn gom tổng theo nguồn từ sổ XP
   và một truy vấn chuỗi cho cả phạm vi, không truy vấn theo từng người. Phạm vi vượt 5.000 học viên trả `LEARNING-LEADERBOARD_TOO_LARGE`.
   Đo trên PostgreSQL 16 (Testcontainers, dữ liệu tổng hợp 60 ngày học, 5 lần học × 12 bài hoàn thành, 3 đề đạt mỗi
   người): 7 người của bộ demo 3 ms, 500 người 57 ms, 4.900 người 540 ms cho điểm và 618 ms cho cả API. Nếu phạm vi
   thực tế vượt vài nghìn người, cân nhắc bảng tổng hợp hằng đêm thay vì tính khi đọc.
-- Lỗi: `scope` ngoài `team|org|all`, `size` ngoài 1-100 hoặc `page` âm trả `CORE-VALIDATION_FAILED`; vai trò không phải
+- Lỗi: `scope` ngoài `team|org|all`, `period` ngoài `week|month|all` hoặc `offset` âm hoặc quá 520 trả `CORE-VALIDATION_FAILED`; vai trò không phải
   học viên trả 403 `CORE-ACCESS_DENIED`.
 
 Bốn nguồn XP và trọng số (phiên bản cấu hình 1 gieo từ `app.learning.points.*`, biến môi trường `APP_LEARNING_POINTS_LESSON`,

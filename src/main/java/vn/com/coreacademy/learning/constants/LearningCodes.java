@@ -279,6 +279,17 @@ public final class LearningCodes {
         }
     }
 
+    /** Kỳ xếp hạng; week là thứ Hai-Chủ nhật, month là tháng dương lịch, cả hai theo Asia/Ho_Chi_Minh. */
+    public static final class LeaderboardPeriod {
+        public static final String WEEK = "week";
+        public static final String MONTH = "month";
+        public static final String ALL = "all";
+        public static final String PATTERN = WEEK + "|" + MONTH + "|" + ALL;
+
+        private LeaderboardPeriod() {
+        }
+    }
+
     /** Hoạt động đầu tiên trong ngày, ghi ở learning_activity_days.first_source. */
     public static final class ActivitySource {
         public static final String SESSION = "session";

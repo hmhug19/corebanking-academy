@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardPeriod;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardScope;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningLevelViews;
@@ -96,18 +97,23 @@ public class LearningLeaderboardController {
     @Operation(
         summary = "Bảng xếp hạng điểm học tập",
         description = """
-            Xếp hạng học viên đủ điều kiện học theo điểm giảm dần; cùng điểm chung hạng (1, 1, 3).
+            Xếp hạng học viên đủ điều kiện học theo XP của kỳ, giảm dần; cùng XP chung hạng (1, 1, 3).
             - scope: team (nhóm của caller), org (đơn vị của caller, mặc định) hoặc all (mọi học viên trong hệ thống).
-            - me là dòng của caller, luôn có kể cả khi không nằm trong trang; rank của me là null nếu caller không thuộc
-              phạm vi (xem nhóm khi chưa có nhóm).
+            - period: week (thứ Hai-Chủ nhật), month (mặc định) hoặc all, theo giờ Asia/Ho_Chi_Minh; offset lùi về
+              tuần hoặc tháng trước (0 là kỳ hiện tại, bị bỏ qua khi period=all).
+            - Trả top 10 và me (luôn có; rank null nếu caller không thuộc phạm vi). Khi me ngoài top 10, above là 1-2
+              người ngay trên me và gapToAbove là XP còn thiếu để vượt người gần nhất có XP cao hơn. Không phân trang
+              và không có tổng số người.
             - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
             """
     )
-    public BaseResponse<LearningPointsViews.LeaderboardPage> leaderboard(
+    public BaseResponse<LearningPointsViews.Leaderboard> leaderboard(
         @Parameter(description = "team | org | all")
         @RequestParam(defaultValue = LeaderboardScope.ORG) @Pattern(regexp = LeaderboardScope.PATTERN) String scope,
-        @RequestParam(defaultValue = "0") @Min(0) int page,
-        @RequestParam(defaultValue = "20") @Min(1) @Max(LearningLimits.MAX_LEADERBOARD_PAGE_SIZE) int size) {
-        return BaseResponse.ok(leaderboard.leaderboard(scope, page, size));
+        @Parameter(description = "week | month | all")
+        @RequestParam(defaultValue = LeaderboardPeriod.MONTH) @Pattern(regexp = LeaderboardPeriod.PATTERN)
+        String period,
+        @RequestParam(defaultValue = "0") @Min(0) @Max(LearningLimits.MAX_LEADERBOARD_OFFSET) int offset) {
+        return BaseResponse.ok(leaderboard.leaderboard(scope, period, offset));
     }
 }

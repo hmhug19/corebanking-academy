@@ -38,4 +38,25 @@ public class LearningPointsRepository {
         }
         return result;
     }
+
+    /** Người → tổng XP của các dòng có occurred_at trong [from, to); to null nghĩa là không chặn trên. */
+    public Map<String, Long> sumsBetween(Collection<String> userIds, java.time.Instant from, java.time.Instant to) {
+        if (userIds.isEmpty()) {
+            return Map.of();
+        }
+        List<?> rows = entityManager.createNativeQuery("""
+            select user_id, sum(amount)
+            from learning_hub.xp_ledger
+            where user_id in (:users)
+              and (cast(:from as timestamptz) is null or occurred_at >= cast(:from as timestamptz))
+              and (cast(:to as timestamptz) is null or occurred_at < cast(:to as timestamptz))
+            group by user_id
+            """).setParameter("users", userIds).setParameter("from", from).setParameter("to", to).getResultList();
+        Map<String, Long> result = new HashMap<>();
+        for (Object row : rows) {
+            Object[] columns = (Object[]) row;
+            result.put((String) columns[0], ((Number) columns[1]).longValue());
+        }
+        return result;
+    }
 }
