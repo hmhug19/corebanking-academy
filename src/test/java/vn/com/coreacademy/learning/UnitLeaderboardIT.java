@@ -249,6 +249,27 @@ class UnitLeaderboardIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void aLearnerWhoHidesTheirNameStillCountsForTheirUnit() {
+        unit("A", 5);
+        xp("UL-A-1", 100, "0 days");
+        xp("UL-A-2", 50, "0 days");
+        learned("UL-A-1", "0 days");
+        JsonNode before = board(LEARNER, "").path("top").get(0);
+        jdbc.update("insert into learning_hub.learner_preferences (user_id, leaderboard_hidden) values (?, true)",
+            "UL-A-1");
+
+        try {
+            JsonNode after = board(LEARNER, "").path("top").get(0);
+
+            assertThat(after.path("averageXp").asDouble()).isEqualTo(before.path("averageXp").asDouble())
+                .isEqualTo(75.0);
+            assertThat(after.path("participationPercent").asInt()).isEqualTo(20);
+        } finally {
+            jdbc.update("delete from learning_hub.learner_preferences where user_id = 'UL-A-1'");
+        }
+    }
+
+    @Test
     void aNonLearnerIsRefusedAndBadParametersAreRejected() {
         api.http(ADMIN, get(URL), 403, "CORE-ACCESS_DENIED");
         api.error(LEARNER, get(URL + "?period=year"), "CORE-VALIDATION_FAILED");

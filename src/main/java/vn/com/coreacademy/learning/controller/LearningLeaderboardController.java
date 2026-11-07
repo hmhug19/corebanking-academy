@@ -1,5 +1,6 @@
 package vn.com.coreacademy.learning.controller;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
@@ -12,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,8 +26,10 @@ import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningBadgeViews;
 import vn.com.coreacademy.learning.dto.LearningLevelViews;
 import vn.com.coreacademy.learning.dto.LearningPointsViews;
+import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningStreakViews;
 import vn.com.coreacademy.learning.service.BadgeService;
+import vn.com.coreacademy.learning.service.LearnerPreferenceService;
 import vn.com.coreacademy.learning.service.LearningLeaderboardService;
 import vn.com.coreacademy.learning.service.LearningUnitLeaderboardService;
 import vn.com.coreacademy.learning.service.LearningPointsService;
@@ -44,6 +49,7 @@ public class LearningLeaderboardController {
     private final LevelService levels;
     private final BadgeService badges;
     private final LearningUnitLeaderboardService units;
+    private final LearnerPreferenceService preferences;
 
     @GetMapping("/points")
     @ApiResponse(responseCode = "200",
@@ -111,6 +117,38 @@ public class LearningLeaderboardController {
     )
     public BaseResponse<LearningBadgeViews.MyBadges> badges() {
         return BaseResponse.ok(badges.mine());
+    }
+
+    @GetMapping("/preferences")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Tùy chọn của tôi",
+        description = """
+            Tùy chọn gamification của chính người gọi: showOnLeaderboard (mặc định true).
+            - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403. Không có cách đọc tùy chọn của người khác.
+            """
+    )
+    public BaseResponse<LearningPointsViews.LearnerPreferences> preferences() {
+        return BaseResponse.ok(preferences.mine());
+    }
+
+    @PutMapping("/preferences")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Đổi tùy chọn của tôi",
+        description = """
+            Đặt showOnLeaderboard. Khi false:
+            - người khác không còn thấy tên trên bảng xếp hạng cá nhân và hạng của họ khép lại, không có dòng "Ẩn danh";
+            - chính học viên vẫn thấy hạng mình sẽ có nếu hiện;
+            - XP của họ vẫn tính vào đơn vị trên bảng đơn vị.
+            - Chỉ sửa được tùy chọn của chính người gọi; học viên đã ẩn hiện lại khi đặt true.
+            """
+    )
+    public BaseResponse<LearningPointsViews.LearnerPreferences> updatePreferences(
+        @Valid @RequestBody LearningRequests.LearnerPreferencesRequest request) {
+        return BaseResponse.ok(preferences.update(request.showOnLeaderboard()));
     }
 
     @GetMapping("/leaderboard/units")

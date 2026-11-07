@@ -61,4 +61,9 @@ public final class LearningPointsViews {
     public record UnitLeaderboard(String period, int offset, java.time.LocalDate from, java.time.LocalDate to,
                                   List<UnitRow> top, UnitRow myUnit, boolean myUnitTooSmall) {
     }
+
+    /** Tùy chọn của học viên. showOnLeaderboard=false: tên bị ẩn khỏi bảng xếp hạng của người khác, XP vẫn tính vào đơn vị. */
+    public record LearnerPreferences(
+        @Schema(description = "Hiện tên trên bảng xếp hạng của người khác; mặc định true.") boolean showOnLeaderboard) {
+    }
 }

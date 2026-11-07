@@ -363,6 +363,8 @@ có điểm; vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Hạng phụ thuộ
 | GET `/me/learning/points` | `MyPoints { total, parts { lessons, quizzes, firstTryBonus, courses }, streakDays }` của caller |
 | GET `/me/learning/leaderboard?scope=team\|org\|all&period=week\|month\|all&offset` | `Leaderboard { period, offset, from, to, top, me, above, gapToAbove }`; `scope` mặc định `org`, `period` mặc định `month`, `offset` mặc định 0 (lùi về tuần/tháng trước, bỏ qua khi `period=all`); không phân trang, không tổng số người |
 | GET `/me/learning/leaderboard/units?period=week\|month\|all&offset` | `UnitLeaderboard { period, offset, from, to, top, myUnit, myUnitTooSmall }`; `UnitRow { rank, orgId, unitName, averageXp, participationPercent, mine }`. Chỉ đơn vị từ 5 học viên được xếp hạng; `averageXp` = XP trung bình mỗi học viên có XP trong kỳ, `participationPercent` = % học viên có ít nhất một ngày học đủ điều kiện; top 10 + đơn vị của người gọi, không trả các hạng cuối; `myUnit` null và `myUnitTooSmall` true khi đơn vị chưa đủ 5 học viên; đồng điểm chung hạng |
+| GET `/me/learning/preferences` | `LearnerPreferences { showOnLeaderboard }` của chính người gọi, mặc định `true`; chỉ học viên |
+| PUT `/me/learning/preferences` | Body `{ showOnLeaderboard }` (bắt buộc). `false`: người khác không thấy tên trên bảng cá nhân và hạng khép lại (không có dòng "Ẩn danh"); chính học viên vẫn thấy hạng mình sẽ có nếu hiện; XP vẫn tính vào đơn vị. Chỉ sửa được tùy chọn của chính mình; trả giá trị đang áp dụng |
 
 `LeaderboardRow { rank, userId, fullName, teamName, points, streakDays, me }`. `points` bằng `total` của `/points` cho cùng
 người, nên thẻ điểm và bảng không lệch nhau.

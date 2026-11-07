@@ -1188,3 +1188,14 @@ COMMENT ON COLUMN learning_hub.user_badges.user_id IS 'Mã cán bộ học viên
 COMMENT ON COLUMN learning_hub.user_badges.badge_id IS 'Huy hiệu (badge_definitions.badge_id, ID logic không FK).';
 COMMENT ON COLUMN learning_hub.user_badges.earned_at IS 'Lúc nhận.';
 COMMENT ON COLUMN learning_hub.user_badges.source IS 'EVENT: đạt khi sự kiện xảy ra (có thông báo). BACKFILL: trao âm thầm khi huy hiệu được tạo (không thông báo).';
+
+CREATE TABLE learning_hub.learner_preferences (
+    user_id varchar(20) NOT NULL,
+    leaderboard_hidden boolean NOT NULL DEFAULT false,
+    update_time timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT pk_learner_preferences PRIMARY KEY (user_id)
+);
+COMMENT ON TABLE learning_hub.learner_preferences IS 'Tùy chọn của học viên về gamification; chỉ có dòng khi học viên đã đổi một tùy chọn khỏi mặc định. Hiện chỉ có việc ẩn tên khỏi bảng xếp hạng.';
+COMMENT ON COLUMN learning_hub.learner_preferences.user_id IS 'Mã cán bộ học viên (ID logic không FK).';
+COMMENT ON COLUMN learning_hub.learner_preferences.leaderboard_hidden IS 'true: ẩn tên khỏi bảng xếp hạng của người khác, hạng chung khép lại; người đó vẫn thấy hạng của mình và XP vẫn tính vào đơn vị. Mặc định false (hiện).';
+COMMENT ON COLUMN learning_hub.learner_preferences.update_time IS 'Lần đổi gần nhất.';

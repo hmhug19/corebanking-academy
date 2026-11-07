@@ -264,4 +264,7 @@ public final class LearningRequests {
         @DecimalMin("0") BigDecimal watchedToSeconds,
         @Min(1) Integer pdfPage) {
     }
+
+    public record LearnerPreferencesRequest(@NotNull Boolean showOnLeaderboard) {
+    }
 }

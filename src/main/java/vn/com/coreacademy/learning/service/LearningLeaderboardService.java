@@ -23,12 +23,13 @@ import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningPointsViews.Leaderboard;
 import vn.com.coreacademy.learning.dto.LearningPointsViews.LeaderboardRow;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
+import vn.com.coreacademy.learning.repository.LearnerPreferenceRepository;
 import vn.com.coreacademy.learning.repository.LearningPointsRepository;
 
 /**
  * Bảng xếp hạng XP theo kỳ (tuần, tháng, tất cả) và phạm vi nhóm, đơn vị hoặc toàn hệ thống. Người được xếp hạng là học
  * viên đủ điều kiện học (cùng điều kiện với giao học, lấy từ Identity); XP lấy từ sổ ghi XP nên kỳ "tất cả" khớp thẻ
- * XP. Toàn bộ phạm vi được tính vì hạng phụ thuộc XP của mọi người, nhưng chỉ trả vài dòng.
+ * XP. Người đã ẩn tên bị loại khỏi bảng của người khác và hạng khép lại; chính họ vẫn thấy mình ở hạng sẽ có nếu hiện. Toàn bộ phạm vi được tính vì hạng phụ thuộc XP của mọi người, nhưng chỉ trả vài dòng.
  */
 @Service
 @Transactional(readOnly = true)
@@ -37,6 +38,7 @@ public class LearningLeaderboardService {
     private final LearningAccessPolicy access;
     private final LearningIdentityService identity;
     private final LearningPointsRepository points;
+    private final LearnerPreferenceRepository preferences;
     private final LearningStreakService streaks;
 
     private record Ranked(Person person, long xp) {
@@ -61,7 +63,9 @@ public class LearningLeaderboardService {
         Map<String, Long> sums = points.sumsBetween(ids, range.fromInstant(), range.endInstant());
 
         Collator collator = Collator.getInstance(Locale.forLanguageTag("vi"));
+        Set<String> hidden = preferences.hiddenAmong(ids);
         List<Ranked> ranked = new ArrayList<>(members.stream()
+            .filter(p -> !hidden.contains(p.id()) || p.id().equals(caller.id()))
             .map(p -> new Ranked(p, sums.getOrDefault(p.id(), 0L))).toList());
         ranked.sort(Comparator.<Ranked>comparingLong(r -> -r.xp())
             .thenComparing(r -> r.person().name(), collator).thenComparing(r -> r.person().id()));
