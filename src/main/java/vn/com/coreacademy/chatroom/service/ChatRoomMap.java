@@ -15,7 +15,11 @@ public class ChatRoomMap {
     public record Furniture(String kind, double x, double y, double w, double h) {
     }
 
-    public record Layout(int width, int height, double speed, double radius, Point spawn, List<Furniture> objects) {
+    public record Area(double x, double y, double w, double h) {
+    }
+
+    public record Layout(int width, int height, double speed, double radius, Point spawn, List<Furniture> objects,
+        Area activityArea) {
     }
 
     private final Layout layout;
