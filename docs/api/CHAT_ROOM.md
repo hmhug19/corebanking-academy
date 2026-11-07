@@ -15,28 +15,38 @@ Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-ro
 
 | Hướng | type | Nội dung |
 |---|---|---|
-| Client → server | `join` | `{name,color}`; tên 1–24 ký tự sau chuẩn hóa NFC/trim; màu `teal/slate/amber/blue/rose` |
+| Client → server | `join` | `{name,color,activities?,gestures?}`; tên 1–24 ký tự sau chuẩn hóa NFC/trim; màu `teal/slate/amber/blue/rose`; `activities: true` bật Đố vui, `gestures: true` đăng ký sự kiện động tác |
 | Client → server | `move` | `{x,y,facing?}`; tọa độ chân nhân vật theo pixel; `facing` là một trong tám hướng |
 | Client → server | `chat` | `{text}`; 1–280 ký tự, tối thiểu 750 ms giữa các tin |
+| Client → server | `gesture` | `{kind}` với `jump` hoặc `wave`; server nhận tối đa một động tác mỗi 1.200 ms cho mỗi kết nối |
+| Client → server | `game-start` | Host mở câu hỏi kế tiếp trong bộ câu hỏi có sẵn |
+| Client → server | `game-answer` | `{roundId,choice}`; `choice` là chỉ số từ 0 đến 3 |
+| Client → server | `game-close` | `{roundId}`; host khóa câu hỏi và công bố đáp án |
 | Client → server | `ping` | Heartbeat; FE gửi mỗi 10 giây |
-| Server → client | `welcome` | `{id,players,history:[]}`; danh sách người chơi, không phát lại tin nhắn. `history` rỗng chỉ giữ tương thích client cũ |
+| Server → client | `welcome` | `{id,players,history:[],gestures}`; `gestures` xác nhận hỗ trợ động tác. `history` rỗng chỉ giữ tương thích client cũ |
 | Server → client | `joined` | `{player}`; player gồm `id,name,color,x,y,facing` |
 | Server → client | `moved` | `{id,x,y,facing}`; vị trí đã qua kiểm tra tốc độ và đường đi |
 | Server → client | `correction` | `{x,y}`; vị trí sửa chỉ gửi cho người di chuyển không hợp lệ |
 | Server → client | `chat` | `{id,playerId,name,color,text,at}`; `at` là ISO UTC |
+| Server → client | `gesture` | `{kind,playerId,targetId?,facing?}`; vẫy chào quay về người gần nhất trong phạm vi 220 px nếu đường giữa hai người thông thoáng |
+| Server → client | `game` | `{hostId,round?}`; gửi sau khi vào phòng và khi trạng thái Đố vui thay đổi. `round` gồm `{id,prompt,options,answered,yourChoice}` và thêm `{correctIndex,correctCount}` sau khi khóa câu hỏi |
 | Server → client | `left` | `{id,name}` |
 | Server → client | `error` | `{message}`; lỗi packet/validation, không phản chiếu thông tin nội bộ |
 | Server → client | `pong` | Phản hồi heartbeat |
 
 Hitbox AABB tại chân nhân vật; biên phòng, bàn, ghế, bảng, kệ và cây đều chặn di chuyển. Server kiểm tra đoạn đường mỗi 4 px để chặn xuyên vật thể và ngân sách tốc độ để chặn teleport. Các nhân vật có thể đi ngang nhau. Hướng nhìn gồm `north`, `northeast`, `east`, `southeast`, `south`, `southwest`, `west`, `northwest`; client cũ bỏ qua field này vẫn hoạt động, server suy hướng từ dịch chuyển.
 
-FE mặc định dùng Three.js để dựng góc nhìn thứ nhất 3D, có thể chuyển sang bản đồ Phaser 2D ngay trong phòng mà không kết nối lại. Hai renderer dùng chung tọa độ, hitbox và hàm di chuyển. Chế độ 3D xoay bằng chuột khi nhấp vào phòng, kéo trên màn hình cảm ứng; WASD/phím mũi tên di chuyển tương đối theo hướng nhìn. Chế độ 2D di chuyển theo bản đồ và quay mặt theo tám hướng.
+FE mặc định dùng Three.js để dựng camera 3D theo nhân vật. Kéo để xoay camera, bấm “Cận cảnh nhân vật” để nhìn từ phía trước. WASD hoặc phím mũi tên di chuyển theo góc camera. Có thể chuyển sang bản đồ Phaser 2D trong cùng phiên WebSocket. Hai renderer dùng chung tọa độ, hitbox và hàm di chuyển.
 
-Nhấn Enter hoặc “Nhắn tin” để mở ô nhập dưới cảnh, ngay trên dòng hướng dẫn. Enter gửi và đóng ô; Esc đóng ô hoặc thả chuột. Tin nhắn chỉ thay tên trên đầu nhân vật trong 5,5 giây rồi biến mất. Không có khung trò chuyện/lịch sử. Backend không lưu nội dung tin nhắn; chỉ broadcast tới người đã vào phòng tại thời điểm gửi. Người vào sau hoặc reconnect không nhận tin cũ, kể cả khi bong bóng còn hiện ở client khác.
+Bản đồ 1.600 × 1.120 có `activityArea` đánh dấu khu giao lưu. Khu này đi qua được. Bấm Space khi cảnh được focus hoặc bấm “Nhảy” để nhảy tại chỗ. “Vẫy chào” vẫy về phía người ở gần hoặc vẫy tại chỗ. Cả hai renderer phát động tác từ sự kiện WebSocket. Tọa độ mặt đất và hitbox tiếp tục do server kiểm tra.
+
+Nhấn Enter hoặc “Nhắn tin” để mở ô nhập dưới cảnh, ngay trên dòng hướng dẫn. Enter gửi và đóng ô. Esc đóng ô để tiếp tục di chuyển. Tin nhắn chỉ thay tên trên đầu nhân vật trong 5,5 giây rồi biến mất. Không có khung trò chuyện/lịch sử. Backend không lưu nội dung tin nhắn; chỉ broadcast tới người đã vào phòng tại thời điểm gửi. Người vào sau hoặc reconnect không nhận tin cũ, kể cả khi bong bóng còn hiện ở client khác.
+
+Đố vui dùng chung cho cả hai chế độ. Phiên đầu tiên vào phòng với `activities: true` làm host. Khi phiên đó rời, server chọn phiên hỗ trợ Đố vui kết nối sớm nhất còn lại và giữ nguyên câu hiện tại. Server khóa mỗi câu trả lời theo tài khoản đã xác thực, kể cả khi mở nhiều tab hoặc kết nối lại. `yourChoice` chỉ phản ánh lựa chọn của tài khoản đang xem. Khi phiên cuối cùng hỗ trợ Đố vui rời phòng, server đặt lại câu hỏi và kết quả.
 
 ## Cấu hình và triển khai
 
-Giữ Java/compiler, Docker và database theo cấu hình repository. Dependency BE là `spring-boot-starter-websocket`, theo BOM hiện có. Mỗi instance giữ một phòng và tối đa 60 kết nối trong RAM; không có bộ đệm lịch sử chat. Khi reconnect, nhân vật xuất hiện lại ở lối vào. Chưa hỗ trợ chia sẻ phòng giữa nhiều replica. Deploy BE trước FE để ngừng giữ/phát lịch sử cả ở lớp giao thức; không chỉ ẩn lịch sử ở giao diện. Không cần migration database hoặc thay cấu hình Nginx đang hoạt động.
+Giữ Java/compiler, Docker và database theo cấu hình repository. Dependency BE là `spring-boot-starter-websocket`, theo BOM hiện có. Mỗi instance giữ một phòng, trạng thái Đố vui và tối đa 60 kết nối trong RAM. Khi reconnect, nhân vật xuất hiện lại ở lối vào. Chưa hỗ trợ chia sẻ phòng giữa nhiều replica. Deploy BE trước FE để sẵn sàng cho các sự kiện Đố vui. Không cần migration database hoặc thay cấu hình Nginx đang hoạt động.
 
 Các property có mặc định tập trung tại `application.yml` và được validate bởi `ChatRoomProperties`:
 

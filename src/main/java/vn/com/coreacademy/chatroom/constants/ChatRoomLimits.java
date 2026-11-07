@@ -8,6 +8,8 @@ public final class ChatRoomLimits {
     public static final int OUTBOUND_BUFFER_BYTES = 65536;
     public static final int PACKETS_PER_SECOND = 80;
     public static final int CHAT_INTERVAL_MILLIS = 750;
+    public static final int GESTURE_INTERVAL_MILLIS = 1200;
+    public static final int WAVE_RANGE_PIXELS = 220;
 
     private ChatRoomLimits() {
     }
