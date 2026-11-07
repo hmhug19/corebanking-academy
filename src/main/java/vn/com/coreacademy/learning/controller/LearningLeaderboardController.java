@@ -20,9 +20,11 @@ import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardPeriod;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaderboardScope;
 import vn.com.coreacademy.learning.constants.LearningLimits;
+import vn.com.coreacademy.learning.dto.LearningBadgeViews;
 import vn.com.coreacademy.learning.dto.LearningLevelViews;
 import vn.com.coreacademy.learning.dto.LearningPointsViews;
 import vn.com.coreacademy.learning.dto.LearningStreakViews;
+import vn.com.coreacademy.learning.service.BadgeService;
 import vn.com.coreacademy.learning.service.LearningLeaderboardService;
 import vn.com.coreacademy.learning.service.LearningPointsService;
 import vn.com.coreacademy.learning.service.LearningStreakService;
@@ -39,6 +41,7 @@ public class LearningLeaderboardController {
     private final LearningLeaderboardService leaderboard;
     private final LearningStreakService streaks;
     private final LevelService levels;
+    private final BadgeService badges;
 
     @GetMapping("/points")
     @ApiResponse(responseCode = "200",
@@ -89,6 +92,23 @@ public class LearningLeaderboardController {
     )
     public BaseResponse<LearningStreakViews.MyStreak> streak() {
         return BaseResponse.ok(streaks.mine());
+    }
+
+    @GetMapping("/badges")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Huy hiệu của tôi",
+        description = """
+            Huy hiệu đã nhận (mới nhất trước) và huy hiệu chưa nhận cùng điều kiện nhận.
+            - Huy hiệu chương trình chưa nhận có progress {done, total} (số khóa x/y); loại khác có progress null.
+            - Huy hiệu đã ngừng dùng chỉ hiện với người đã nhận (retired = true) và không bao giờ bị thu hồi.
+            - Lần đọc đầu tiên của hệ thống tạo bộ huy hiệu khởi đầu và trao âm thầm cho người đã đủ điều kiện.
+            - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
+            """
+    )
+    public BaseResponse<LearningBadgeViews.MyBadges> badges() {
+        return BaseResponse.ok(badges.mine());
     }
 
     @GetMapping("/leaderboard")

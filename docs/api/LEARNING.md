@@ -389,6 +389,26 @@ Bảng xếp hạng (`/leaderboard`):
 - Lỗi: `scope` ngoài `team|org|all`, `period` ngoài `week|month|all` hoặc `offset` âm hoặc quá 520 trả `CORE-VALIDATION_FAILED`; vai trò không phải
   học viên trả 403 `CORE-ACCESS_DENIED`.
 
+Huy hiệu (`GET /me/learning/badges`): `MyBadges { earned: BadgeView[], notEarned: BadgeView[] }`, `BadgeView { badgeId, name,
+description, icon, condition, earnedAt, retired, progress }`. Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
+
+- **Năm loại luật** (bảng `badge_definitions`, `rule_type` + `param_n` hoặc `param_program_id`): `COURSES_COMPLETED{n}` (số khóa
+  khác nhau đã hoàn thành), `PROGRAM_COMPLETED{programId}` (mọi khóa đã xuất bản của chương trình, chương trình phải có ít
+  nhất một khóa), `FIRST_TRY_PERFECT{n}` (số đề đạt 100% ngay lượt đầu), `ASSIGNED_BEFORE_DEADLINE{n}` (số đợt giao hoàn
+  thành khóa trước hoặc đúng hạn; đợt không có hạn hoặc đã thu hồi không tính), `STREAK_WORKING_DAYS{n}` (chuỗi dài nhất theo
+  ngày làm việc). `HOURS_LEARNED` được dành riêng, chưa xây.
+- **Kiểm tra theo sự kiện**: `XpLedgerService` gọi `BadgeService.evaluate` trong giao dịch của sự kiện: bài học xong → chuỗi;
+  đạt đề → đạt 100% lần đầu và chuỗi; xong khóa → số khóa, chương trình, trước hạn. Mỗi (người, huy hiệu) một dòng ở
+  `user_badges` nên lặp sự kiện không trao hai lần; `source = EVENT` (sẽ có thông báo, ticket sau).
+- **Trao bù khi tạo huy hiệu**: `BadgeService.backfill(badgeId)` trao âm thầm (`source = BACKFILL`, không thông báo) cho mọi người
+  đã đủ điều kiện; chạy lại không trao thêm. Lần đọc huy hiệu đầu tiên tạo bộ khởi đầu (khóa đầu tiên, 10 khóa, mỗi chương trình
+  đã xuất bản một huy hiệu, 100% lần đầu x3, trước hạn x3, chuỗi 5/20/60 ngày làm việc) rồi trao bù.
+- **Không bao giờ thu hồi**: huy hiệu ngừng dùng (`status = retired`) không được trao và không trao bù nữa nhưng người đã nhận giữ
+  nguyên và thấy `retired = true`; người chưa nhận không thấy nó.
+- `progress { done, total }` chỉ có ở huy hiệu chương trình chưa nhận ("x/y khóa"); `condition` là câu điều kiện tiếng Việt do
+  server dựng. `icon` là tên biểu tượng Lucide.
+- Schema: `docs/sql/upgrade/2026-11-07-badges.sql` phải chạy **trước khi triển khai backend**.
+
 Bốn nguồn XP và trọng số (phiên bản cấu hình 1 gieo từ `app.learning.points.*`, biến môi trường `APP_LEARNING_POINTS_LESSON`,
 `_QUIZ_PASS`; từ đó trọng số nằm ở `gamification_config_versions` và đổi trọng số chỉ áp dụng từ lúc đổi, không đổi XP cũ):
 

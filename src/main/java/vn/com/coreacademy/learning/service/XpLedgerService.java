@@ -2,11 +2,13 @@ package vn.com.coreacademy.learning.service;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.learning.config.LearningPointsProperties;
+import vn.com.coreacademy.learning.constants.LearningCodes.BadgeRule;
 import vn.com.coreacademy.learning.constants.LearningCodes.XpSource;
 import vn.com.coreacademy.learning.dto.GamificationConfig;
 import vn.com.coreacademy.learning.repository.XpLedgerRepository;
@@ -14,7 +16,7 @@ import vn.com.coreacademy.learning.repository.XpLedgerRepository;
 /**
  * Ghi XP vào sổ chỉ cộng thêm. Mỗi lần ghi chạy trong giao dịch của sự kiện sinh ra nó (bài học xong, đạt đề, xong
  * khóa) và dùng phiên bản cấu hình đang áp dụng lúc đó. Mỗi (người, loại nguồn, mã nguồn) chỉ có một dòng nên học lại
- * hay lặp sự kiện không ghi thêm; số XP bằng 0 không ghi dòng nào.
+ * hay lặp sự kiện không ghi thêm; số XP bằng 0 không ghi dòng nào. Cùng các sự kiện này kiểm tra luật huy hiệu.
  */
 @Service
 @Transactional
@@ -28,6 +30,7 @@ public class XpLedgerService {
     private final XpLedgerRepository repository;
     private final LearningPointsProperties seed;
     private final LevelService levels;
+    private final BadgeService badges;
 
     /** Phiên bản cấu hình đang áp dụng; lần đầu tiên được gieo từ app.learning.points.*. */
     public GamificationConfig currentConfig() {
@@ -42,6 +45,7 @@ public class XpLedgerService {
     public void lessonCompleted(String userId, Long lessonKey, Instant at) {
         GamificationConfig config = currentConfig();
         append(userId, config.lessonXp(), at, XpSource.LESSON, String.valueOf(lessonKey), config);
+        badges.evaluate(userId, List.of(BadgeRule.STREAK_WORKING_DAYS));
     }
 
     /**
@@ -57,11 +61,14 @@ public class XpLedgerService {
             append(userId, config.firstTryBonusXp(), at, XpSource.QUIZ_FIRST_TRY_BONUS, String.valueOf(quizId),
                 config);
         }
+        badges.evaluate(userId, List.of(BadgeRule.FIRST_TRY_PERFECT, BadgeRule.STREAK_WORKING_DAYS));
     }
 
     /** Khóa học hoàn thành; XP là điểm thưởng riêng của khóa, mỗi khóa một lần dù học lại. */
     public void courseCompleted(String userId, Long courseId, int rewardPoints, Instant at) {
         append(userId, rewardPoints, at, XpSource.COURSE, String.valueOf(courseId), currentConfig());
+        badges.evaluate(userId, List.of(BadgeRule.COURSES_COMPLETED, BadgeRule.PROGRAM_COMPLETED,
+            BadgeRule.ASSIGNED_BEFORE_DEADLINE));
     }
 
     /**

@@ -313,6 +313,35 @@ public final class LearningCodes {
         }
     }
 
+    /** Loại luật của huy hiệu. HOURS_LEARNED được dành riêng và chưa xây. */
+    public static final class BadgeRule {
+        public static final String COURSES_COMPLETED = "COURSES_COMPLETED";
+        public static final String PROGRAM_COMPLETED = "PROGRAM_COMPLETED";
+        public static final String FIRST_TRY_PERFECT = "FIRST_TRY_PERFECT";
+        public static final String ASSIGNED_BEFORE_DEADLINE = "ASSIGNED_BEFORE_DEADLINE";
+        public static final String STREAK_WORKING_DAYS = "STREAK_WORKING_DAYS";
+
+        private BadgeRule() {
+        }
+    }
+
+    public static final class BadgeStatus {
+        public static final String ACTIVE = "active";
+        public static final String RETIRED = "retired";
+
+        private BadgeStatus() {
+        }
+    }
+
+    /** Nguồn của một lần nhận huy hiệu: EVENT có thông báo, BACKFILL (trao bù khi tạo huy hiệu) thì không. */
+    public static final class BadgeSource {
+        public static final String EVENT = "EVENT";
+        public static final String BACKFILL = "BACKFILL";
+
+        private BadgeSource() {
+        }
+    }
+
     /** Loại neo của ghi chú và đánh dấu, ghi ở anchor_type; đánh dấu chỉ nhận pdf và video. */
     public static final class AnchorType {
         public static final String NONE = "none";
