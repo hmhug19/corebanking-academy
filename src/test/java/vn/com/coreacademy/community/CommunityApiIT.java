@@ -1062,16 +1062,36 @@ class CommunityApiIT {
 
     @Test
     void architectureReviewPinsThreadsAndConcludesOnlyAfterResolution() throws Exception {
+        var incomplete = body("organization", List.of());
+        incomplete.put("context", Map.of("review", Map.of("problem", "", "constraints", "", "decisionsNeeded", List.of())));
+        JsonNode incompleteDraft = success(post(API + "/reviews").content(json.writeValueAsString(incomplete)), "000005");
+        long incompleteId = incompleteDraft.path("contentId").asLong();
+        assertThat(response(post(API + "/contents/" + incompleteId + "/publish")
+            .content(json.writeValueAsString(versions(incompleteDraft))), "000005").path("status").asText())
+            .isEqualTo("ERROR");
         var body = body("organization", List.of());
         body.put("context", Map.of("review", Map.of("problem", "Synthetic architecture design problem",
             "constraints", "Synthetic constraints", "decisionsNeeded", List.of("Choose safe storage"))));
         JsonNode created = success(post(API + "/reviews").content(json.writeValueAsString(body)), "000005");
         long content = created.path("contentId").asLong();
+        assertThat(success(get(API + "/reviews/" + content), "000005").path("draftRevision").isNull()).isFalse();
+        assertThat(response(get(API + "/reviews/" + content), "000004").path("status").asText()).isEqualTo("ERROR");
+        assertThat(response(get(API + "/reviews/" + content + "/invitations"), "000004")
+            .path("status").asText()).isEqualTo("ERROR");
         JsonNode published = publish(content, created, "000005");
         published = success(post(API + "/contents/" + content + "/lifecycle").content(json.writeValueAsString(Map.of(
             "expectedContentVersion", published.path("contentVersion").asLong(), "action", "open_review",
             "reason", "Synthetic open review"))), "000005");
         long revision = published.path("publishedRevision").path("revisionId").asLong();
+        JsonNode detail = success(get(API + "/reviews/" + content), "000005");
+        assertThat(detail.path("reviewCapabilities").toString()).contains("invite", "conclude");
+        assertThat(success(get(API + "/reviews/" + content), "000004")
+            .path("reviewCapabilities").toString()).doesNotContain("invite", "conclude");
+        JsonNode invited = success(post(API + "/reviews/" + content + "/invitations")
+            .content(json.writeValueAsString(Map.of("reviewerUserIds", List.of("000004")))), "000005");
+        assertThat(invited.get(0).path("capabilities").toString()).contains("cancel");
+        assertThat(success(get(API + "/reviews/" + content + "/invitations"), "000004")
+            .path("items").get(0).path("capabilities").toString()).contains("accept", "decline");
         var request = Map.of("clientRequestId", UUID.randomUUID(), "revisionId", revision,
             "anchor", Map.of("type", "section", "section", "Storage design"),
             "bodyMarkdown", "Synthetic feedback on storage design");
@@ -1080,6 +1100,12 @@ class CommunityApiIT {
         assertThat(success(post(API + "/reviews/" + content + "/threads")
             .content(json.writeValueAsString(request)), "000004").path("threadId").asLong())
             .isEqualTo(thread.path("threadId").asLong());
+        assertThat(success(get(API + "/reviews/" + content + "/threads?revisionId=" + revision), "000004")
+            .path("totalElements").asLong()).isEqualTo(1);
+        assertThat(success(get(API + "/reviews/" + content), "000005")
+            .path("reviewCapabilities").toString()).doesNotContain("conclude");
+        assertThat(response(get(API + "/reviews/" + content + "/threads?revisionId=" + Long.MAX_VALUE), "000004")
+            .path("status").asText()).isEqualTo("ERROR");
         var conclusion = Map.of("expectedContentVersion", published.path("contentVersion").asLong(),
             "concludedRevisionId", revision, "conclusion", "Synthetic independent review conclusion");
         assertThat(response(post(API + "/reviews/" + content + "/conclude")
@@ -1122,6 +1148,7 @@ class CommunityApiIT {
     void swaggerDeclaresSuccessResponseSchemaForEveryImplementedRoute() throws Exception {
         JsonNode doc = json.readTree(mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString());
+        Files.createDirectories(Path.of("tmp"));
         Files.writeString(Path.of("tmp/community-openapi.json"), doc.toPrettyString(), StandardCharsets.UTF_8);
         AtomicInteger routeCount = new AtomicInteger();
         doc.path("paths").fields().forEachRemaining(path -> {
@@ -1138,7 +1165,7 @@ class CommunityApiIT {
                 });
             }
         });
-        assertThat(routeCount.get()).isEqualTo(138);
+        assertThat(routeCount.get()).isEqualTo(141);
         doc.path("paths").fieldNames().forEachRemaining(path ->
             assertThat(path).doesNotStartWith(API + "/ai/"));
     }

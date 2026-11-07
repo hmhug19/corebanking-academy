@@ -2,11 +2,15 @@ package vn.com.coreacademy.community.service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -17,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.community.dto.ContentRequests.CreateComment;
+import vn.com.coreacademy.community.dto.ContentViews.CommentView;
 import vn.com.coreacademy.community.dto.ContentViews.ContentDetail;
 import vn.com.coreacademy.community.dto.ContentViews.PersonRef;
 import vn.com.coreacademy.community.dto.DocumentRequests.CreateReview;
@@ -77,6 +82,53 @@ public class CommunityReviewService {
                     reviews.openThreads(card.contentId(), card.publishedRevisionId()),
                     reviews.invitationCount(card.contentId()));
             });
+    }
+
+    public ReviewView detail(Long contentId) {
+        var actor = policy.actor();
+        var content = policy.readable(contentId, actor);
+        contents.requireKind(content, "architecture_review");
+        return view(content, repository.require(ReviewProposal.class, contentId), actor);
+    }
+
+    public PageResponse<ThreadView> threads(Long contentId, Long revisionId, String status, int page, int size) {
+        CommunityPages.check(page, size);
+        var actor = policy.actor();
+        var content = policy.readable(contentId, actor);
+        contents.requireKind(content, "architecture_review");
+        // Also prevents a draft-only proposal being exposed to other organization members.
+        contents.detail(content, actor, false);
+        publishedRevision(content, revisionId, actor);
+        if (status != null && !Set.of("open", "resolved").contains(status)) {
+            throw new BusinessException(CommunityResponseCode.INVALID_REFERENCE);
+        }
+        var rows = reviews.threads(contentId, revisionId, status, page * size, size);
+        var roots = comments.views(reviews.rootComments(rows.stream().map(ReviewThread::getThreadId).toList()));
+        Map<Long, CommentView> rootByThread = new HashMap<>();
+        roots.forEach(root -> rootByThread.putIfAbsent(root.reviewThreadId(), root));
+        var names = identity.fullNames(rows.stream().map(ReviewThread::getResolvedBy)
+            .filter(Objects::nonNull).collect(Collectors.toSet()));
+        boolean writable = reviewActions(content, repository.require(ReviewProposal.class, contentId), actor)
+            .contains("comment");
+        boolean reviewer = policy.isAuthorOrMaintainer(content, actor) || reviews.accepted(contentId, actor.person().id());
+        return CommunityPages.of(rows.stream().map(thread -> threadView(thread, actor, writable, reviewer,
+            rootByThread.get(thread.getThreadId()), names)).toList(), page, size,
+            reviews.threadCount(contentId, revisionId, status));
+    }
+
+    public PageResponse<InvitationView> invitations(Long contentId, int page, int size) {
+        CommunityPages.check(page, size);
+        var actor = policy.actor();
+        var content = policy.readable(contentId, actor);
+        contents.requireKind(content, "architecture_review");
+        contents.detail(content, actor, false);
+        var rows = reviews.invitations(contentId, page * size, size);
+        var names = identity.fullNames(rows.stream().flatMap(row -> Stream.of(row.getReviewerUserId(), row.getInvitedBy()))
+            .collect(Collectors.toSet()));
+        boolean writable = reviewActions(content, repository.require(ReviewProposal.class, contentId), actor)
+            .contains("comment");
+        return CommunityPages.of(rows.stream().map(value -> invitationView(value, actor, content, writable, names))
+            .toList(), page, size, reviews.invitationCount(contentId));
     }
 
     @Transactional
@@ -433,33 +485,87 @@ public class CommunityReviewService {
         var content = policy.readable(thread.getProposalContentId(), actor);
         var root = reviews.rootComment(thread.getThreadId());
         var comment = root == null ? null : comments.view(root);
-        boolean editable = "open".equals(repository.require(ReviewProposal.class,
-            content.getContentId()).getReviewStatus()) && "active".equals(content.getLifecycleStatus())
-            && canResolve(thread, content, actor);
+        boolean writable = reviewActions(content, repository.require(ReviewProposal.class,
+            content.getContentId()), actor).contains("comment");
+        Map<String, String> names = thread.getResolvedBy() == null ? Map.of()
+            : identity.fullNames(List.of(thread.getResolvedBy()));
+        return threadView(thread, actor, writable, canResolve(thread, content, actor), comment, names);
+    }
+
+    private ThreadView threadView(ReviewThread thread, Actor actor, boolean writable, boolean reviewer,
+        CommentView comment, Map<String, String> names) {
+        boolean editable = writable && (reviewer || Objects.equals(thread.getCreatedBy(), actor.person().id()));
         return new ThreadView(thread.getThreadId(), thread.getProposalContentId(), thread.getRevisionId(),
-            thread.getRevisionAssetId(), thread.getAnchorJson(), thread.getStatus(), person(thread.getResolvedBy()),
+            thread.getRevisionAssetId(), thread.getAnchorJson(), thread.getStatus(), person(thread.getResolvedBy(), names),
             thread.getResolvedAt(), thread.getResolutionNote(), comment, thread.getRowVersion(),
             thread.getCreateTime(), thread.getUpdateTime(), editable ? List.of("open".equals(thread.getStatus())
                 ? "resolve" : "reopen") : List.of());
     }
 
     private InvitationView invitationView(ReviewInvitation value, Actor actor) {
+        var content = policy.readable(value.getProposalContentId(), actor);
+        boolean writable = reviewActions(content, repository.require(ReviewProposal.class,
+            content.getContentId()), actor).contains("comment");
+        return invitationView(value, actor, content, writable,
+            identity.fullNames(List.of(value.getReviewerUserId(), value.getInvitedBy())));
+    }
+
+    private InvitationView invitationView(ReviewInvitation value, Actor actor, CommunityContent content,
+        boolean writable, Map<String, String> names) {
         boolean current = value.getExpiresAt() == null || value.getExpiresAt().isAfter(Instant.now());
-        List<String> capabilities = List.of();
-        if (current && Objects.equals(value.getReviewerUserId(), actor.person().id())) {
-            capabilities = "pending".equals(value.getStatus()) ? List.of("accept", "decline")
-                : "accepted".equals(value.getStatus()) ? List.of("complete") : List.of();
+        boolean open = current && writable;
+        List<String> capabilities = new ArrayList<>();
+        if (open && Objects.equals(value.getReviewerUserId(), actor.person().id())) {
+            capabilities.addAll("pending".equals(value.getStatus()) ? List.of("accept", "decline")
+                : "accepted".equals(value.getStatus()) ? List.of("complete") : List.of());
+        }
+        if (open && policy.isAuthorOrMaintainer(content, actor)
+            && Set.of("pending", "accepted").contains(value.getStatus())) {
+            capabilities.add("cancel");
         }
         return new InvitationView(value.getInvitationId(), value.getProposalContentId(),
-            person(value.getReviewerUserId()), person(value.getInvitedBy()), value.getStatus(), value.getRespondedAt(),
+            person(value.getReviewerUserId(), names), person(value.getInvitedBy(), names), value.getStatus(), value.getRespondedAt(),
             value.getExpiresAt(), value.getRowVersion(), value.getCreateTime(), value.getUpdateTime(), capabilities);
     }
 
     private ReviewView view(CommunityContent content, ReviewProposal proposal, Actor actor) {
-        return new ReviewView(contents.detail(content, actor, false), proposal.getReviewStatus(), proposal.getDueAt(),
+        return new ReviewView(contents.detail(content, actor, true), proposal.getReviewStatus(), proposal.getDueAt(),
             proposal.getConcludedRevisionId(), proposal.getConclusion(), person(proposal.getConcludedBy()),
             proposal.getConcludedAt(), reviews.openThreads(content.getContentId(),
-                content.getCurrentPublishedRevisionId()));
+                content.getCurrentPublishedRevisionId()), reviewActions(content, proposal, actor));
+    }
+
+    private List<String> reviewActions(CommunityContent content, ReviewProposal proposal, Actor actor) {
+        List<String> actions = new ArrayList<>();
+        try {
+            policy.requireInteractive(content, actor);
+            boolean owner = policy.isAuthorOrMaintainer(content, actor);
+            if (owner && content.getCurrentPublishedRevisionId() != null
+                && "draft".equals(proposal.getReviewStatus())) {
+                actions.add("open");
+            }
+            if (content.getCurrentPublishedRevisionId() != null && "open".equals(proposal.getReviewStatus())) {
+                actions.add("comment");
+                if (owner) {
+                    actions.addAll(List.of("invite", "close"));
+                    if (reviews.openThreads(content.getContentId(), content.getCurrentPublishedRevisionId()) == 0) {
+                        actions.add("conclude");
+                    }
+                }
+            }
+        } catch (BusinessException exception) {
+            // Read-only proposals remain readable, with no mutation controls.
+        }
+        if (Objects.equals(content.getAuthorUserId(), actor.person().id())
+            && Set.of("concluded", "closed").contains(proposal.getReviewStatus())
+            && "active".equals(content.getLifecycleStatus())) {
+            actions.add("follow_up");
+        }
+        return List.copyOf(actions);
+    }
+
+    private PersonRef person(String userId, Map<String, String> names) {
+        return userId == null ? null : new PersonRef(userId, names.get(userId));
     }
 
     private PersonRef person(String userId) {

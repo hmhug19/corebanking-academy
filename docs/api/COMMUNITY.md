@@ -1,7 +1,7 @@
 # Community — contract toàn bộ phạm vi và trạng thái triển khai
 
-Trạng thái source ngày 28/10/2026: **đã triển khai C01–C141 và mapping 51 bảng**.
-**Đang hoạt động: 138 API. Tạm dừng C126–C128** bằng comment `@RestController` và import tương ứng trong
+Trạng thái source ngày 28/10/2026: **đã triển khai C01–C144 và mapping 51 bảng**.
+**Đang hoạt động: 141 API. Tạm dừng C126–C128** bằng comment `@RestController` và import tương ứng trong
 `CommunityAiController`: 3 route `/api/v1/community/ai/**` không đăng ký, không xuất hiện trên Swagger và trả 404.
 Giữ service/DTO/bảng AI để bật lại sau, không xóa dữ liệu hoặc đổi schema. Contract AI bên dưới là đặc tả lưu lại,
 chưa sử dụng ở thời điểm này. Tìm kiếm thường, index, job và Assistant hiện có không thay đổi.
@@ -20,7 +20,7 @@ Thiết kế và cột tại [COMMUNITY_DATABASE.md](COMMUNITY_DATABASE.md). Env
 | Media và worker | Multipart/reservation/manifest/retry/abort, GET/HEAD/Range, probe/cleanup, transcript; outbox/index/fanout/digest/ledger/badge | Worker mặc định tắt; phải cấu hình actor kỹ thuật và hạ tầng bên dưới |
 | Persistence | Baseline SQL/mapping 51 bảng, scalar ID, audit/version, không FK/UNIQUE nghiệp vụ | Chưa chạy DDL hoặc seed trên server; DB hiện hữu cần migration được review riêng |
 
-Schema thực tế để FE import: [community-openapi.json](../postman/community-openapi.json); Swagger kiểm tra đủ 138 operation đang bật,
+Schema thực tế để FE import: [community-openapi.json](../postman/community-openapi.json); Swagger kiểm tra đủ 141 operation đang bật,
 response thành công 200 và schema JSON/binary phù hợp. Có route không có nghĩa mọi tích hợp ngoài đã được nghiệm thu.
 Kiểm chứng mới nhất dùng PostgreSQL 16.15 với **pgvector 0.8.0 thật**, DDL gốc không thay kiểu cột:
 `clean verify` **235 test pass, 0 failure/error, 0 skipped**; đã chạy cả 49 test từng bị bỏ qua vì thiếu Docker.
@@ -828,3 +828,22 @@ It selects the published revision when available, otherwise the authorized draft
 does not change the published cover. Read bytes through the authenticated, ACL-checked
 `GET /api/v1/community/revision-assets/{revisionAssetId}/content` endpoint. No public asset URL
 is exposed. A null/absent cover uses the frontend default image. No database migration is required.
+
+
+## Architecture review read integration (2026-11-07)
+
+The existing review mutations are complemented by three paginated/reloadable reads. No new database table or migration is required; deploy backend before the frontend routes.
+
+| ID | Method and route | Response |
+|---|---|---|
+| C142 | `GET /api/v1/community/reviews/{contentId}` | `ReviewView`, including the caller's editable draft and `reviewCapabilities` |
+| C143 | `GET /api/v1/community/reviews/{contentId}/threads?revisionId=&status=&page=&size=` | `PageResponse<ThreadView>`; status is optional `open` or `resolved` |
+| C144 | `GET /api/v1/community/reviews/{contentId}/invitations?page=&size=` | `PageResponse<InvitationView>` with current response/cancellation capabilities |
+
+All three reads recheck organization, audience and publication/revision access. Draft-only proposals are not readable by other unit members. Pagination is validated before querying; foreign/draft/deleted revisions cannot expose threads. Person names and root comments are loaded in batches for a page.
+
+`reviewCapabilities` contains only currently permitted actions: `open`, `comment`, `invite`, `close`, `conclude`, `follow_up`. The server withholds `conclude` while threads remain open on the **current published revision**, and rechecks the same invariant inside the write lock. Invitation actions are empty after closing/concluding or expiry; the owner receives `cancel` for pending/accepted current invitations. Existing optimistic versions remain mandatory.
+
+The supported workflow is `draft -> open -> concluded|closed`. Publishing a design and opening feedback are separate actions. Publishing a new revision while open retains old threads on their source revision. A follow-up creates a new draft and a source link; it never reopens an immutable conclusion. This change does not enable the unused `in_review` state described in older design notes.
+
+The frontend exposes Questions, Articles, Architecture Review and My posts only. Guild/Wiki/Radar/Recording/Contribution screens are outside this delivery; existing backend APIs for them remain unchanged.

@@ -52,7 +52,7 @@ public final class ReviewDtos {
 
     public record ReviewView(@JsonUnwrapped ContentDetail content, String reviewStatus, Instant dueAt,
                              Long concludedRevisionId, String conclusion, PersonRef concludedBy,
-                             Instant concludedAt, long openThreadCount) {
+                             Instant concludedAt, long openThreadCount, List<String> reviewCapabilities) {
     }
 
     public record InvitationView(Long invitationId, Long proposalContentId, PersonRef reviewer, PersonRef invitedBy,

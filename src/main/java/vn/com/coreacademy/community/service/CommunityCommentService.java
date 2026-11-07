@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,7 @@ import vn.com.coreacademy.community.repository.CommunityRelations;
 import vn.com.coreacademy.community.repository.CommunityRepository;
 import vn.com.coreacademy.identity.service.IdentityWriteLock;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
+import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 
 @Service
 @Transactional(readOnly = true)
@@ -162,13 +164,26 @@ public class CommunityCommentService {
         }
     }
 
+    public List<CommentView> views(List<CommunityComment> values) {
+        var actor = policy.actor();
+        values.stream().map(CommunityComment::getContentId).distinct().forEach(id -> policy.readable(id, actor));
+        var names = identity.fullNames(values.stream().map(CommunityComment::getAuthorUserId)
+            .filter(Objects::nonNull).collect(Collectors.toSet()));
+        return values.stream().map(value -> safeView(value, actor, names)).toList();
+    }
+
     public CommentView view(CommunityComment comment) {
         policy.readable(comment.getContentId(), policy.actor());
         return safeView(comment);
     }
 
     private CommentView safeView(CommunityComment comment) {
-        var actor = policy.actor();
+        var names = comment.getAuthorUserId() == null ? Map.<String, String>of()
+            : identity.fullNames(List.of(comment.getAuthorUserId()));
+        return safeView(comment, policy.actor(), names);
+    }
+
+    private CommentView safeView(CommunityComment comment, Actor actor, Map<String, String> names) {
         boolean hidden = comment.getDeletedAt() != null || !"visible".equals(comment.getStatus());
         boolean writable = !hidden && Objects.equals(comment.getAuthorUserId(), actor.person().id());
         if (writable) {
@@ -181,7 +196,7 @@ public class CommunityCommentService {
             }
         }
         String user = hidden ? null : comment.getAuthorUserId();
-        var author = user == null ? null : new PersonRef(user, identity.fullNames(List.of(user)).get(user));
+        var author = user == null ? null : new PersonRef(user, names.get(user));
         return new CommentView(comment.getCommentId(), comment.getContentId(), user, comment.getParentCommentId(),
             comment.getReviewThreadId(), hidden ? null : comment.getBodyMarkdown(), hidden
                 ? comment.getDeletedAt() == null ? "hidden" : "deleted" : comment.getStatus(),

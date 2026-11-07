@@ -66,17 +66,17 @@ public final class CommunityDocumentContext {
             }
             case "review" -> {
                 fields(value, Set.of("problem", "constraints", "decisionsNeeded"));
-                text(value, "problem", 20, 10_000, complete);
+                text(value, "problem", complete ? 20 : 0, 10_000, complete);
                 text(value, "constraints", 0, 20_000, false);
                 JsonNode decisions = value.get("decisionsNeeded");
                 if (decisions == null && !complete) {
                     break;
                 }
-                if (decisions == null || !decisions.isArray() || decisions.isEmpty() || decisions.size() > 20) {
+                if (decisions == null || !decisions.isArray() || complete && decisions.isEmpty() || decisions.size() > 20) {
                     invalid("decisionsNeeded");
                 }
                 for (JsonNode decision : decisions) {
-                    if (!decision.isTextual() || decision.asText().isBlank() || decision.asText().length() > 3_000) {
+                    if (!decision.isTextual() || complete && decision.asText().isBlank() || decision.asText().length() > 3_000) {
                         invalid("decisionsNeeded");
                     }
                 }

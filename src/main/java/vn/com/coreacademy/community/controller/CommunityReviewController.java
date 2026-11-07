@@ -55,6 +55,33 @@ public class CommunityReviewController {
         return BaseResponse.ok(reviews.list(q, guildId, status, page, size));
     }
 
+    @GetMapping("/reviews/{contentId}")
+    @Operation(summary = "Đọc hồ sơ review và quyền thao tác hiện tại")
+    @ApiResponse(responseCode = "200", description = "Hồ sơ còn quyền đọc; nháp chỉ cho người sửa.",
+        useReturnTypeSchema = true)
+    public BaseResponse<ReviewView> detail(@PathVariable @Positive Long contentId) {
+        return BaseResponse.ok(reviews.detail(contentId));
+    }
+
+    @GetMapping("/reviews/{contentId}/threads")
+    @Operation(summary = "Đọc góp ý theo phiên bản thiết kế")
+    @ApiResponse(responseCode = "200", description = "Góp ý đúng revision và quyền hiện tại.",
+        useReturnTypeSchema = true)
+    public BaseResponse<PageResponse<ThreadView>> threads(@PathVariable @Positive Long contentId,
+        @RequestParam @Positive Long revisionId, @RequestParam(required = false) String status,
+        @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return BaseResponse.ok(reviews.threads(contentId, revisionId, status, page, size));
+    }
+
+    @GetMapping("/reviews/{contentId}/invitations")
+    @Operation(summary = "Đọc lời mời phản biện")
+    @ApiResponse(responseCode = "200", description = "Danh sách lời mời và quyền phản hồi của caller.",
+        useReturnTypeSchema = true)
+    public BaseResponse<PageResponse<InvitationView>> invitations(@PathVariable @Positive Long contentId,
+        @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return BaseResponse.ok(reviews.invitations(contentId, page, size));
+    }
+
     @PostMapping("/reviews")
     @Operation(summary = "Tạo đề nghị review kiến trúc")
     @ApiResponse(responseCode = "200", description = "Bản nháp đề nghị review.", useReturnTypeSchema = true)

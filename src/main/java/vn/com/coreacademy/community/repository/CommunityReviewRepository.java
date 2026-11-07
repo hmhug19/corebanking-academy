@@ -2,6 +2,7 @@ package vn.com.coreacademy.community.repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -15,6 +16,38 @@ import vn.com.coreacademy.community.entity.ReviewThread;
 @RequiredArgsConstructor
 public class CommunityReviewRepository {
     private final CommunityRepository repository;
+
+    public List<ReviewInvitation> invitations(Long contentId, int offset, int size) {
+        return repository.page("""
+            select i from ReviewInvitation i where i.proposalContentId = :content order by i.invitationId desc
+            """, ReviewInvitation.class, Map.of("content", contentId), offset, size);
+    }
+
+    public List<ReviewThread> threads(Long contentId, Long revisionId, String status, int offset, int size) {
+        var parameters = threadParameters(contentId, revisionId, status);
+        return repository.page("""
+            select t from ReviewThread t where t.proposalContentId = :content and t.revisionId = :revision
+              and (:status is null or t.status = :status) order by t.threadId desc
+            """, ReviewThread.class, parameters, offset, size);
+    }
+
+    public long threadCount(Long contentId, Long revisionId, String status) {
+        if (revisionId == null) {
+            return 0;
+        }
+        return repository.one("""
+            select count(t) from ReviewThread t where t.proposalContentId = :content and t.revisionId = :revision
+              and (:status is null or t.status = :status)
+            """, Long.class, threadParameters(contentId, revisionId, status));
+    }
+
+    private Map<String, Object> threadParameters(Long contentId, Long revisionId, String status) {
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("content", contentId);
+        parameters.put("revision", revisionId);
+        parameters.put("status", status);
+        return parameters;
+    }
 
     public List<ReviewInvitation> invitation(Long contentId, String userId) {
         return repository.list("""
@@ -45,6 +78,18 @@ public class CommunityReviewRepository {
             """, ReviewThread.class, Map.of("actor", actorId, "request", requestId));
     }
 
+    public List<CommunityComment> rootComments(List<Long> threadIds) {
+        if (threadIds.isEmpty()) {
+            return List.of();
+        }
+        return repository.list("""
+            select c from CommunityComment c where c.reviewThreadId in :threads and c.parentCommentId is null
+              and c.commentId = (select min(root.commentId) from CommunityComment root
+                  where root.reviewThreadId = c.reviewThreadId and root.parentCommentId is null)
+            order by c.commentId
+            """, CommunityComment.class, Map.of("threads", threadIds));
+    }
+
     public CommunityComment rootComment(Long threadId) {
         var values = repository.page("""
             select c from CommunityComment c where c.reviewThreadId = :thread and c.parentCommentId is null
@@ -54,6 +99,9 @@ public class CommunityReviewRepository {
     }
 
     public long openThreads(Long contentId, Long revisionId) {
+        if (revisionId == null) {
+            return 0;
+        }
         return repository.one("""
             select count(t) from ReviewThread t where t.proposalContentId = :content
               and t.revisionId = :revision and t.status = :status
