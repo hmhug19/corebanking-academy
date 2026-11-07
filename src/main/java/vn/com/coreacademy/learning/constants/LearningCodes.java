@@ -330,6 +330,8 @@ public final class LearningCodes {
         public static final String FIRST_TRY_PERFECT = "FIRST_TRY_PERFECT";
         public static final String ASSIGNED_BEFORE_DEADLINE = "ASSIGNED_BEFORE_DEADLINE";
         public static final String STREAK_WORKING_DAYS = "STREAK_WORKING_DAYS";
+        public static final java.util.Set<String> ALL = java.util.Set.of(COURSES_COMPLETED, PROGRAM_COMPLETED,
+            FIRST_TRY_PERFECT, ASSIGNED_BEFORE_DEADLINE, STREAK_WORKING_DAYS);
 
         private BadgeRule() {
         }
@@ -349,6 +351,16 @@ public final class LearningCodes {
         public static final String BACKFILL = "BACKFILL";
 
         private BadgeSource() {
+        }
+    }
+
+    /** Loại ngày ngoại lệ của lịch làm việc, ghi ở working_calendar_days.day_type. */
+    public static final class CalendarDayType {
+        public static final String HOLIDAY = "HOLIDAY";
+        public static final String MAKEUP_WORKDAY = "MAKEUP_WORKDAY";
+        public static final java.util.Set<String> ALL = java.util.Set.of(HOLIDAY, MAKEUP_WORKDAY);
+
+        private CalendarDayType() {
         }
     }
 

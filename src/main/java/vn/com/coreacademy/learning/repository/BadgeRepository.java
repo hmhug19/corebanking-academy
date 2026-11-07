@@ -72,6 +72,84 @@ public class BadgeRepository {
             .getResultList()).stream().findFirst();
     }
 
+    /** Một huy hiệu cho quản trị: số người đã nhận và tiến độ trao bù nền. */
+    public record AdminRow(Definition definition, long holders, String backfillStatus, int backfillTotal,
+                           int backfillDone) {
+    }
+
+    /** Mọi huy hiệu (kể cả đã ngừng dùng) theo thứ tự hiển thị, kèm số người nhận và tiến độ trao bù. */
+    public List<AdminRow> adminRows() {
+        List<?> rows = entityManager.createNativeQuery("""
+            select d.badge_id, (select count(*) from learning_hub.user_badges u where u.badge_id = d.badge_id),
+                   d.backfill_status, d.backfill_total, d.backfill_done
+            from learning_hub.badge_definitions d order by d.sort_no, d.badge_id
+            """).getResultList();
+        Map<Long, Definition> definitions = new HashMap<>();
+        definitions().forEach(definition -> definitions.put(definition.badgeId(), definition));
+        return rows.stream().map(Object[].class::cast).map(row -> new AdminRow(
+            definitions.get(((Number) row[0]).longValue()), ((Number) row[1]).longValue(), (String) row[2],
+            ((Number) row[3]).intValue(), ((Number) row[4]).intValue())).toList();
+    }
+
+    public Optional<AdminRow> adminRow(long badgeId) {
+        return adminRows().stream().filter(row -> row.definition().badgeId() == badgeId).findFirst();
+    }
+
+    public long holders(long badgeId) {
+        return ((Number) entityManager.createNativeQuery("select count(*) from learning_hub.user_badges"
+            + " where badge_id = :id").setParameter("id", badgeId).getSingleResult()).longValue();
+    }
+
+    public int nextSortNo() {
+        return ((Number) entityManager.createNativeQuery("select coalesce(max(sort_no), -1) + 1"
+            + " from learning_hub.badge_definitions").getSingleResult()).intValue();
+    }
+
+    public boolean programExists(long programId) {
+        return ((Number) entityManager.createNativeQuery("select count(*) from learning_hub.training_programs"
+            + " where program_id = :id").setParameter("id", programId).getSingleResult()).longValue() > 0;
+    }
+
+    /** Sửa mô tả và luật của một huy hiệu; mã và trạng thái giữ nguyên. */
+    public void updateDefinition(long badgeId, String name, String description, String icon, String ruleType,
+                                 Integer paramN, Long paramProgramId) {
+        entityManager.createNativeQuery("""
+            update learning_hub.badge_definitions
+               set name = :name, description = :description, icon = :icon, rule_type = :ruleType,
+                   param_n = :paramN, param_program_id = :programId, update_time = now()
+             where badge_id = :id
+            """)
+            .setParameter("name", name).setParameter("description", description).setParameter("icon", icon)
+            .setParameter("ruleType", ruleType).setParameter("paramN", paramN)
+            .setParameter("programId", paramProgramId).setParameter("id", badgeId).executeUpdate();
+    }
+
+    public void setStatus(long badgeId, String status) {
+        entityManager.createNativeQuery("update learning_hub.badge_definitions set status = :status,"
+            + " update_time = now() where badge_id = :id").setParameter("status", status)
+            .setParameter("id", badgeId).executeUpdate();
+    }
+
+    /** Ghi tiến độ trao bù nền. */
+    public void setBackfill(long badgeId, String status, int total, int done) {
+        entityManager.createNativeQuery("update learning_hub.badge_definitions set backfill_status = :status,"
+            + " backfill_total = :total, backfill_done = :done where badge_id = :id")
+            .setParameter("status", status).setParameter("total", total).setParameter("done", done)
+            .setParameter("id", badgeId).executeUpdate();
+    }
+
+    public void failBackfill(long badgeId) {
+        entityManager.createNativeQuery("update learning_hub.badge_definitions set backfill_status = 'FAILED'"
+            + " where badge_id = :id").setParameter("id", badgeId).executeUpdate();
+    }
+
+    /** Huy hiệu đang trao bù dở (ứng dụng bị dừng giữa chừng) để chạy lại. */
+    public List<Long> runningBackfills() {
+        return entityManager.createNativeQuery("select badge_id from learning_hub.badge_definitions"
+            + " where backfill_status = 'RUNNING' order by badge_id").getResultList().stream()
+            .map(row -> ((Number) row).longValue()).toList();
+    }
+
     /** Huy hiệu còn dùng, thuộc các loại luật đã cho, mà người này chưa nhận. */
     public List<Definition> activeNotHeld(String userId, Collection<String> ruleTypes) {
         return map(entityManager.createNativeQuery("select " + COLUMNS + """

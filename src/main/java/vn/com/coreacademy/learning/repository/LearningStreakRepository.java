@@ -85,6 +85,39 @@ public class LearningStreakRepository {
             .collect(Collectors.toMap(row -> ((Date) row[0]).toLocalDate(), row -> (String) row[1]));
     }
 
+    /** Ngày ngoại lệ của một năm, ngày tăng dần: ngày, loại, ghi chú. */
+    public List<Object[]> calendarYear(int year) {
+        List<?> rows = entityManager.createNativeQuery("""
+            select calendar_date, day_type, note from learning_hub.working_calendar_days
+            where calendar_date >= make_date(:year, 1, 1) and calendar_date <= make_date(:year, 12, 31)
+            order by calendar_date
+            """).setParameter("year", year).getResultList();
+        return rows.stream().map(Object[].class::cast).toList();
+    }
+
+    /** Thay toàn bộ ngày ngoại lệ của một năm bằng các ngày cho trước. */
+    public void replaceCalendarYear(int year, List<CalendarEntry> days, String author) {
+        entityManager.createNativeQuery("""
+            delete from learning_hub.working_calendar_days
+            where calendar_date >= make_date(:year, 1, 1) and calendar_date <= make_date(:year, 12, 31)
+            """).setParameter("year", year).executeUpdate();
+        for (CalendarEntry day : days) {
+            entityManager.createNativeQuery("""
+                insert into learning_hub.working_calendar_days (calendar_date, day_type, note, created_by)
+                values (:date, :type, :note, :author)
+                """)
+                .setParameter("date", day.date())
+                .setParameter("type", day.type())
+                .setParameter("note", day.note())
+                .setParameter("author", author)
+                .executeUpdate();
+        }
+    }
+
+    /** Một ngày ngoại lệ đã chuẩn hóa để ghi. */
+    public record CalendarEntry(LocalDate date, String type, String note) {
+    }
+
     private Map<LocalDate, Integer> perDay(String sql, String userId, boolean withStatus) {
         var query = entityManager.createNativeQuery(sql).setParameter("user", userId);
         if (withStatus) {

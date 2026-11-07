@@ -1,6 +1,8 @@
 package vn.com.coreacademy.learning.repository;
 
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,6 +34,61 @@ public class XpLedgerRepository {
             number(row[1]).intValue(), number(row[2]).intValue(), number(row[3]).intValue(),
             number(row[4]).intValue(), number(row[5]).intValue(), number(row[6]).intValue(),
             number(row[7]).intValue())).findFirst();
+    }
+
+    /** Mọi phiên bản cấu hình, mới nhất trước, kèm người lưu và lúc lưu. */
+    public List<ConfigRow> configVersions() {
+        List<?> rows = entityManager.createNativeQuery("""
+            select version_id, version_no, lesson_xp, quiz_pass_xp, first_try_bonus_xp, first_try_threshold_percent,
+                   community_xp, community_daily_cap, created_by, create_time
+            from learning_hub.gamification_config_versions
+            order by version_no desc
+            """).getResultList();
+        return rows.stream().map(Object[].class::cast).map(row -> new ConfigRow(
+            new GamificationConfig(number(row[0]).longValue(), number(row[1]).intValue(), number(row[2]).intValue(),
+                number(row[3]).intValue(), number(row[4]).intValue(), number(row[5]).intValue(),
+                number(row[6]).intValue(), number(row[7]).intValue()),
+            (String) row[8], instant(row[9]))).toList();
+    }
+
+    /** Thêm phiên bản kế tiếp; hai lần lưu đồng thời thì một bên thua khóa duy nhất của số phiên bản. */
+    public GamificationConfig insertConfig(int lessonXp, int quizPassXp, int firstTryBonusXp,
+                                           int firstTryThresholdPercent, int communityXp, int communityDailyCap,
+                                           String createdBy) {
+        Object[] row = (Object[]) entityManager.createNativeQuery("""
+            insert into learning_hub.gamification_config_versions (version_no, lesson_xp, quiz_pass_xp,
+                first_try_bonus_xp, first_try_threshold_percent, community_xp, community_daily_cap, created_by)
+            select coalesce(max(version_no), 0) + 1, :lesson, :quiz, :bonus, :threshold, :community, :cap, :author
+            from learning_hub.gamification_config_versions
+            returning version_id, version_no
+            """)
+            .setParameter("lesson", lessonXp)
+            .setParameter("quiz", quizPassXp)
+            .setParameter("bonus", firstTryBonusXp)
+            .setParameter("threshold", firstTryThresholdPercent)
+            .setParameter("community", communityXp)
+            .setParameter("cap", communityDailyCap)
+            .setParameter("author", createdBy)
+            .getSingleResult();
+        return new GamificationConfig(number(row[0]).longValue(), number(row[1]).intValue(), lessonXp, quizPassXp,
+            firstTryBonusXp, firstTryThresholdPercent, communityXp, communityDailyCap);
+    }
+
+    /** Một phiên bản cùng người lưu và lúc lưu. */
+    public record ConfigRow(GamificationConfig config, String createdBy, Instant createdAt) {
+    }
+
+    private static Instant instant(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Instant instant) {
+            return instant;
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toInstant();
+        }
+        return ((OffsetDateTime) value).toInstant();
     }
 
     /** Tạo phiên bản 1; hai request đồng thời cùng gieo thì một bên bị bỏ qua nhờ khóa duy nhất của số phiên bản. */

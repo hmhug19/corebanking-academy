@@ -109,6 +109,13 @@ public class BadgeService {
         return repository.awardAll(badgeId, new Metrics(null).qualifiers(definition), BadgeSource.BACKFILL);
     }
 
+    /** Những người đang đủ điều kiện của một huy hiệu, dùng cho trao bù nền. */
+    public Set<String> qualifiers(long badgeId) {
+        repository.flush();
+        Definition definition = repository.definition(badgeId).orElseThrow();
+        return new Metrics(null).qualifiers(definition);
+    }
+
     /** Bộ huy hiệu khởi đầu, tạo một lần khi chưa có huy hiệu nào; người đã đủ điều kiện nhận ngay, âm thầm. */
     void ensureStarterSet() {
         if (repository.countDefinitions() > 0) {

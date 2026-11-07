@@ -412,6 +412,38 @@ description, icon, condition, earnedAt, retired, progress }`. Chỉ học viên 
   server dựng. `icon` là tên biểu tượng Lucide.
 - Schema: `docs/sql/upgrade/2026-11-07-badges.sql` phải chạy **trước khi triển khai backend**.
 
+Quản lý huy hiệu (chỉ quản trị hệ thống: ADMIN hoặc SUPER_ADMIN phạm vi GLOBAL, vai trò khác nhận 403), gốc
+`/api/v1/admin/learning/badges`; `AdminBadgeView { badgeId, code, name, description, icon, ruleType, paramN, paramProgramId,
+programName, condition, status, locked, holders, backfillStatus, backfillTotal, backfillDone }`:
+- `GET` liệt kê mọi huy hiệu (kể cả `retired`). `POST` tạo, `PUT /{badgeId}` sửa (`SaveBadge { name ≤100, description ≤300, icon
+  Lucide ^[a-z0-9-]{1,50}$, ruleType, paramN 1..1000 hoặc paramProgramId }`; luật `PROGRAM_COMPLETED` cần chương trình tồn tại,
+  bốn luật còn lại cần `paramN`). Sai là `CORE-VALIDATION_FAILED` trên đúng trường. Mã (`code`) do server sinh (`CUSTOM_…`).
+- **Khóa luật**: `locked = holders > 0`. Đổi `ruleType/paramN/paramProgramId` của huy hiệu đã có người nhận là
+  `CORE-VALIDATION_FAILED` (`ruleType`, `LOCKED`); tên, mô tả, biểu tượng vẫn sửa được. Đổi luật khi chưa ai nhận thì trao bù lại.
+- **Trao bù nền**: `POST` trả ngay với `backfillStatus = RUNNING`; `BadgeBackfillJob` (một luồng) tìm người đủ điều kiện rồi trao
+  từng lô 200 người, mỗi lô một giao dịch kèm cập nhật `backfillDone/backfillTotal`, nên client thấy tiến độ bằng cách đọc lại
+  `GET`. Kết thúc là `DONE`, lỗi là `FAILED`; trao âm thầm (không thông báo). Khởi động lại giữa chừng thì lần khởi động sau chạy
+  lại các huy hiệu còn `RUNNING`. Huy hiệu bị ngừng dùng giữa chừng thì dừng trao.
+- `POST /{badgeId}/retire` ngừng dùng: không trao nữa, người đã nhận giữ huy hiệu; gọi lại không đổi. Không có `badgeId`:
+  `LEARNING-NOT_FOUND`.
+- Audit: `BADGE_CREATED`, `BADGE_UPDATED`, `BADGE_RETIRED` (entity `badge`, id huy hiệu).
+- Schema: `docs/sql/upgrade/2026-11-07-badge-backfill-progress.sql` (ba cột tiến độ ở `badge_definitions`) phải chạy **trước khi
+  triển khai backend**.
+
+Báo cáo tác động gamification, `GET /api/v1/reports/learning/gamification-impact?from&to&orgId` và `.../export` (CSV).
+Phạm vi là phạm vi báo cáo của người gọi (SUPER_ADMIN, ADMIN, INSTRUCTOR, REPORT_VIEWER theo grant GLOBAL/ORG/TEAM; vai trò khác
+403); server chốt học viên trong phạm vi, `orgId` chỉ thu hẹp thêm (ngoài phạm vi thì 0 học viên). Chỉ số tổng hợp, không có dòng
+theo người, cả trên màn hình lẫn CSV (CSV dựng từ chính `ImpactReport`, mỗi dòng `Nhóm, Chỉ số, Giá trị` là một số trên màn hình):
+- `from/to` là ngày giờ Việt Nam, cả hai bao gồm; mặc định 28 ngày kết thúc hôm nay, tối đa 366 ngày (sai là `CORE-VALIDATION_FAILED`).
+- `weeklyActive`: học viên có dòng sổ XP (trừ `ADJUSTMENT`) trong tuần (thứ Hai là đầu tuần) và trong kỳ.
+- `assigned`: lần giao chưa thu hồi có `effective_start_at` trong kỳ; `completed` là lần học `completed`; `completedOnTime` là xong
+  trước hạn hoặc không có hạn; tỷ lệ là phần trăm một chữ số thập phân, `null` khi không có mẫu.
+- `launchedAt` là `create_time` của phiên bản cấu hình 1; `comparison` là hai cửa sổ liền kề 28 ngày trước/sau mốc đó (không phụ
+  thuộc kỳ đã chọn), `after = null` nếu chưa qua ngày nào; `weeklyActiveLearners` là số (học viên, tuần) hoạt động chia số tuần.
+- `xpBySource`, `badges` (huy hiệu còn dùng kể cả 0 lượt, và huy hiệu đã ngừng có lượt trong kỳ), `levels` (học viên chưa có dòng
+  cấp tính vào cấp 1), `optOut` (số người tắt hiển thị tên trên số học viên, không phụ thuộc kỳ).
+- Tối đa 5.000 học viên (`LEARNING-LEADERBOARD_TOO_LARGE`), giống bảng xếp hạng.
+
 Bốn nguồn XP và trọng số (phiên bản cấu hình 1 gieo từ `app.learning.points.*`, biến môi trường `APP_LEARNING_POINTS_LESSON`,
 `_QUIZ_PASS`; từ đó trọng số nằm ở `gamification_config_versions` và đổi trọng số chỉ áp dụng từ lúc đổi, không đổi XP cũ):
 

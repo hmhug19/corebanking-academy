@@ -1163,12 +1163,17 @@ CREATE TABLE learning_hub.badge_definitions (
     created_by varchar(20),
     create_time timestamptz NOT NULL DEFAULT now(),
     update_time timestamptz NOT NULL DEFAULT now(),
+    backfill_status varchar(20) NOT NULL DEFAULT 'DONE',
+    backfill_total integer NOT NULL DEFAULT 0,
+    backfill_done integer NOT NULL DEFAULT 0,
     CONSTRAINT uq_badge_definitions_code UNIQUE (code),
     CONSTRAINT ck_badge_definitions_rule CHECK (
         (rule_type = 'PROGRAM_COMPLETED' AND param_program_id IS NOT NULL)
         OR (rule_type IN ('COURSES_COMPLETED', 'FIRST_TRY_PERFECT', 'ASSIGNED_BEFORE_DEADLINE', 'STREAK_WORKING_DAYS')
             AND param_n >= 1)),
-    CONSTRAINT ck_badge_definitions_status CHECK (status IN ('active', 'retired'))
+    CONSTRAINT ck_badge_definitions_status CHECK (status IN ('active', 'retired')),
+    CONSTRAINT ck_badge_definitions_backfill CHECK (backfill_status IN ('RUNNING', 'DONE', 'FAILED')
+        AND backfill_total >= 0 AND backfill_done >= 0)
 );
 COMMENT ON TABLE learning_hub.badge_definitions IS 'Huy hiệu và luật đạt huy hiệu (một trong năm loại luật). Luật bị khóa khi đã có người nhận (suy ra từ user_badges); huy hiệu ngừng dùng không còn được trao nhưng người đã nhận giữ nguyên.';
 COMMENT ON COLUMN learning_hub.badge_definitions.code IS 'Mã duy nhất, ổn định.';
@@ -1181,6 +1186,9 @@ COMMENT ON COLUMN learning_hub.badge_definitions.param_program_id IS 'Chương t
 COMMENT ON COLUMN learning_hub.badge_definitions.status IS 'active hoặc retired.';
 COMMENT ON COLUMN learning_hub.badge_definitions.sort_no IS 'Thứ tự hiển thị.';
 COMMENT ON COLUMN learning_hub.badge_definitions.created_by IS 'Mã cán bộ tạo; null với bộ huy hiệu khởi đầu do hệ thống gieo.';
+COMMENT ON COLUMN learning_hub.badge_definitions.backfill_status IS 'Trao bù nền khi tạo huy hiệu hoặc đổi luật: RUNNING (đang chạy), DONE, FAILED. Chạy lại an toàn vì mỗi (người, huy hiệu) một dòng.';
+COMMENT ON COLUMN learning_hub.badge_definitions.backfill_total IS 'Số người đủ điều kiện tìm thấy lúc bắt đầu trao bù.';
+COMMENT ON COLUMN learning_hub.badge_definitions.backfill_done IS 'Số người đã xử lý (đã được trao hoặc đã có huy hiệu) trong lần trao bù gần nhất.';
 
 CREATE TABLE learning_hub.user_badges (
     user_id varchar(20) NOT NULL,
