@@ -156,17 +156,36 @@ public class QuizAttemptAdminService {
         return grants.stream().map(g -> view(g, names.get(g.getUserId()))).toList();
     }
 
+    public PageResponse<AssessmentViews.ExhaustedLearner> exhaustedLearners(Long quizId, String userId, int page,
+                                                                             int size) {
+        Quiz quiz = managedQuiz(quizId).quiz();
+        var rows = repository.exhaustedLearners(quiz, userId, PageQuery.of(page, size, "id", Set.of("id")));
+        Map<String, String> names = learning.fullNames(rows.getContent().stream()
+            .map(AssessmentViews.ExhaustedLearnerCount::userId).toList());
+        return PageResponse.from(rows.map(row -> new AssessmentViews.ExhaustedLearner(row.userId(),
+            names.get(row.userId()), row.attemptsUsed())));
+    }
+
     /** Cấp thêm lượt riêng cho một học viên có lần học của khóa; không đổi maxAttempts chung của đề. */
     @Transactional
-    public AssessmentViews.GrantView grant(Long quizId, AssessmentRequests.GrantRequest request) {
+    public AssessmentViews.GrantView grant(Long quizId, AssessmentRequests.GrantRequest request,
+                                            boolean requireExhausted) {
+        lock.acquire();
         ManagedQuiz managed = managedQuiz(quizId);
         String actor = learning.actor().person().id();
-        lock.acquire();
 
         String userId = request.userId().trim();
         if (!learning.hasEnrollment(managed.quiz().getCourseId(), userId)) {
             throw BusinessException.field(AssessmentResponseCode.INVALID_REFERENCE, "userId", "NOT_FOUND",
                 "Học viên chưa có lần học của khóa này.");
+        }
+        if (requireExhausted) {
+            var summary = AttemptSummaries.summarize(managed.quiz(), repository.attempts(quizId, userId),
+                repository.grantedAttempts(quizId, userId), ServerTime.now());
+            if (summary.attemptsLeft() > 0) {
+                throw BusinessException.field(AssessmentResponseCode.CONFLICT, "userId", "ATTEMPTS_REMAIN",
+                    "Thí sinh vẫn còn lượt thi. Hãy tải lại danh sách.");
+            }
         }
         QuizAttemptGrant grant = new QuizAttemptGrant();
         grant.setQuizId(quizId);

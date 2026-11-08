@@ -41,6 +41,7 @@ class AssessmentOpenApiIT extends AssessmentIntegrationTest {
         Map.entry("/api/v1/me/competency", "get"),
         Map.entry("/api/v1/quizzes/{quizId}/attempts", "get"),
         Map.entry("/api/v1/quizzes/{quizId}/grants", "get,post"),
+        Map.entry("/api/v1/quizzes/{quizId}/exhausted-learners", "get"),
         Map.entry("/api/v1/quiz-attempts/{attemptId}", "get"),
         Map.entry("/api/v1/quiz-attempts/{attemptId}/void", "post"),
         Map.entry("/api/v1/quiz-attempts/{attemptId}/force-submit", "post"),
@@ -77,6 +78,6 @@ class AssessmentOpenApiIT extends AssessmentIntegrationTest {
                 operations++;
             }
         }
-        assertThat(operations).isEqualTo(47);
+        assertThat(operations).isEqualTo(48);
     }
 }

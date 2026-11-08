@@ -288,16 +288,25 @@ class LearnerQuizFlowIT extends AssessmentIntegrationTest {
         api.error(LEARNER, api.post(Map.of(), ME + "/quizzes/{id}/attempts", quizId), "ASSESSMENT-NO_ATTEMPTS_LEFT");
 
         String grants = "/api/v1/quizzes/{id}/grants";
+        String strictGrant = grants + "?requireExhausted=true";
+        String exhausted = "/api/v1/quizzes/{id}/exhausted-learners";
+        api.http(LEARNER, get(exhausted, quizId), 403, "CORE-ACCESS_DENIED");
+        JsonNode candidates = api.ok(INSTRUCTOR, get(exhausted + "?userId={u}&size=1", quizId, LEARNER));
+        assertThat(candidates.path("totalElements").asLong()).isEqualTo(1);
+        assertThat(candidates.path("items").get(0).path("userId").asText()).isEqualTo(LEARNER);
+        assertThat(candidates.path("items").get(0).path("attemptsUsed").asLong()).isEqualTo(1);
         JsonNode notEnrolled = api.error(INSTRUCTOR, api.post(grant(INSTRUCTOR), grants, quizId),
             "ASSESSMENT-INVALID_REFERENCE");
         assertThat(notEnrolled.path("errors").get(0).path("field").asText()).isEqualTo("userId");
         api.error(INSTRUCTOR, api.post(Map.of("userId", LEARNER, "extraAttempts", 11, "reason", "x"), grants, quizId),
             "CORE-VALIDATION_FAILED");
         api.http(LEARNER, api.post(grant(LEARNER), grants, quizId), 403, "CORE-ACCESS_DENIED");
-        JsonNode granted = api.ok(INSTRUCTOR, api.post(grant(LEARNER), grants, quizId));
+        JsonNode granted = api.ok(INSTRUCTOR, api.post(grant(LEARNER), strictGrant, quizId));
         assertThat(granted.path("userName").asText()).isEqualTo("Học viên tiền gửi Demo");
         assertThat(granted.path("grantedBy").asText()).isEqualTo(INSTRUCTOR);
         assertThat(granted.path("revoked").asBoolean()).isFalse();
+        api.error(INSTRUCTOR, api.post(grant(LEARNER), strictGrant, quizId), "ASSESSMENT-CONFLICT");
+        assertThat(api.ok(INSTRUCTOR, get(exhausted, quizId)).path("totalElements").asLong()).isZero();
         assertThat(api.ok(LEARNER, get(ME + "/quizzes/{id}", quizId)).path("summary").path("attemptsLeft").asInt())
             .isEqualTo(1);
 
@@ -349,6 +358,8 @@ class LearnerQuizFlowIT extends AssessmentIntegrationTest {
         assertThat(history).hasSize(1);
         assertThat(api.ok(LEARNER, get(ME + "/quizzes/{id}", quizId)).path("summary").path("attemptsLeft").asInt())
             .as("thu hồi không làm số lượt âm").isZero();
+        assertThat(api.ok(INSTRUCTOR, get(exhausted, quizId)).path("items").get(0).path("attemptsUsed").asLong())
+            .as("không tính lượt bị hủy, có xét thu hồi cấp thêm").isEqualTo(2);
     }
 
     @Test

@@ -393,6 +393,12 @@ public final class AssessmentViews {
         @Schema(description = "Lịch sử chấm lại của lượt, cũ nhất trước.") List<RegradeHistory> regrades) {
     }
 
+    public record ExhaustedLearnerCount(String userId, Long attemptsUsed) {
+    }
+
+    public record ExhaustedLearner(String userId, String userName, Long attemptsUsed) {
+    }
+
     public record GrantView(
         Long id,
         Long quizId,
