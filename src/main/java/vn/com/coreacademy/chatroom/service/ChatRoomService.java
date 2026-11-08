@@ -1,6 +1,7 @@
 package vn.com.coreacademy.chatroom.service;
 
 import java.io.IOException;
+import java.security.SecureRandom;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -30,6 +31,9 @@ import vn.com.coreacademy.common.exception.BusinessException;
 @Service
 @RequiredArgsConstructor
 public class ChatRoomService {
+    private static final int STARTING_DICE_TOKENS = 100;
+    private static final long MAX_SAFE_DICE_BALANCE = 9_007_199_254_740_991L;
+    private static final SecureRandom DICE_RANDOM = new SecureRandom();
     private static final Set<String> COLORS = Set.of("teal", "slate", "amber", "blue", "rose");
     private static final List<String> FACINGS = List.of("east", "southeast", "south", "southwest",
         "west", "northwest", "north", "northeast");
@@ -46,11 +50,18 @@ public class ChatRoomService {
     private final ChatRoomTickets tickets;
     private final ChatRoomProperties properties;
     private final Map<String, Guest> guests = new LinkedHashMap<>();
+    private final Map<String, HighFiveInvite> invitations = new LinkedHashMap<>();
     private String hostId;
     private Round round;
     private int nextQuestion;
 
     private record Question(String prompt, List<String> options, int correctIndex) {
+    }
+
+    private record HighFiveInvite(String id, Guest from, Guest to, long expiresAt) {
+    }
+
+    private record DiceResult(String side, long stake, List<Integer> dice, int total, String outcome, boolean won) {
     }
 
     private static final class Round {
@@ -70,9 +81,17 @@ public class ChatRoomService {
         private final long connectedAt = System.currentTimeMillis();
         private volatile String name;
         private String color;
+        private String avatar;
         private String facing = "north";
         private boolean activities;
         private boolean gestures;
+        private boolean interactions;
+        private boolean diceEnabled;
+        private long diceBalance = STARTING_DICE_TOKENS;
+        private long diceTurn;
+        private DiceResult diceResult;
+        private Integer seat;
+        private long highFiveUntil;
         private double x;
         private double y;
         private double allowance = 30;
@@ -90,8 +109,12 @@ public class ChatRoomService {
         }
 
         private Map<String, Object> view() {
-            return Map.of("id", session.getId(), "name", name, "color", color, "x", x, "y", y,
-                "facing", facing);
+            Map<String, Object> player = new LinkedHashMap<>(Map.of("id", session.getId(), "name", name,
+                "color", color, "avatar", avatar, "x", x, "y", y, "facing", facing));
+            if (seat != null) {
+                player.put("seat", seat);
+            }
+            return player;
         }
     }
 
@@ -152,6 +175,10 @@ public class ChatRoomService {
                 case "move" -> move(guest, packet);
                 case "chat" -> chat(guest, packet, now);
                 case "gesture" -> gesture(guest, packet, now);
+                case "seat" -> seat(guest, packet, now);
+                case "high-five-invite" -> inviteHighFive(guest, now);
+                case "high-five-reply" -> replyHighFive(guest, packet, now);
+                case "dice-roll" -> rollDice(guest, packet);
                 case "game-start", "game-answer", "game-close" -> play(guest, type, packet);
                 default -> error(guest, "Sự kiện không được hỗ trợ.");
             }
@@ -172,6 +199,10 @@ public class ChatRoomService {
         guest.name = name;
         guest.activities = packet.path("activities").isBoolean() && packet.path("activities").asBoolean();
         guest.gestures = packet.path("gestures").isBoolean() && packet.path("gestures").asBoolean();
+        guest.interactions = packet.path("interactions").isBoolean() && packet.path("interactions").asBoolean();
+        guest.diceEnabled = packet.path("dice").isBoolean() && packet.path("dice").asBoolean()
+            && map.layout().diceArea() != null;
+        guest.avatar = "female".equals(packet.path("avatar").asText()) ? "female" : "male";
         String color = packet.path("color").asText();
         guest.color = COLORS.contains(color) ? color : "teal";
         ChatRoomMap.Point spawn = spawnFor(guest);
@@ -179,7 +210,11 @@ public class ChatRoomService {
         guest.y = spawn.y();
         guest.lastMove = System.nanoTime();
         send(guest, Map.of("type", "welcome", "id", guest.session.getId(), "players", guests.values().stream()
-            .filter(g -> g.name != null).map(Guest::view).toList(), "history", List.of(), "gestures", guest.gestures));
+            .filter(g -> g.name != null).map(Guest::view).toList(), "history", List.of(), "gestures", guest.gestures,
+            "interactions", guest.interactions));
+        if (guest.diceEnabled) {
+            sendDiceState(guest);
+        }
         broadcast(Map.of("type", "joined", "player", guest.view()));
         if (guest.activities) {
             if (hostId == null) {
@@ -189,6 +224,52 @@ public class ChatRoomService {
                 send(guest, gameView(guest));
             }
         }
+    }
+
+    private void rollDice(Guest guest, JsonNode packet) throws IOException {
+        if (!guest.diceEnabled) {
+            return;
+        }
+        JsonNode turn = packet.path("turn");
+        if (!turn.isIntegralNumber() || !turn.canConvertToLong() || turn.longValue() != guest.diceTurn) {
+            sendDiceState(guest);
+            return;
+        }
+        if (!map.layout().diceArea().contains(guest.x, guest.y)) {
+            send(guest, Map.of("type", "dice-error", "message", "Hãy đến khu Tài/Xỉu để tung súc xắc."));
+            return;
+        }
+        String side = packet.path("side").asText();
+        JsonNode amount = packet.path("stake");
+        if (!("small".equals(side) || "big".equals(side)) || !amount.isIntegralNumber()
+            || !amount.canConvertToLong() || amount.longValue() < 1 || amount.longValue() > guest.diceBalance) {
+            send(guest, Map.of("type", "dice-error", "message", "Chọn cửa và số token nguyên trong số dư hiện có."));
+            return;
+        }
+        long stake = amount.longValue();
+        if (stake > MAX_SAFE_DICE_BALANCE - guest.diceBalance) {
+            send(guest, Map.of("type", "dice-error", "message", "Hãy đặt ít token hơn."));
+            return;
+        }
+        int first = DICE_RANDOM.nextInt(6) + 1;
+        int second = DICE_RANDOM.nextInt(6) + 1;
+        int third = DICE_RANDOM.nextInt(6) + 1;
+        int total = first + second + third;
+        String outcome = first == second && second == third ? "triple" : (total <= 10 ? "small" : "big");
+        boolean won = side.equals(outcome);
+        guest.diceBalance += won ? stake : -stake;
+        guest.diceTurn++;
+        guest.diceResult = new DiceResult(side, stake, List.of(first, second, third), total, outcome, won);
+        sendDiceState(guest);
+    }
+
+    private void sendDiceState(Guest guest) throws IOException {
+        Map<String, Object> state = new LinkedHashMap<>(Map.of("type", "dice-state", "balance", guest.diceBalance,
+            "turn", guest.diceTurn));
+        if (guest.diceResult != null) {
+            state.put("result", guest.diceResult);
+        }
+        send(guest, state);
     }
 
     private ChatRoomMap.Point spawnFor(Guest joining) {
@@ -291,6 +372,10 @@ public class ChatRoomService {
     }
 
     private void move(Guest guest, JsonNode packet) throws IOException {
+        if (guest.seat != null || guest.highFiveUntil > System.currentTimeMillis()) {
+            send(guest, Map.of("type", "correction", "x", guest.x, "y", guest.y));
+            return;
+        }
         if (!packet.path("x").isNumber() || !packet.path("y").isNumber()) {
             error(guest, "Tọa độ không hợp lệ.");
             return;
@@ -318,8 +403,128 @@ public class ChatRoomService {
         }
         guest.x = x;
         guest.y = y;
-        broadcast(Map.of("type", "moved", "id", guest.session.getId(), "x", x, "y", y,
-            "facing", guest.facing));
+        broadcastPosition(guest);
+    }
+
+    private void broadcastPosition(Guest guest) throws IOException {
+        Map<String, Object> position = new LinkedHashMap<>(Map.of("type", "moved", "id", guest.session.getId(),
+            "x", guest.x, "y", guest.y, "facing", guest.facing));
+        if (guest.interactions) {
+            position.put("seat", guest.seat);
+        }
+        broadcast(position);
+    }
+
+    private void seat(Guest guest, JsonNode packet, long now) throws IOException {
+        if (!guest.interactions || guest.highFiveUntil > now) {
+            return;
+        }
+        if ("stand".equals(packet.path("action").asText())) {
+            if (guest.seat != null) {
+                guest.seat = null;
+                broadcastPosition(guest);
+            }
+            return;
+        }
+        if (!"sit".equals(packet.path("action").asText()) || guest.seat != null) {
+            return;
+        }
+        JsonNode requested = packet.get("chair");
+        if (requested != null && (!requested.isIntegralNumber() || !requested.canConvertToInt())) {
+            error(guest, "Ghế không hợp lệ.");
+            return;
+        }
+        Integer chair = requested == null ? null : requested.intValue();
+        if (chair == null) {
+            double nearest = ChatRoomLimits.SEAT_RANGE_PIXELS;
+            for (int i = 0; i < map.layout().objects().size(); i++) {
+                ChatRoomMap.Point point = freeSeatApproach(guest, i);
+                if (point != null && Math.hypot(point.x() - guest.x, point.y() - guest.y) < nearest) {
+                    nearest = Math.hypot(point.x() - guest.x, point.y() - guest.y);
+                    chair = i;
+                }
+            }
+        }
+        ChatRoomMap.Point point = chair == null ? null : freeSeatApproach(guest, chair);
+        if (point == null) {
+            error(guest, "Hãy đến gần một ghế trống để ngồi.");
+            return;
+        }
+        guest.seat = chair;
+        guest.x = point.x();
+        guest.y = point.y();
+        guest.facing = "north";
+        broadcastPosition(guest);
+    }
+
+    private ChatRoomMap.Point freeSeatApproach(Guest guest, int index) {
+        if (index < 0 || index >= map.layout().objects().size()
+            || guests.values().stream().anyMatch(other -> Integer.valueOf(index).equals(other.seat))) {
+            return null;
+        }
+        ChatRoomMap.Furniture chair = map.layout().objects().get(index);
+        if (!"chair".equals(chair.kind())) {
+            return null;
+        }
+        double x = chair.x() + chair.w() / 2;
+        double y = chair.y() + chair.h() + map.layout().radius() + 8;
+        return Math.hypot(x - guest.x, y - guest.y) <= ChatRoomLimits.SEAT_RANGE_PIXELS
+            && map.clearPath(guest.x, guest.y, x, y) ? new ChatRoomMap.Point(x, y) : null;
+    }
+
+    private void inviteHighFive(Guest guest, long now) throws IOException {
+        invitations.values().removeIf(invite -> invite.expiresAt() <= now);
+        if (!canHighFive(guest, now) || hasInvitation(guest)) {
+            return;
+        }
+        Guest target = nearbyGuest(guest, ChatRoomLimits.HIGH_FIVE_RANGE_PIXELS,
+            other -> canHighFive(other, now) && !hasInvitation(other)
+                && Math.hypot(other.x - guest.x, other.y - guest.y) >= ChatRoomLimits.HIGH_FIVE_MIN_PIXELS);
+        if (target == null) {
+            error(guest, "Hãy đứng gần một bạn để mời đập tay.");
+            return;
+        }
+        String id = UUID.randomUUID().toString();
+        invitations.put(id, new HighFiveInvite(id, guest, target, now + ChatRoomLimits.HIGH_FIVE_INVITE_MILLIS));
+        Map<String, Object> event = Map.of("type", "high-five-invite", "id", id,
+            "from", guest.session.getId(), "to", target.session.getId());
+        broadcast(event, viewer -> viewer == guest || viewer == target);
+    }
+
+    private boolean canHighFive(Guest guest, long now) {
+        return guest.interactions && guest.seat == null && guest.highFiveUntil <= now && guest.session.isOpen();
+    }
+
+    private boolean hasInvitation(Guest guest) {
+        return invitations.values().stream().anyMatch(invite -> invite.from() == guest || invite.to() == guest);
+    }
+
+    private void replyHighFive(Guest guest, JsonNode packet, long now) throws IOException {
+        HighFiveInvite invite = invitations.get(packet.path("inviteId").asText());
+        if (invite == null || invite.to() != guest || !packet.path("accept").isBoolean()) {
+            return;
+        }
+        invitations.remove(invite.id());
+        Guest sender = invite.from();
+        broadcast(Map.of("type", "high-five-end", "id", invite.id()), viewer -> viewer == sender || viewer == guest);
+        if (!packet.path("accept").asBoolean() || invite.expiresAt() <= now) {
+            return;
+        }
+        double distance = Math.hypot(sender.x - guest.x, sender.y - guest.y);
+        if (!canHighFive(sender, now) || !canHighFive(guest, now)
+            || distance < ChatRoomLimits.HIGH_FIVE_MIN_PIXELS || distance > ChatRoomLimits.HIGH_FIVE_RANGE_PIXELS
+            || !map.clearPath(sender.x, sender.y, guest.x, guest.y)) {
+            error(guest, "Hai bạn cần đứng gần nhau để đập tay.");
+            error(sender, "Hai bạn cần đứng gần nhau để đập tay.");
+            return;
+        }
+        sender.highFiveUntil = guest.highFiveUntil = now + ChatRoomLimits.HIGH_FIVE_LOCK_MILLIS;
+        broadcast(Map.of("type", "high-five", "from", posePosition(sender), "to", posePosition(guest)),
+            viewer -> viewer.interactions);
+    }
+
+    private Map<String, Object> posePosition(Guest guest) {
+        return Map.of("id", guest.session.getId(), "x", guest.x, "y", guest.y);
     }
 
     private void gesture(Guest guest, JsonNode packet, long now) throws IOException {
@@ -328,14 +533,15 @@ public class ChatRoomService {
             error(guest, "Động tác này không được hỗ trợ.");
             return;
         }
-        if (now - guest.lastGesture < ChatRoomLimits.GESTURE_INTERVAL_MILLIS) {
+        if (now - guest.lastGesture < ChatRoomLimits.GESTURE_INTERVAL_MILLIS || guest.highFiveUntil > now
+            || (guest.seat != null && "jump".equals(kind))) {
             return;
         }
         guest.lastGesture = now;
         Map<String, Object> event = new LinkedHashMap<>(Map.of("type", "gesture", "kind", kind,
             "playerId", guest.session.getId()));
         if ("wave".equals(kind)) {
-            Guest target = nearbyGuest(guest);
+            Guest target = nearbyGuest(guest, ChatRoomLimits.WAVE_RANGE_PIXELS, candidate -> true);
             if (target != null) {
                 event.put("targetId", target.session.getId());
                 event.put("facing", facingFrom(guest, target.x, target.y));
@@ -344,15 +550,14 @@ public class ChatRoomService {
         broadcast(event, viewer -> viewer.gestures);
     }
 
-    private Guest nearbyGuest(Guest actor) {
+    private Guest nearbyGuest(Guest actor, double range, Predicate<Guest> eligible) {
         Guest nearest = null;
-        double range = ChatRoomLimits.WAVE_RANGE_PIXELS;
         for (Guest candidate : guests.values()) {
             if (candidate == actor || candidate.name == null || !candidate.session.isOpen()) {
                 continue;
             }
             double distance = Math.hypot(candidate.x - actor.x, candidate.y - actor.y);
-            if (distance < range && map.clearPath(actor.x, actor.y, candidate.x, candidate.y)) {
+            if (distance < range && eligible.test(candidate) && map.clearPath(actor.x, actor.y, candidate.x, candidate.y)) {
                 range = distance;
                 nearest = candidate;
             }
@@ -420,6 +625,7 @@ public class ChatRoomService {
     public synchronized void disconnect(WebSocketSession session) throws IOException {
         Guest guest = guests.remove(session.getId());
         if (guest != null && guest.name != null) {
+            invitations.values().removeIf(invite -> invite.from() == guest || invite.to() == guest);
             broadcast(Map.of("type", "left", "id", session.getId(), "name", guest.name));
             if (session.getId().equals(hostId)) {
                 hostId = guests.values().stream()

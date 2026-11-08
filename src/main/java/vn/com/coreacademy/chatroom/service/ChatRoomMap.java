@@ -16,10 +16,13 @@ public class ChatRoomMap {
     }
 
     public record Area(double x, double y, double w, double h) {
+        public boolean contains(double px, double py) {
+            return px >= x && px <= x + w && py >= y && py <= y + h;
+        }
     }
 
     public record Layout(int width, int height, double speed, double radius, Point spawn, List<Furniture> objects,
-        Area activityArea) {
+        Area activityArea, Area diceArea) {
     }
 
     private final Layout layout;
