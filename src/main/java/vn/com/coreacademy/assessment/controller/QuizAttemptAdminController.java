@@ -5,6 +5,7 @@ import java.util.List;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -116,6 +117,24 @@ public class QuizAttemptAdminController {
         return BaseResponse.ok(attempts.grants(quizId, userId));
     }
 
+    @GetMapping("/quizzes/{quizId}/exhausted-learners")
+    @ApiResponse(responseCode = "200",
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
+    @Operation(
+        summary = "Danh sách thí sinh đã hết lượt thi",
+        description = """
+            Liệt kê theo từng bài kiểm tra, có tính lượt được cấp bổ sung còn hiệu lực.
+            - Chỉ người quản lý khóa chứa bài kiểm tra được tra cứu.
+            """
+    )
+    public BaseResponse<PageResponse<AssessmentViews.ExhaustedLearner>> exhaustedLearners(
+        @PathVariable @Positive Long quizId,
+        @Parameter(description = "Tìm theo một phần mã cán bộ.") @RequestParam(required = false) @Size(max = 20)
+        String userId,
+        @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return BaseResponse.ok(attempts.exhaustedLearners(quizId, userId, page, size));
+    }
+
     @PostMapping("/quizzes/{quizId}/grants")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
@@ -126,8 +145,10 @@ public class QuizAttemptAdminController {
             """
     )
     public BaseResponse<AssessmentViews.GrantView> grant(@PathVariable @Positive Long quizId,
-        @Valid @RequestBody AssessmentRequests.GrantRequest request) {
-        return BaseResponse.ok(attempts.grant(quizId, request));
+        @Valid @RequestBody AssessmentRequests.GrantRequest request,
+        @Parameter(description = "Chỉ cấp nếu học viên đã dùng hết lượt tại thời điểm lưu.")
+        @RequestParam(defaultValue = "false") boolean requireExhausted) {
+        return BaseResponse.ok(attempts.grant(quizId, request, requireExhausted));
     }
 
     @PostMapping("/quiz-attempt-grants/{grantId}/revoke")

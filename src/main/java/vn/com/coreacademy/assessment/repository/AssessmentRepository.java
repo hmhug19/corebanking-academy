@@ -10,6 +10,8 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.AttemptStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.ItemStatus;
@@ -30,6 +32,8 @@ import vn.com.coreacademy.assessment.entity.QuizAttemptGrant;
 import vn.com.coreacademy.assessment.entity.QuizQuestion;
 import vn.com.coreacademy.assessment.exception.AssessmentResponseCode;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.common.persistence.NativeSearchQuery;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 
 /** Truy cập scalar entity của Quiz Engine, không có quan hệ JPA hay FK; query nghiệp vụ chỉ đặt tại đây. */
 @Repository
@@ -401,6 +405,42 @@ public class AssessmentRepository {
             and a.userId = :user
             order by a.attemptNo
             """, QuizAttempt.class, Map.of("quiz", quizId, "user", userId));
+    }
+
+    public Page<AssessmentViews.ExhaustedLearnerCount> exhaustedLearners(Quiz quiz, String userId, Pageable page) {
+        var sql = new NativeSearchQuery("""
+            from (
+                select a.user_id, count(*) as attempts_used
+                from learning_hub.quiz_attempts a
+                where a.quiz_id = :quiz and a.status <> :voided
+                group by a.user_id
+            ) used
+            left join (
+                select g.user_id, sum(g.extra_attempts) as extra_attempts
+                from learning_hub.quiz_attempt_grants g
+                where g.quiz_id = :quiz and not g.is_deleted
+                group by g.user_id
+            ) grants on grants.user_id = used.user_id
+            """);
+        sql.bind("quiz", quiz.getId());
+        sql.bind("voided", AttemptStatus.VOIDED);
+        sql.and("used.attempts_used >= :maxAttempts + coalesce(grants.extra_attempts, 0)");
+        sql.bind("maxAttempts", quiz.getMaxAttempts());
+        sql.and("""
+            exists (
+                select 1 from learning_hub.course_enrollments e
+                where e.course_id = :course and e.user_id = used.user_id and e.status <> :withdrawn
+            )
+            """);
+        sql.bind("course", quiz.getCourseId());
+        sql.bind("withdrawn", ProgressStatus.WITHDRAWN);
+        String pattern = NativeSearchQuery.containsPattern(userId);
+        if (pattern != null) {
+            sql.and("used.user_id ilike :userId escape '!'");
+            sql.bind("userId", pattern);
+        }
+        return sql.page(entityManager, "select used.user_id, used.attempts_used\n",
+            AssessmentViews.ExhaustedLearnerCount.class, page, Map.of("id", "used.user_id"));
     }
 
     public int grantedAttempts(Long quizId, String userId) {
