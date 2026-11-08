@@ -15,20 +15,29 @@ Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-ro
 
 | Hướng | type | Nội dung |
 |---|---|---|
-| Client → server | `join` | `{name,color,activities?,gestures?}`; tên 1–24 ký tự sau chuẩn hóa NFC/trim; màu `teal/slate/amber/blue/rose`; `activities: true` bật Đố vui, `gestures: true` đăng ký sự kiện động tác |
+| Client → server | `join` | `{name,color,avatar?,activities?,gestures?,interactions?,dice?}`. Tên dài 1–24 ký tự sau chuẩn hóa. Màu nhận `teal/slate/amber/blue/rose`. Mẫu nhân vật nhận `male` hoặc `female`, mặc định `male`. Các cờ lần lượt bật Đố vui cũ, động tác, tương tác với ghế hoặc người chơi và bàn Tài/Xỉu. |
 | Client → server | `move` | `{x,y,facing?}`; tọa độ chân nhân vật theo pixel; `facing` là một trong tám hướng |
 | Client → server | `chat` | `{text}`; 1–280 ký tự, tối thiểu 750 ms giữa các tin |
 | Client → server | `gesture` | `{kind}` với `jump` hoặc `wave`; server nhận tối đa một động tác mỗi 1.200 ms cho mỗi kết nối |
+| Client → server | `dice-roll` | `{turn,side,stake}`. `side` là `small` hoặc `big` và `stake` là số token nguyên dương. |
+| Client → server | `seat` | `{action,chair?}`. `action` là `sit` hoặc `stand`. `chair` là chỉ số trong `objects`. Khi bỏ qua `chair`, server chọn ghế trống gần nhất có thể đến được. |
+| Client → server | `high-five-invite` | Mời người đứng gần nhất có hỗ trợ đập tay. |
+| Client → server | `high-five-reply` | `{inviteId,accept}`. Chỉ phiên nhận lời mời có quyền trả lời. |
 | Client → server | `game-start` | Host mở câu hỏi kế tiếp trong bộ câu hỏi có sẵn |
 | Client → server | `game-answer` | `{roundId,choice}`; `choice` là chỉ số từ 0 đến 3 |
 | Client → server | `game-close` | `{roundId}`; host khóa câu hỏi và công bố đáp án |
 | Client → server | `ping` | Heartbeat; FE gửi mỗi 10 giây |
-| Server → client | `welcome` | `{id,players,history:[],gestures}`; `gestures` xác nhận hỗ trợ động tác. `history` rỗng chỉ giữ tương thích client cũ |
-| Server → client | `joined` | `{player}`; player gồm `id,name,color,x,y,facing` |
-| Server → client | `moved` | `{id,x,y,facing}`; vị trí đã qua kiểm tra tốc độ và đường đi |
+| Server → client | `welcome` | `{id,players,history:[],gestures,interactions}`. Hai cờ xác nhận các tính năng phiên hỗ trợ. |
+| Server → client | `joined` | `{player}`. Player gồm `id,name,color,avatar,x,y,facing,seat?`. |
+| Server → client | `moved` | `{id,x,y,facing,seat?}`. `seat` chứa chỉ số ghế khi ngồi và `null` khi đứng. Tọa độ khi ngồi là điểm bước xuống ngay sau ghế. |
 | Server → client | `correction` | `{x,y}`; vị trí sửa chỉ gửi cho người di chuyển không hợp lệ |
 | Server → client | `chat` | `{id,playerId,name,color,text,at}`; `at` là ISO UTC |
 | Server → client | `gesture` | `{kind,playerId,targetId?,facing?}`; vẫy chào quay về người gần nhất trong phạm vi 220 px nếu đường giữa hai người thông thoáng |
+| Server → client | `dice-state` | `{turn,balance,result?}`. `result` gồm `side`, `stake`, `dice`, `total`, `outcome` và `won`. |
+| Server → client | `dice-error` | `{message}`. Lỗi chọn cửa, số token đặt hoặc vị trí. |
+| Server → client | `high-five-invite` | `{id,from,to}`. Chỉ gửi cho hai người tham gia. Lời mời có hiệu lực 10 giây. |
+| Server → client | `high-five-end` | `{id}`. Hai bên đóng lời mời sau khi người nhận trả lời. |
+| Server → client | `high-five` | `{from:{id,x,y},to:{id,x,y}}`. Hai renderer phát cùng một động tác từ tọa độ đã kiểm tra trên server. |
 | Server → client | `game` | `{hostId,round?}`; gửi sau khi vào phòng và khi trạng thái Đố vui thay đổi. `round` gồm `{id,prompt,options,answered,yourChoice}` và thêm `{correctIndex,correctCount}` sau khi khóa câu hỏi |
 | Server → client | `left` | `{id,name}` |
 | Server → client | `error` | `{message}`; lỗi packet/validation, không phản chiếu thông tin nội bộ |
@@ -38,11 +47,13 @@ Hitbox AABB tại chân nhân vật; biên phòng, bàn, ghế, bảng, kệ và
 
 FE mặc định dùng Three.js để dựng camera 3D theo nhân vật. Kéo để xoay camera, bấm “Cận cảnh nhân vật” để nhìn từ phía trước. WASD hoặc phím mũi tên di chuyển theo góc camera. Có thể chuyển sang bản đồ Phaser 2D trong cùng phiên WebSocket. Hai renderer dùng chung tọa độ, hitbox và hàm di chuyển.
 
-Bản đồ 1.600 × 1.120 có `activityArea` đánh dấu khu giao lưu. Khu này đi qua được. Bấm Space khi cảnh được focus hoặc bấm “Nhảy” để nhảy tại chỗ. “Vẫy chào” vẫy về phía người ở gần hoặc vẫy tại chỗ. Cả hai renderer phát động tác từ sự kiện WebSocket. Tọa độ mặt đất và hitbox tiếp tục do server kiểm tra.
+Bản đồ 3.200 × 2.240 có `activityArea` đánh dấu khu giao lưu có thể đi qua. Bấm Space khi cảnh được focus hoặc bấm “Nhảy” để nhảy tại chỗ. “Vẫy chào” vẫy về phía người ở gần hoặc vẫy tại chỗ. Khi ở gần bàn, bấm ghế hoặc “Ngồi ghế” để ngồi. Ghế chỉ nhận một người tại một thời điểm và được giải phóng khi người đó đứng dậy hoặc rời phòng. Server kiểm tra khoảng cách, đường đi và tư thế của cả hai người khi chấp nhận đập tay.
 
 Nhấn Enter hoặc “Nhắn tin” để mở ô nhập dưới cảnh, ngay trên dòng hướng dẫn. Enter gửi và đóng ô. Esc đóng ô để tiếp tục di chuyển. Tin nhắn chỉ thay tên trên đầu nhân vật trong 5,5 giây rồi biến mất. Không có khung trò chuyện/lịch sử. Backend không lưu nội dung tin nhắn; chỉ broadcast tới người đã vào phòng tại thời điểm gửi. Người vào sau hoặc reconnect không nhận tin cũ, kể cả khi bong bóng còn hiện ở client khác.
 
-Đố vui dùng chung cho cả hai chế độ. Phiên đầu tiên vào phòng với `activities: true` làm host. Khi phiên đó rời, server chọn phiên hỗ trợ Đố vui kết nối sớm nhất còn lại và giữ nguyên câu hiện tại. Server khóa mỗi câu trả lời theo tài khoản đã xác thực, kể cả khi mở nhiều tab hoặc kết nối lại. `yourChoice` chỉ phản ánh lựa chọn của tài khoản đang xem. Khi phiên cuối cùng hỗ trợ Đố vui rời phòng, server đặt lại câu hỏi và kết quả.
+Mỗi kết nối vào phòng với `dice: true` nhận 100 token chơi trong bộ nhớ của server. Người chơi phải đứng trong `diceArea` ở góc dưới bên phải để tung. Server tung ba viên cho từng người, chốt số dư và gửi kết quả riêng. Xỉu là 4–10, Tài là 11–17 và bộ ba làm cả hai cửa thua. Cửa thắng cộng đúng số token đã đặt. Gửi lại cùng `turn` trả số dư hiện có. Rời phòng hoặc kết nối lại bắt đầu lượt vào mới với 100 token. Token chỉ dùng trong bàn chơi và kết quả tồn tại trong phiên WebSocket.
+
+Các client cũ vẫn có thể đăng ký Đố vui qua `activities: true`. Giao diện phòng hiện tại đăng ký bàn Tài/Xỉu qua `dice: true`.
 
 ## Cấu hình và triển khai
 
