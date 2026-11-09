@@ -1,6 +1,6 @@
 # Phòng học 3D/2D realtime
 
-Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-room` trong `lms-vip-pro-max`. Mọi tài khoản ACTIVE đã đổi mật khẩu tạm đều được vào phòng; tên hiển thị chỉ là nhãn, không thay thế danh tính đăng nhập. Không thêm bảng, seed, migration hoặc quyền quản trị.
+Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-room` trong `lms-vip-pro-max`. Mọi tài khoản ACTIVE đã đổi mật khẩu tạm đều được vào phòng. Ví và các khoản cược gắn với tài khoản đăng nhập.
 
 ## HTTP và xác thực
 
@@ -15,13 +15,17 @@ Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-ro
 
 | Hướng | type | Nội dung |
 |---|---|---|
-| Client → server | `join` | `{name,color,avatar?,activities?,gestures?,interactions?,dice?}`. Tên dài 1–24 ký tự sau chuẩn hóa. Màu nhận `teal/slate/amber/blue/rose`. Mẫu nhân vật nhận `male` hoặc `female`, mặc định `male`. Các cờ lần lượt bật Đố vui cũ, động tác, tương tác với ghế hoặc người chơi và bàn Tài/Xỉu. |
+| Client → server | `join` | `{name,color,avatar?,activities?,gestures?,interactions?,roomGames?}`. Tên dài 1–24 ký tự sau chuẩn hóa. Màu nhận `teal/slate/amber/blue/rose`. Mẫu nhân vật nhận `male` hoặc `female`, mặc định `male`. `roomGames: true` bật ví, Trên/Dưới và Caro. |
 | Client → server | `move` | `{x,y,facing?}`; tọa độ chân nhân vật theo pixel; `facing` là một trong tám hướng |
 | Client → server | `chat` | `{text}`; 1–280 ký tự, tối thiểu 750 ms giữa các tin |
 | Client → server | `gesture` | `{kind}` với `jump` hoặc `wave`; server nhận tối đa một động tác mỗi 1.200 ms cho mỗi kết nối |
-| Client → server | `dice-roll` | `{turn,side,stake}`. `side` là `small` hoặc `big` và `stake` là số token nguyên dương. |
+| Client → server | `dice-open`, `dice-close` | Đăng ký hoặc dừng nhận các lượt Trên/Dưới. Mở bàn yêu cầu người chơi ở trong `diceArea`. |
+| Client → server | `dice-bet` | `{round,side,stake}`. `side` là `lower` hoặc `upper`, cược nguyên từ 1 đến 1.000.000 token. |
+| Client → server | `wallet-rank` | Yêu cầu bảng Top tài phú. |
+| Client → server | `caro-invite`, `caro-reply`, `caro-move` | Lần lượt dùng `{target,stake}`, `{inviteId,accept}`, `{gameId,move,cell}`. `target` là ID phiên người được mời, `move` là số nước đã đánh và `cell` là chỉ số ô 0–2499 theo thứ tự hàng. |
+| Client → server | `approach-cancel` | Dừng tự đi tới mục tiêu. |
 | Client → server | `seat` | `{action,chair?}`. `action` là `sit` hoặc `stand`. `chair` là chỉ số trong `objects`. Khi bỏ qua `chair`, server chọn ghế trống gần nhất có thể đến được. |
-| Client → server | `high-five-invite` | Mời người đứng gần nhất có hỗ trợ đập tay. |
+| Client → server | `high-five-invite` | Tìm người phù hợp gần nhất, tự đi tới tầm mời nếu cần. |
 | Client → server | `high-five-reply` | `{inviteId,accept}`. Chỉ phiên nhận lời mời có quyền trả lời. |
 | Client → server | `game-start` | Host mở câu hỏi kế tiếp trong bộ câu hỏi có sẵn |
 | Client → server | `game-answer` | `{roundId,choice}`; `choice` là chỉ số từ 0 đến 3 |
@@ -29,12 +33,16 @@ Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-ro
 | Client → server | `ping` | Heartbeat; FE gửi mỗi 10 giây |
 | Server → client | `welcome` | `{id,players,history:[],gestures,interactions}`. Hai cờ xác nhận các tính năng phiên hỗ trợ. |
 | Server → client | `joined` | `{player}`. Player gồm `id,name,color,avatar,x,y,facing,seat?`. |
-| Server → client | `moved` | `{id,x,y,facing,seat?}`. `seat` chứa chỉ số ghế khi ngồi và `null` khi đứng. Tọa độ khi ngồi là điểm bước xuống ngay sau ghế. |
+| Server → client | `moved` | `{id,x,y,facing,seat?,approaching?}`. `seat` chứa chỉ số ghế khi ngồi và `null` khi đứng. Tọa độ khi ngồi là điểm bước xuống ngay sau ghế. |
 | Server → client | `correction` | `{x,y}`; vị trí sửa chỉ gửi cho người di chuyển không hợp lệ |
 | Server → client | `chat` | `{id,playerId,name,color,text,at}`; `at` là ISO UTC |
 | Server → client | `gesture` | `{kind,playerId,targetId?,facing?}`; vẫy chào quay về người gần nhất trong phạm vi 220 px nếu đường giữa hai người thông thoáng |
-| Server → client | `dice-state` | `{turn,balance,result?}`. `result` gồm `side`, `stake`, `dice`, `total`, `outcome` và `won`. |
+| Server → client | `wallet`, `wallet-rank` | `{balance}` gửi riêng và `{ranks:[{name,balance}]}` trả tối đa 10 người đang hoạt động theo số dư khả dụng. |
+| Server → client | `dice-state` | `{round,closesAt,serverTime,history,bet?,lastBet?}`. Mốc giờ là epoch ms. Lịch sử tối đa 12 kết quả `{round,dice,total,outcome}` dùng chung. Hai trường cược chỉ gửi cho chính tài khoản. |
 | Server → client | `dice-error` | `{message}`. Lỗi chọn cửa, số token đặt hoặc vị trí. |
+| Server → client | `caro-invite`, `caro-invite-end` | `{id,from,fromName,to,toName,stake}` và `{id}`. Lời mời có hiệu lực 20 giây. |
+| Server → client | `caro-state` | `{id,xName,oName,piece,stake,board,moves,expiresAt,serverTime,result?}`. Chuỗi bàn dài 2.500 ký tự `.`/`X`/`O`. Kết quả là `X`, `O` hoặc `draw`. |
+| Server → client | `caro-error` | `{message}`. Không thể gửi hoặc chấp nhận lời mời. |
 | Server → client | `high-five-invite` | `{id,from,to}`. Chỉ gửi cho hai người tham gia. Lời mời có hiệu lực 10 giây. |
 | Server → client | `high-five-end` | `{id}`. Hai bên đóng lời mời sau khi người nhận trả lời. |
 | Server → client | `high-five` | `{from:{id,x,y},to:{id,x,y}}`. Hai renderer phát cùng một động tác từ tọa độ đã kiểm tra trên server. |
@@ -47,17 +55,17 @@ Hitbox AABB tại chân nhân vật; biên phòng, bàn, ghế, bảng, kệ và
 
 FE mặc định dùng Three.js để dựng camera 3D theo nhân vật. Kéo để xoay camera, bấm “Cận cảnh nhân vật” để nhìn từ phía trước. WASD hoặc phím mũi tên di chuyển theo góc camera. Có thể chuyển sang bản đồ Phaser 2D trong cùng phiên WebSocket. Hai renderer dùng chung tọa độ, hitbox và hàm di chuyển.
 
-Bản đồ 3.200 × 2.240 có `activityArea` đánh dấu khu giao lưu có thể đi qua. Bấm Space khi cảnh được focus hoặc bấm “Nhảy” để nhảy tại chỗ. “Vẫy chào” vẫy về phía người ở gần hoặc vẫy tại chỗ. Khi ở gần bàn, bấm ghế hoặc “Ngồi ghế” để ngồi. Ghế chỉ nhận một người tại một thời điểm và được giải phóng khi người đó đứng dậy hoặc rời phòng. Server kiểm tra khoảng cách, đường đi và tư thế của cả hai người khi chấp nhận đập tay.
+Bản đồ 3.200 × 2.240 có `activityArea` đánh dấu khu giao lưu có thể đi qua. Bấm Space khi cảnh được focus hoặc bấm “Nhảy” để nhảy tại chỗ. “Vẫy chào” vẫy về phía người ở gần hoặc vẫy tại chỗ. Ghế và đập tay dùng đường đi do server tính nếu còn xa. Server kiểm tra lại chỗ ngồi và đối tác lúc tới nơi. Mục tiêu không phù hợp thì thao tác dừng im lặng. Ghế được giải phóng khi người đó đứng dậy hoặc rời phòng.
 
 Nhấn Enter hoặc “Nhắn tin” để mở ô nhập dưới cảnh, ngay trên dòng hướng dẫn. Enter gửi và đóng ô. Esc đóng ô để tiếp tục di chuyển. Tin nhắn chỉ thay tên trên đầu nhân vật trong 5,5 giây rồi biến mất. Không có khung trò chuyện/lịch sử. Backend không lưu nội dung tin nhắn; chỉ broadcast tới người đã vào phòng tại thời điểm gửi. Người vào sau hoặc reconnect không nhận tin cũ, kể cả khi bong bóng còn hiện ở client khác.
 
-Mỗi kết nối vào phòng với `dice: true` nhận 100 token chơi trong bộ nhớ của server. Người chơi phải đứng trong `diceArea` ở góc dưới bên phải để tung. Server tung ba viên cho từng người, chốt số dư và gửi kết quả riêng. Xỉu là 4–10, Tài là 11–17 và bộ ba làm cả hai cửa thua. Cửa thắng cộng đúng số token đã đặt. Gửi lại cùng `turn` trả số dư hiện có. Rời phòng hoặc kết nối lại bắt đầu lượt vào mới với 100 token. Token chỉ dùng trong bàn chơi và kết quả tồn tại trong phiên WebSocket.
+Tài khoản nhận 50 token ở lần vào phòng đầu tiên mỗi ngày theo múi giờ Việt Nam. Mỗi dòng XP dương mới trong sổ XP cộng cùng số token, cùng giao dịch với khoản XP. Trên/Dưới tạo lượt 30 giây khi có người mở bàn. Mỗi tài khoản được đặt một cược một lượt. Server tung ba viên một lần, lưu kết quả và trả gấp đôi tiền đặt cho cửa thắng. Dưới là 4–10, Trên là 11–17, bộ ba làm cả hai cửa thua. Rời bàn vẫn nhận kết toán cho cược đã đặt.
 
-Các client cũ vẫn có thể đăng ký Đố vui qua `activities: true`. Giao diện phòng hiện tại đăng ký bàn Tài/Xỉu qua `dice: true`.
+Caro dùng bàn 50×50. Người gửi và người nhận phải ở gần lúc mời và lúc đồng ý. Khi đồng ý, server giữ cùng mức cược mỗi bên (0–1.000.000 token). Chuỗi đúng 5 quân với ít nhất một đầu trống thắng ván. Mép bàn được tính là đầu chặn. Đầy bàn hoặc 120 giây không có nước hợp lệ thì hòa và hoàn cược. Bàn và cược được lưu, nên người chơi có thể kết nối lại trước khi hết thời gian.
 
 ## Cấu hình và triển khai
 
-Giữ Java/compiler, Docker và database theo cấu hình repository. Dependency BE là `spring-boot-starter-websocket`, theo BOM hiện có. Mỗi instance giữ một phòng, trạng thái Đố vui và tối đa 60 kết nối trong RAM. Khi reconnect, nhân vật xuất hiện lại ở lối vào. Chưa hỗ trợ chia sẻ phòng giữa nhiều replica. Deploy BE trước FE để sẵn sàng cho các sự kiện Đố vui. Không cần migration database hoặc thay cấu hình Nginx đang hoạt động.
+Chạy [migration ví và trò chơi](../sql/upgrade/2026-11-09-chat-room-games.sql) sau khi đã có sổ XP và trước khi triển khai BE rồi FE. Giữ Java/compiler và Docker theo cấu hình repository. Vị trí, kết nối và lời mời hiện tại thuộc một instance, tối đa 60 kết nối. Khi reconnect, nhân vật xuất hiện lại ở lối vào. Ví, kết quả Trên/Dưới và ván Caro lưu trong PostgreSQL.
 
 Các property có mặc định tập trung tại `application.yml` và được validate bởi `ChatRoomProperties`:
 

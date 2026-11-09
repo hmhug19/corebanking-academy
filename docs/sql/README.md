@@ -25,6 +25,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 |---|---|---|
 | 1 | `learning_hub_identity.sql` | Schema, 7 tài khoản demo, RBAC |
 | 2 | `learning_hub_learning.sql` | 30 bảng Learning (gồm `learning_activity_days`, `lesson_notes`, `lesson_bookmarks`, `lesson_feedback`) |
+| 2a | `upgrade/2026-11-09-chat-room-games.sql` | Ví token, lịch sử Trên/Dưới, bàn Caro 50×50 và trigger cộng token từ XP mới |
 | 3 | `learning_hub_media_progress.sql` | Extension media/tiến độ |
 | 4 | `learning_hub_assessment.sql` | Quiz Engine; cần Identity + Learning, nằm trước Knowledge/Community |
 | 4a | `upgrade/2026-11-07-flashcards.sql` | Flashcard, trạng thái ôn và đánh dấu theo học viên |
@@ -66,6 +67,11 @@ Baseline mới đã có constraint và ý nghĩa mới. Rollback cùng tên tín
 hiện tại (không phải phục hồi snapshot), chạy cùng việc quay về BE/FE cũ. Không tự chạy SQL lúc startup.
 
 Script trong `docs/sql/upgrade/` dành cho DB đã chạy baseline. Với DB mới, làm theo thứ tự ở bảng khởi tạo local.
+
+Với DB đang chạy, áp dụng [2026-11-09-chat-room-games.sql](upgrade/2026-11-09-chat-room-games.sql)
+sau khi đã có `learning_hub.xp_ledger`, trước khi chạy bản backend có trò chơi phòng học.
+Migration thêm bốn bảng và một trigger cho dòng XP dương mới. Giữ các bảng để bảo toàn ví và cược khi đổi bản ứng dụng.
+Có thể chạy lại cùng file nếu đã cài schema thử nghiệm trước đó và bảng Caro chưa có ván theo kích thước cũ.
 Chạy toàn bộ file với `-v ON_ERROR_STOP=1`, mật khẩu qua `PGPASSWORD`. Xem hướng dẫn rollback của từng upgrade.
 
 | Upgrade | Nội dung | Rollback |
