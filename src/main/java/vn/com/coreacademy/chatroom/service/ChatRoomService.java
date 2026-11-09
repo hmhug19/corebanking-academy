@@ -1,6 +1,7 @@
 package vn.com.coreacademy.chatroom.service;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -19,8 +20,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.NestedRuntimeException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -59,6 +63,7 @@ public class ChatRoomService {
     private final Map<String, CaroInvite> caroInvites = new LinkedHashMap<>();
     private long knownDiceRound;
     private long lastWalletRefresh;
+    private long gameRetryAt;
     private String hostId;
     private Round round;
     private int nextQuestion;
@@ -202,6 +207,8 @@ public class ChatRoomService {
             }
         } catch (JsonProcessingException exception) {
             error(guest, "Dữ liệu không hợp lệ.");
+        } catch (DataAccessException | TransactionException exception) {
+            gamesUnavailable(guest, exception);
         }
     }
 
@@ -214,12 +221,11 @@ public class ChatRoomService {
             error(guest, "Tên cần từ 1 đến " + ChatRoomLimits.NAME_LENGTH + " ký tự.");
             return;
         }
-        long balance = games.claim(guest.access.userId());
         guest.name = name;
         guest.activities = packet.path("activities").isBoolean() && packet.path("activities").asBoolean();
         guest.gestures = packet.path("gestures").isBoolean() && packet.path("gestures").asBoolean();
         guest.interactions = packet.path("interactions").isBoolean() && packet.path("interactions").asBoolean();
-        guest.roomGames = packet.path("roomGames").isBoolean() && packet.path("roomGames").asBoolean();
+        boolean wantsGames = packet.path("roomGames").isBoolean() && packet.path("roomGames").asBoolean();
         guest.avatar = "female".equals(packet.path("avatar").asText()) ? "female" : "male";
         String color = packet.path("color").asText();
         guest.color = COLORS.contains(color) ? color : "teal";
@@ -230,13 +236,6 @@ public class ChatRoomService {
         send(guest, Map.of("type", "welcome", "id", guest.session.getId(), "players", guests.values().stream()
             .filter(g -> g.name != null).map(Guest::view).toList(), "history", List.of(), "gestures", guest.gestures,
             "interactions", guest.interactions));
-        if (guest.roomGames) {
-            sendWallet(guest, balance);
-            CaroGame active = games.activeCaro(guest.access.userId()).orElse(null);
-            if (active != null && active.expiresAt().isAfter(Instant.now())) {
-                sendCaro(guest, active);
-            }
-        }
         broadcast(Map.of("type", "joined", "player", guest.view()));
         if (guest.activities) {
             if (hostId == null) {
@@ -246,6 +245,50 @@ public class ChatRoomService {
                 send(guest, gameView(guest));
             }
         }
+        initializeGames(guest, wantsGames);
+    }
+
+    private void initializeGames(Guest guest, boolean wantsGames) throws IOException {
+        try {
+            long balance = games.claim(guest.access.userId());
+            if (!wantsGames) {
+                return;
+            }
+            CaroGame active = games.activeCaro(guest.access.userId()).orElse(null);
+            guest.roomGames = true;
+            sendWallet(guest, balance);
+            if (active != null && active.expiresAt().isAfter(Instant.now())) {
+                sendCaro(guest, active);
+            }
+        } catch (DataAccessException | TransactionException exception) {
+            if (wantsGames) {
+                gamesUnavailable(guest, exception);
+            } else {
+                logGameFailure(exception);
+            }
+        }
+    }
+
+    private void gamesUnavailable(Guest guest, NestedRuntimeException exception) throws IOException {
+        guest.roomGames = false;
+        guest.diceViewing = false;
+        String sqlState = logGameFailure(exception);
+        boolean missingSchema = "42P01".equals(sqlState) || "42703".equals(sqlState);
+        send(guest, Map.of("type", "error", "scope", "games", "message", missingSchema
+            ? "Máy chủ chưa cài đủ dữ liệu cho ví token và trò chơi. Hãy báo quản trị viên. Bạn vẫn có thể sử dụng phòng."
+            : "Máy chủ tạm thời không truy cập được ví token và trò chơi. Bạn vẫn có thể sử dụng phòng và vào lại để thử."));
+    }
+
+    private String logGameFailure(NestedRuntimeException exception) {
+        Throwable cause = exception.getMostSpecificCause();
+        String sqlState = cause instanceof SQLException sql ? sql.getSQLState() : null;
+        long now = System.currentTimeMillis();
+        if (now >= gameRetryAt) {
+            log.warn("Chat room game storage unavailable (type={}, sqlState={})",
+                exception.getClass().getSimpleName(), sqlState);
+            gameRetryAt = now + 10_000;
+        }
+        return sqlState;
     }
 
     private void dice(Guest guest, String type, JsonNode packet) throws IOException {
@@ -280,13 +323,20 @@ public class ChatRoomService {
 
     @Scheduled(fixedDelay = 1000)
     public synchronized void gameTick() throws IOException {
-        publishGames(false);
         long now = System.currentTimeMillis();
-        if (now - lastWalletRefresh >= 5000) {
-            refreshWallets();
-            lastWalletRefresh = now;
-        }
         expireCaroInvites(now);
+        if (now < gameRetryAt) {
+            return;
+        }
+        try {
+            publishGames(false);
+            if (now - lastWalletRefresh >= 5000) {
+                refreshWallets();
+                lastWalletRefresh = now;
+            }
+        } catch (DataAccessException | TransactionException exception) {
+            logGameFailure(exception);
+        }
     }
 
     private void publishGames(boolean refreshDice) throws IOException {

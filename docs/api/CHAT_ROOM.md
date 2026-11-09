@@ -48,7 +48,7 @@ Module `chatroom` trong backend hiện có, FE tương ứng là route `/chat-ro
 | Server → client | `high-five` | `{from:{id,x,y},to:{id,x,y}}`. Hai renderer phát cùng một động tác từ tọa độ đã kiểm tra trên server. |
 | Server → client | `game` | `{hostId,round?}`; gửi sau khi vào phòng và khi trạng thái Đố vui thay đổi. `round` gồm `{id,prompt,options,answered,yourChoice}` và thêm `{correctIndex,correctCount}` sau khi khóa câu hỏi |
 | Server → client | `left` | `{id,name}` |
-| Server → client | `error` | `{message}`; lỗi packet/validation, không phản chiếu thông tin nội bộ |
+| Server → client | `error` | `{message,scope?}`; `scope: "games"` báo lỗi ví hoặc trò chơi. Các lỗi này không ngắt kết nối phòng. |
 | Server → client | `pong` | Phản hồi heartbeat |
 
 Hitbox AABB tại chân nhân vật; biên phòng, bàn, ghế, bảng, kệ và cây đều chặn di chuyển. Server kiểm tra đoạn đường mỗi 4 px để chặn xuyên vật thể và ngân sách tốc độ để chặn teleport. Các nhân vật có thể đi ngang nhau. Hướng nhìn gồm `north`, `northeast`, `east`, `southeast`, `south`, `southwest`, `west`, `northwest`; client cũ bỏ qua field này vẫn hoạt động, server suy hướng từ dịch chuyển.
@@ -60,6 +60,8 @@ Bản đồ 3.200 × 2.240 có `activityArea` đánh dấu khu giao lưu có th�
 Nhấn Enter hoặc “Nhắn tin” để mở ô nhập dưới cảnh, ngay trên dòng hướng dẫn. Enter gửi và đóng ô. Esc đóng ô để tiếp tục di chuyển. Tin nhắn chỉ thay tên trên đầu nhân vật trong 5,5 giây rồi biến mất. Không có khung trò chuyện/lịch sử. Backend không lưu nội dung tin nhắn; chỉ broadcast tới người đã vào phòng tại thời điểm gửi. Người vào sau hoặc reconnect không nhận tin cũ, kể cả khi bong bóng còn hiện ở client khác.
 
 Tài khoản nhận 50 token ở lần vào phòng đầu tiên mỗi ngày theo múi giờ Việt Nam. Mỗi dòng XP dương mới trong sổ XP cộng cùng số token, cùng giao dịch với khoản XP. Trên/Dưới tạo lượt 30 giây khi có người mở bàn. Mỗi tài khoản được đặt một cược một lượt. Server tung ba viên một lần, lưu kết quả và trả gấp đôi tiền đặt cho cửa thắng. Dưới là 4–10, Trên là 11–17, bộ ba làm cả hai cửa thua. Rời bàn vẫn nhận kết toán cho cược đã đặt.
+
+HTTP 101 xác nhận WebSocket đã mở. Sự kiện `welcome` xác nhận người dùng đã vào phòng và được gửi trước khi đọc ví. Lần đầu vào phòng, máy chủ tạo ví còn thiếu và ghi ngày điểm danh cùng khoản 50 token trong một thao tác. Nếu cơ sở dữ liệu trò chơi lỗi, người dùng vẫn có thể vào phòng và trò chuyện.
 
 Caro dùng bàn 50×50. Người gửi và người nhận phải ở gần lúc mời và lúc đồng ý. Khi đồng ý, server giữ cùng mức cược mỗi bên (0–1.000.000 token). Chuỗi đúng 5 quân với ít nhất một đầu trống thắng ván. Mép bàn được tính là đầu chặn. Đầy bàn hoặc 120 giây không có nước hợp lệ thì hòa và hoàn cược. Bàn và cược được lưu, nên người chơi có thể kết nối lại trước khi hết thời gian.
 
