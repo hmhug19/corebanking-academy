@@ -11,6 +11,11 @@ import vn.com.coreacademy.identity.dto.RoleGrant;
  */
 public record Skill(String id, String description, List<String> tools, List<String> roles, String system,
                     String examples, String output) {
+    /** A skill that reads the open lesson is only offered when the app opened the assistant from a lesson. */
+    public boolean needsLesson() {
+        return tools.contains("read_lesson");
+    }
+
     public boolean allowedFor(AgentContext context) {
         if (roles.isEmpty()) {
             return true;

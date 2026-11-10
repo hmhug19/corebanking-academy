@@ -70,6 +70,11 @@ public class CourseContentRetrieval {
         }
     }
 
+    /** A lesson the caller may read. */
+    public record LessonRef(long courseId, long revisionId, long chapterId, long lessonId, String courseTitle,
+                            String chapterTitle, String lessonTitle) {
+    }
+
     private static final RowMapper<CourseHit> HITS = (rs, rowNum) -> new CourseHit(rs.getLong("chunk_id"),
         rs.getLong("course_id"), rs.getString("course_title"), rs.getLong("revision_id"), rs.getLong("chapter_id"),
         rs.getString("chapter_title"), rs.getLong("lesson_id"), rs.getString("lesson_title"), rs.getLong("block_id"),
@@ -83,6 +88,53 @@ public class CourseContentRetrieval {
 
         return jdbc.query(SELECT + READABLE
             + " ORDER BY ch.embedding <=> CAST(:vector AS vector), ch.chunk_id LIMIT :limit", parameters, HITS);
+    }
+
+    /** The {@code limit} chunks of one lesson closest to {@code vector}, if the caller may read that lesson. */
+    public List<CourseHit> searchInLesson(float[] vector, long lessonId, int limit) {
+        Map<String, Object> parameters = readerParameters();
+        parameters.put("vector", VectorLiteral.encode(vector));
+        parameters.put("lessonId", lessonId);
+        parameters.put("limit", limit);
+
+        return jdbc.query(SELECT + READABLE + " AND ch.lesson_id = :lessonId"
+            + " ORDER BY ch.embedding <=> CAST(:vector AS vector), ch.chunk_id LIMIT :limit", parameters, HITS);
+    }
+
+    /** The text of one lesson in reading order (first {@code limit} chunks), if the caller may read it. */
+    public List<CourseHit> lessonChunks(long lessonId, int limit) {
+        Map<String, Object> parameters = readerParameters();
+        parameters.put("vector", VectorLiteral.encode(unitVector()));
+        parameters.put("lessonId", lessonId);
+        parameters.put("limit", limit);
+
+        return jdbc.query(SELECT + READABLE + " AND ch.lesson_id = :lessonId"
+            + " ORDER BY ch.chunk_index, ch.chunk_id LIMIT :limit", parameters, HITS);
+    }
+
+    /**
+     * The lesson of the published revision of a course, if the caller may read it. The rule is the one of the chunks,
+     * so a lesson that is unpublished, from an older revision or of a course the user cannot read is not found.
+     */
+    public Optional<LessonRef> lesson(long courseId, long revisionId, long lessonId) {
+        Map<String, Object> parameters = readerParameters();
+        parameters.put("courseId", courseId);
+        parameters.put("revisionId", revisionId);
+        parameters.put("lessonId", lessonId);
+
+        return jdbc.query("""
+            SELECT course.course_id, ch.revision_id, ch.chapter_id, l.lesson_id, r.title AS course_title,
+                   ch.title AS chapter_title, l.title AS lesson_title
+              FROM learning_hub.course_lessons l
+              JOIN learning_hub.course_chapters ch ON ch.chapter_id = l.chapter_id
+              JOIN learning_hub.course_revisions r ON r.revision_id = ch.revision_id
+              JOIN learning_hub.courses course
+                ON course.course_id = r.course_id AND course.published_revision_id = ch.revision_id
+            """ + READABLE + " AND course.course_id = :courseId AND ch.revision_id = :revisionId"
+            + " AND l.lesson_id = :lessonId", parameters,
+            (rs, rowNum) -> new LessonRef(rs.getLong("course_id"), rs.getLong("revision_id"),
+                rs.getLong("chapter_id"), rs.getLong("lesson_id"), rs.getString("course_title"),
+                rs.getString("chapter_title"), rs.getString("lesson_title"))).stream().findFirst();
     }
 
     /** One chunk by id if the caller may read it, with no similarity (1.0). */

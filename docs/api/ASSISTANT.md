@@ -37,7 +37,16 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 ```
 
 - `message` 1–500 ký tự sau khi bỏ khoảng trắng hai đầu, nếu không là `CORE-VALIDATION_FAILED`.
-- `skill` (tùy chọn): `qa_tai_lieu`, `dieu_huong`, `ho_so` hoặc `tro_chuyen`. Có `skill` hợp lệ thì server dùng luôn,
+- `context` (tùy chọn): `{ courseId, revisionId, lessonId }` của bài học đang xem (nút "Hỏi trợ lý AI" trên trang bài
+  học). Server kiểm quyền đọc đúng bài đó (quản lý khóa hoặc ghi danh còn hiệu lực trên revision đang xuất bản); bài không
+  tồn tại, chưa xuất bản hoặc không đọc được đều là envelope `ASSISTANT-LESSON_NOT_FOUND` trước khi stream bắt đầu. Có
+  `context` thì server không gọi mô hình phân loại (dùng `qa_tai_lieu` nếu không nêu `skill`), nói với mô hình tên khóa và
+  bài đang mở, và `search_courses` đưa các đoạn của bài đó lên đầu kể cả khi độ tương đồng thấp. Hội thoại mới lưu bài này
+  (`context_*`), chi tiết và danh sách hội thoại trả `context: { courseId, revisionId, lessonId, label }` (bỏ khi không có)
+  để mở lại vẫn hiện nhãn "Khóa › Bài"; hội thoại cũ giữ bối cảnh lúc bắt đầu.
+- `skill` (tùy chọn): `qa_tai_lieu`, `dieu_huong`, `ho_so`, `tom_tat_bai` hoặc `tro_chuyen`. `tom_tat_bai` (công cụ
+  `read_lesson`, không tham số, đọc tối đa 8 đoạn đầu của bài đang mở theo thứ tự) chỉ được dùng khi có `context`; không có
+  thì bị bỏ qua như giá trị lạ và không được mô hình phân loại chọn. Có `skill` hợp lệ thì server dùng luôn,
   không gọi mô hình phân loại. Bỏ trống, giá trị lạ hoặc không được phép thì một lần gọi mô hình ngắn chọn skill; phân
   loại lỗi hay trả nhãn lạ thì dùng `qa_tai_lieu`. Mỗi lượt chỉ được cấp công cụ của skill đó (sau khi đọc tài liệu vẫn
   bỏ công cụ tác động như trước).
@@ -129,6 +138,7 @@ Bỏ yêu cầu mà không chạy. Trả `BaseResponse<Void>`.
 | Công cụ            | Loại                         | Ai được dùng                                  | Kết quả                       |
 | ------------------ | ---------------------------- | --------------------------------------------- | ----------------------------- |
 | `search_documents` | đọc                          | mọi người dùng                                | văn bản cho mô hình + citations |
+| `read_lesson`      | đọc                          | chỉ khi có `context` bài học                  | các đoạn của bài đang mở + citations |
 | `search_courses`   | đọc                          | mọi người dùng (kết quả theo quyền học/quản lý) | văn bản cho mô hình + citations |
 | `open_screen`      | đọc, kết thúc lượt           | người dùng có ít nhất một màn hình mở được    | sự kiện `navigate`            |
 | `update_profile`   | đổi dữ liệu, kết thúc lượt   | tài khoản `LOCAL` không phải đổi mật khẩu tạm | sự kiện `action_required`     |
@@ -205,6 +215,7 @@ là `PENDING` đã quá `expires_at`.
 | `ASSISTANT-BUSY`             | —    | Người dùng đang có một lượt chạy, hoặc server đã đủ lượt (sự kiện `error`)        |
 | `ASSISTANT-RATE_LIMITED`     | —    | Người dùng đã hỏi quá `questions-per-hour` câu trong 1 giờ trượt (sự kiện `error`, kèm "thử lại sau X phút") |
 | `ASSISTANT-CONVERSATION_NOT_FOUND` | 200 | Hội thoại không tồn tại hoặc của người khác (cùng một mã)                         |
+| `ASSISTANT-LESSON_NOT_FOUND` | 200 | Bài học trong `context` không tồn tại, chưa xuất bản hoặc người dùng không đọc được (cùng một mã) |
 | `ASSISTANT-TURN_NOT_FOUND`   | 200  | Lượt (khi đánh giá) không tồn tại hoặc của người khác (cùng một mã)                |
 | `ASSISTANT-ACTION_STALE`     | 200  | Dữ liệu đã đổi từ lúc trợ lý đề xuất (khi xác nhận)                                |
 | `CORE-VALIDATION_FAILED`     | 200  | Request `/stream` không hợp lệ                                                     |

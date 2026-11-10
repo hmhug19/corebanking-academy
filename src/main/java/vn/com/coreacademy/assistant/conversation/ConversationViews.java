@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant.conversation;
 import java.time.Instant;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import vn.com.coreacademy.assistant.dto.PendingActionView;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
@@ -16,7 +17,13 @@ public final class ConversationViews {
         long id,
         String title,
         @Schema(description = "Lần hỏi gần nhất.") Instant lastActivityTime,
-        Instant createTime) {
+        Instant createTime,
+        @Schema(description = "Bài học mà hội thoại được mở từ đó; bỏ khi hội thoại không gắn bài học.")
+        @JsonInclude(JsonInclude.Include.NON_NULL) LessonLabel context) {
+    }
+
+    @Schema(description = "Bài học gắn với hội thoại; label là \"Khóa › Bài\" lúc mở hội thoại.")
+    public record LessonLabel(long courseId, long revisionId, long lessonId, String label) {
     }
 
     @Schema(description = "Hội thoại kèm các lượt, cũ nhất trước.")
@@ -25,6 +32,7 @@ public final class ConversationViews {
         String title,
         Instant lastActivityTime,
         Instant createTime,
+        @JsonInclude(JsonInclude.Include.NON_NULL) LessonLabel context,
         List<TurnView> turns) {
     }
 

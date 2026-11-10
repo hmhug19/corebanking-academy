@@ -77,7 +77,7 @@ class CourseContentIndexIT extends AssessmentIntegrationTest {
 
     @Test
     void enrolledLearnerFindsTheLessonAndCitesItWithALink() {
-        List<ChunkHit> hits = as(LEARNER, () -> questions.hits("Giới thiệu"));
+        List<ChunkHit> hits = as(LEARNER, () -> questions.hits("Giới thiệu", course.lessonId()));
 
         assertThat(hits).anySatisfy(hit -> {
             assertThat(hit.lesson()).isNotNull();
@@ -126,7 +126,8 @@ class CourseContentIndexIT extends AssessmentIntegrationTest {
         float[] vector = new float[1024];
         vector[0] = 1f;
 
-        return retrieval.search(vector, 50);
+        // Other tests share the database and every fake vector is alike, so take them all.
+        return retrieval.search(vector, 100_000);
     }
 
     private int count() {

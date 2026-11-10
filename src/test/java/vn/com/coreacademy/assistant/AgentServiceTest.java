@@ -82,6 +82,8 @@ class AgentServiceTest {
     private final MutableClock clock = new MutableClock();
     private final TurnLimiter limiter = new TurnLimiter(properties, new AssistantLimits(3), clock);
     private final InMemoryConversations conversations = new InMemoryConversations();
+    private final vn.com.coreacademy.assistant.agent.LessonAccess lessonAccess =
+        mock(vn.com.coreacademy.assistant.agent.LessonAccess.class);
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     /** One skill that offers every tool the tests register, so tool behaviour is tested apart from skill choice. */
     private final SkillCatalog catalog = new SkillCatalog("base", List.of(new Skill("qa_tai_lieu", "hỏi đáp",
@@ -110,7 +112,7 @@ class AgentServiceTest {
         when(provider.orderedStream()).thenAnswer(invocation -> tools.stream());
         return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, conversations, json,
             new AssistantMetrics(meters), new SkillSelector(ollama, skills, AssistantModels.defaults()), skills,
-            AssistantModels.defaults());
+            AssistantModels.defaults(), lessonAccess);
     }
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
@@ -813,5 +815,53 @@ class AgentServiceTest {
 
         assertThatThrownBy(() -> ask("Xin chào")).isInstanceOfSatisfying(BusinessException.class,
             exception -> assertThat(exception.getResponseCode()).isEqualTo(AssistantResponseCode.AI_UNAVAILABLE));
+    }
+
+    private static final vn.com.coreacademy.assistant.agent.LessonFocus FOCUS =
+        new vn.com.coreacademy.assistant.agent.LessonFocus(7, 70, 9, "Tín dụng", "Chương 1", "Lãi suất");
+    private static final vn.com.coreacademy.assistant.dto.LessonContext LESSON =
+        new vn.com.coreacademy.assistant.dto.LessonContext(7L, 70L, 9L);
+
+    @Test
+    void aLessonTheUserMayNotReadIsRefusedBeforeAnythingStarts() {
+        when(lessonAccess.require(LESSON)).thenThrow(new BusinessException(AssistantResponseCode.LESSON_NOT_FOUND));
+
+        assertThatThrownBy(() -> service().stream("Bài này nói gì?", null, null, LESSON))
+            .isInstanceOf(BusinessException.class).extracting("responseCode")
+            .isEqualTo(AssistantResponseCode.LESSON_NOT_FOUND);
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+        assertThat(conversations.recorded).isEmpty();
+    }
+
+    @Test
+    void theLessonReachesTheToolsTheConversationAndThePrompt() throws IOException {
+        when(lessonAccess.require(LESSON)).thenReturn(FOCUS);
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("đoạn [1]"));
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("Bài nói về lãi suất [1].", List.of()));
+
+        events(service().stream("Bài này nói gì?", null, null, LESSON));
+
+        assertThat(contexts).hasSize(1);
+        assertThat(contexts.get(0).lesson()).isEqualTo(FOCUS);
+        assertThat(conversations.lastOpenedLesson).isEqualTo(FOCUS);
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<ChatMessage>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(ollama, times(2)).chatWithTools(sent.capture(), anyList(), any(), any());
+        assertThat(sent.getAllValues().get(0).get(0).content()).contains("«Tín dụng» › «Lãi suất»");
+    }
+
+    @Test
+    void theSummarySkillIsOnlyUsedWhenALessonIsOpen() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        when(lessonAccess.require(LESSON)).thenReturn(FOCUS);
+        modelAnswers(List.of("ok"), List.of());
+
+        events(service(real).stream("Tóm tắt bài này", null, "tom_tat_bai", LESSON));
+        assertThat(conversations.lastRecord().skill()).isEqualTo("tom_tat_bai");
+        verify(ollama, never()).chat(anyList(), any());
+
+        modelAnswers(List.of("ok"), List.of());
+        events(service(real).stream("Tóm tắt bài này", null, "tom_tat_bai"));
+        assertThat(conversations.lastRecord().skill()).isNotEqualTo("tom_tat_bai");
     }
 }

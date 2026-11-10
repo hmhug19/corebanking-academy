@@ -51,7 +51,7 @@ public abstract class AssessmentIntegrationTest {
         "learning_hub_media_progress.sql", "learning_hub_knowledge.sql", "learning_hub_assessment.sql",
         "upgrade/2026-11-07-flashcards.sql", "upgrade/2026-11-07-personal-flashcards.sql",
         "upgrade/2026-11-10-assistant-conversations.sql", "upgrade/2026-11-10-assistant-pending-actions.sql",
-        "upgrade/2026-11-10-assistant-feedback.sql", "upgrade/2026-11-11-knowledge-document-scope.sql", "upgrade/2026-11-11-course-content-index.sql",
+        "upgrade/2026-11-10-assistant-feedback.sql", "upgrade/2026-11-11-knowledge-document-scope.sql", "upgrade/2026-11-11-course-content-index.sql", "upgrade/2026-11-11-assistant-conversation-lesson-context.sql",
         "learning_hub_community.sql", "learning_hub_reporting.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */

@@ -20,6 +20,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.assistant.action.AssistantPendingAction;
+import vn.com.coreacademy.assistant.agent.LessonFocus;
 import vn.com.coreacademy.assistant.action.PendingActionRepository;
 import vn.com.coreacademy.assistant.action.PendingActionStore;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
@@ -27,6 +28,7 @@ import vn.com.coreacademy.assistant.conversation.ConversationViews.ActionState;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationDetail;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationSummary;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.FeedbackView;
+import vn.com.coreacademy.assistant.conversation.ConversationViews.LessonLabel;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.TurnView;
 import vn.com.coreacademy.assistant.dto.PendingActionView;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
@@ -87,11 +89,23 @@ public class ConversationService implements Conversations {
     @Override
     @Transactional
     public Opened open(String ownerId, Long conversationId, String question) {
+        return open(ownerId, conversationId, question, null);
+    }
+
+    @Override
+    @Transactional
+    public Opened open(String ownerId, Long conversationId, String question, LessonFocus lesson) {
         if (conversationId == null) {
             AssistantConversation created = new AssistantConversation();
             created.setOwnerId(ownerId);
             created.setTitle(titleOf(question));
             created.setLastActivityTime(clock.instant());
+            if (lesson != null) {
+                created.setContextCourseId(lesson.courseId());
+                created.setContextRevisionId(lesson.revisionId());
+                created.setContextLessonId(lesson.lessonId());
+                created.setContextLabel(lesson.label());
+            }
             return new Opened(conversations.save(created).getId(), List.of());
         }
 
@@ -181,7 +195,7 @@ public class ConversationService implements Conversations {
             .toList();
 
         return new ConversationDetail(conversation.getId(), conversation.getTitle(),
-            conversation.getLastActivityTime(), conversation.getCreateTime(), views);
+            conversation.getLastActivityTime(), conversation.getCreateTime(), label(conversation), views);
     }
 
     @Transactional
@@ -243,7 +257,13 @@ public class ConversationService implements Conversations {
 
     private static ConversationSummary summary(AssistantConversation conversation) {
         return new ConversationSummary(conversation.getId(), conversation.getTitle(),
-            conversation.getLastActivityTime(), conversation.getCreateTime());
+            conversation.getLastActivityTime(), conversation.getCreateTime(), label(conversation));
+    }
+
+    private static LessonLabel label(AssistantConversation conversation) {
+        return conversation.getContextLessonId() == null ? null
+            : new LessonLabel(conversation.getContextCourseId(), conversation.getContextRevisionId(),
+                conversation.getContextLessonId(), conversation.getContextLabel());
     }
 
     private TurnView view(AssistantTurn turn, AssistantPendingAction action, FeedbackView rating, Instant now) {

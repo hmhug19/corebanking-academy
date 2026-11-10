@@ -16,6 +16,9 @@ public class InMemoryConversations implements Conversations {
     private final Map<Long, List<TurnRecord>> turns = new HashMap<>();
     private long nextId = 100;
 
+    /** The lesson the last 4-argument open was given, for assertions. */
+    public vn.com.coreacademy.assistant.agent.LessonFocus lastOpenedLesson;
+
     /** Every turn recorded, in order, for assertions. */
     public final List<TurnRecord> recorded = new ArrayList<>();
 
@@ -53,6 +56,13 @@ public class InMemoryConversations implements Conversations {
             .filter(turn -> turn.status() == TurnRecord.Status.DONE && turn.answer() != null)
             .map(turn -> new Exchange(turn.question(), turn.answer())).toList();
         return new Opened(conversationId, history);
+    }
+
+    @Override
+    public Opened open(String ownerId, Long conversationId, String question,
+                       vn.com.coreacademy.assistant.agent.LessonFocus lesson) {
+        lastOpenedLesson = lesson;
+        return open(ownerId, conversationId, question);
     }
 
     @Override

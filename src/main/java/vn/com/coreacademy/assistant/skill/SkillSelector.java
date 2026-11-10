@@ -26,12 +26,16 @@ public class SkillSelector {
     private final AssistantModels models;
 
     public Skill select(String requested, String question, AgentContext context) {
-        Skill named = catalog.find(requested).filter(skill -> skill.allowedFor(context)).orElse(null);
+        Skill named = catalog.find(requested).filter(skill -> offered(skill, context)).orElse(null);
         if (named != null) {
             return named;
         }
+        if (context.lesson() != null) {
+            // Asked from a lesson page: the question is about that lesson, so no classifier call is needed.
+            return catalog.defaultSkill();
+        }
 
-        List<Skill> allowed = catalog.all().stream().filter(skill -> skill.allowedFor(context)).toList();
+        List<Skill> allowed = catalog.all().stream().filter(skill -> offered(skill, context)).toList();
         try {
             String reply = ollama.chat(List.of(
                 OllamaClient.Message.system(prompt(allowed)), OllamaClient.Message.user(question)),
@@ -52,6 +56,11 @@ public class SkillSelector {
         }
 
         return catalog.defaultSkill();
+    }
+
+    /** The user's role allows it, and a skill that reads the open lesson needs a lesson to be open. */
+    private static boolean offered(Skill skill, AgentContext context) {
+        return skill.allowedFor(context) && (!skill.needsLesson() || context.lesson() != null);
     }
 
     private static String prompt(List<Skill> allowed) {

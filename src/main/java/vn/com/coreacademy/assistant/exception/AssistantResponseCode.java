@@ -23,6 +23,9 @@ public enum AssistantResponseCode implements ApiResponseCode {
         "Không tìm thấy hội thoại"),
     // One code for a missing or foreign turn, so an id reveals nothing about other users.
     TURN_NOT_FOUND("ASSISTANT-TURN_NOT_FOUND", "Không tìm thấy câu trả lời này.", "Không tìm thấy câu trả lời"),
+    // One code for a missing, unpublished or unreadable lesson, so an id reveals nothing about other courses.
+    LESSON_NOT_FOUND("ASSISTANT-LESSON_NOT_FOUND", "Không tìm thấy bài học này hoặc bạn không có quyền xem.",
+        "Không tìm thấy bài học"),
     ACTION_STALE("ASSISTANT-ACTION_STALE", "Dữ liệu đã thay đổi từ lúc trợ lý đề xuất. Vui lòng yêu cầu lại.",
         "Dữ liệu đã thay đổi");
 

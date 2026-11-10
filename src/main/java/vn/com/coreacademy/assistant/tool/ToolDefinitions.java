@@ -12,6 +12,7 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 public final class ToolDefinitions {
     public static final String SEARCH_DOCUMENTS = "search_documents";
     public static final String SEARCH_COURSES = "search_courses";
+    public static final String READ_LESSON = "read_lesson";
     public static final String SEARCH_COMMUNITY = "search_community";
     public static final String OPEN_SCREEN = "open_screen";
     public static final String UPDATE_PROFILE = "update_profile";
@@ -48,6 +49,17 @@ public final class ToolDefinitions {
             "Tìm trong nội dung các bài học của khóa học mà người dùng đang học hoặc được quản lý. Dùng khi câu hỏi "
                 + "về nội dung khóa học, bài học hoặc kiến thức được dạy trong khóa. Kết quả là các đoạn đánh số [n]; "
                 + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
+    }
+
+    public static ToolDefinition readLesson() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties");
+
+        return new ToolDefinition(READ_LESSON,
+            "Đọc nội dung bài học mà người dùng đang xem (không cần tham số). Dùng khi người dùng muốn tóm tắt hoặc "
+                + "hỏi bài này nói gì. Kết quả là các đoạn đánh số [n] theo thứ tự trong bài; chỉ trả lời từ các đoạn "
+                + "đó và ghi [n] sau mỗi ý.", parameters);
     }
 
     public static ToolDefinition searchCommunity() {

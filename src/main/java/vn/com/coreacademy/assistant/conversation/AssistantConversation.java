@@ -32,6 +32,18 @@ public class AssistantConversation extends UpdatedEntity {
     @Column(name = "title", length = 80, nullable = false)
     private String title;
 
+    @Column(name = "context_course_id")
+    private Long contextCourseId;
+
+    @Column(name = "context_revision_id")
+    private Long contextRevisionId;
+
+    @Column(name = "context_lesson_id")
+    private Long contextLessonId;
+
+    @Column(name = "context_label", length = 255)
+    private String contextLabel;
+
     @Column(name = "last_activity_time", nullable = false)
     private Instant lastActivityTime = Instant.now();
 }
