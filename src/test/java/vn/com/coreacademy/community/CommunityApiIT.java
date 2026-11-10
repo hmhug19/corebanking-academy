@@ -127,6 +127,7 @@ class CommunityApiIT {
         registry.add("app.storage.s3.access-key", () -> "synthetic-test-access");
         registry.add("app.storage.s3.secret-key", () -> "synthetic-test-secret");
         registry.add("app.knowledge.worker.poll-interval", () -> "1h");
+        registry.add("app.learning.course-index.poll-interval", () -> "1h");
         registry.add("app.knowledge.ollama.base-url", () -> "http://127.0.0.1:1");
         registry.add("app.knowledge.storage-dir", () -> "./tmp/community-knowledge-test");
         registry.add("app.bootstrap.admin-id", () -> "");

@@ -62,7 +62,9 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 | `error`           | `messageCode`, `message`        | Dòng cuối khi lỗi giữa chừng                                                             |
 
 `citations` có dạng `CitationView` của chat tài liệu (`n`, `documentId`, `fileName`, `page`, `lineStart`, `lineEnd`,
-`snippet`) và rỗng trừ khi `search_documents` đã chạy trong lượt.
+`snippet`) và rỗng trừ khi `search_documents` hoặc `search_courses` đã chạy trong lượt. Nguồn là bài học thì thêm
+`lesson` (`courseId`, `courseTitle`, `revisionId`, `chapterTitle`, `lessonId`, `lessonTitle`, `blockId`, `url`) và
+`documentId` = 0; `url` là `/lesson/{courseId}/{lessonId}`. Citation của tài liệu không có trường `lesson`.
 
 `PendingActionView`:
 
@@ -127,6 +129,7 @@ Bỏ yêu cầu mà không chạy. Trả `BaseResponse<Void>`.
 | Công cụ            | Loại                         | Ai được dùng                                  | Kết quả                       |
 | ------------------ | ---------------------------- | --------------------------------------------- | ----------------------------- |
 | `search_documents` | đọc                          | mọi người dùng                                | văn bản cho mô hình + citations |
+| `search_courses`   | đọc                          | mọi người dùng (kết quả theo quyền học/quản lý) | văn bản cho mô hình + citations |
 | `open_screen`      | đọc, kết thúc lượt           | người dùng có ít nhất một màn hình mở được    | sự kiện `navigate`            |
 | `update_profile`   | đổi dữ liệu, kết thúc lượt   | tài khoản `LOCAL` không phải đổi mật khẩu tạm | sự kiện `action_required`     |
 
@@ -148,6 +151,18 @@ lượt; đoạn đã gặp giữ số cũ và không lặp lại. Kết thúc l
   khoảng bị bỏ qua.
 
 Ollama không phản hồi khi nhúng câu hỏi: sự kiện `error` `ASSISTANT-AI_UNAVAILABLE`.
+
+### `search_courses`
+
+Tham số `query` (1–300 ký tự). Tìm trong chỉ mục nội dung bài học (`learning_hub.course_content_chunks`), chỉ revision
+đang xuất bản của khóa. Người dùng chỉ thấy khóa mình quản lý (cùng phạm vi `LearningAccessPolicy.searchScope`) hoặc khóa
+có ghi danh còn hiệu lực trên đúng revision đó; lọc nằm trong cùng câu SQL với ORDER BY/LIMIT nên đoạn không đọc được
+không chiếm chỗ top-k. Số `[n]` dùng chung với `search_documents` trong lượt; kết thúc lượt theo cùng quy tắc.
+
+Chỉ mục do worker `CourseContentIndexer` dựng (thăm dò mỗi `app.learning.course-index.poll-interval`, mặc định 30s,
+chỉ chạy khi Ollama sẵn sàng): mỗi revision đã xuất bản được ghi cùng lúc đoạn và dấu hoàn tất trong một transaction
+nên chạy lại hay khởi động lại giữa chừng không nhân đôi; revision cũ bị xóa khi có bản xuất bản mới. SQL:
+`docs/sql/upgrade/2026-11-11-course-content-index.sql`.
 
 ### `open_screen`
 

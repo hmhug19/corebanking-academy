@@ -64,6 +64,11 @@ public class ChatPromptBuilder {
     /** One numbered chunk as the model sees it: {@code [n] (file, trang p, dòng a–b)} then the text. */
     public static String formatChunk(int n, ChunkHit hit) {
         StringBuilder chunk = new StringBuilder();
+        if (hit.lesson() != null) {
+            return chunk.append('[').append(n).append("] (Khóa học: ").append(hit.lesson().courseTitle())
+                .append(", chương: ").append(hit.lesson().chapterTitle()).append(", bài: ")
+                .append(hit.lesson().lessonTitle()).append(")\n").append(hit.content()).toString();
+        }
         chunk.append('[').append(n).append("] (").append(hit.fileName());
         if (hit.page() != null) {
             chunk.append(", trang ").append(hit.page());

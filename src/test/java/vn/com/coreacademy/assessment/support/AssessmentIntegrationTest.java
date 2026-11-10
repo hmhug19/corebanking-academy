@@ -51,7 +51,7 @@ public abstract class AssessmentIntegrationTest {
         "learning_hub_media_progress.sql", "learning_hub_knowledge.sql", "learning_hub_assessment.sql",
         "upgrade/2026-11-07-flashcards.sql", "upgrade/2026-11-07-personal-flashcards.sql",
         "upgrade/2026-11-10-assistant-conversations.sql", "upgrade/2026-11-10-assistant-pending-actions.sql",
-        "upgrade/2026-11-10-assistant-feedback.sql", "upgrade/2026-11-11-knowledge-document-scope.sql",
+        "upgrade/2026-11-10-assistant-feedback.sql", "upgrade/2026-11-11-knowledge-document-scope.sql", "upgrade/2026-11-11-course-content-index.sql",
         "learning_hub_community.sql", "learning_hub_reporting.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */
@@ -143,6 +143,7 @@ public abstract class AssessmentIntegrationTest {
         registry.add("app.storage.s3.access-key", () -> "test-only-access");
         registry.add("app.storage.s3.secret-key", () -> "test-only-secret");
         registry.add("app.knowledge.worker.poll-interval", () -> "1h");
+        registry.add("app.learning.course-index.poll-interval", () -> "1h");
         registry.add("app.knowledge.storage-dir", () -> System.getProperty("java.io.tmpdir") + "/knowledge-test");
         // Test gọi job tự nộp trực tiếp; scheduler không được tự chạy xen vào dữ liệu đang dựng.
         registry.add("app.assessment.auto-submit-interval", () -> "1h");

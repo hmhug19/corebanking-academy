@@ -20,13 +20,13 @@ final class RetrievedChunks {
     }
 
     private final List<ChunkHit> hits = new ArrayList<>();
-    private final Set<Long> seen = new HashSet<>();
+    private final Set<String> seen = new HashSet<>();
 
     /** Adds the chunks not seen before in this turn and returns them with their new numbers. */
     List<Added> add(List<ChunkHit> found) {
         List<Added> added = new ArrayList<>();
         for (ChunkHit hit : found) {
-            if (seen.add(hit.chunkId())) {
+            if (seen.add(hit.key())) {
                 hits.add(hit);
                 added.add(new Added(hits.size(), hit));
             }

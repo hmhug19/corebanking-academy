@@ -41,7 +41,26 @@ public class DocumentChunkRepository {
 
     /** A chunk found by {@link #search}, with the metadata a citation needs. */
     public record ChunkHit(long chunkId, long documentId, String fileName, Integer page, int lineStart, int lineEnd,
-                           String content, double similarity) {
+                           String content, double similarity, LessonSource lesson) {
+        /** A chunk of a document; it has no lesson. */
+        public ChunkHit(long chunkId, long documentId, String fileName, Integer page, int lineStart, int lineEnd,
+                        String content, double similarity) {
+            this(chunkId, documentId, fileName, page, lineStart, lineEnd, content, similarity, null);
+        }
+
+        /**
+         * Chunk ids of documents and of lessons come from two tables, so two different chunks can share an id; this
+         * key tells them apart wherever hits of both kinds are collected.
+         */
+        public String key() {
+            return (lesson == null ? "d" : "l") + chunkId;
+        }
+    }
+
+    /** Where a chunk of published course content comes from; the link opens the lesson. */
+    public record LessonSource(long courseId, String courseTitle, long revisionId, long chapterId,
+                               String chapterTitle, long lessonId, String lessonTitle, long blockId,
+                               String blockTitle, String url) {
     }
 
     /**

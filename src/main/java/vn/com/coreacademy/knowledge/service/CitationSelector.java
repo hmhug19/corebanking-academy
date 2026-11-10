@@ -8,7 +8,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.dto.ChatViews.LessonCitation;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
+import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.LessonSource;
 
 /**
  * Chooses the sources shown with an answer. Every field of a citation comes from the retrieved chunk's metadata; the
@@ -60,8 +62,13 @@ public final class CitationSelector {
     }
 
     private static CitationView citation(int n, ChunkHit hit) {
+        LessonSource lesson = hit.lesson();
+        LessonCitation cited = lesson == null ? null : new LessonCitation(lesson.courseId(), lesson.courseTitle(),
+            lesson.revisionId(), lesson.chapterTitle(), lesson.lessonId(), lesson.lessonTitle(), lesson.blockId(),
+            lesson.url());
+
         return new CitationView(n, hit.documentId(), hit.fileName(), hit.page(), hit.lineStart(), hit.lineEnd(),
-            snippet(hit.content()));
+            snippet(hit.content()), cited);
     }
 
     /** The first 280 characters, cut back to a word boundary. */

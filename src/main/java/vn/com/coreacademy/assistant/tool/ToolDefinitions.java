@@ -11,6 +11,7 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 /** What the model is told about each tool: name, when to use it and its arguments. No behaviour lives here. */
 public final class ToolDefinitions {
     public static final String SEARCH_DOCUMENTS = "search_documents";
+    public static final String SEARCH_COURSES = "search_courses";
     public static final String SEARCH_COMMUNITY = "search_community";
     public static final String OPEN_SCREEN = "open_screen";
     public static final String UPDATE_PROFILE = "update_profile";
@@ -33,6 +34,19 @@ public final class ToolDefinitions {
         return new ToolDefinition(SEARCH_DOCUMENTS,
             "Tìm trong kho tài liệu nội bộ dùng chung (quy trình, nghiệp vụ, thuật ngữ Core Banking). "
                 + "Dùng cho mọi câu hỏi cần thông tin từ tài liệu. Kết quả là các đoạn đánh số [n]; "
+                + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
+    }
+
+    public static ToolDefinition searchCourses() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties").putObject("query").put("type", "string").put("minLength", 1)
+            .put("maxLength", 300).put("description", "Câu hỏi hoặc từ khoá về nội dung bài học, tiếng Việt.");
+        parameters.putArray("required").add("query");
+
+        return new ToolDefinition(SEARCH_COURSES,
+            "Tìm trong nội dung các bài học của khóa học mà người dùng đang học hoặc được quản lý. Dùng khi câu hỏi "
+                + "về nội dung khóa học, bài học hoặc kiến thức được dạy trong khóa. Kết quả là các đoạn đánh số [n]; "
                 + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
     }
 

@@ -53,6 +53,7 @@ FILES=(
   upgrade/2026-11-10-assistant-pending-actions.sql
   upgrade/2026-11-10-assistant-feedback.sql
   upgrade/2026-11-11-knowledge-document-scope.sql
+  upgrade/2026-11-11-course-content-index.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

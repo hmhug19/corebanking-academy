@@ -19,7 +19,7 @@ class SkillCatalogTest {
         assertThat(catalog.all()).extracting(Skill::id)
             .containsExactlyInAnyOrder("qa_tai_lieu", "dieu_huong", "ho_so", "tro_chuyen");
         assertThat(catalog.find("qa_tai_lieu").orElseThrow().tools())
-            .containsExactly("search_documents", "search_community");
+            .containsExactly("search_documents", "search_courses", "search_community");
         assertThat(catalog.find("tro_chuyen").orElseThrow().tools()).isEmpty();
         assertThat(catalog.find("không_có")).isEmpty();
         assertThat(catalog.version()).hasSize(12).isEqualTo(new SkillCatalog().version());

@@ -51,6 +51,9 @@ public abstract class KnowledgeIntegrationTest {
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-knowledge-document-scope.sql"),
                     "/docker-entrypoint-initdb.d/04z-knowledge-document-scope.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-course-content-index.sql"),
+                    "/docker-entrypoint-initdb.d/04y-course-content-index.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_community.sql"),
                     "/docker-entrypoint-initdb.d/05-community.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_assessment.sql"),
@@ -90,6 +93,7 @@ public abstract class KnowledgeIntegrationTest {
         registry.add("app.storage.s3.secret-key", () -> "test-only-secret");
         // Tests call the worker themselves; the scheduler must never fire on its own.
         registry.add("app.knowledge.worker.poll-interval", () -> "1h");
+        registry.add("app.learning.course-index.poll-interval", () -> "1h");
         registry.add("app.knowledge.storage-dir", () -> System.getProperty("java.io.tmpdir") + "/knowledge-test");
     }
 }

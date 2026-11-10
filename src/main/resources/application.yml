@@ -48,6 +48,9 @@ app:
       read-timeout-seconds: ${S3_READ_TIMEOUT_SECONDS:60}
       call-timeout-seconds: ${S3_CALL_TIMEOUT_SECONDS:600}
   learning:
+    course-index:
+      # How often the worker looks for published course revisions that are not indexed yet.
+      poll-interval: ${COURSE_INDEX_POLL:30s}
     points:
       # Weights of the learning leaderboard; override with APP_LEARNING_POINTS_LESSON and so on.
       lesson: 5
