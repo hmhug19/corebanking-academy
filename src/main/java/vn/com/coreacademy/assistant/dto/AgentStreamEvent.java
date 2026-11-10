@@ -30,10 +30,11 @@ public sealed interface AgentStreamEvent {
 
     /** Last line on success; {@code answer} replaces what the deltas added up to. */
     record Done(String type, String answer, List<CitationView> citations,
-                @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId) implements AgentStreamEvent {
+                @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId,
+                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions) implements AgentStreamEvent {
         /** The same line naming the stored turn, so the client can send feedback on it. */
         public Done withTurnId(long id) {
-            return new Done(type, answer, citations, id);
+            return new Done(type, answer, citations, id, suggestions);
         }
     }
 
@@ -62,7 +63,11 @@ public sealed interface AgentStreamEvent {
     }
 
     static Done done(String answer, List<CitationView> citations) {
-        return new Done("done", answer, citations, null);
+        return new Done("done", answer, citations, null, List.of());
+    }
+
+    static Done done(String answer, List<CitationView> citations, List<String> suggestions) {
+        return new Done("done", answer, citations, null, suggestions);
     }
 
     static Error error(String messageCode, String message) {

@@ -37,7 +37,7 @@ curl -s "http://127.0.0.1:8020/actuator/metrics/assistant.turn.duration?tag=surf
 | `assistant.turn.first_token` | Timer | `surface` | Từ lúc hỏi đến khi có chữ đầu tiên. Tăng cao: mô hình nghẽn hoặc nạp lại |
 | `assistant.turn.steps` | Summary | `surface` | Số lần gọi mô hình trong một lượt của trợ lý nhanh. Gần `max-steps`: mô hình lặp công cụ |
 | `assistant.tool.calls` | Counter | `tool` (tên công cụ; `unknown` cho tên mô hình bịa) | Công cụ nào được gọi |
-| `assistant.skill.turns` | Counter | `skill` | Lượt theo skill (có từ khi skill được bật) |
+| `assistant.skill.turns` | Counter | `skill` | Lượt theo skill (`qa_tai_lieu`, `dieu_huong`, `ho_so`, `tro_chuyen`) |
 | `assistant.answers.not_found` | Counter | `surface` | Câu trả lời "không tìm thấy trong tài liệu". Tỉ lệ so với số lượt cho biết kho tài liệu có thiếu |
 | `assistant.errors` | Counter | `surface`, `code` | Lượt kết thúc bằng lỗi, theo mã (`ASSISTANT-AI_UNAVAILABLE`, `CORE-INTERNAL_ERROR`…) |
 | `assistant.refusals` | Counter | `surface`, `reason` (`rate_limited`/`busy`) | Câu hỏi bị từ chối trước khi chạy |

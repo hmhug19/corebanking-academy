@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
@@ -22,6 +23,10 @@ import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.AgentStreamEvent;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
+import vn.com.coreacademy.assistant.skill.Skill;
+import vn.com.coreacademy.assistant.skill.SkillCatalog;
+import vn.com.coreacademy.assistant.skill.SkillSelector;
+import vn.com.coreacademy.assistant.skill.Suggestions;
 import vn.com.coreacademy.assistant.tool.AgentTool;
 import vn.com.coreacademy.assistant.tool.FinishedAnswer;
 import vn.com.coreacademy.assistant.tool.ToolOutcome;
@@ -71,6 +76,9 @@ public class AgentService {
     private final Conversations conversations;
     private final ObjectMapper json;
     private final AssistantMetrics metrics;
+    private final SkillSelector selector;
+    private final SkillCatalog catalog;
+    private final AssistantModels models;
 
     /**
      * Validates the request, then streams the turn. The client sends only the new question and, for a follow-up, the
@@ -83,7 +91,7 @@ public class AgentService {
                 "Tin nhắn phải từ 1 đến " + MAX_USER_LENGTH + " ký tự.");
         }
 
-        return stream(question, request.conversationId());
+        return stream(question, request.conversationId(), request.skill());
     }
 
     /**
@@ -91,14 +99,17 @@ public class AgentService {
      * and the stream body never needs the security context.
      */
     public StreamingResponseBody stream(String question, Long conversationId) {
+        return stream(question, conversationId, null);
+    }
+
+    /** {@code requestedSkill} is the app's own choice; null lets the server classify the question. */
+    public StreamingResponseBody stream(String question, Long conversationId, String requestedSkill) {
         AgentContext context = AgentContext.of(AssistantAccess.require(auth.me()));
         conversations.requireOwned(context.userId(), conversationId);
         if (!ollama.isAvailable()) {
             throw new BusinessException(AssistantResponseCode.AI_UNAVAILABLE);
         }
 
-        List<AgentTool> tools = registry.availableTo(context);
-        List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(context)).toList();
         return output -> {
             TurnLimiter.Admission admission = limiter.admit(context.userId());
             if (!(admission instanceof TurnLimiter.Admission.Started started)) {
@@ -116,9 +127,14 @@ public class AgentService {
                     history.add(ChatMessage.assistant(exchange.answer()));
                 }
                 history.add(ChatMessage.user(question));
-                TurnLog turnLog = new TurnLog(opened.conversationId(), question);
+                Skill skill = selector.select(requestedSkill, question, context);
+                metrics.skill(skill.id());
+                List<AgentTool> tools = registry.availableTo(context).stream()
+                    .filter(tool -> skill.tools().contains(tool.name())).toList();
+                List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(context)).toList();
+                TurnLog turnLog = new TurnLog(opened.conversationId(), question, skill.id(), catalog.version());
                 try {
-                    run(output, history, context, tools, definitions, turnLog);
+                    run(output, history, context, skill, tools, definitions, turnLog);
                 } finally {
                     store(turnLog);
                 }
@@ -134,20 +150,26 @@ public class AgentService {
         return AgentStreamEvent.error(AssistantResponseCode.BUSY.getCode(), AssistantResponseCode.BUSY.getMessage());
     }
 
-    private void run(OutputStream output, List<ChatMessage> history, AgentContext context, List<AgentTool> tools,
-                     List<ToolDefinition> definitions, TurnLog turnLog) {
+    private void run(OutputStream output, List<ChatMessage> history, AgentContext context, Skill skill,
+                     List<AgentTool> tools, List<ToolDefinition> definitions, TurnLog turnLog) {
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(AgentPrompt.SYSTEM));
+        messages.add(ChatMessage.system(catalog.systemPrompt(skill)));
         messages.addAll(history);
         TurnState turn = new TurnState();
         List<ToolDefinition> offered = definitions;
         boolean readShared = false;
+        Suggestions.Filter filter = new Suggestions.Filter();
 
         try {
             for (int step = 0; step < properties.maxSteps(); step++) {
                 turnLog.steps++;
-                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, OllamaClient.Options.AGENT,
-                    delta -> emit(output, turnLog, AgentStreamEvent.delta(delta)));
+                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, models.agentOptions(),
+                    delta -> {
+                        String shown = filter.accept(delta);
+                        if (!shown.isEmpty()) {
+                            emit(output, turnLog, AgentStreamEvent.delta(shown));
+                        }
+                    });
                 if (answer.toolCalls().isEmpty()) {
                     finish(output, turnLog, turn, answer.content().strip());
                     return;
@@ -238,14 +260,16 @@ public class AgentService {
         return false;
     }
 
-    private void finish(OutputStream output, TurnLog turnLog, TurnState turn, String answer) {
+    private void finish(OutputStream output, TurnLog turnLog, TurnState turn, String raw) {
+        Suggestions.Split split = Suggestions.split(raw);
+        String answer = split.answer().strip();
         FinishedAnswer finished = turn.finisher().map(finisher -> finisher.finish(answer))
             .orElseGet(() -> new FinishedAnswer(answer, List.of()));
         if (finished.answer().isBlank()) {
             // qwen3 sometimes ends with nothing after a tool result; an empty bubble reads as a hang.
             finished = new FinishedAnswer(EMPTY_ANSWER, List.of());
         }
-        emit(output, turnLog, AgentStreamEvent.done(finished.answer(), finished.citations()));
+        emit(output, turnLog, AgentStreamEvent.done(finished.answer(), finished.citations(), split.suggestions()));
     }
 
     private void emit(OutputStream output, TurnLog turnLog, AgentStreamEvent event) {
@@ -295,6 +319,8 @@ public class AgentService {
     private static final class TurnLog {
         private final String question;
         private final long conversationId;
+        private final String skill;
+        private final String promptVersion;
         private boolean attempted;
         private int steps;
         private Long storedId;
@@ -307,9 +333,11 @@ public class AgentService {
         private String actionId;
         private Integer firstTokenMs;
 
-        TurnLog(long conversationId, String question) {
+        TurnLog(long conversationId, String question, String skill, String promptVersion) {
             this.conversationId = conversationId;
             this.question = question;
+            this.skill = skill;
+            this.promptVersion = promptVersion;
         }
 
         void stopped() {
@@ -342,7 +370,7 @@ public class AgentService {
 
         TurnRecord record() {
             return new TurnRecord(TurnRecord.AGENT, question, answer, citations, List.copyOf(tools), navigation,
-                actionId, status, firstTokenMs, millisSince());
+                actionId, status, firstTokenMs, millisSince(), skill, promptVersion);
         }
     }
 

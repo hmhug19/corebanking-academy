@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import vn.com.coreacademy.assistant.conversation.ConversationRetention;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({AssistantProperties.class, AssistantLimits.class, ConversationRetention.class})
+@EnableConfigurationProperties({AssistantProperties.class, AssistantLimits.class, ConversationRetention.class,
+    AssistantModels.class})
 public class AssistantConfig {
 }

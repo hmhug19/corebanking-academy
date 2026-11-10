@@ -25,10 +25,11 @@ public sealed interface ChatStreamEvent {
      * the model said nothing was found (a client replaces what it streamed). Citations are empty in that case.
      */
     record Done(String type, boolean found, String answer, List<CitationView> citations,
-                @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId) implements ChatStreamEvent {
+                @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId,
+                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions) implements ChatStreamEvent {
         /** The same line naming the stored turn, so the client can send feedback on it. */
         public Done withTurnId(long id) {
-            return new Done(type, found, answer, citations, id);
+            return new Done(type, found, answer, citations, id, suggestions);
         }
     }
 
@@ -49,7 +50,11 @@ public sealed interface ChatStreamEvent {
     }
 
     static Done done(boolean found, String answer, List<CitationView> citations) {
-        return new Done("done", found, answer, citations, null);
+        return new Done("done", found, answer, citations, null, List.of());
+    }
+
+    static Done done(boolean found, String answer, List<CitationView> citations, List<String> suggestions) {
+        return new Done("done", found, answer, citations, null, suggestions);
     }
 
     static Error error(String messageCode, String message) {

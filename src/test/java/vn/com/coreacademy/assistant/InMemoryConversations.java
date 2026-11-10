@@ -19,12 +19,16 @@ public class InMemoryConversations implements Conversations {
     /** Every turn recorded, in order, for assertions. */
     public final List<TurnRecord> recorded = new ArrayList<>();
 
+    public TurnRecord lastRecord() {
+        return recorded.get(recorded.size() - 1);
+    }
+
     /** A conversation owned by {@code ownerId} that already holds one finished exchange. */
     public long seed(String ownerId, String question, String answer) {
         long id = nextId++;
         owners.put(id, ownerId);
         turns.put(id, new ArrayList<>(List.of(new TurnRecord(TurnRecord.AGENT, question, answer, List.of(),
-            List.of(), null, null, TurnRecord.Status.DONE, null, 1))));
+            List.of(), null, null, TurnRecord.Status.DONE, null, 1, null, null))));
         return id;
     }
 

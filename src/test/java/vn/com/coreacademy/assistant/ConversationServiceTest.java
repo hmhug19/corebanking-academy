@@ -189,7 +189,7 @@ class ConversationServiceTest {
 
         long id = service.record(7L, new TurnRecord(TurnRecord.KNOWLEDGE, question, answer,
             List.of(new CitationView(1, 3L, "a.pdf", 2, 4, 6, "đoạn trích bí mật")), List.of(), null, null,
-            TurnRecord.Status.DONE, 120, 900));
+            TurnRecord.Status.DONE, 120, 900, "qa_tai_lieu", "v1"));
 
         assertThat(id).isEqualTo(31L);
         ArgumentCaptor<AssistantTurn> saved = ArgumentCaptor.forClass(AssistantTurn.class);

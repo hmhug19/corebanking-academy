@@ -138,6 +138,8 @@ public class ConversationService implements Conversations {
         row.setStatus(turn.status().name());
         row.setFirstTokenMs(turn.firstTokenMs());
         row.setDurationMs(turn.durationMs());
+        row.setSkill(turn.skill());
+        row.setPromptVersion(turn.promptVersion());
         long id = turns.save(row).getId();
         conversations.findById(conversationId).ifPresent(conversation -> {
             conversation.setLastActivityTime(clock.instant());

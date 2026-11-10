@@ -55,6 +55,15 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
 
     @TestConfiguration
     static class StubTools {
+        /** The stub tools belong to no real skill, so the document skill is told to offer them. */
+        @Bean
+        @org.springframework.context.annotation.Primary
+        vn.com.coreacademy.assistant.skill.SkillCatalog stubSkills() {
+            return new vn.com.coreacademy.assistant.skill.SkillCatalog("base", List.of(
+                new vn.com.coreacademy.assistant.skill.Skill("qa_tai_lieu", "hỏi đáp",
+                    List.of("stub_read", "stub_change"), List.of(), "system", "", "")), "test");
+        }
+
         @Bean
         AgentTool stubRead() {
             return new StubTool("stub_read") {

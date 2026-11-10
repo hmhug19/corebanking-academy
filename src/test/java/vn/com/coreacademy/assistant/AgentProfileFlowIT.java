@@ -82,7 +82,7 @@ class AgentProfileFlowIT extends KnowledgeIntegrationTest {
 
         MvcResult started = mvc.perform(post(AGENT + "/stream").with(as(LEARNER)).accept(NDJSON, MediaType.APPLICATION_JSON)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"message\":\"Đổi chức danh của tôi thành Chuyên viên chính\"}"))
+                .content("{\"message\":\"Đổi chức danh của tôi thành Chuyên viên chính\",\"skill\":\"ho_so\"}"))
             .andExpect(request().asyncStarted()).andReturn();
         MvcResult result = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn();
 

@@ -59,9 +59,7 @@ public class CommunityIndexService {
     }
 
     public List<float[]> embed(Plan plan) {
-        if (!"bge-m3".equals(properties.ollama().embedModel())) {
-            throw new IllegalStateException("Community index requires bge-m3/1024 dimensions");
-        }
+        // Any embed model works as long as its vectors are 1024-wide; OllamaClient.embed enforces that.
         return plan.chunks().isEmpty() ? List.of() : ollama.embed(plan.chunks().stream().map(Chunk::text).toList());
     }
 

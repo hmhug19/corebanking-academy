@@ -15,7 +15,9 @@ public record TurnRecord(
     String actionId,
     Status status,
     Integer firstTokenMs,
-    int durationMs) {
+    int durationMs,
+    String skill,
+    String promptVersion) {
     public static final String AGENT = "AGENT";
     public static final String KNOWLEDGE = "KNOWLEDGE";
 

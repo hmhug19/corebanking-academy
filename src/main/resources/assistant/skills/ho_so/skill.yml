@@ -1,0 +1,6 @@
+description: xem hoặc sửa hồ sơ cá nhân của chính người dùng
+tools:
+  - update_profile
+  - open_screen
+roles: []
+output: Nêu rõ thay đổi đang chờ xác nhận.

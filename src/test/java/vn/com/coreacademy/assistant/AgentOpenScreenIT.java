@@ -67,7 +67,7 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
 
         return mvc.perform(post("/api/v1/assistant/agent/stream").with(as(userId))
                 .accept(NDJSON, MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"message\":\"mở trang quản lý người dùng\"}"))
+                .content("{\"message\":\"mở trang quản lý người dùng\",\"skill\":\"dieu_huong\"}"))
             .andExpect(request().asyncStarted()).andReturn();
     }
 
@@ -121,7 +121,7 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
         assertThat(openScreen.description()).contains("PROFILE").doesNotContain("USER_MANAGEMENT")
             .doesNotContain("SYSTEM_AUDIT");
         assertThat(offered.getAllValues().get(0)).extracting(ToolDefinition::name)
-            .containsExactlyInAnyOrder("search_documents", "search_community", "open_screen", "update_profile");
+            .containsExactly("open_screen");
     }
 
     private static RequestPostProcessor as(String userId) {

@@ -37,6 +37,10 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 ```
 
 - `message` 1–500 ký tự sau khi bỏ khoảng trắng hai đầu, nếu không là `CORE-VALIDATION_FAILED`.
+- `skill` (tùy chọn): `qa_tai_lieu`, `dieu_huong`, `ho_so` hoặc `tro_chuyen`. Có `skill` hợp lệ thì server dùng luôn,
+  không gọi mô hình phân loại. Bỏ trống, giá trị lạ hoặc không được phép thì một lần gọi mô hình ngắn chọn skill; phân
+  loại lỗi hay trả nhãn lạ thì dùng `qa_tai_lieu`. Mỗi lượt chỉ được cấp công cụ của skill đó (sau khi đọc tài liệu vẫn
+  bỏ công cụ tác động như trước).
 - `conversationId` bỏ trống để bắt đầu hội thoại mới; sự kiện `conversation` đầu tiên của stream trả mã đó. Mã không
   phải của người gọi (hoặc không tồn tại) là envelope `ASSISTANT-CONVERSATION_NOT_FOUND` trước khi stream bắt đầu.
 - Client **không gửi lịch sử**. Backend nạp các lượt `done` gần nhất của hội thoại sao cho cùng câu hỏi mới không quá
@@ -54,7 +58,7 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 | `delta`           | `text`                          | Một đoạn văn bản của câu trả lời, nhiều dòng                                             |
 | `navigate`        | `path`, `title`                 | App chuyển trang (từ `open_screen`); lượt kết thúc ngay sau đó                           |
 | `action_required` | `action` (`PendingActionView`)  | Một thay đổi dữ liệu chờ xác nhận; lượt kết thúc ngay sau đó                             |
-| `done`            | `answer`, `citations`, `turnId` | Dòng cuối khi thành công; `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `turnId` là lượt đã lưu, dùng để gửi đánh giá (bỏ khi không lưu được lượt) |
+| `done`            | `answer`, `citations`, `turnId`, `suggestions` | Dòng cuối khi thành công; `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `turnId` là lượt đã lưu, dùng để gửi đánh giá (bỏ khi không lưu được lượt); `suggestions` (tối đa 3 câu, mỗi câu tối đa 120 ký tự) là gợi ý hỏi tiếp, bỏ khi không có |
 | `error`           | `messageCode`, `message`        | Dòng cuối khi lỗi giữa chừng                                                             |
 
 `citations` có dạng `CitationView` của chat tài liệu (`n`, `documentId`, `fileName`, `page`, `lineStart`, `lineEnd`,
@@ -229,3 +233,17 @@ bao giờ ghi `note`. Schema: [2026-11-10-assistant-feedback.sql](../sql/upgrade
   vẫn giữ nguồn. Câu trả lời không có `[n]` hợp lệ nào cũng không có nguồn. Hai quy tắc này chỉ áp cho agent;
   `/knowledge/chat` giữ quy tắc cũ (không có `[n]` hợp lệ thì trả mọi đoạn).
 - Khi `open_screen` từ chối, mô hình đôi khi nhắc lại mã chức năng thay vì tên màn hình. Không có gì được mở.
+
+## Skill, prompt và cấu hình mô hình
+
+- Prompt nằm trong `src/main/resources/assistant/`: `base.md` (giọng văn chung và quy tắc gợi ý) và, mỗi skill,
+  `skills/<skill>/system.md`, `examples.md`, `skill.yml` (`description`, `tools`, `roles` rỗng là mọi vai trò, `output`).
+  Mỗi lượt lưu `skill` và `prompt_version` (12 ký tự đầu của SHA-256 trên toàn bộ các file đó); sửa một file là đổi phiên bản.
+- Mô hình thêm khối gợi ý ở cuối câu trả lời (dòng `@@GOI_Y@@` rồi tối đa 3 dòng `- câu hỏi`). Server cắt khối khỏi
+  `delta`, `answer` và lượt đã lưu, rồi gửi trong `done.suggestions`. Khối sai định dạng bị bỏ im lặng. `/knowledge/chat/stream` có cùng
+  quy tắc (`done.suggestions`), skill của lượt đó luôn là `qa_tai_lieu`.
+- `app.assistant.models.{agent,grounded,classifier,generation}` mỗi mục có `chat-model`, `temperature`, `num-ctx`;
+  bỏ trống mục nào thì giữ giá trị cũ (`app.knowledge.ollama.chat-model`, nhiệt độ 0,1, ngữ cảnh 8192; bộ phân loại 0 và 2048).
+  `generation` dành cho tạo khóa học (chưa dùng).
+- Embedding: không còn so tên `bge-m3` cố định. Mô hình nhúng lấy từ `app.knowledge.ollama.embed-model`; `OllamaClient.embed`
+  từ chối vector khác 1024 chiều, nên đổi mô hình khác chiều là lỗi rõ ràng chứ không ghi dữ liệu sai.

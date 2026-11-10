@@ -30,6 +30,7 @@ import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
+import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
@@ -91,7 +92,8 @@ class KnowledgeChatServiceTest {
         limiter = new TurnLimiter(new AssistantProperties(4, 20, Duration.ofMinutes(10), 4), new AssistantLimits(2),
             clock);
         service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter,
-            conversations, new AssistantMetrics(meters));
+            conversations, new AssistantMetrics(meters), vn.com.coreacademy.assistant.config.AssistantModels.defaults(),
+            new vn.com.coreacademy.assistant.skill.SkillCatalog());
         when(ollama.embed(anyList())).thenReturn(List.of(new float[1024]));
         signedInAs(USER);
     }
@@ -354,6 +356,25 @@ class KnowledgeChatServiceTest {
         assertThat(stored.answer()).isEqualTo("CIF là mã khách hàng [1].");
         assertThat(stored.citations()).hasSize(1);
         assertThat(stored.status()).isEqualTo(TurnRecord.Status.DONE);
+    }
+
+    @Test
+    void suggestionsLeaveTheAnswerAndTheStreamAndTheTurnStoresTheSkillAndPromptVersion() throws IOException {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        streamDeltas("CIF là mã khách hàng [1].\n@@GOI", "_Y@@\n- CIF cấp thế nào?\n- Ai quản lý CIF?");
+
+        List<JsonNode> events = runRaw(service.stream("CIF là gì?"));
+
+        String streamed = events.stream().filter(e -> e.path("type").asText().equals("delta"))
+            .map(e -> e.path("text").asText()).reduce("", String::concat);
+        assertThat(streamed).doesNotContain("GOI_Y").doesNotContain("cấp thế nào");
+        JsonNode done = events.get(events.size() - 1);
+        assertThat(done.path("answer").asText()).isEqualTo("CIF là mã khách hàng [1].");
+        assertThat(done.path("suggestions")).extracting(JsonNode::asText)
+            .containsExactly("CIF cấp thế nào?", "Ai quản lý CIF?");
+        assertThat(conversations.lastRecord().skill()).isEqualTo("qa_tai_lieu");
+        assertThat(conversations.lastRecord().promptVersion()).isEqualTo(new SkillCatalog().version());
+        assertThat(conversations.lastRecord().answer()).doesNotContain("GOI_Y");
     }
 
     @Test

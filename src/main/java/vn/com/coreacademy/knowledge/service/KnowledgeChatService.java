@@ -21,6 +21,9 @@ import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
+import vn.com.coreacademy.assistant.config.AssistantModels;
+import vn.com.coreacademy.assistant.skill.SkillCatalog;
+import vn.com.coreacademy.assistant.skill.Suggestions;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.security.SecurityContextUtils;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
@@ -57,6 +60,8 @@ public class KnowledgeChatService {
     private final TurnLimiter limiter;
     private final Conversations conversations;
     private final AssistantMetrics metrics;
+    private final AssistantModels models;
+    private final SkillCatalog catalog;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -95,12 +100,12 @@ public class KnowledgeChatService {
             String text;
             try {
                 text = ollama.chat(prompts.build(retrieval.question(), retrieval.hits()),
-                    OllamaClient.Options.GROUNDED).strip();
+                    models.groundedOptions()).strip();
             } catch (OllamaUnavailableException | OllamaException exception) {
                 throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
             }
 
-            return conclude(text, retrieval.hits());
+            return conclude(Suggestions.split(text).answer(), retrieval.hits());
         }
     }
 
@@ -143,7 +148,8 @@ public class KnowledgeChatService {
             try (TurnLimiter.Turn ignored = started.turn()) {
                 Conversations.Opened opened = conversations.open(userId, conversationId, retrieval.question());
                 write(output, ChatStreamEvent.conversation(opened.conversationId()));
-                TurnLog turnLog = new TurnLog(opened.conversationId(), retrieval.question());
+                metrics.skill(SkillCatalog.DEFAULT);
+                TurnLog turnLog = new TurnLog(opened.conversationId(), retrieval.question(), catalog.version());
                 try {
                     streamAnswer(output, retrieval, opened.history(), turnLog);
                 } finally {
@@ -171,11 +177,15 @@ public class KnowledgeChatService {
         }
 
         StringBuilder text = new StringBuilder();
+        Suggestions.Filter filter = new Suggestions.Filter();
         try {
-            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), OllamaClient.Options.GROUNDED,
+            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), models.groundedOptions(),
                 delta -> {
                     text.append(delta);
-                    emit(output, turnLog, ChatStreamEvent.delta(delta));
+                    String shown = filter.accept(delta);
+                    if (!shown.isEmpty()) {
+                        emit(output, turnLog, ChatStreamEvent.delta(shown));
+                    }
                 });
         } catch (UncheckedIOException exception) {
             turnLog.stopped();
@@ -186,8 +196,10 @@ public class KnowledgeChatService {
             return;
         }
 
-        ChatAnswerView answer = conclude(text.toString().strip(), retrieval.hits());
-        emit(output, turnLog, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations()));
+        Suggestions.Split split = Suggestions.split(text.toString().strip());
+        ChatAnswerView answer = conclude(split.answer(), retrieval.hits());
+        emit(output, turnLog, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations(),
+            answer.found() ? split.suggestions() : List.of()));
     }
 
     private void emit(OutputStream output, TurnLog turnLog, ChatStreamEvent event) {
@@ -234,6 +246,7 @@ public class KnowledgeChatService {
     private static final class TurnLog {
         private final String question;
         private final long conversationId;
+        private final String promptVersion;
         private boolean attempted;
         private Long storedId;
         private final long started = System.nanoTime();
@@ -242,9 +255,10 @@ public class KnowledgeChatService {
         private List<ChatViews.CitationView> citations = List.of();
         private Integer firstTokenMs;
 
-        TurnLog(long conversationId, String question) {
+        TurnLog(long conversationId, String question, String promptVersion) {
             this.conversationId = conversationId;
             this.question = question;
+            this.promptVersion = promptVersion;
         }
 
         void stopped() {
@@ -271,7 +285,7 @@ public class KnowledgeChatService {
 
         TurnRecord record() {
             return new TurnRecord(TurnRecord.KNOWLEDGE, question, answer, citations, List.of(), null, null, status,
-                firstTokenMs, millisSince());
+                firstTokenMs, millisSince(), SkillCatalog.DEFAULT, promptVersion);
         }
     }
 

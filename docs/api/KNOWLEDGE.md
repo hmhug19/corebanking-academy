@@ -136,7 +136,7 @@ stream (envelope JSON) không bị trả 406.
 | `conversation` | `conversationId`                   | Dòng đầu của stream: hội thoại lưu lượt này                   |
 | `retrieved` | `count`                               | Số đoạn đủ liên quan, gửi ngay khi tìm xong                   |
 | `delta`     | `text`                                | Một đoạn văn bản của câu trả lời, nối theo thứ tự             |
-| `done`      | `found`, `answer`, `citations`, `turnId` | Kết thúc; `turnId` là lượt đã lưu, dùng để gửi đánh giá (bỏ khi không lưu được); `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `citations` như trên, rỗng khi `found = false` |
+| `done`      | `found`, `answer`, `citations`, `turnId`, `suggestions` | Kết thúc; `turnId` là lượt đã lưu, dùng để gửi đánh giá (bỏ khi không lưu được); `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `citations` như trên, rỗng khi `found = false`; `suggestions` là tối đa 3 gợi ý hỏi tiếp, bỏ khi không có |
 | `error`     | `messageCode`, `message`              | Lỗi giữa chừng (Ollama dừng sau khi đã bắt đầu), kết thúc dòng |
 
 Khi không có đoạn nào đủ liên quan: `retrieved(0)`, một `delta` là câu cố định, `done(found=false)`.

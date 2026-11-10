@@ -25,13 +25,16 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import vn.com.coreacademy.assistant.action.PendingAction;
 import vn.com.coreacademy.assistant.agent.AgentContext;
-import vn.com.coreacademy.assistant.agent.AgentPrompt;
 import vn.com.coreacademy.assistant.agent.AgentService;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
+import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.skill.Skill;
+import vn.com.coreacademy.assistant.skill.SkillCatalog;
+import vn.com.coreacademy.assistant.skill.SkillSelector;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.PendingActionView.Change;
@@ -80,6 +83,10 @@ class AgentServiceTest {
     private final TurnLimiter limiter = new TurnLimiter(properties, new AssistantLimits(3), clock);
     private final InMemoryConversations conversations = new InMemoryConversations();
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    /** One skill that offers every tool the tests register, so tool behaviour is tested apart from skill choice. */
+    private final SkillCatalog catalog = new SkillCatalog("base", List.of(new Skill("qa_tai_lieu", "hỏi đáp",
+        List.of("search_documents", "search_community", "open_screen", "update_profile", "admin_only"), List.of(),
+        "system", "", "")), "v1");
 
     @BeforeEach
     void setUp() {
@@ -94,11 +101,16 @@ class AgentServiceTest {
 
     /** Built per call: the registry reads the tools once, so the test's tools must exist before it is created. */
     private AgentService service() {
+        return service(catalog);
+    }
+
+    private AgentService service(SkillCatalog skills) {
         @SuppressWarnings("unchecked")
         ObjectProvider<AgentTool> provider = mock(ObjectProvider.class);
         when(provider.orderedStream()).thenAnswer(invocation -> tools.stream());
         return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, conversations, json,
-            new AssistantMetrics(meters));
+            new AssistantMetrics(meters), new SkillSelector(ollama, skills, AssistantModels.defaults()), skills,
+            AssistantModels.defaults());
     }
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
@@ -204,6 +216,85 @@ class AgentServiceTest {
         assertThat(events.get(2).path("answer").asText()).isEqualTo("Xin chào");
         assertThat(events.get(2).path("citations").size()).isZero();
         verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any());
+    }
+
+    private static String conversationOf(List<JsonNode> all) {
+        return all.get(0).path("type").asText();
+    }
+
+    @Test
+    void aSkillTheAppNamesIsUsedWithoutAnyClassifierCall() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        tool("open_screen", true, false, true, (arguments, turn) -> new ToolOutcome.Navigate("/courses", "Khóa học",
+            "Đã mở."));
+        modelAnswers(List.of("ok"), List.of());
+
+        events(service(real).stream("Mở khóa học", null, "dieu_huong"));
+
+        verify(ollama, never()).chat(anyList(), any());
+        assertThat(conversations.lastRecord().skill()).isEqualTo("dieu_huong");
+        assertThat(conversations.lastRecord().promptVersion()).isEqualTo(real.version());
+    }
+
+    @Test
+    void anUnknownLabelOrAFailingClassifierFallsBackToTheDocumentSkill() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        modelAnswers(List.of("ok"), List.of());
+        when(ollama.chat(anyList(), any())).thenReturn("bầu trời xanh");
+        events(service(real).stream("Câu hỏi", null, null));
+        assertThat(conversations.lastRecord().skill()).isEqualTo("qa_tai_lieu");
+
+        when(ollama.chat(anyList(), any())).thenThrow(new OllamaUnavailableException("down", null));
+        clock.advance(Duration.ofMinutes(1));
+        events(service(real).stream("Câu hỏi khác", null, null));
+        assertThat(conversations.lastRecord().skill()).isEqualTo("qa_tai_lieu");
+
+        org.mockito.Mockito.doReturn("{\"skill\": \"tro_chuyen\"}").when(ollama).chat(anyList(), any());
+        clock.advance(Duration.ofMinutes(1));
+        events(service(real).stream("Xin chào", null, "không_có_skill_này"));
+        assertThat(conversations.lastRecord().skill()).isEqualTo("tro_chuyen");
+    }
+
+    @Test
+    void aTurnIsOfferedOnlyItsSkillsTools() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        tool("search_documents", true, (arguments, turn) -> new ToolOutcome.Result("x"));
+        tool("open_screen", true, false, true, (arguments, turn) -> new ToolOutcome.Result("y"));
+        modelAnswers(List.of("ok"), List.of());
+
+        events(service(real).stream("Mở màn hình", null, "dieu_huong"));
+
+        ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
+        verify(ollama).chatWithTools(anyList(), offered.capture(), any(), any());
+        assertThat(offered.getValue()).extracting(ToolDefinition::name).containsExactly("open_screen");
+    }
+
+    @Test
+    void suggestionsAreCutFromTheAnswerAndTheStreamAndArriveInDone() throws IOException {
+        modelAnswers(List.of("CIF là mã khách hàng [1].\n@@GO", "I_Y@@\n- CIF cấp thế nào?\n- Ai quản lý CIF?\n- ",
+            "x".repeat(130) + "\n- Thêm\n- Thừa"), List.of());
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        String streamed = events.stream().filter(e -> e.path("type").asText().equals("delta"))
+            .map(e -> e.path("text").asText()).reduce("", String::concat);
+        assertThat(streamed).doesNotContain("GOI_Y").doesNotContain("CIF cấp thế nào").startsWith("CIF là mã");
+        JsonNode done = events.get(events.size() - 1);
+        assertThat(done.path("answer").asText()).isEqualTo("CIF là mã khách hàng [1].");
+        assertThat(done.path("suggestions")).extracting(JsonNode::asText)
+            .containsExactly("CIF cấp thế nào?", "Ai quản lý CIF?", "Thêm");
+        assertThat(conversations.lastRecord().answer()).doesNotContain("GOI_Y");
+    }
+
+    @Test
+    void aMalformedSuggestionBlockIsDroppedWithoutAnError() throws IOException {
+        modelAnswers(List.of("Trả lời xong.\n@@GOI_Y@@\nkhông phải danh sách\n* sai dấu"), List.of());
+
+        JsonNode done = events(ask("Hỏi")).stream().filter(e -> e.path("type").asText().equals("done")).findFirst()
+            .orElseThrow();
+
+        assertThat(done.path("answer").asText()).isEqualTo("Trả lời xong.");
+        assertThat(done.has("suggestions")).isFalse();
     }
 
     @Test
@@ -360,7 +451,7 @@ class AgentServiceTest {
     @Test
     void aMessageThatIsBlankOrOver500CharactersIsRefused() {
         for (String message : new String[] {"   ", "x".repeat(501)}) {
-            assertThatThrownBy(() -> service().stream(new AgentRequest(null, message)))
+            assertThatThrownBy(() -> service().stream(new AgentRequest(null, message, null)))
                 .isInstanceOf(BusinessException.class);
         }
     }
@@ -437,7 +528,7 @@ class AgentServiceTest {
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
         verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any());
         assertThat(messages.getValue()).extracting(ChatMessage::role).containsExactly("system", "user");
-        assertThat(messages.getValue().get(0).content()).isEqualTo(AgentPrompt.SYSTEM);
+        assertThat(messages.getValue().get(0).content()).isEqualTo(catalog.systemPrompt(catalog.defaultSkill()));
         assertThat(messages.getValue().get(1).content()).isEqualTo("c");
     }
 

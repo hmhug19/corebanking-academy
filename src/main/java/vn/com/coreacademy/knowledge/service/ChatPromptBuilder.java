@@ -3,14 +3,28 @@ package vn.com.coreacademy.knowledge.service;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import vn.com.coreacademy.assistant.conversation.Conversations;
+import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 
 /** Builds the grounded prompt: the model sees the numbered chunks and the question, nothing else. */
 @Component
 public class ChatPromptBuilder {
+    private final String system;
+
+    @Autowired
+    public ChatPromptBuilder(SkillCatalog catalog) {
+        this.system = SYSTEM + "\n" + catalog.base();
+    }
+
+    /** For callers without a Spring context; reads the same prompt files. */
+    public ChatPromptBuilder() {
+        this(new SkillCatalog());
+    }
+
     private static final String SYSTEM = """
         Bạn là trợ lý tra cứu tài liệu nội bộ của Ban QL&PT Core Banking.
         Chỉ dùng các đoạn trong phần NGỮ CẢNH dưới đây để trả lời. Không dùng kiến thức bên ngoài.
@@ -37,7 +51,7 @@ public class ChatPromptBuilder {
         user.append("CÂU HỎI: ").append(question);
 
         List<Message> messages = new ArrayList<>();
-        messages.add(Message.system(SYSTEM));
+        messages.add(Message.system(system));
         for (Conversations.Exchange exchange : history) {
             messages.add(Message.user(exchange.question()));
             messages.add(Message.assistant(exchange.answer()));

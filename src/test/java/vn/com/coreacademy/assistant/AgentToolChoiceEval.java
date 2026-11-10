@@ -15,7 +15,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.unit.DataSize;
-import vn.com.coreacademy.assistant.agent.AgentPrompt;
+import vn.com.coreacademy.assistant.agent.AgentContext;
+import vn.com.coreacademy.assistant.config.AssistantModels;
+import vn.com.coreacademy.assistant.skill.Skill;
+import vn.com.coreacademy.assistant.skill.SkillCatalog;
+import vn.com.coreacademy.assistant.skill.SkillSelector;
 import vn.com.coreacademy.assistant.tool.ToolDefinitions;
 import vn.com.coreacademy.assistant.tool.ToolDefinitions.Screen;
 import vn.com.coreacademy.knowledge.ai.ChatMessage;
@@ -28,7 +32,8 @@ import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Measures how reliably the real local model picks the right tool for fixed Vietnamese prompts. It needs Ollama with
+ * Measures how reliably the real local model picks the right skill and then the right tool for fixed Vietnamese
+ * prompts (the skill comes from the classifier, the tools offered are the skill's). It needs Ollama with
  * {@code qwen3:8b} running, so its name keeps it out of the default run (surefire only includes {@code *Test} and
  * {@code *IT}); run it with {@code mvn test -Dtest=AgentToolChoiceEval}. Tool execution is not involved: only the
  * first model call of a turn is made, with the real tool definitions. The report is printed and written to
@@ -61,6 +66,16 @@ class AgentToolChoiceEval {
             return new Prompt(text, tool, argumentName, expectedArgument);
         }
 
+        /** The skill whose tools include the expected one. */
+        String expectedSkill() {
+            return switch (expectedTool) {
+                case ToolDefinitions.SEARCH_DOCUMENTS, ToolDefinitions.SEARCH_COMMUNITY -> "qa_tai_lieu";
+                case ToolDefinitions.OPEN_SCREEN -> "dieu_huong";
+                case ToolDefinitions.UPDATE_PROFILE -> "ho_so";
+                default -> "tro_chuyen";
+            };
+        }
+
         static Prompt direct(String text) {
             return new Prompt(text, NONE, null, null);
         }
@@ -69,10 +84,14 @@ class AgentToolChoiceEval {
     private record Call(String chosen, String arguments, OptionalLong firstDeltaMs, long totalMs) {
     }
 
-    private record Result(Prompt prompt, String chosen, String arguments, boolean argumentOk, OptionalLong firstDeltaMs,
+    private record Result(Prompt prompt, String skill, String chosen, String arguments, boolean argumentOk, OptionalLong firstDeltaMs,
                           long totalMs) {
         boolean hit() {
             return prompt.expectedTool().equals(chosen);
+        }
+
+        boolean skillHit() {
+            return prompt.expectedSkill().equals(skill);
         }
     }
 
@@ -121,11 +140,13 @@ class AgentToolChoiceEval {
         List<ToolDefinition> tools = List.of(ToolDefinitions.searchDocuments(), ToolDefinitions.searchCommunity(),
             ToolDefinitions.openScreen(SCREENS), ToolDefinitions.updateProfile());
 
-        long warmUp = call(ollama, tools, "Xin chào").totalMs();
+        SkillCatalog catalog = new SkillCatalog();
+        SkillSelector selector = new SkillSelector(ollama, catalog, AssistantModels.defaults());
+        long warmUp = call(ollama, catalog, catalog.defaultSkill(), tools, "Xin chào").totalMs();
 
         List<Result> results = new ArrayList<>();
         for (Prompt prompt : PROMPTS) {
-            results.add(run(ollama, tools, prompt));
+            results.add(run(ollama, catalog, selector, tools, prompt));
         }
 
         String report = report(results, warmUp);
@@ -133,20 +154,27 @@ class AgentToolChoiceEval {
         Files.writeString(Paths.get("target", "agent-tool-choice-eval.txt"), report, StandardCharsets.UTF_8);
         long hits = results.stream().filter(Result::hit).count();
         assertThat((double) hits / results.size()).as("tool choice hit rate").isGreaterThanOrEqualTo(REQUIRED_HIT_RATE);
+        long skillHits = results.stream().filter(Result::skillHit).count();
+        assertThat((double) skillHits / results.size()).as("skill choice hit rate")
+            .isGreaterThanOrEqualTo(REQUIRED_HIT_RATE);
     }
 
-    private static Result run(OllamaClient ollama, List<ToolDefinition> tools, Prompt prompt) {
-        Call call = call(ollama, tools, prompt.text());
+    private static Result run(OllamaClient ollama, SkillCatalog catalog, SkillSelector selector,
+                              List<ToolDefinition> tools, Prompt prompt) {
+        Skill skill = selector.select(null, prompt.text(), new AgentContext("000004", null, null));
+        Call call = call(ollama, catalog, skill, tools, prompt.text());
         boolean argumentOk = prompt.argumentName() == null
             || argumentOf(call, prompt.argumentName()).equals(prompt.expectedArgument());
-        return new Result(prompt, call.chosen(), call.arguments(), argumentOk, call.firstDeltaMs(), call.totalMs());
+        return new Result(prompt, skill.id(), call.chosen(), call.arguments(), argumentOk, call.firstDeltaMs(), call.totalMs());
     }
 
-    private static Call call(OllamaClient ollama, List<ToolDefinition> tools, String text) {
+    private static Call call(OllamaClient ollama, SkillCatalog catalog, Skill skill, List<ToolDefinition> allTools,
+                             String text) {
+        List<ToolDefinition> tools = allTools.stream().filter(tool -> skill.tools().contains(tool.name())).toList();
         long started = System.nanoTime();
         AtomicLong firstDelta = new AtomicLong(-1);
         ChatTurn turn = ollama.chatWithTools(
-            List.of(ChatMessage.system(AgentPrompt.SYSTEM), ChatMessage.user(text)), tools,
+            List.of(ChatMessage.system(catalog.systemPrompt(skill)), ChatMessage.user(text)), tools,
             OllamaClient.Options.AGENT, delta -> firstDelta.compareAndSet(-1, millisSince(started)));
         long total = millisSince(started);
         ToolCall first = turn.toolCalls().isEmpty() ? null : turn.toolCalls().get(0);
@@ -168,8 +196,8 @@ class AgentToolChoiceEval {
         StringBuilder out = new StringBuilder("\nAgentToolChoiceEval (qwen3:8b, think=false, temperature 0.1)\n");
         out.append(String.format("model warm-up call: %d ms (excluded from the figures below)%n%n", warmUpMs));
         for (Result result : results) {
-            out.append(String.format("%-4s %-62s expected=%-16s chosen=%-16s args=%s %s | first delta=%s total=%d ms%n",
-                result.hit() ? "OK" : "MISS", result.prompt().text(), result.prompt().expectedTool(),
+            out.append(String.format("%-4s %-62s skill=%-12s expected=%-16s chosen=%-16s args=%s %s | first delta=%s total=%d ms%n",
+                result.hit() ? "OK" : "MISS", result.prompt().text(), result.skill(), result.prompt().expectedTool(),
                 result.chosen(), result.argumentOk() ? "ok" : "WRONG", result.arguments(),
                 result.firstDeltaMs().isPresent() ? result.firstDeltaMs().getAsLong() + " ms" : "-", result.totalMs()));
         }
@@ -178,7 +206,9 @@ class AgentToolChoiceEval {
         List<Long> decisions = results.stream().map(Result::totalMs).sorted().toList();
         List<Long> firstTokens = results.stream().filter(result -> result.firstDeltaMs().isPresent())
             .map(result -> result.firstDeltaMs().getAsLong()).sorted().toList();
-        out.append(String.format("%ntool choice: %d/%d = %.0f%%  (arguments right where the tool was right: %d/%d)%n",
+        out.append(String.format("%nskill choice: %d/%d%n", results.stream().filter(Result::skillHit).count(),
+            results.size()));
+        out.append(String.format("tool choice: %d/%d = %.0f%%  (arguments right where the tool was right: %d/%d)%n",
             hits, results.size(), 100.0 * hits / results.size(), argumentHits, hits));
         out.append(String.format("time to the tool decision (first model call): median %d ms, max %d ms%n",
             median(decisions), decisions.get(decisions.size() - 1)));
