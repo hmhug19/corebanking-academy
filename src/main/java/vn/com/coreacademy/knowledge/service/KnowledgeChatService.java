@@ -139,11 +139,11 @@ public class KnowledgeChatService {
             try (TurnLimiter.Turn ignored = started.turn()) {
                 Conversations.Opened opened = conversations.open(userId, conversationId, retrieval.question());
                 write(output, ChatStreamEvent.conversation(opened.conversationId()));
-                TurnLog turnLog = new TurnLog(retrieval.question());
+                TurnLog turnLog = new TurnLog(opened.conversationId(), retrieval.question());
                 try {
                     streamAnswer(output, retrieval, opened.history(), turnLog);
                 } finally {
-                    store(opened.conversationId(), turnLog);
+                    store(turnLog);
                 }
             }
         };
@@ -188,30 +188,49 @@ public class KnowledgeChatService {
 
     private void emit(OutputStream output, TurnLog turnLog, ChatStreamEvent event) {
         turnLog.observe(event);
+        if (event instanceof ChatStreamEvent.Done done) {
+            // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
+            Long turnId = store(turnLog);
+            write(output, turnId == null ? done : done.withTurnId(turnId));
+            return;
+        }
         write(output, event);
     }
 
-    /** Stores the turn without ever failing the stream: the user already has the answer. */
-    private void store(long conversationId, TurnLog turnLog) {
+    /**
+     * Stores the turn once, without ever failing the stream: the user already has the answer. Returns the stored id,
+     * or null when the turn could not be stored.
+     */
+    private Long store(TurnLog turnLog) {
+        if (turnLog.attempted) {
+            return turnLog.storedId;
+        }
+        turnLog.attempted = true;
         try {
-            conversations.record(conversationId, turnLog.record());
+            turnLog.storedId = conversations.record(turnLog.conversationId, turnLog.record());
         } catch (RuntimeException exception) {
             // The message could quote the user's text; log the type only.
-            log.error("Knowledge turn not stored conversationId={} type={}", conversationId,
+            log.error("Knowledge turn not stored conversationId={} type={}", turnLog.conversationId,
                 exception.getClass().getName());
         }
+
+        return turnLog.storedId;
     }
 
     /** What the events of one turn add up to, for the stored turn. */
     private static final class TurnLog {
         private final String question;
+        private final long conversationId;
+        private boolean attempted;
+        private Long storedId;
         private final long started = System.nanoTime();
         private TurnRecord.Status status = TurnRecord.Status.STOPPED;
         private String answer;
         private List<ChatViews.CitationView> citations = List.of();
         private Integer firstTokenMs;
 
-        TurnLog(String question) {
+        TurnLog(long conversationId, String question) {
+            this.conversationId = conversationId;
             this.question = question;
         }
 

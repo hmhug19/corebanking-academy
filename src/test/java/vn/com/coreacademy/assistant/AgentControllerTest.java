@@ -148,11 +148,11 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
 
         List<String> lines = lines("000004", question("Xin chào"));
 
-        assertThat(lines).containsExactly(
+        assertThat(lines.subList(0, 3)).containsExactly(
             "{\"type\":\"tool\",\"name\":\"stub_read\"}",
             "{\"type\":\"delta\",\"text\":\"Xin \"}",
-            "{\"type\":\"delta\",\"text\":\"chào\"}",
-            "{\"type\":\"done\",\"answer\":\"Xin chào\",\"citations\":[]}");
+            "{\"type\":\"delta\",\"text\":\"chào\"}");
+        assertThat(lines.get(3)).matches("\\{\"type\":\"done\",\"answer\":\"Xin chào\",\"citations\":\\[],\"turnId\":\\d+}");
     }
 
     @Test
@@ -170,7 +170,8 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
         assertThat(card.path("expiresAt").asText()).matches("\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z");
         assertThat(card.has("userId")).isFalse();
         assertThat(card.has("arguments")).isFalse();
-        assertThat(lines.get(2)).isEqualTo("{\"type\":\"done\",\"answer\":\"Vui lòng xác nhận.\",\"citations\":[]}");
+        assertThat(lines.get(2))
+            .matches("\\{\"type\":\"done\",\"answer\":\"Vui lòng xác nhận.\",\"citations\":\\[],\"turnId\":\\d+}");
     }
 
     @Test

@@ -111,11 +111,11 @@ public class AgentService {
                     history.add(ChatMessage.assistant(exchange.answer()));
                 }
                 history.add(ChatMessage.user(question));
-                TurnLog turnLog = new TurnLog(question);
+                TurnLog turnLog = new TurnLog(opened.conversationId(), question);
                 try {
                     run(output, history, context, tools, definitions, turnLog);
                 } finally {
-                    store(opened.conversationId(), turnLog);
+                    store(turnLog);
                 }
             }
         };
@@ -243,23 +243,41 @@ public class AgentService {
 
     private void emit(OutputStream output, TurnLog turnLog, AgentStreamEvent event) {
         turnLog.observe(event);
+        if (event instanceof AgentStreamEvent.Done done) {
+            // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
+            Long turnId = store(turnLog);
+            write(output, turnId == null ? done : done.withTurnId(turnId));
+            return;
+        }
         write(output, event);
     }
 
-    /** Stores the turn without ever failing the stream: the user already has the answer. */
-    private void store(long conversationId, TurnLog turnLog) {
+    /**
+     * Stores the turn once, without ever failing the stream: the user already has the answer. Returns the stored id,
+     * or null when the turn could not be stored.
+     */
+    private Long store(TurnLog turnLog) {
+        if (turnLog.attempted) {
+            return turnLog.storedId;
+        }
+        turnLog.attempted = true;
         try {
-            conversations.record(conversationId, turnLog.record());
+            turnLog.storedId = conversations.record(turnLog.conversationId, turnLog.record());
         } catch (RuntimeException exception) {
             // The message could quote the user's text; log the type only.
-            log.error("Assistant turn not stored conversationId={} type={}", conversationId,
+            log.error("Assistant turn not stored conversationId={} type={}", turnLog.conversationId,
                 exception.getClass().getName());
         }
+
+        return turnLog.storedId;
     }
 
     /** What the events of one turn add up to, for the stored turn; the first event that ends the turn decides it. */
     private static final class TurnLog {
         private final String question;
+        private final long conversationId;
+        private boolean attempted;
+        private Long storedId;
         private final long started = System.nanoTime();
         private final List<String> tools = new ArrayList<>();
         private TurnRecord.Status status = TurnRecord.Status.STOPPED;
@@ -269,7 +287,8 @@ public class AgentService {
         private String actionId;
         private Integer firstTokenMs;
 
-        TurnLog(String question) {
+        TurnLog(long conversationId, String question) {
+            this.conversationId = conversationId;
             this.question = question;
         }
 

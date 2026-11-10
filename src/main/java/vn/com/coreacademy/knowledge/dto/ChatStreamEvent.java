@@ -2,6 +2,8 @@ package vn.com.coreacademy.knowledge.dto;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 
 /** One NDJSON line of the chat stream; {@code type} is the first field so a client can branch on it. */
@@ -22,7 +24,12 @@ public sealed interface ChatStreamEvent {
      * Last line on success. {@code answer} is the final text: what the deltas added up to, or the fixed sentence when
      * the model said nothing was found (a client replaces what it streamed). Citations are empty in that case.
      */
-    record Done(String type, boolean found, String answer, List<CitationView> citations) implements ChatStreamEvent {
+    record Done(String type, boolean found, String answer, List<CitationView> citations,
+                @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId) implements ChatStreamEvent {
+        /** The same line naming the stored turn, so the client can send feedback on it. */
+        public Done withTurnId(long id) {
+            return new Done(type, found, answer, citations, id);
+        }
     }
 
     /** Last line on failure after the stream has started. */
@@ -42,7 +49,7 @@ public sealed interface ChatStreamEvent {
     }
 
     static Done done(boolean found, String answer, List<CitationView> citations) {
-        return new Done("done", found, answer, citations);
+        return new Done("done", found, answer, citations, null);
     }
 
     static Error error(String messageCode, String message) {

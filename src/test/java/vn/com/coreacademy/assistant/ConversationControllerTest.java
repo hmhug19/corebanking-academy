@@ -49,6 +49,8 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
     private static final MediaType NDJSON = MediaType.parseMediaType("application/x-ndjson");
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    private String lastStream = "";
+
     @MockitoBean
     private OllamaClient ollama;
 
@@ -83,7 +85,8 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(request().asyncStarted()).andReturn();
         MvcResult result = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn();
-        String first = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().findFirst().orElseThrow();
+        lastStream = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        String first = lastStream.lines().findFirst().orElseThrow();
         JsonNode event = JSON.readTree(first);
         assertThat(event.path("type").asText()).isEqualTo("conversation");
         return event.path("conversationId").asLong();
@@ -118,6 +121,26 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
             .andExpect(jsonPath("$.messageCode").value("ASSISTANT-CONVERSATION_NOT_FOUND"));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.assistant_conversations", Integer.class))
             .isEqualTo(1);
+    }
+
+    @Test
+    void theDoneLineNamesTheStoredTurnSoTheAnswerCanBeRated() throws Exception {
+        modelAnswers("Chào bạn");
+
+        long id = ask(ME, null, "Xin chào trợ lý");
+
+        JsonNode done = lastStream.lines().map(line -> {
+            try {
+                return JSON.readTree(line);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        }).filter(event -> "done".equals(event.path("type").asText())).findFirst().orElseThrow();
+        long stored = jdbc.queryForObject("SELECT turn_id FROM learning_hub.assistant_turns WHERE conversation_id = ?",
+            Long.class, id);
+        assertThat(done.path("turnId").asLong()).isEqualTo(stored);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.assistant_turns WHERE conversation_id = ?",
+            Integer.class, id)).isEqualTo(1);
     }
 
     @Test

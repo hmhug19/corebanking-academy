@@ -2,6 +2,8 @@ package vn.com.coreacademy.assistant.dto;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 
 /** One NDJSON line of the agent stream; {@code type} is the first field so a client can branch on it. */
@@ -27,7 +29,12 @@ public sealed interface AgentStreamEvent {
     }
 
     /** Last line on success; {@code answer} replaces what the deltas added up to. */
-    record Done(String type, String answer, List<CitationView> citations) implements AgentStreamEvent {
+    record Done(String type, String answer, List<CitationView> citations,
+                @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId) implements AgentStreamEvent {
+        /** The same line naming the stored turn, so the client can send feedback on it. */
+        public Done withTurnId(long id) {
+            return new Done(type, answer, citations, id);
+        }
     }
 
     /** Last line on failure after the stream has started. */
@@ -55,7 +62,7 @@ public sealed interface AgentStreamEvent {
     }
 
     static Done done(String answer, List<CitationView> citations) {
-        return new Done("done", answer, citations);
+        return new Done("done", answer, citations, null);
     }
 
     static Error error(String messageCode, String message) {

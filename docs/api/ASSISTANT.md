@@ -54,7 +54,7 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 | `delta`           | `text`                          | Một đoạn văn bản của câu trả lời, nhiều dòng                                             |
 | `navigate`        | `path`, `title`                 | App chuyển trang (từ `open_screen`); lượt kết thúc ngay sau đó                           |
 | `action_required` | `action` (`PendingActionView`)  | Một thay đổi dữ liệu chờ xác nhận; lượt kết thúc ngay sau đó                             |
-| `done`            | `answer`, `citations`           | Dòng cuối khi thành công; `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó) |
+| `done`            | `answer`, `citations`, `turnId` | Dòng cuối khi thành công; `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `turnId` là lượt đã lưu, dùng để gửi đánh giá (bỏ khi không lưu được lượt) |
 | `error`           | `messageCode`, `message`        | Dòng cuối khi lỗi giữa chừng                                                             |
 
 `citations` có dạng `CitationView` của chat tài liệu (`n`, `documentId`, `fileName`, `page`, `lineStart`, `lineEnd`,
