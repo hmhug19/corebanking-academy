@@ -26,6 +26,7 @@ import vn.com.coreacademy.assistant.agent.AgentPrompt;
 import vn.com.coreacademy.assistant.agent.AgentService;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.dto.AgentMessage;
 import vn.com.coreacademy.assistant.dto.AgentRequest;
@@ -71,7 +72,8 @@ class AgentServiceTest {
     private final List<AgentTool> tools = new ArrayList<>();
     private final List<AgentContext> contexts = new ArrayList<>();
     private final AssistantProperties properties = new AssistantProperties(4, 20, Duration.ofMinutes(10), 4);
-    private final TurnLimiter limiter = new TurnLimiter(properties);
+    private final MutableClock clock = new MutableClock();
+    private final TurnLimiter limiter = new TurnLimiter(properties, new AssistantLimits(3), clock);
 
     @BeforeEach
     void setUp() {
@@ -242,7 +244,7 @@ class AgentServiceTest {
 
     @Test
     void aSecondTurnOfTheSameUserWhileOneIsRunningEndsBusyWithoutCallingTheModel() throws IOException {
-        limiter.tryStart("000004").orElseThrow();
+        limiter.admit("000004");
 
         List<JsonNode> events = events(ask("Xin chào"));
 
@@ -252,12 +254,29 @@ class AgentServiceTest {
     }
 
     @Test
+    void theQuestionAfterTheHourlyLimitEndsRateLimitedWithTheWaitAndWithoutCallingTheModel() throws IOException {
+        when(ollama.chatWithTools(anyList(), anyList(), any(), any())).thenReturn(new ChatTurn("Chào bạn", List.of()));
+        for (int i = 0; i < 3; i++) {
+            assertThat(types(events(ask("Xin chào")))).contains("done");
+            clock.advance(Duration.ofMinutes(1));
+        }
+        org.mockito.Mockito.clearInvocations(ollama);
+
+        List<JsonNode> events = events(ask("Xin chào"));
+
+        assertThat(types(events)).containsExactly("error");
+        assertThat(events.get(0).path("messageCode").asText()).isEqualTo("ASSISTANT-RATE_LIMITED");
+        assertThat(events.get(0).path("message").asText()).isEqualTo("Bạn đã hỏi nhiều, thử lại sau 57 phút.");
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+    }
+
+    @Test
     void aTurnFreesItsPlaceWhenItEndsEvenOnAFailure() throws IOException {
         when(ollama.chatWithTools(anyList(), anyList(), any(), any())).thenThrow(new IllegalStateException("boom"));
 
         events(ask("Xin chào"));
 
-        assertThat(limiter.tryStart("000004")).isPresent();
+        assertThat(limiter.admit("000004")).isInstanceOf(TurnLimiter.Admission.Started.class);
     }
 
     @Test

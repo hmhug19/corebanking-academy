@@ -162,31 +162,4 @@ class PendingActionStoreTest {
         assertNotFound(() -> store.take(old.id(), "000004"));
         assertThat(store.take(fresh.id(), "000004")).isEqualTo(fresh);
     }
-
-    private static final class MutableClock extends Clock {
-        private Instant now;
-
-        MutableClock(Instant now) {
-            this.now = now;
-        }
-
-        void advance(Duration duration) {
-            now = now.plus(duration);
-        }
-
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
-    }
 }

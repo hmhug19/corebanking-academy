@@ -16,7 +16,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.security.SecurityContextUtils;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
 import vn.com.coreacademy.knowledge.ai.OllamaException;
@@ -47,6 +50,7 @@ public class KnowledgeChatService {
     private final ChatPromptBuilder prompts;
     private final KnowledgeProperties properties;
     private final ObjectMapper json;
+    private final TurnLimiter limiter;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -77,19 +81,35 @@ public class KnowledgeChatService {
     /** One complete answer, the contract of record for tests and tooling. */
     public ChatAnswerView answer(String rawQuestion) {
         Retrieval retrieval = retrieve(rawQuestion);
-        if (retrieval.hits().isEmpty()) {
-            return notFound();
+        try (TurnLimiter.Turn ignored = admitOrRefuse(SecurityContextUtils.getUserId())) {
+            if (retrieval.hits().isEmpty()) {
+                return notFound();
+            }
+
+            String text;
+            try {
+                text = ollama.chat(prompts.build(retrieval.question(), retrieval.hits()),
+                    OllamaClient.Options.GROUNDED).strip();
+            } catch (OllamaUnavailableException | OllamaException exception) {
+                throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
+            }
+
+            return conclude(text, retrieval.hits());
+        }
+    }
+
+    /** The shared per-user limits of the agent apply to the document chat too; a refusal is an ordinary envelope. */
+    private TurnLimiter.Turn admitOrRefuse(String userId) {
+        TurnLimiter.Admission admission = limiter.admit(userId);
+        if (admission instanceof TurnLimiter.Admission.Started started) {
+            return started.turn();
+        }
+        if (admission instanceof TurnLimiter.Admission.RateLimited limited) {
+            throw BusinessException.field(AssistantResponseCode.RATE_LIMITED, "question", "RATE_LIMITED",
+                limited.message());
         }
 
-        String text;
-        try {
-            text = ollama.chat(prompts.build(retrieval.question(), retrieval.hits()), OllamaClient.Options.GROUNDED)
-                .strip();
-        } catch (OllamaUnavailableException | OllamaException exception) {
-            throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
-        }
-
-        return conclude(text, retrieval.hits());
+        throw new BusinessException(AssistantResponseCode.BUSY);
     }
 
     /**
@@ -98,30 +118,50 @@ public class KnowledgeChatService {
      */
     public StreamingResponseBody stream(String rawQuestion) {
         Retrieval retrieval = retrieve(rawQuestion);
+        String userId = SecurityContextUtils.getUserId();
         return output -> {
-            write(output, ChatStreamEvent.retrieved(retrieval.hits().size()));
-            if (retrieval.hits().isEmpty()) {
-                write(output, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
-                write(output, ChatStreamEvent.done(false, NotFoundAnswer.TEXT, List.of()));
+            TurnLimiter.Admission admission = limiter.admit(userId);
+            if (!(admission instanceof TurnLimiter.Admission.Started started)) {
+                write(output, refusal(admission));
                 return;
             }
-
-            StringBuilder text = new StringBuilder();
-            try {
-                ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits()), OllamaClient.Options.GROUNDED,
-                    delta -> {
-                        text.append(delta);
-                        write(output, ChatStreamEvent.delta(delta));
-                    });
-            } catch (OllamaUnavailableException | OllamaException exception) {
-                write(output, ChatStreamEvent.error(KnowledgeResponseCode.AI_UNAVAILABLE.getCode(),
-                    KnowledgeResponseCode.AI_UNAVAILABLE.getMessage()));
-                return;
+            try (TurnLimiter.Turn ignored = started.turn()) {
+                streamAnswer(output, retrieval);
             }
-
-            ChatAnswerView answer = conclude(text.toString().strip(), retrieval.hits());
-            write(output, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations()));
         };
+    }
+
+    private static ChatStreamEvent refusal(TurnLimiter.Admission admission) {
+        if (admission instanceof TurnLimiter.Admission.RateLimited limited) {
+            return ChatStreamEvent.error(AssistantResponseCode.RATE_LIMITED.getCode(), limited.message());
+        }
+
+        return ChatStreamEvent.error(AssistantResponseCode.BUSY.getCode(), AssistantResponseCode.BUSY.getMessage());
+    }
+
+    private void streamAnswer(OutputStream output, Retrieval retrieval) {
+        write(output, ChatStreamEvent.retrieved(retrieval.hits().size()));
+        if (retrieval.hits().isEmpty()) {
+            write(output, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
+            write(output, ChatStreamEvent.done(false, NotFoundAnswer.TEXT, List.of()));
+            return;
+        }
+
+        StringBuilder text = new StringBuilder();
+        try {
+            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits()), OllamaClient.Options.GROUNDED,
+                delta -> {
+                    text.append(delta);
+                    write(output, ChatStreamEvent.delta(delta));
+                });
+        } catch (OllamaUnavailableException | OllamaException exception) {
+            write(output, ChatStreamEvent.error(KnowledgeResponseCode.AI_UNAVAILABLE.getCode(),
+                KnowledgeResponseCode.AI_UNAVAILABLE.getMessage()));
+            return;
+        }
+
+        ChatAnswerView answer = conclude(text.toString().strip(), retrieval.hits());
+        write(output, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations()));
     }
 
     private ChatAnswerView conclude(String text, List<ChunkHit> hits) {

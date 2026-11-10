@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import vn.com.coreacademy.assistant.agent.AssistantGate;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
@@ -33,6 +34,7 @@ import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
 @Validated
 @RequiredArgsConstructor
 public class KnowledgeDocumentController {
+    private final AssistantGate gate;
     private final KnowledgeDocumentService documents;
 
     @PostMapping(value = "/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -48,6 +50,7 @@ public class KnowledgeDocumentController {
             """
     )
     public BaseResponse<KnowledgeDocumentView> upload(@RequestPart MultipartFile file) {
+        gate.requireAccess();
         return BaseResponse.ok(documents.upload(file));
     }
 
@@ -65,6 +68,7 @@ public class KnowledgeDocumentController {
         @RequestParam(defaultValue = "false") boolean mine,
         @Parameter(description = "queued, processing, ready hoặc failed") @RequestParam(required = false)
         List<String> status) {
+        gate.requireAccess();
         return BaseResponse.ok(documents.list(page, size, mine, status));
     }
 
@@ -76,6 +80,7 @@ public class KnowledgeDocumentController {
             """
     )
     public BaseResponse<KnowledgeDocumentView> get(@PathVariable @Positive Long documentId) {
+        gate.requireAccess();
         return BaseResponse.ok(documents.get(documentId));
     }
 }

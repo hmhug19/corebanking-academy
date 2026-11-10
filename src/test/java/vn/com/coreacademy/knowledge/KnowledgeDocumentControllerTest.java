@@ -109,6 +109,22 @@ class KnowledgeDocumentControllerTest extends KnowledgeIntegrationTest {
     }
 
     @Test
+    void aCallerWithoutTheAssistantFunctionCannotUploadListOrReadDocuments() throws Exception {
+        // A temporary password empties the user's rights, AI_ASSISTANT included.
+        jdbc.update("UPDATE learning_hub.users SET must_change_password = true WHERE user_id = ?", "000004");
+        try {
+            mvc.perform(multipart(DOCUMENTS).file(markdown("a.md", "x")).with(as("000004")))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+            mvc.perform(get(DOCUMENTS).with(as("000004")))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+            mvc.perform(get(DOCUMENTS + "/1").with(as("000004")))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+        } finally {
+            jdbc.update("UPDATE learning_hub.users SET must_change_password = false WHERE user_id = ?", "000004");
+        }
+    }
+
+    @Test
     void listShowsEveryonesDocumentsNewestFirstAndMineKeepsTheCallers() throws Exception {
         upload("000005", "cua-giang-vien.md");
         upload("000004", "cua-hoc-vien.md");

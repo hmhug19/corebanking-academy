@@ -7,6 +7,9 @@ backend xử lý nền (trích xuất theo trang/dòng, chia đoạn, nhúng vec
 - Schema: [learning_hub_knowledge.sql](../sql/learning_hub_knowledge.sql) (cần pgvector; chạy sau Identity và Learning).
 - Chức năng menu `AI_ASSISTANT` (route `/assistant`) nằm trong seed Identity và được cấp cho mọi vai trò.
 - Request mẫu: [Postman](../postman/knowledge.postman_collection.json). Swagger: `/swagger-ui.html`.
+- Mọi API dưới `/api/v1/knowledge` (tải lên, danh sách, chi tiết, hỏi đáp) yêu cầu người gọi có chức năng `AI_ASSISTANT`,
+  thiếu thì `CORE-ACCESS_DENIED` (HTTP 403). Hỏi đáp dùng chung hạn mức câu hỏi/giờ và lượt chạy với trợ lý nhanh
+  (`ASSISTANT-BUSY`, `ASSISTANT-RATE_LIMITED`; xem [ASSISTANT.md](ASSISTANT.md)).
 - Mọi API dưới `/api/v1/knowledge`, yêu cầu JWT hợp lệ, trả `BaseResponse` (xem [API_CONTRACT.md](API_CONTRACT.md))
   trừ luồng NDJSON của chat.
 

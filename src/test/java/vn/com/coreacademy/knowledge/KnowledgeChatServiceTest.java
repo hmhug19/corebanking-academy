@@ -12,11 +12,19 @@ import java.util.stream.IntStream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.MutableClock;
+import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.config.AssistantLimits;
+import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
@@ -47,6 +55,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class KnowledgeChatServiceTest {
+    private static final String USER = "000004";
     private static final ChunkHit CIF = new ChunkHit(1, 42, "Quy-trinh-EOD.pdf", 3, 13, 27,
         "CIF (Customer Information File) là mã khách hàng duy nhất.", 0.82);
     private static final ChunkHit GL = new ChunkHit(2, 43, "Checklist.md", null, 5, 9,
@@ -60,6 +69,8 @@ class KnowledgeChatServiceTest {
     private final OllamaClient ollama = mock(OllamaClient.class);
     private final DocumentChunkRepository chunks = mock(DocumentChunkRepository.class);
     private final ObjectMapper json = new ObjectMapper();
+    private final MutableClock clock = new MutableClock();
+    private TurnLimiter limiter;
     private KnowledgeChatService service;
 
     @BeforeEach
@@ -69,8 +80,67 @@ class KnowledgeChatServiceTest {
             new KnowledgeProperties.Chunk(600, 800, 80), new KnowledgeProperties.Retrieval(5, 0.35),
             new KnowledgeProperties.Ollama("http://localhost:11434", "chat", "embed", Duration.ofSeconds(5),
                 Duration.ofSeconds(180), Duration.ofMinutes(10)));
-        service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json);
+        limiter = new TurnLimiter(new AssistantProperties(4, 20, Duration.ofMinutes(10), 4), new AssistantLimits(2),
+            clock);
+        service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter);
         when(ollama.embed(anyList())).thenReturn(List.of(new float[1024]));
+        signedInAs(USER);
+    }
+
+    @AfterEach
+    void signedOut() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private static void signedInAs(String userId) {
+        Jwt jwt = Jwt.withTokenValue("t").header("alg", "none").subject(userId).build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt, List.of()));
+    }
+
+    @Test
+    void aSecondStreamOfTheSameUserEndsBusyWithoutCallingTheModel() throws IOException {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        StreamingResponseBody body = service.stream("CIF là gì?");
+        TurnLimiter.Turn running = ((TurnLimiter.Admission.Started) limiter.admit(USER)).turn();
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        body.writeTo(out);
+
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("\"messageCode\":\"ASSISTANT-BUSY\"")
+            .doesNotContain("retrieved");
+        verify(ollama, never()).chatStream(anyList(), any(), any());
+        running.close();
+    }
+
+    @Test
+    void theStreamAfterTheHourlyLimitEndsRateLimitedWithTheWait() throws IOException {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of());
+        for (int i = 0; i < 2; i++) {
+            service.stream("Hỏi").writeTo(new ByteArrayOutputStream());
+            clock.advance(Duration.ofMinutes(5));
+        }
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        service.stream("Hỏi").writeTo(out);
+
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("\"messageCode\":\"ASSISTANT-RATE_LIMITED\"")
+            .contains("thử lại sau 50 phút");
+    }
+
+    @Test
+    void theNonStreamChatIsRefusedWhileTheUsersOtherTurnRunsAndAfterTheHourlyLimit() {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of());
+        TurnLimiter.Turn running = ((TurnLimiter.Admission.Started) limiter.admit(USER)).turn();
+
+        assertThatThrownBy(() -> service.answer("Hỏi")).isInstanceOf(BusinessException.class)
+            .extracting(e -> ((BusinessException) e).getResponseCode().getCode()).isEqualTo("ASSISTANT-BUSY");
+        running.close();
+
+        // The turn held above was the hour's first question; this is the second and last.
+        service.answer("Hỏi");
+        assertThatThrownBy(() -> service.answer("Hỏi")).isInstanceOf(BusinessException.class)
+            .extracting(e -> ((BusinessException) e).getResponseCode().getCode())
+            .isEqualTo("ASSISTANT-RATE_LIMITED");
     }
 
     @Test

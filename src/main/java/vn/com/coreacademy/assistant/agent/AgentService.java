@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -141,16 +140,23 @@ public class AgentService {
         List<AgentTool> tools = registry.availableTo(context);
         List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(context)).toList();
         return output -> {
-            Optional<TurnLimiter.Turn> started = limiter.tryStart(context.userId());
-            if (started.isEmpty()) {
-                write(output, AgentStreamEvent.error(AssistantResponseCode.BUSY.getCode(),
-                    AssistantResponseCode.BUSY.getMessage()));
+            TurnLimiter.Admission admission = limiter.admit(context.userId());
+            if (!(admission instanceof TurnLimiter.Admission.Started started)) {
+                write(output, refusal(admission));
                 return;
             }
-            try (TurnLimiter.Turn ignored = started.get()) {
+            try (TurnLimiter.Turn ignored = started.turn()) {
                 run(output, history, context, tools, definitions);
             }
         };
+    }
+
+    private static AgentStreamEvent refusal(TurnLimiter.Admission admission) {
+        if (admission instanceof TurnLimiter.Admission.RateLimited limited) {
+            return AgentStreamEvent.error(AssistantResponseCode.RATE_LIMITED.getCode(), limited.message());
+        }
+
+        return AgentStreamEvent.error(AssistantResponseCode.BUSY.getCode(), AssistantResponseCode.BUSY.getMessage());
     }
 
     private void run(OutputStream output, List<ChatMessage> history, AgentContext context, List<AgentTool> tools,

@@ -79,6 +79,8 @@ app:
       history-messages: 20
       action-ttl: ${ASSISTANT_ACTION_TTL:10m}
       max-concurrent-turns: ${ASSISTANT_MAX_CONCURRENT_TURNS:4}
+    limits:
+      questions-per-hour: ${ASSISTANT_QUESTIONS_PER_HOUR:60}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30

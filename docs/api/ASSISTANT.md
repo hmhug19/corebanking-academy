@@ -80,7 +80,10 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 
 1. Backend dựng ngữ cảnh người dùng (quyền, hồ sơ) **trước** khi stream bắt đầu; công cụ chỉ đọc danh tính từ đó.
 2. Mỗi người dùng chỉ có một lượt chạy tại một thời điểm, và server chạy tối đa `max-concurrent-turns` lượt; quá thì
-   stream chỉ có một sự kiện `error` `ASSISTANT-BUSY`, không gọi mô hình.
+   stream chỉ có một sự kiện `error` `ASSISTANT-BUSY`, không gọi mô hình. Mỗi người dùng được hỏi tối đa
+   `app.assistant.limits.questions-per-hour` câu (mặc định 60, biến `ASSISTANT_QUESTIONS_PER_HOUR`) trong 1 giờ trượt;
+   câu vượt hạn mức nhận sự kiện `error` `ASSISTANT-RATE_LIMITED` kèm thời gian chờ. Hạn mức và lượt chạy dùng chung
+   với hỏi đáp tài liệu (`/api/v1/knowledge/chat`).
 3. Hội thoại trong request quá 16 000 ký tự thì backend bỏ các tin nhắn cũ nhất (bắt đầu lại từ một tin nhắn `user`) cho
    tới khi vừa. Gọi mô hình với các công cụ mà người dùng được dùng; một bước chỉ chạy 3 lời gọi công cụ đầu tiên. Nếu
    mô hình gọi công cụ: kết quả công cụ đọc được đưa lại cho mô hình và vòng lặp tiếp tục (tối đa `max-steps` lần gọi).
@@ -180,6 +183,7 @@ mất mọi yêu cầu; app báo yêu cầu đã hết hạn khi xác nhận.
 | `ASSISTANT-AI_UNAVAILABLE`   | 200  | Ollama không phản hồi (trước stream: envelope; giữa stream: sự kiện `error`)       |
 | `ASSISTANT-ACTION_NOT_FOUND` | 200  | Yêu cầu không có, hết hạn, đã xác nhận/huỷ, hoặc của người khác (cùng một mã, id không tiết lộ gì) |
 | `ASSISTANT-BUSY`             | —    | Người dùng đang có một lượt chạy, hoặc server đã đủ lượt (sự kiện `error`)        |
+| `ASSISTANT-RATE_LIMITED`     | —    | Người dùng đã hỏi quá `questions-per-hour` câu trong 1 giờ trượt (sự kiện `error`, kèm "thử lại sau X phút") |
 | `ASSISTANT-ACTION_STALE`     | 200  | Dữ liệu đã đổi từ lúc trợ lý đề xuất (khi xác nhận)                                |
 | `CORE-VALIDATION_FAILED`     | 200  | Request `/stream` không hợp lệ                                                     |
 | `CORE-ACCESS_DENIED`         | 403  | Người gọi không có chức năng `AI_ASSISTANT` (mọi API của trợ lý nhanh)              |
