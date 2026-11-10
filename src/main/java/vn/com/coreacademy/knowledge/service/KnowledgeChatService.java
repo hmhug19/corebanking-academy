@@ -20,6 +20,7 @@ import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
+import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.security.SecurityContextUtils;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
@@ -55,6 +56,7 @@ public class KnowledgeChatService {
     private final ObjectMapper json;
     private final TurnLimiter limiter;
     private final Conversations conversations;
+    private final AssistantMetrics metrics;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -133,6 +135,8 @@ public class KnowledgeChatService {
         return output -> {
             TurnLimiter.Admission admission = limiter.admit(userId);
             if (!(admission instanceof TurnLimiter.Admission.Started started)) {
+                metrics.refused(AssistantMetrics.KNOWLEDGE,
+                    admission instanceof TurnLimiter.Admission.RateLimited ? "rate_limited" : "busy");
                 write(output, refusal(admission));
                 return;
             }
@@ -188,7 +192,13 @@ public class KnowledgeChatService {
 
     private void emit(OutputStream output, TurnLog turnLog, ChatStreamEvent event) {
         turnLog.observe(event);
+        if (event instanceof ChatStreamEvent.Error error) {
+            metrics.error(AssistantMetrics.KNOWLEDGE, error.messageCode());
+        }
         if (event instanceof ChatStreamEvent.Done done) {
+            if (!done.found()) {
+                metrics.notFound(AssistantMetrics.KNOWLEDGE);
+            }
             // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
             Long turnId = store(turnLog);
             write(output, turnId == null ? done : done.withTurnId(turnId));
@@ -206,8 +216,11 @@ public class KnowledgeChatService {
             return turnLog.storedId;
         }
         turnLog.attempted = true;
+        TurnRecord record = turnLog.record();
+        // Counted whether or not the store works: the meters describe what the user went through.
+        metrics.turn(AssistantMetrics.KNOWLEDGE, record.status(), record.firstTokenMs(), record.durationMs());
         try {
-            turnLog.storedId = conversations.record(turnLog.conversationId, turnLog.record());
+            turnLog.storedId = conversations.record(turnLog.conversationId, record);
         } catch (RuntimeException exception) {
             // The message could quote the user's text; log the type only.
             log.error("Knowledge turn not stored conversationId={} type={}", turnLog.conversationId,

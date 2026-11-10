@@ -21,6 +21,7 @@ import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.AgentStreamEvent;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
+import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.assistant.tool.AgentTool;
 import vn.com.coreacademy.assistant.tool.FinishedAnswer;
 import vn.com.coreacademy.assistant.tool.ToolOutcome;
@@ -36,6 +37,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.ai.ToolCall;
 import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 /**
  * Runs one user turn: asks the local model with the tools this user may use, runs the tools it calls and streams the
@@ -68,6 +70,7 @@ public class AgentService {
     private final TurnLimiter limiter;
     private final Conversations conversations;
     private final ObjectMapper json;
+    private final AssistantMetrics metrics;
 
     /**
      * Validates the request, then streams the turn. The client sends only the new question and, for a follow-up, the
@@ -99,6 +102,8 @@ public class AgentService {
         return output -> {
             TurnLimiter.Admission admission = limiter.admit(context.userId());
             if (!(admission instanceof TurnLimiter.Admission.Started started)) {
+                metrics.refused(AssistantMetrics.AGENT,
+                    admission instanceof TurnLimiter.Admission.RateLimited ? "rate_limited" : "busy");
                 write(output, refusal(admission));
                 return;
             }
@@ -140,6 +145,7 @@ public class AgentService {
 
         try {
             for (int step = 0; step < properties.maxSteps(); step++) {
+                turnLog.steps++;
                 ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, OllamaClient.Options.AGENT,
                     delta -> emit(output, turnLog, AgentStreamEvent.delta(delta)));
                 if (answer.toolCalls().isEmpty()) {
@@ -152,6 +158,7 @@ public class AgentService {
                 for (ToolCall call : calls) {
                     emit(output, turnLog, AgentStreamEvent.tool(call.name()));
                     AgentTool tool = find(tools, call.name());
+                    metrics.toolCall(tool == null ? AssistantMetrics.UNKNOWN_TOOL : tool.name());
                     ToolOutcome outcome = tool != null && tool.actsForUser() && readShared
                         ? new ToolOutcome.Result(ACTION_AFTER_DOCUMENTS)
                         : runTool(call, tool, context, turn);
@@ -243,7 +250,13 @@ public class AgentService {
 
     private void emit(OutputStream output, TurnLog turnLog, AgentStreamEvent event) {
         turnLog.observe(event);
+        if (event instanceof AgentStreamEvent.Error error) {
+            metrics.error(AssistantMetrics.AGENT, error.messageCode());
+        }
         if (event instanceof AgentStreamEvent.Done done) {
+            if (NotFoundAnswer.isNotFound(done.answer())) {
+                metrics.notFound(AssistantMetrics.AGENT);
+            }
             // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
             Long turnId = store(turnLog);
             write(output, turnId == null ? done : done.withTurnId(turnId));
@@ -261,8 +274,14 @@ public class AgentService {
             return turnLog.storedId;
         }
         turnLog.attempted = true;
+        TurnRecord record = turnLog.record();
+        // Counted whether or not the store works: the meters describe what the user went through.
+        metrics.turn(AssistantMetrics.AGENT, record.status(), record.firstTokenMs(), record.durationMs());
+        if (turnLog.steps > 0) {
+            metrics.steps(AssistantMetrics.AGENT, turnLog.steps);
+        }
         try {
-            turnLog.storedId = conversations.record(turnLog.conversationId, turnLog.record());
+            turnLog.storedId = conversations.record(turnLog.conversationId, record);
         } catch (RuntimeException exception) {
             // The message could quote the user's text; log the type only.
             log.error("Assistant turn not stored conversationId={} type={}", turnLog.conversationId,
@@ -277,6 +296,7 @@ public class AgentService {
         private final String question;
         private final long conversationId;
         private boolean attempted;
+        private int steps;
         private Long storedId;
         private final long started = System.nanoTime();
         private final List<String> tools = new ArrayList<>();

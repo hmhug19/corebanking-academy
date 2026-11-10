@@ -11,6 +11,9 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -29,6 +32,7 @@ import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.PendingActionView.Change;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
@@ -75,6 +79,7 @@ class AgentServiceTest {
     private final MutableClock clock = new MutableClock();
     private final TurnLimiter limiter = new TurnLimiter(properties, new AssistantLimits(3), clock);
     private final InMemoryConversations conversations = new InMemoryConversations();
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
     @BeforeEach
     void setUp() {
@@ -92,7 +97,8 @@ class AgentServiceTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<AgentTool> provider = mock(ObjectProvider.class);
         when(provider.orderedStream()).thenAnswer(invocation -> tools.stream());
-        return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, conversations, json);
+        return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, conversations, json,
+            new AssistantMetrics(meters));
     }
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
@@ -198,6 +204,59 @@ class AgentServiceTest {
         assertThat(events.get(2).path("answer").asText()).isEqualTo("Xin chào");
         assertThat(events.get(2).path("citations").size()).isZero();
         verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any());
+    }
+
+    @Test
+    void aTurnCountsItsDurationFirstTokenStepsAndToolCalls() throws IOException {
+        tool("search_documents", true, (arguments, turn) -> new ToolOutcome.Result("[1] CIF là mã khách hàng."));
+        modelAnswers(List.of(), List.of(call("search_documents"), call("bịa_ra")), new ChatTurn("CIF là mã [1].",
+            List.of()));
+
+        events(ask("CIF là gì?"));
+
+        assertThat(meters.get("assistant.turn.duration").tag("surface", "agent").tag("status", "done").timer().count())
+            .isEqualTo(1);
+        assertThat(meters.get("assistant.turn.first_token").tag("surface", "agent").timer().count()).isEqualTo(1);
+        assertThat(meters.get("assistant.turn.steps").tag("surface", "agent").summary().totalAmount()).isEqualTo(2);
+        assertThat(meters.get("assistant.tool.calls").tag("tool", "search_documents").counter().count()).isEqualTo(1);
+        // A tool name the server does not know is one tag, however many the model invents.
+        assertThat(meters.get("assistant.tool.calls").tag("tool", "unknown").counter().count()).isEqualTo(1);
+    }
+
+    @Test
+    void anAnswerThatFoundNothingAnAiOutageAndARefusalAreCounted() throws IOException {
+        modelAnswers(List.of("Không tìm thấy thông tin này trong tài liệu."), List.of());
+        events(ask("Việc X?"));
+        assertThat(meters.get("assistant.answers.not_found").tag("surface", "agent").counter().count()).isEqualTo(1);
+
+        doAnswer(invocation -> {
+            throw new OllamaUnavailableException("down", null);
+        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+        clock.advance(Duration.ofMinutes(1));
+        events(ask("Xin chào"));
+        assertThat(meters.get("assistant.errors").tag("code", "ASSISTANT-AI_UNAVAILABLE").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.get("assistant.turn.duration").tag("status", "error").timer().count()).isEqualTo(1);
+
+        limiter.admit("000004");
+        events(ask("Xin chào"));
+        assertThat(meters.get("assistant.refusals").tag("reason", "busy").counter().count()).isEqualTo(1);
+    }
+
+    @Test
+    void noMeterTagCarriesAUserIdAQuestionOrAnAnswer() throws IOException {
+        tool("search_documents", true, (arguments, turn) -> new ToolOutcome.Result("[1] Nội dung riêng tư."));
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("Câu trả lời riêng tư [1].", List.of()));
+
+        events(ask("Câu hỏi riêng tư của 000004"));
+
+        List<String> values = meters.getMeters().stream().flatMap(meter -> meter.getId().getTags().stream())
+            .map(Tag::getValue).toList();
+        assertThat(meters.getMeters()).isNotEmpty();
+        assertThat(values).allSatisfy(value -> assertThat(value).doesNotContain("000004").doesNotContain("riêng tư")
+            .doesNotContain("hocvien"));
+        assertThat(meters.getMeters().stream().map(Meter::getId).map(id -> id.getName())).allMatch(
+            name -> name.startsWith("assistant."));
     }
 
     @Test

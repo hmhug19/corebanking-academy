@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -28,6 +29,7 @@ import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
@@ -73,6 +75,7 @@ class KnowledgeChatServiceTest {
     private final DocumentChunkRepository chunks = mock(DocumentChunkRepository.class);
     private final ObjectMapper json = new ObjectMapper();
     private final MutableClock clock = new MutableClock();
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private TurnLimiter limiter;
     private KnowledgeChatService service;
 
@@ -88,7 +91,7 @@ class KnowledgeChatServiceTest {
         limiter = new TurnLimiter(new AssistantProperties(4, 20, Duration.ofMinutes(10), 4), new AssistantLimits(2),
             clock);
         service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter,
-            conversations);
+            conversations, new AssistantMetrics(meters));
         when(ollama.embed(anyList())).thenReturn(List.of(new float[1024]));
         signedInAs(USER);
     }
@@ -408,6 +411,21 @@ class KnowledgeChatServiceTest {
         assertThat(events.get(2).path("answer").asText()).isEqualTo(NotFoundAnswer.TEXT);
         assertThat(events.get(2).path("citations")).isEmpty();
         verify(ollama, never()).chatStream(anyList(), any(), any());
+    }
+
+    @Test
+    void aStreamedTurnAndANotFoundAnswerAreCountedWithoutAnyUserText() throws IOException {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(WEAK));
+
+        run(service.stream("Hỏi chuyện riêng tư"));
+
+        assertThat(meters.get("assistant.turn.duration").tag("surface", "knowledge").tag("status", "done").timer()
+            .count()).isEqualTo(1);
+        assertThat(meters.get("assistant.answers.not_found").tag("surface", "knowledge").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.getMeters().stream().flatMap(meter -> meter.getId().getTags().stream())
+            .map(io.micrometer.core.instrument.Tag::getValue)).allSatisfy(value -> assertThat(value)
+            .doesNotContain("riêng tư").doesNotContain(USER));
     }
 
     @Test

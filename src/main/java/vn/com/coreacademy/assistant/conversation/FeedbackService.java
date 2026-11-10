@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.FeedbackView;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
+import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.common.exception.BusinessException;
 
 /** Stores the owner's thumbs on one turn. A turn that is not the caller's answers like one that does not exist. */
@@ -21,6 +22,7 @@ public class FeedbackService {
     private final TurnRepository turns;
     private final ConversationRepository conversations;
     private final FeedbackRepository feedback;
+    private final AssistantMetrics metrics;
 
     @Transactional
     public FeedbackView put(String ownerId, long turnId, boolean helpful, String reasonCode, String note) {
@@ -44,6 +46,7 @@ public class FeedbackService {
         row.setReasonCode(reason);
         row.setNote(text);
         feedback.save(row);
+        metrics.feedback(AssistantMetrics.surfaceOf(turn.getSurface()), helpful, reason);
         // Ids and the thumb only: the note is the user's text and never reaches a log.
         log.info("Assistant feedback turnId={} helpful={} reason={}", turnId, helpful, reason);
 

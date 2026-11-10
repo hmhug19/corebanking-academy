@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assistant;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,9 @@ class FeedbackControllerTest extends KnowledgeIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private MeterRegistry meters;
 
     private long conversation;
     private long turn;
@@ -76,6 +80,24 @@ class FeedbackControllerTest extends KnowledgeIntegrationTest {
         mvc.perform(get("/api/v1/assistant/conversations/" + conversation).with(as(ME)))
             .andExpect(jsonPath("$.data.turns[0].feedback.helpful").value(true))
             .andExpect(jsonPath("$.data.turns[0].feedback.reasonCode").doesNotExist());
+    }
+
+    @Test
+    void feedbackIsCountedByThumbsAndReasonWithoutTheNote() throws Exception {
+        double before = count(false, "outdated");
+
+        rate(ME, "{\"helpful\":false,\"reasonCode\":\"outdated\",\"note\":\"Chuyện riêng\"}");
+
+        assertThat(count(false, "outdated")).isEqualTo(before + 1);
+        assertThat(meters.getMeters().stream().flatMap(meter -> meter.getId().getTags().stream())
+            .map(io.micrometer.core.instrument.Tag::getValue)).noneMatch(value -> value.contains("riêng")
+            || value.contains(ME));
+    }
+
+    private double count(boolean helpful, String reason) {
+        var counter = meters.find("assistant.feedback").tag("helpful", Boolean.toString(helpful))
+            .tag("reason", reason).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test
