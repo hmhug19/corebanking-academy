@@ -167,10 +167,14 @@ Trên thẻ học viên, `assigned`, nghĩa vụ bắt buộc và `dueAt` chỉ 
 nếu chỉ có lượt giao tương lai thì không lấy hạn tương lai làm hạn hiện hành. Với `/me/learning/courses`, lọc
 `requirement=mandatory` yêu cầu có nghĩa vụ bắt buộc hiện hành; lọc loại khóa trong catalog vẫn theo contract tìm kiếm catalog.
 
-GET `/me/learning/facets` trả `{ fields[], programs[], modules[] }`, mỗi mục `{ id, code, name }`; chương trình và phân
-hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong `/catalog` dùng (cùng quy tắc nhìn thấy, gồm
+GET `/me/learning/facets` trả `{ fields[], programs[], modules[], fieldsWithUnclassifiedCourses[] }`, mỗi mục danh mục
+gồm `{ id, code, name }`; chương trình và phân hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong
+`/catalog` dùng (cùng quy tắc nhìn thấy, gồm
 khóa đã đăng ký, khóa của đơn vị mình và khóa được chia sẻ), sắp theo `sortNo` rồi tên. Học viên không cần quyền đọc
 `/training-catalog`.
+
+`fieldsWithUnclassifiedCourses` chứa ID lĩnh vực có khóa chưa có phân hệ hợp lệ, hoặc `null` nếu khóa không có lĩnh vực.
+GET `/me/learning/catalog?withoutModule=true` lọc nhóm này cùng các bộ lọc khác. Không gửi cùng `moduleId`.
 
 GET `/me/learning/courses/{courseId}` trả `{ card: CourseCard, content: CourseDetail }`. `card` là kết quả search CATALOG
 theo `courseId`, nên quy tắc nhìn thấy, bản revision và cờ failed giống `/catalog`. `content` là bản revision của `card`:

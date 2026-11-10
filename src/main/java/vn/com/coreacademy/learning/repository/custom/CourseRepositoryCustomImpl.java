@@ -142,6 +142,9 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             sql.and("r.module_id = :module");
             sql.bind("module", filter.moduleId());
         }
+        if (filter.withoutModule()) {
+            sql.and("m.module_id is null");
+        }
         if (filter.level() != null) {
             sql.and("r.level = :level");
             sql.bind("level", filter.level());
@@ -233,7 +236,13 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                 select tm.module_id, tm.field_id, tm.code, tm.name from learning_hub.business_modules tm
                 where tm.module_id in (%s)
                 order by tm.sort_no, tm.name
-                """.formatted(visibleValues("r.module_id")), FieldFacet.class, filter));
+                """.formatted(visibleValues("r.module_id")), FieldFacet.class, filter),
+            facetRows("""
+                select distinct p.field_id
+                %s
+                where (%s) and m.module_id is null
+                order by p.field_id
+                """.formatted(COURSE_BASE, LEARNER_VISIBILITY), Long.class, filter));
     }
 
     private static String visibleValues(String column) {

@@ -88,6 +88,7 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 38 | GET `/api/v1/questions/export?courseId&q&competencyId&questionType&difficulty&status` | Xuất ngân hàng câu hỏi ra .xlsx cùng định dạng tệp nhập |
 | 39 | POST `/api/v1/quizzes/{id}/regrade` | Chấm lại sau khi sửa đáp án (`questionId`, `reason`, `dryRun` mặc định true) |
 | 40 | GET `/api/v1/reports/assessment/overview` | Tổng quan: lượt chấm, học viên, đạt, tỷ lệ đạt, điểm TB; theo đề và theo đơn vị |
+| 40a | GET `/api/v1/reports/assessment/quiz-options?courseId&orgId&teamId` | Danh sách `{ id, name }` để chọn bài kiểm tra theo phạm vi báo cáo. Gồm bài đã mở và có học viên trong phạm vi, kể cả chưa có lượt thi. Có thể gửi `quizId` để tra một lựa chọn từ liên kết đã lưu. |
 | 41 | GET `/api/v1/reports/assessment/results` | Từng lượt thi kèm tên học viên, đơn vị/nhóm lúc thi; sort `id/startedAt/submittedAt/scorePercent` |
 | 42 | GET `/api/v1/reports/assessment/learners?quizId` | Học viên được giao theo đề, gồm cả người chưa thi; sort `userId/finalScore/lastSubmittedAt` |
 | 43 | GET `/api/v1/reports/assessment/competency?groupBy=user\|org` | Năng lực theo học viên hoặc đơn vị lúc thi |
