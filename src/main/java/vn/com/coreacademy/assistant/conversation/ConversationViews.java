@@ -40,6 +40,7 @@ public final class ConversationViews {
         @Schema(description = "Mã yêu cầu thay đổi dữ liệu do lượt đề xuất; null nếu không có.") String actionId,
         @Schema(description = "Thẻ xác nhận của lượt kèm kết cục thật; null nếu lượt không đề xuất thay đổi.")
         ActionState action,
+        @Schema(description = "Đánh giá của người dùng cho lượt; null nếu chưa đánh giá.") FeedbackView feedback,
         @Schema(description = "done, error hoặc stopped.") String status,
         Instant createTime) {
     }
@@ -55,6 +56,18 @@ public final class ConversationViews {
         Instant expiresAt,
         @Schema(description = "Kết quả hiện cho người dùng sau khi xác nhận, hoặc lý do bị từ chối; null khi chưa có.")
         String message) {
+    }
+
+    @Schema(description = "Đánh giá một câu trả lời.")
+    public record FeedbackRequest(
+        @Schema(description = "true = hữu ích (👍), false = chưa tốt (👎).") boolean helpful,
+        @Schema(description = "Chỉ khi helpful=false: irrelevant, incorrect, outdated, missing_source hoặc other.")
+        String reasonCode,
+        @Schema(description = "Ghi chú tuỳ chọn, tối đa 2000 ký tự.") String note) {
+    }
+
+    @Schema(description = "Đánh giá đã lưu của một lượt.")
+    public record FeedbackView(boolean helpful, String reasonCode, String note) {
     }
 
     @Schema(description = "Đổi tên hội thoại.")

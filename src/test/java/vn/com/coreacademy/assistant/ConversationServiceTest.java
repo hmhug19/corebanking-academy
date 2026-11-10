@@ -21,6 +21,7 @@ import vn.com.coreacademy.assistant.conversation.ConversationRepository;
 import vn.com.coreacademy.assistant.conversation.ConversationRetention;
 import vn.com.coreacademy.assistant.conversation.ConversationRetentionJob;
 import vn.com.coreacademy.assistant.conversation.ConversationService;
+import vn.com.coreacademy.assistant.conversation.FeedbackRepository;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationDetail;
 import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
@@ -55,11 +56,17 @@ class ConversationServiceTest {
 
     static ConversationService newService(ConversationRepository conversations, TurnRepository turns,
                                           PendingActionRepository actions, MutableClock clock) {
+        return newService(conversations, turns, actions, mock(FeedbackRepository.class), clock);
+    }
+
+    static ConversationService newService(ConversationRepository conversations, TurnRepository turns,
+                                          PendingActionRepository actions, FeedbackRepository feedback,
+                                          MutableClock clock) {
         try {
             var constructor = ConversationService.class.getDeclaredConstructor(ConversationRepository.class,
-                TurnRepository.class, PendingActionRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class);
+                TurnRepository.class, PendingActionRepository.class, FeedbackRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class);
             constructor.setAccessible(true);
-            return constructor.newInstance(conversations, turns, actions, new ObjectMapper().findAndRegisterModules(), clock,
+            return constructor.newInstance(conversations, turns, actions, feedback, new ObjectMapper().findAndRegisterModules(), clock,
                 new AssistantProperties(4, 20, Duration.ofMinutes(10), 4));
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException(exception);

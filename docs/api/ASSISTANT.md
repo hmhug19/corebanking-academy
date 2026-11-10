@@ -186,6 +186,7 @@ là `PENDING` đã quá `expires_at`.
 | `ASSISTANT-BUSY`             | —    | Người dùng đang có một lượt chạy, hoặc server đã đủ lượt (sự kiện `error`)        |
 | `ASSISTANT-RATE_LIMITED`     | —    | Người dùng đã hỏi quá `questions-per-hour` câu trong 1 giờ trượt (sự kiện `error`, kèm "thử lại sau X phút") |
 | `ASSISTANT-CONVERSATION_NOT_FOUND` | 200 | Hội thoại không tồn tại hoặc của người khác (cùng một mã)                         |
+| `ASSISTANT-TURN_NOT_FOUND`   | 200  | Lượt (khi đánh giá) không tồn tại hoặc của người khác (cùng một mã)                |
 | `ASSISTANT-ACTION_STALE`     | 200  | Dữ liệu đã đổi từ lúc trợ lý đề xuất (khi xác nhận)                                |
 | `CORE-VALIDATION_FAILED`     | 200  | Request `/stream` không hợp lệ                                                     |
 | `CORE-ACCESS_DENIED`         | 403  | Người gọi không có chức năng `AI_ASSISTANT` (mọi API của trợ lý nhanh)              |
@@ -210,6 +211,16 @@ Tên mặc định là câu hỏi đầu tiên cắt còn 80 ký tự (không g�
 (`done`|`error`|`stopped`) và `createTime`. `action` (null nếu lượt không đề xuất thay đổi) là thẻ xác nhận với trạng
 thái hiện tại: `id`, `tool`, `title`, `changes`, `status` (`pending`|`confirmed`|`cancelled`|`failed`|`expired`),
 `expiresAt` và `message` (kết quả hoặc lý do bị từ chối). Schema: [2026-11-10-assistant-conversations.sql](../sql/upgrade/2026-11-10-assistant-conversations.sql).
+
+## Đánh giá câu trả lời
+
+`PUT /api/v1/assistant/turns/{turnId}/feedback` (chức năng `AI_ASSISTANT`, chỉ chủ lượt): ghi hoặc sửa 👍/👎 của một
+lượt; mỗi lượt một đánh giá. Body: `helpful` (bắt buộc), `reasonCode` (chỉ khi `helpful=false`: `irrelevant`,
+`incorrect`, `outdated`, `missing_source`, `other`), `note` (tối đa 2000 ký tự). Trả `{ helpful, reasonCode, note }`.
+`reasonCode` sai hoặc đi với 👍, `note` quá dài trả `CORE-VALIDATION_FAILED`. Lượt của người khác hoặc không có trả
+`ASSISTANT-TURN_NOT_FOUND`. `TurnView.feedback` (null nếu chưa đánh giá) cho lần mở lại hội thoại thấy lựa chọn đã lưu.
+Xoá hội thoại, xoá tất cả và dọn quá hạn đều xoá đánh giá của các lượt đó. Log chỉ ghi id lượt, 👍/👎 và mã lý do, không
+bao giờ ghi `note`. Schema: [2026-11-10-assistant-feedback.sql](../sql/upgrade/2026-11-10-assistant-feedback.sql).
 
 ## Giới hạn đã biết
 

@@ -21,6 +21,8 @@ public enum AssistantResponseCode implements ApiResponseCode {
     // One code for a missing or foreign conversation, so an id reveals nothing about other users.
     CONVERSATION_NOT_FOUND("ASSISTANT-CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại này.",
         "Không tìm thấy hội thoại"),
+    // One code for a missing or foreign turn, so an id reveals nothing about other users.
+    TURN_NOT_FOUND("ASSISTANT-TURN_NOT_FOUND", "Không tìm thấy câu trả lời này.", "Không tìm thấy câu trả lời"),
     ACTION_STALE("ASSISTANT-ACTION_STALE", "Dữ liệu đã thay đổi từ lúc trợ lý đề xuất. Vui lòng yêu cầu lại.",
         "Dữ liệu đã thay đổi");
 

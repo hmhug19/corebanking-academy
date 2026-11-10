@@ -26,6 +26,7 @@ import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ActionState;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationDetail;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationSummary;
+import vn.com.coreacademy.assistant.conversation.ConversationViews.FeedbackView;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.TurnView;
 import vn.com.coreacademy.assistant.dto.PendingActionView;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
@@ -52,21 +53,24 @@ public class ConversationService implements Conversations {
     private final ConversationRepository conversations;
     private final TurnRepository turns;
     private final PendingActionRepository actions;
+    private final FeedbackRepository feedback;
     private final ObjectMapper json;
     private final Clock clock;
     private final int historyTurns;
 
     @Autowired
     public ConversationService(ConversationRepository conversations, TurnRepository turns,
-                               PendingActionRepository actions, ObjectMapper json, AssistantProperties properties) {
-        this(conversations, turns, actions, json, Clock.systemUTC(), properties);
+                               PendingActionRepository actions, FeedbackRepository feedback, ObjectMapper json,
+                               AssistantProperties properties) {
+        this(conversations, turns, actions, feedback, json, Clock.systemUTC(), properties);
     }
 
     ConversationService(ConversationRepository conversations, TurnRepository turns, PendingActionRepository actions,
-                        ObjectMapper json, Clock clock, AssistantProperties properties) {
+                        FeedbackRepository feedback, ObjectMapper json, Clock clock, AssistantProperties properties) {
         this.conversations = conversations;
         this.turns = turns;
         this.actions = actions;
+        this.feedback = feedback;
         this.json = json;
         this.clock = clock;
         this.historyTurns = Math.min(HISTORY_TURNS_READ, Math.max(1, properties.historyMessages() / 2));
@@ -165,9 +169,13 @@ public class ConversationService implements Conversations {
         Map<String, AssistantPendingAction> proposed = new HashMap<>();
         actions.findAllById(stored.stream().map(AssistantTurn::getActionId).filter(Objects::nonNull).distinct()
             .toList()).forEach(action -> proposed.put(action.getId(), action));
+        Map<Long, FeedbackView> rated = new HashMap<>();
+        feedback.findByTurnIdIn(stored.stream().map(AssistantTurn::getId).toList()).forEach(row -> rated.put(
+            row.getTurnId(), new FeedbackView(row.isHelpful(), row.getReasonCode(), row.getNote())));
         Instant now = clock.instant();
         List<TurnView> views = stored.stream()
-            .map(turn -> view(turn, turn.getActionId() == null ? null : proposed.get(turn.getActionId()), now))
+            .map(turn -> view(turn, turn.getActionId() == null ? null : proposed.get(turn.getActionId()),
+                rated.get(turn.getId()), now))
             .toList();
 
         return new ConversationDetail(conversation.getId(), conversation.getTitle(),
@@ -193,6 +201,7 @@ public class ConversationService implements Conversations {
         AssistantConversation conversation = conversations.findByIdAndOwnerId(conversationId, ownerId)
             .orElseThrow(ConversationService::notFound);
         actions.deleteOfConversation(conversation.getId());
+        feedback.deleteOfConversation(conversation.getId());
         turns.deleteByConversation(conversation.getId());
         conversations.delete(conversation);
     }
@@ -201,6 +210,7 @@ public class ConversationService implements Conversations {
     @Transactional
     public int deleteAll(String ownerId) {
         actions.deleteAllByOwner(ownerId);
+        feedback.deleteAllByOwner(ownerId);
         turns.deleteAllByOwner(ownerId);
         return conversations.deleteAllByOwner(ownerId);
     }
@@ -211,6 +221,7 @@ public class ConversationService implements Conversations {
         actions.deleteOfConversationsInactiveBefore(cutoff);
         // Proposals no turn ever showed (the stream ended first) go on the same schedule.
         actions.deleteCreatedBefore(cutoff);
+        feedback.deleteOfConversationsInactiveBefore(cutoff);
         turns.deleteInactiveBefore(cutoff);
         return conversations.deleteInactiveBefore(cutoff);
     }
@@ -233,13 +244,13 @@ public class ConversationService implements Conversations {
             conversation.getLastActivityTime(), conversation.getCreateTime());
     }
 
-    private TurnView view(AssistantTurn turn, AssistantPendingAction action, Instant now) {
+    private TurnView view(AssistantTurn turn, AssistantPendingAction action, FeedbackView rating, Instant now) {
         return new TurnView(turn.getId(), turn.getSurface(), turn.getQuestion(), turn.getAnswer(),
             read(turn.getCitations(), CITATIONS, List.of()), read(turn.getToolNames(), NAMES, List.of()),
             turn.getNavigation() == null ? null
                 : read(turn.getNavigation(), new TypeReference<TurnRecord.Navigation>() {
                 }, null),
-            turn.getActionId(), action == null ? null : state(action, now),
+            turn.getActionId(), action == null ? null : state(action, now), rating,
             turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime());
     }
 
