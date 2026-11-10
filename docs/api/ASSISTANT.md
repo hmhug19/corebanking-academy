@@ -292,3 +292,29 @@ bao giờ ghi `note`. Schema: [2026-11-10-assistant-feedback.sql](../sql/upgrade
   `generation` dành cho tạo khóa học (chưa dùng).
 - Embedding: không còn so tên `bge-m3` cố định. Mô hình nhúng lấy từ `app.knowledge.ollama.embed-model`; `OllamaClient.embed`
   từ chối vector khác 1024 chiều, nên đổi mô hình khác chiều là lỗi rõ ràng chứ không ghi dữ liệu sai.
+
+## Tạo khóa học bằng AI: job (`/api/v1/assistant/course-jobs`)
+
+Chuẩn bị cho đường ống tạo khóa học (outline → bài → câu hỏi → bản nháp). Mọi endpoint cần chức năng `AI_ASSISTANT`;
+riêng việc dùng còn cần vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN): học viên và người xem báo cáo nhận 403.
+
+| Method | Path | Ý nghĩa |
+|---|---|---|
+| POST | `/api/v1/assistant/course-jobs` | multipart `file` (.pdf/.docx/.md ≤ `app.knowledge.max-file-size`) + `inputs` (JSON). Trả job. |
+| GET | `/api/v1/assistant/course-jobs` | Các job của tôi, mới nhất trước (tối đa 50). |
+| GET | `/api/v1/assistant/course-jobs/{jobId}` | Trạng thái, bước, tiến độ, các bước đã có. Job của người khác: `CORE-RESOURCE_NOT_FOUND`. |
+| POST | `/api/v1/assistant/course-jobs/{jobId}/cancel` | Hủy job chưa kết thúc (`CORE-VALIDATION_FAILED`/`JOB_FINISHED` nếu đã kết thúc). |
+| DELETE | `/api/v1/assistant/course-jobs/{jobId}` | Xóa job, bước và tài liệu nguồn; job đang chạy phải hủy trước (`JOB_RUNNING`). |
+
+`inputs`: `targetLearners` (1–500 ký tự), `level` (`BEGINNER|INTERMEDIATE|ADVANCED`), `chapters` (1–20) hoặc
+`durationMinutes` (15–1200) — cần ít nhất một, `programmeId`, `competencyId` (người dùng chọn, không do model), `ownerOrgId`.
+
+- Đơn vị sở hữu do server quyết định: giảng viên luôn là đơn vị của mình (gửi đơn vị khác là 403); ADMIN/SUPER_ADMIN bắt buộc gửi
+  `ownerOrgId` và nó được kiểm theo phạm vi quản lý của họ (ngoài phạm vi là 403).
+- Tệp trở thành tài liệu `personal` của người gọi, liên kết với job, và đi qua cùng đường ingest như mọi tài liệu.
+- Mỗi người tối đa `app.assistant.generation.jobs-per-day` (mặc định 3) job trong 24 giờ trượt, đếm trong database nên không mất khi
+  khởi động lại; vượt giới hạn: `ASSISTANT-JOB_RATE_LIMITED` kèm thời gian chờ trong `errors[0].message`, không lưu tệp nào.
+- Bảng `course_generation_jobs` / `course_generation_steps` (`docs/sql/upgrade/2026-11-12-course-generation-jobs.sql`). Worker nhận
+  từng bước bằng `FOR UPDATE SKIP LOCKED` sau một khóa advisory của giao dịch, nên chỉ một job chạy trên toàn hệ thống (job còn lại ở
+  `queued`; job `waiting_approval` không chiếm chỗ). Khởi động lại đưa bước đang chạy về `pending`, các bước đã xong giữ nguyên đầu ra.
+- Trạng thái job: `queued`, `running`, `waiting_approval`, `completed`, `failed`, `cancelled`.

@@ -57,6 +57,9 @@ public abstract class KnowledgeIntegrationTest {
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-assistant-conversation-lesson-context.sql"),
                     "/docker-entrypoint-initdb.d/04za-assistant-conversation-lesson-context.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-12-course-generation-jobs.sql"),
+                    "/docker-entrypoint-initdb.d/04zb-course-generation-jobs.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_community.sql"),
                     "/docker-entrypoint-initdb.d/05-community.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_assessment.sql"),
@@ -97,6 +100,7 @@ public abstract class KnowledgeIntegrationTest {
         // Tests call the worker themselves; the scheduler must never fire on its own.
         registry.add("app.knowledge.worker.poll-interval", () -> "1h");
         registry.add("app.learning.course-index.poll-interval", () -> "1h");
+        registry.add("app.assistant.generation.poll-interval", () -> "1h");
         registry.add("app.knowledge.storage-dir", () -> System.getProperty("java.io.tmpdir") + "/knowledge-test");
     }
 }

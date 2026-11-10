@@ -55,6 +55,7 @@ FILES=(
   upgrade/2026-11-11-knowledge-document-scope.sql
   upgrade/2026-11-11-course-content-index.sql
   upgrade/2026-11-11-assistant-conversation-lesson-context.sql
+  upgrade/2026-11-12-course-generation-jobs.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

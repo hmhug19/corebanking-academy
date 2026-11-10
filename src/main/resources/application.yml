@@ -86,6 +86,9 @@ app:
       questions-per-hour: ${ASSISTANT_QUESTIONS_PER_HOUR:60}
     history:
       retention: ${ASSISTANT_HISTORY_RETENTION:90d}
+    generation:
+      jobs-per-day: ${ASSISTANT_GENERATION_JOBS_PER_DAY:3}
+      poll-interval: ${ASSISTANT_GENERATION_POLL:3s}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30

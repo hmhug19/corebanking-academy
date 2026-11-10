@@ -1,0 +1,49 @@
+package vn.com.coreacademy.assistant.course;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+
+public final class CourseJobViews {
+    private CourseJobViews() {
+    }
+
+    @Schema(description = "Thông tin form khởi tạo. Đơn vị sở hữu do server quyết định.")
+    public record Inputs(
+        @Schema(description = "Đối tượng học viên, 1–500 ký tự.") String targetLearners,
+        @Schema(description = "BEGINNER, INTERMEDIATE hoặc ADVANCED.") String level,
+        @Schema(description = "Số chương mong muốn (1–20); cần chapters hoặc durationMinutes.") Integer chapters,
+        @Schema(description = "Thời lượng mong muốn, phút (15–1200).") Integer durationMinutes,
+        @Schema(description = "Chương trình đào tạo của khóa; do người dùng chọn, không do model.") Long programmeId,
+        @Schema(description = "Năng lực gán cho câu hỏi; do người dùng chọn, không do model.") Long competencyId,
+        @Schema(description = "Chỉ ADMIN/SUPER_ADMIN: đơn vị sở hữu khóa, trong phạm vi quản lý của họ. "
+            + "Giảng viên không được gửi giá trị khác đơn vị của mình.") Long ownerOrgId) {
+    }
+
+    public record SourceView(Long documentId, String fileName, String status) {
+    }
+
+    public record StepView(String kind, String itemKey, String status, String errorMessage) {
+    }
+
+    @Schema(description = "Một job tạo khóa học: trạng thái, bước hiện tại, tiến độ và các đầu ra đã có.")
+    public record JobView(
+        long jobId,
+        @Schema(description = "queued | running | waiting_approval | completed | failed | cancelled.") String status,
+        String step,
+        @Schema(description = "0–100.") int progress,
+        @Schema(description = "Lý do thất bại, đọc được.") String error,
+        Inputs inputs,
+        long ownerOrgId,
+        SourceView source,
+        @Schema(description = "Khóa học nháp đã tạo; null khi chưa tạo.") Long createdDraftId,
+        @Schema(description = "Các bước đã tạo ra cho job, theo thứ tự.") List<StepView> steps,
+        OffsetDateTime createTime,
+        OffsetDateTime updateTime) {
+    }
+
+    public record JobSummary(long jobId, String status, String step, int progress, String error, String sourceFileName,
+                             Long createdDraftId, OffsetDateTime createTime) {
+    }
+}

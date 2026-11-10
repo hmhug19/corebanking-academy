@@ -26,6 +26,9 @@ public enum AssistantResponseCode implements ApiResponseCode {
     // One code for a missing, unpublished or unreadable lesson, so an id reveals nothing about other courses.
     LESSON_NOT_FOUND("ASSISTANT-LESSON_NOT_FOUND", "Không tìm thấy bài học này hoặc bạn không có quyền xem.",
         "Không tìm thấy bài học"),
+    // A user over the day's course generation jobs; the message carries the wait time.
+    JOB_RATE_LIMITED("ASSISTANT-JOB_RATE_LIMITED", "Bạn đã tạo đủ số khóa học bằng AI cho phép trong ngày.",
+        "Đã đạt giới hạn tạo khóa học"),
     ACTION_STALE("ASSISTANT-ACTION_STALE", "Dữ liệu đã thay đổi từ lúc trợ lý đề xuất. Vui lòng yêu cầu lại.",
         "Dữ liệu đã thay đổi");
 
