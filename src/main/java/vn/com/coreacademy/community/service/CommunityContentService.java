@@ -338,7 +338,8 @@ public class CommunityContentService {
                 throw new BusinessException(CommunityResponseCode.NOT_PUBLISHABLE);
             }
         }
-        if (revision.getTitle().trim().length() < 5 || revision.getBodyMarkdown().trim().length() < 20
+        int minimumBodyLength = CommunityCodes.ANSWER.equals(content.getKind()) ? 1 : 20;
+        if (revision.getTitle().trim().length() < 5 || revision.getBodyMarkdown().trim().length() < minimumBodyLength
             || CommunityCodes.QUESTION.equals(content.getKind())
                 && relations.contentTags(content.getContentId()).isEmpty()) {
             throw new BusinessException(CommunityResponseCode.NOT_PUBLISHABLE);
