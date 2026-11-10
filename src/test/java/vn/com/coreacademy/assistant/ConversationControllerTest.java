@@ -65,6 +65,7 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
     @BeforeEach
     @AfterEach
     void clean() {
+        jdbc.update("DELETE FROM learning_hub.assistant_pending_actions");
         jdbc.update("DELETE FROM learning_hub.assistant_turns");
         jdbc.update("DELETE FROM learning_hub.assistant_conversations");
     }
@@ -117,6 +118,27 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
             .andExpect(jsonPath("$.messageCode").value("ASSISTANT-CONVERSATION_NOT_FOUND"));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.assistant_conversations", Integer.class))
             .isEqualTo(1);
+    }
+
+    @Test
+    void aReopenedConversationShowsTheCardWithItsRealStateAndDeletingItDeletesTheAction() throws Exception {
+        modelAnswers("Đây là thay đổi bạn muốn.");
+        long id = ask(ME, null, "Đổi chức danh");
+        jdbc.update("INSERT INTO learning_hub.assistant_pending_actions (action_id, owner_id, tool, arguments, title, "
+            + "changes, status, result_message, expires_at) VALUES ('act-1', ?, 'update_profile', '{}'::jsonb, "
+            + "'Cập nhật hồ sơ cá nhân', '[{\"field\":\"positionName\",\"label\":\"Chức danh\",\"from\":\"Cũ\","
+            + "\"to\":\"Mới\"}]'::jsonb, 'CONFIRMED', 'Đã cập nhật.', now() + interval '1 hour')", ME);
+        jdbc.update("UPDATE learning_hub.assistant_turns SET action_id = 'act-1' WHERE conversation_id = ?", id);
+
+        mvc.perform(get(CONVERSATIONS + "/" + id).with(as(ME)))
+            .andExpect(jsonPath("$.data.turns[0].action.id").value("act-1"))
+            .andExpect(jsonPath("$.data.turns[0].action.status").value("confirmed"))
+            .andExpect(jsonPath("$.data.turns[0].action.message").value("Đã cập nhật."))
+            .andExpect(jsonPath("$.data.turns[0].action.changes[0].to").value("Mới"));
+
+        mvc.perform(delete(CONVERSATIONS + "/" + id).with(as(ME))).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.assistant_pending_actions", Integer.class))
+            .isZero();
     }
 
     @Test

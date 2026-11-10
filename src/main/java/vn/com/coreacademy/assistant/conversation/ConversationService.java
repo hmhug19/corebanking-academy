@@ -4,7 +4,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -16,10 +19,15 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.assistant.action.AssistantPendingAction;
+import vn.com.coreacademy.assistant.action.PendingActionRepository;
+import vn.com.coreacademy.assistant.action.PendingActionStore;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.conversation.ConversationViews.ActionState;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationDetail;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationSummary;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.TurnView;
+import vn.com.coreacademy.assistant.dto.PendingActionView;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -37,24 +45,28 @@ public class ConversationService implements Conversations {
     };
     private static final TypeReference<List<String>> NAMES = new TypeReference<>() {
     };
+    private static final TypeReference<List<PendingActionView.Change>> CHANGES = new TypeReference<>() {
+    };
     private static final int HISTORY_TURNS_READ = 50;
 
     private final ConversationRepository conversations;
     private final TurnRepository turns;
+    private final PendingActionRepository actions;
     private final ObjectMapper json;
     private final Clock clock;
     private final int historyTurns;
 
     @Autowired
-    public ConversationService(ConversationRepository conversations, TurnRepository turns, ObjectMapper json,
-                               AssistantProperties properties) {
-        this(conversations, turns, json, Clock.systemUTC(), properties);
+    public ConversationService(ConversationRepository conversations, TurnRepository turns,
+                               PendingActionRepository actions, ObjectMapper json, AssistantProperties properties) {
+        this(conversations, turns, actions, json, Clock.systemUTC(), properties);
     }
 
-    ConversationService(ConversationRepository conversations, TurnRepository turns, ObjectMapper json, Clock clock,
-                        AssistantProperties properties) {
+    ConversationService(ConversationRepository conversations, TurnRepository turns, PendingActionRepository actions,
+                        ObjectMapper json, Clock clock, AssistantProperties properties) {
         this.conversations = conversations;
         this.turns = turns;
+        this.actions = actions;
         this.json = json;
         this.clock = clock;
         this.historyTurns = Math.min(HISTORY_TURNS_READ, Math.max(1, properties.historyMessages() / 2));
@@ -149,7 +161,14 @@ public class ConversationService implements Conversations {
     public ConversationDetail get(String ownerId, long conversationId) {
         AssistantConversation conversation = conversations.findByIdAndOwnerId(conversationId, ownerId)
             .orElseThrow(ConversationService::notFound);
-        List<TurnView> views = turns.findByConversationIdOrderByIdAsc(conversationId).stream().map(this::view).toList();
+        List<AssistantTurn> stored = turns.findByConversationIdOrderByIdAsc(conversationId);
+        Map<String, AssistantPendingAction> proposed = new HashMap<>();
+        actions.findAllById(stored.stream().map(AssistantTurn::getActionId).filter(Objects::nonNull).distinct()
+            .toList()).forEach(action -> proposed.put(action.getId(), action));
+        Instant now = clock.instant();
+        List<TurnView> views = stored.stream()
+            .map(turn -> view(turn, turn.getActionId() == null ? null : proposed.get(turn.getActionId()), now))
+            .toList();
 
         return new ConversationDetail(conversation.getId(), conversation.getTitle(),
             conversation.getLastActivityTime(), conversation.getCreateTime(), views);
@@ -173,6 +192,7 @@ public class ConversationService implements Conversations {
     public void delete(String ownerId, long conversationId) {
         AssistantConversation conversation = conversations.findByIdAndOwnerId(conversationId, ownerId)
             .orElseThrow(ConversationService::notFound);
+        actions.deleteOfConversation(conversation.getId());
         turns.deleteByConversation(conversation.getId());
         conversations.delete(conversation);
     }
@@ -180,6 +200,7 @@ public class ConversationService implements Conversations {
     /** Hard-deletes every conversation of {@code ownerId} and nobody else's; returns how many. */
     @Transactional
     public int deleteAll(String ownerId) {
+        actions.deleteAllByOwner(ownerId);
         turns.deleteAllByOwner(ownerId);
         return conversations.deleteAllByOwner(ownerId);
     }
@@ -187,6 +208,9 @@ public class ConversationService implements Conversations {
     /** Hard-deletes conversations whose last activity is before {@code cutoff}, turns first; returns how many. */
     @Transactional
     public int deleteInactiveBefore(Instant cutoff) {
+        actions.deleteOfConversationsInactiveBefore(cutoff);
+        // Proposals no turn ever showed (the stream ended first) go on the same schedule.
+        actions.deleteCreatedBefore(cutoff);
         turns.deleteInactiveBefore(cutoff);
         return conversations.deleteInactiveBefore(cutoff);
     }
@@ -209,13 +233,24 @@ public class ConversationService implements Conversations {
             conversation.getLastActivityTime(), conversation.getCreateTime());
     }
 
-    private TurnView view(AssistantTurn turn) {
+    private TurnView view(AssistantTurn turn, AssistantPendingAction action, Instant now) {
         return new TurnView(turn.getId(), turn.getSurface(), turn.getQuestion(), turn.getAnswer(),
             read(turn.getCitations(), CITATIONS, List.of()), read(turn.getToolNames(), NAMES, List.of()),
             turn.getNavigation() == null ? null
                 : read(turn.getNavigation(), new TypeReference<TurnRecord.Navigation>() {
                 }, null),
-            turn.getActionId(), turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime());
+            turn.getActionId(), action == null ? null : state(action, now),
+            turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime());
+    }
+
+    /** The card as it stands now: a proposal nobody answered in time reads as expired, not as still waiting. */
+    private ActionState state(AssistantPendingAction action, Instant now) {
+        String status = PendingActionStore.PENDING.equals(action.getStatus()) && !action.getExpiresAt().isAfter(now)
+            ? "expired" : action.getStatus().toLowerCase(java.util.Locale.ROOT);
+
+        return new ActionState(action.getId(), action.getTool(), action.getTitle(),
+            read(action.getChanges(), CHANGES, List.of()), status, action.getExpiresAt(),
+            action.getResultMessage());
     }
 
     private <T> T read(String text, TypeReference<T> type, T fallback) {

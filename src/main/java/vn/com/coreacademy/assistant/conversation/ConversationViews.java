@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import vn.com.coreacademy.assistant.dto.PendingActionView;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 
 public final class ConversationViews {
@@ -37,8 +38,23 @@ public final class ConversationViews {
         List<String> toolNames,
         @Schema(description = "Màn hình trợ lý đã mở trong lượt; null nếu không có.") TurnRecord.Navigation navigation,
         @Schema(description = "Mã yêu cầu thay đổi dữ liệu do lượt đề xuất; null nếu không có.") String actionId,
+        @Schema(description = "Thẻ xác nhận của lượt kèm kết cục thật; null nếu lượt không đề xuất thay đổi.")
+        ActionState action,
         @Schema(description = "done, error hoặc stopped.") String status,
         Instant createTime) {
+    }
+
+    @Schema(description = "Thay đổi dữ liệu mà một lượt đã đề xuất, với trạng thái hiện tại.")
+    public record ActionState(
+        String id,
+        String tool,
+        String title,
+        List<PendingActionView.Change> changes,
+        @Schema(description = "pending (còn chờ), confirmed, cancelled, expired (hết hạn chưa trả lời) hoặc failed "
+            + "(đã xác nhận nhưng công cụ từ chối).") String status,
+        Instant expiresAt,
+        @Schema(description = "Kết quả hiện cho người dùng sau khi xác nhận, hoặc lý do bị từ chối; null khi chưa có.")
+        String message) {
     }
 
     @Schema(description = "Đổi tên hội thoại.")

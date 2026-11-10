@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import vn.com.coreacademy.assistant.action.AssistantPendingAction;
+import vn.com.coreacademy.assistant.action.PendingActionRepository;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.conversation.AssistantConversation;
 import vn.com.coreacademy.assistant.conversation.AssistantTurn;
@@ -42,21 +44,22 @@ class ConversationServiceTest {
 
     private final ConversationRepository conversations = mock(ConversationRepository.class);
     private final TurnRepository turns = mock(TurnRepository.class);
+    private final PendingActionRepository actions = mock(PendingActionRepository.class);
     private final MutableClock clock = new MutableClock();
     private final ConversationService service = serviceWith(clock);
     private final LogCapture logs = new LogCapture();
 
     private ConversationService serviceWith(MutableClock clock) {
-        return newService(conversations, turns, clock);
+        return newService(conversations, turns, actions, clock);
     }
 
     static ConversationService newService(ConversationRepository conversations, TurnRepository turns,
-                                          MutableClock clock) {
+                                          PendingActionRepository actions, MutableClock clock) {
         try {
             var constructor = ConversationService.class.getDeclaredConstructor(ConversationRepository.class,
-                TurnRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class);
+                TurnRepository.class, PendingActionRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class);
             constructor.setAccessible(true);
-            return constructor.newInstance(conversations, turns, new ObjectMapper().findAndRegisterModules(), clock,
+            return constructor.newInstance(conversations, turns, actions, new ObjectMapper().findAndRegisterModules(), clock,
                 new AssistantProperties(4, 20, Duration.ofMinutes(10), 4));
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException(exception);
@@ -215,6 +218,49 @@ class ConversationServiceTest {
         assertThat(detail.turns().get(0).status()).isEqualTo("done");
     }
 
+    private AssistantPendingAction proposal(String id, String status, Duration expiresIn, String message) {
+        AssistantPendingAction action = new AssistantPendingAction();
+        action.setId(id);
+        action.setTool("update_profile");
+        action.setTitle("Cập nhật hồ sơ cá nhân");
+        action.setChanges("[{\"field\":\"positionName\",\"label\":\"Chức danh\",\"from\":\"Cũ\","
+            + "\"to\":\"Mới\"}]");
+        action.setStatus(status);
+        action.setExpiresAt(clock.instant().plus(expiresIn));
+        action.setResultMessage(message);
+        return action;
+    }
+
+    @Test
+    void getShowsEachProposedActionWithItsRealOutcomeAndReadsAnUnansweredOldOneAsExpired() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        List<AssistantTurn> stored = new java.util.ArrayList<>();
+        for (String id : List.of("live", "done", "no", "bad", "late")) {
+            AssistantTurn turn = done("Hỏi", "Đáp");
+            turn.setId((long) stored.size() + 1);
+            turn.setActionId(id);
+            stored.add(turn);
+        }
+        AssistantTurn plain = done("Không đề xuất", "Đáp");
+        plain.setId(99L);
+        stored.add(plain);
+        when(turns.findByConversationIdOrderByIdAsc(5L)).thenReturn(stored);
+        when(actions.findAllById(any())).thenReturn(List.of(
+            proposal("live", "PENDING", Duration.ofMinutes(5), null),
+            proposal("done", "CONFIRMED", Duration.ofMinutes(5), "Đã cập nhật."),
+            proposal("no", "CANCELLED", Duration.ofMinutes(5), null),
+            proposal("bad", "FAILED", Duration.ofMinutes(5), "Không thực hiện được."),
+            proposal("late", "PENDING", Duration.ofMinutes(-1), null)));
+
+        var views = service.get(ME, 5L).turns();
+
+        assertThat(views).extracting(view -> view.action() == null ? null : view.action().status())
+            .containsExactly("pending", "confirmed", "cancelled", "failed", "expired", null);
+        assertThat(views.get(1).action().message()).isEqualTo("Đã cập nhật.");
+        assertThat(views.get(3).action().message()).isEqualTo("Không thực hiện được.");
+        assertThat(views.get(0).action().changes().get(0).to()).isEqualTo("Mới");
+    }
+
     @Test
     void deleteRemovesTheTurnsAndTheConversationAndDeleteAllOnlyTheCallers() {
         AssistantConversation mine = owned(5L, ME);
@@ -223,11 +269,14 @@ class ConversationServiceTest {
         service.delete(ME, 5L);
         service.deleteAll(ME);
 
-        var order = inOrder(turns, conversations);
+        var order = inOrder(actions, turns, conversations);
+        order.verify(actions).deleteOfConversation(5L);
         order.verify(turns).deleteByConversation(5L);
         order.verify(conversations).delete(mine);
+        order.verify(actions).deleteAllByOwner(ME);
         order.verify(turns).deleteAllByOwner(ME);
         order.verify(conversations).deleteAllByOwner(ME);
+        verify(actions, never()).deleteAllByOwner(THEM);
         verify(turns, never()).deleteAllByOwner(THEM);
         verify(conversations, never()).deleteAllByOwner(THEM);
     }
@@ -262,7 +311,9 @@ class ConversationServiceTest {
         job.purge();
 
         Instant cutoff = clock.instant().minus(Duration.ofDays(90));
-        var order = inOrder(turns, conversations);
+        var order = inOrder(actions, turns, conversations);
+        order.verify(actions).deleteOfConversationsInactiveBefore(cutoff);
+        order.verify(actions).deleteCreatedBefore(cutoff);
         order.verify(turns).deleteInactiveBefore(cutoff);
         order.verify(conversations).deleteInactiveBefore(cutoff);
         verify(conversations, never()).deleteAllByOwner(any());

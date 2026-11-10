@@ -50,6 +50,7 @@ FILES=(
   upgrade/2026-11-07-personal-flashcards.sql
   learning_hub_knowledge.sql
   upgrade/2026-11-10-assistant-conversations.sql
+  upgrade/2026-11-10-assistant-pending-actions.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

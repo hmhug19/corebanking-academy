@@ -19,6 +19,8 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 @Service
 @RequiredArgsConstructor
 public class AgentActionService {
+    private static final String GENERIC_FAILURE = "Không thực hiện được thay đổi này.";
+
     private final PendingActionStore store;
     private final ToolRegistry registry;
     private final AuthService auth;
@@ -26,10 +28,24 @@ public class AgentActionService {
     public ActionResultView confirm(String actionId) {
         AgentContext context = AgentContext.of(AssistantAccess.require(auth.me()));
         PendingAction action = store.take(actionId, SecurityContextUtils.getUserId());
-        var tool = registry.find(action.tool())
-            .orElseThrow(() -> new BusinessException(AssistantResponseCode.ACTION_NOT_FOUND));
+        var tool = registry.find(action.tool()).orElse(null);
+        if (tool == null) {
+            store.failed(action.id(), AssistantResponseCode.ACTION_NOT_FOUND.getMessage());
+            throw new BusinessException(AssistantResponseCode.ACTION_NOT_FOUND);
+        }
 
-        return tool.execute(action, context);
+        ActionResultView result;
+        try {
+            result = tool.execute(action, context);
+        } catch (RuntimeException exception) {
+            // The action was taken either way; its row keeps the reason so a reopened conversation shows it.
+            store.failed(action.id(), exception instanceof BusinessException business
+                ? business.getResponseCode().getMessage() : GENERIC_FAILURE);
+            throw exception;
+        }
+        store.succeeded(action.id(), result.message());
+
+        return result;
     }
 
     public void cancel(String actionId) {

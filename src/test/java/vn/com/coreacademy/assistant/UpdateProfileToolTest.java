@@ -1,6 +1,6 @@
 package vn.com.coreacademy.assistant;
 
-import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -10,13 +10,13 @@ import jakarta.validation.Validator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.access.AccessDeniedException;
 import vn.com.coreacademy.assistant.action.PendingAction;
 import vn.com.coreacademy.assistant.action.PendingActionStore;
 import vn.com.coreacademy.assistant.agent.AgentContext;
-import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.dto.ActionResultView;
 import vn.com.coreacademy.assistant.dto.PendingActionView.Change;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
@@ -34,6 +34,7 @@ import vn.com.coreacademy.identity.service.SelfProfileService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -45,8 +46,7 @@ class UpdateProfileToolTest {
 
     private final AuthService auth = mock(AuthService.class);
     private final SelfProfileService profiles = mock(SelfProfileService.class);
-    private final PendingActionStore store = new PendingActionStore(new AssistantProperties(4, 20,
-        Duration.ofMinutes(10), 4));
+    private final PendingActionStore store = mock(PendingActionStore.class);
     private final UpdateProfileTool tool = new UpdateProfileTool(store, auth, profiles, VALIDATOR);
 
     private static UserInfo user(String provider, boolean mustChangePassword, String fullName, String email,
@@ -109,6 +109,13 @@ class UpdateProfileToolTest {
         assertThat(action.arguments().fieldNames()).toIterable().containsExactly("positionName");
     }
 
+    @BeforeEach
+    void storeEchoesWhatItIsGiven() {
+        when(store.add(any(), any(), any(), any(), any())).thenAnswer(call -> new PendingAction("a1",
+            call.getArgument(0), call.getArgument(1), call.getArgument(2), call.getArgument(3),
+            call.getArgument(4), Instant.parse("2026-10-24T09:00:00Z"), Instant.parse("2026-10-24T09:10:00Z")));
+    }
+
     @Test
     void validationFailuresAreResultsTheModelCanRelay() {
         assertThat(text(run(args().put("fullName", "   ")))).isEqualTo("Họ tên phải từ 1 đến 255 ký tự.");
@@ -120,14 +127,14 @@ class UpdateProfileToolTest {
         assertThat(text(run(args().put("positionName", "p".repeat(256))))).isEqualTo(
             "Chức danh dài tối đa 255 ký tự.");
         assertThat(text(run(args().put("email", 5)))).isEqualTo("Email phải là văn bản.");
-        assertThat(store.size()).isZero();
+        verify(store, never()).add(any(), any(), any(), any(), any());
     }
 
     @Test
     void aProposalNeedsNoCardUntilEveryFieldIsValid() {
         assertThat(run(args().put("fullName", "Nguyễn Văn Minh").put("email", "sai"))).isInstanceOf(
             ToolOutcome.Result.class);
-        assertThat(store.size()).isZero();
+        verify(store, never()).add(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -155,7 +162,7 @@ class UpdateProfileToolTest {
             new Change("fullName", "Họ tên", "Học viên Demo", "Nguyễn Văn Minh"),
             new Change("email", "Email", "hv@example.test", "minh@example.test"),
             new Change("positionName", "Chức danh", "Chuyên viên", "Chuyên viên chính"));
-        assertThat(store.take(action.id(), "000004")).isEqualTo(action);
+        verify(store).add(eq("000004"), eq("update_profile"), any(), eq("Cập nhật hồ sơ cá nhân"), any());
     }
 
     @Test

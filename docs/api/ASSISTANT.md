@@ -111,8 +111,8 @@ Chạy yêu cầu chờ xác nhận bằng quyền của chính người gọi, 
 { "actionId": "6f1c0a52-…", "tool": "update_profile", "message": "Đã cập nhật hồ sơ.", "data": { } }
 ```
 
-`data` phụ thuộc công cụ. Mỗi yêu cầu chỉ chạy một lần: yêu cầu bị gỡ khỏi bộ nhớ trước khi chạy, nên bấm hai lần chỉ
-chạy một lần. Lời từ chối của service (validation, SSO, đang phải đổi mật khẩu) giữ nguyên envelope của nó.
+`data` phụ thuộc công cụ. Mỗi yêu cầu chỉ chạy một lần: yêu cầu được đánh dấu đã xác nhận bằng một câu lệnh UPDATE có điều kiện trước khi chạy, nên bấm hai lần (kể cả
+từ hai instance) chỉ chạy một lần. Lời từ chối của service (validation, SSO, đang phải đổi mật khẩu) giữ nguyên envelope của nó.
 
 ## POST /api/v1/assistant/agent/actions/{actionId}/cancel
 
@@ -170,9 +170,12 @@ giữ khóa ghi, so từng `from` với giá trị hiện tại trong cùng tran
 
 ## Yêu cầu chờ xác nhận
 
-Giữ trong bộ nhớ (không có bảng nào): hết hạn sau `action-ttl`, gắn với người đã gây ra nó, tối đa 20 yêu cầu mỗi người
-(yêu cầu cũ nhất bị bỏ khi thêm cái thứ 21), và một tác vụ nền quét yêu cầu hết hạn mỗi phút. Khởi động lại backend làm
-mất mọi yêu cầu; app báo yêu cầu đã hết hạn khi xác nhận.
+Lưu ở bảng `assistant_pending_actions` ([2026-11-10-assistant-pending-actions.sql](../sql/upgrade/2026-11-10-assistant-pending-actions.sql)):
+hết hạn sau `action-ttl`, gắn với người đã gây ra nó, tối đa 20 yêu cầu đang chờ mỗi người (yêu cầu cũ nhất chuyển sang
+`CANCELLED` khi thêm cái thứ 21). Khởi động lại backend không làm mất yêu cầu: xác nhận vẫn được nếu còn hạn. Hàng
+được giữ cùng kết cục (`PENDING`→`CONFIRMED`|`CANCELLED`|`FAILED`, kèm `result_message`) đến khi hội thoại chứa nó bị
+xoá (xoá tay hoặc quá `history.retention`); yêu cầu không gắn với lượt nào bị dọn theo cùng hạn đó. "Hết hạn" không lưu:
+là `PENDING` đã quá `expires_at`.
 
 ## Mã lỗi
 
@@ -203,8 +206,10 @@ của chính người gọi; quản trị viên không đọc được nội dun
 
 Tên mặc định là câu hỏi đầu tiên cắt còn 80 ký tự (không gọi mô hình). Mã của người khác trả
 `ASSISTANT-CONVERSATION_NOT_FOUND`, giống mã không tồn tại. Một lượt (`TurnView`) có `surface` (`AGENT`|`KNOWLEDGE`),
-`question`, `answer` (null nếu lỗi/dừng sớm), `citations`, `toolNames`, `navigation`, `actionId`, `status`
-(`done`|`error`|`stopped`) và `createTime`. Schema: [2026-11-10-assistant-conversations.sql](../sql/upgrade/2026-11-10-assistant-conversations.sql).
+`question`, `answer` (null nếu lỗi/dừng sớm), `citations`, `toolNames`, `navigation`, `actionId`, `action`, `status`
+(`done`|`error`|`stopped`) và `createTime`. `action` (null nếu lượt không đề xuất thay đổi) là thẻ xác nhận với trạng
+thái hiện tại: `id`, `tool`, `title`, `changes`, `status` (`pending`|`confirmed`|`cancelled`|`failed`|`expired`),
+`expiresAt` và `message` (kết quả hoặc lý do bị từ chối). Schema: [2026-11-10-assistant-conversations.sql](../sql/upgrade/2026-11-10-assistant-conversations.sql).
 
 ## Giới hạn đã biết
 
