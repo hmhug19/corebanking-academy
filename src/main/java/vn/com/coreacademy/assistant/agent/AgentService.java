@@ -228,7 +228,7 @@ public class AgentService {
     }
 
     /** Tells the model which lesson the user has open; the titles are data, so they are quoted and on one line. */
-    private static String lessonNote(AgentContext context) {
+    public static String lessonNote(AgentContext context) {
         if (context.lesson() == null) {
             return "";
         }
