@@ -224,6 +224,30 @@ public class QuizAttemptService {
         return result(attempt);
     }
 
+    /**
+     * The question the caller asks the assistant to explain. It applies the very rule that decides whether the result
+     * carries the review (own attempt, submitted, the quiz's review policy), so an explanation can never show more
+     * than the review does. A policy that hides the answers is {@code ASSESSMENT-REVIEW_NOT_AVAILABLE}.
+     */
+    public AssessmentViews.ExplainSource explainSource(Long attemptId, int displayOrder) {
+        AssessmentViews.AttemptResult result = result(attemptId);
+        if (!Boolean.TRUE.equals(result.reviewAvailable()) || result.review() == null) {
+            throw new BusinessException(AssessmentResponseCode.REVIEW_NOT_AVAILABLE);
+        }
+        AssessmentViews.ReviewQuestion reviewed = result.review().stream()
+            .filter(question -> question.displayOrder() != null && question.displayOrder() == displayOrder)
+            .findFirst().orElseThrow(() -> new BusinessException(AssessmentResponseCode.NOT_FOUND));
+        Long courseId = result.courseId();
+        Long lessonId = repository.attemptQuestions(attemptId).stream()
+            .filter(question -> question.getDisplayOrder() == displayOrder).findFirst()
+            .flatMap(question -> repository.questions(List.of(question.getQuestionId())).stream().findFirst())
+            .map(question -> question.getLessonId()).orElse(null);
+
+        return new AssessmentViews.ExplainSource(result.quizTitle(), reviewed.displayOrder(),
+            reviewed.questionType(), reviewed.content(), reviewed.options(), reviewed.correct(),
+            reviewed.explanation(), courseId, lessonId);
+    }
+
     public AssessmentViews.AttemptHistory history(Long quizId) {
         Quiz quiz = visibleQuiz(quizId);
         String userId = learning.actor().person().id();

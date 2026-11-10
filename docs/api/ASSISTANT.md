@@ -133,6 +133,25 @@ từ hai instance) chỉ chạy một lần. Lời từ chối của service (va
 
 Bỏ yêu cầu mà không chạy. Trả `BaseResponse<Void>`.
 
+## Giải thích một câu của lượt thi
+
+`POST /api/v1/assistant/quiz-attempts/{attemptId}/questions/{displayOrder}/explain` (không body) trả `application/x-ndjson` với
+cùng sự kiện như trợ lý nhanh: `conversation`, các `delta`, rồi `done` (`answer`, `citations`, `turnId`) hoặc `error`.
+`displayOrder` là thứ tự câu trong `review` của kết quả lượt thi.
+
+Điều kiện nằm ở `QuizAttemptService.explainSource`, dùng đúng quy tắc quyết định kết quả có `review` hay không, nên giải
+thích không bao giờ lộ nhiều hơn màn hình xem lại: lượt của chính người gọi (lượt người khác: `ASSESSMENT-NOT_FOUND`), đã
+nộp (đang làm: `ASSESSMENT-ATTEMPT_IN_PROGRESS`) và `reviewPolicy` đang cho xem đáp án (`AFTER_SUBMIT`; `AFTER_PASS` khi
+đã từng đạt; `AFTER_CLOSE` khi đề đã đóng; `NEVER` không bao giờ). Không được xem: `ASSESSMENT-REVIEW_NOT_AVAILABLE`.
+Các từ chối này là envelope JSON trước khi stream bắt đầu. Server kiểm lại ở mỗi lần gọi, không tin việc client đã ẩn nút.
+
+Mô hình nhận câu hỏi, các phương án (đánh dấu đáp án đúng và lựa chọn của người học), giải thích của người ra đề và, khi
+câu hỏi gắn bài học, các đoạn của bài đó mà người gọi đọc được (tối đa 8 đoạn đầu), tất cả trong khối "DỮ LIỆU" chỉ để
+tham khảo; lời nhắc nằm ở `assistant/explain.md` và nằm trong `promptVersion`. `citations` chỉ có khi câu trả lời ghi
+`[n]` trỏ đoạn bài học; câu không gắn bài học vẫn được giải thích từ `explanation` và không có nguồn. Mỗi lần gọi tính là
+một câu hỏi trong giới hạn mỗi giờ (`ASSISTANT-RATE_LIMITED` / `ASSISTANT-BUSY` là sự kiện `error` đầu tiên) và được lưu
+thành một hội thoại mới tên "Giải thích câu N: …", có thể đánh giá bằng `turnId`.
+
 ## Công cụ
 
 | Công cụ            | Loại                         | Ai được dùng                                  | Kết quả                       |

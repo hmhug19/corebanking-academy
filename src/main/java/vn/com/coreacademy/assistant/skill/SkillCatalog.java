@@ -31,6 +31,7 @@ public class SkillCatalog {
     private static final int VERSION_CHARS = 12;
 
     private final String base;
+    private final String explain;
     private final Map<String, Skill> skills = new LinkedHashMap<>();
     private final String version;
 
@@ -38,6 +39,7 @@ public class SkillCatalog {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         MessageDigest digest = digest();
         this.base = read(resolver.getResource("classpath:" + ROOT + "base.md"), digest);
+        this.explain = read(resolver.getResource("classpath:" + ROOT + "explain.md"), digest);
         try {
             List<String> ids = new ArrayList<>();
             for (Resource config : resolver.getResources("classpath*:" + ROOT + "skills/*/skill.yml")) {
@@ -61,6 +63,7 @@ public class SkillCatalog {
     /** A fixed catalog, for tests that need skills of their own. */
     public SkillCatalog(String base, List<Skill> list, String version) {
         this.base = base;
+        this.explain = "";
         list.forEach(skill -> skills.put(skill.id(), skill));
         this.version = version;
     }
@@ -125,6 +128,11 @@ public class SkillCatalog {
         }
 
         return text.toString();
+    }
+
+    /** The system prompt that explains one reviewed quiz question: the shared style, then the explanation rules. */
+    public String explainPrompt() {
+        return base + "\n\n" + explain;
     }
 
     /** The shared style alone, for the grounded document chat. */

@@ -14,16 +14,16 @@ import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
  * model reads in the tool results, so they keep counting across several searches and a chunk found twice keeps its
  * first number. It also turns the model's final text into the answer and citations the app shows.
  */
-final class RetrievedChunks {
+public final class RetrievedChunks {
     /** A chunk first seen in the latest search, with its number. */
-    record Added(int n, ChunkHit hit) {
+    public record Added(int n, ChunkHit hit) {
     }
 
     private final List<ChunkHit> hits = new ArrayList<>();
     private final Set<String> seen = new HashSet<>();
 
     /** Adds the chunks not seen before in this turn and returns them with their new numbers. */
-    List<Added> add(List<ChunkHit> found) {
+    public List<Added> add(List<ChunkHit> found) {
         List<Added> added = new ArrayList<>();
         for (ChunkHit hit : found) {
             if (seen.add(hit.key())) {
@@ -35,7 +35,7 @@ final class RetrievedChunks {
         return added;
     }
 
-    boolean isEmpty() {
+    public boolean isEmpty() {
         return hits.isEmpty();
     }
 
@@ -44,7 +44,7 @@ final class RetrievedChunks {
      * the model wrote; so is an answer with no [n] marker that says it in its own words. Otherwise the sources are only
      * the chunks the answer marks, from their metadata: unlike kb-chat, an answer with no usable marker cites nothing.
      */
-    FinishedAnswer finish(String answer) {
+    public FinishedAnswer finish(String answer) {
         Set<Integer> cited = CitationSelector.citedNumbers(answer, hits.size());
         if (hits.isEmpty() || NotFoundAnswer.isNotFound(answer)
             || cited.isEmpty() && NotFoundAnswer.saysNothingWasFound(answer)) {
