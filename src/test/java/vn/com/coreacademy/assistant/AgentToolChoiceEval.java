@@ -86,6 +86,14 @@ class AgentToolChoiceEval {
         Prompt.tool("Khi chạy batch cuối ngày bị lỗi thì xử lý thế nào?", ToolDefinitions.SEARCH_DOCUMENTS),
         Prompt.tool("Tài liệu nào nói về kiểm soát hạn mức giao dịch?", ToolDefinitions.SEARCH_DOCUMENTS),
 
+        Prompt.tool("Tìm trong cộng đồng bài viết về đối soát cuối ngày", ToolDefinitions.SEARCH_COMMUNITY),
+        Prompt.tool("Có thảo luận nào trong cộng đồng về lỗi batch EOD không?", ToolDefinitions.SEARCH_COMMUNITY),
+        Prompt.tool("Đồng nghiệp có chia sẻ kinh nghiệm xử lý ECR trên cộng đồng không?",
+            ToolDefinitions.SEARCH_COMMUNITY),
+        Prompt.tool("Tìm giúp mình các bài Wiki cộng đồng về hạch toán GL", ToolDefinitions.SEARCH_COMMUNITY),
+        Prompt.tool("Cho mình xem câu hỏi của mọi người trong cộng đồng về CIF", ToolDefinitions.SEARCH_COMMUNITY),
+        Prompt.tool("Có bài viết cộng đồng nào hướng dẫn mở tài khoản không?", ToolDefinitions.SEARCH_COMMUNITY),
+
         Prompt.tool("mở trang quản lý người dùng", ToolDefinitions.OPEN_SCREEN, "functionCode", "USER_MANAGEMENT"),
         Prompt.tool("cho mình xem tiến độ học tập", ToolDefinitions.OPEN_SCREEN, "functionCode", "LEARNING_PROGRESS"),
         Prompt.tool("đưa mình tới màn hình báo cáo đào tạo", ToolDefinitions.OPEN_SCREEN, "functionCode",
@@ -110,8 +118,8 @@ class AgentToolChoiceEval {
     void theModelPicksTheRightToolForAtLeastNinetyPercentOfThePrompts() throws Exception {
         OllamaClient ollama = ollama();
         assertThat(ollama.isAvailable()).as("Ollama must be running on localhost:11434").isTrue();
-        List<ToolDefinition> tools = List.of(ToolDefinitions.searchDocuments(), ToolDefinitions.openScreen(SCREENS),
-            ToolDefinitions.updateProfile());
+        List<ToolDefinition> tools = List.of(ToolDefinitions.searchDocuments(), ToolDefinitions.searchCommunity(),
+            ToolDefinitions.openScreen(SCREENS), ToolDefinitions.updateProfile());
 
         long warmUp = call(ollama, tools, "Xin chào").totalMs();
 

@@ -11,6 +11,7 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 /** What the model is told about each tool: name, when to use it and its arguments. No behaviour lives here. */
 public final class ToolDefinitions {
     public static final String SEARCH_DOCUMENTS = "search_documents";
+    public static final String SEARCH_COMMUNITY = "search_community";
     public static final String OPEN_SCREEN = "open_screen";
     public static final String UPDATE_PROFILE = "update_profile";
 
@@ -33,6 +34,19 @@ public final class ToolDefinitions {
             "Tìm trong kho tài liệu nội bộ dùng chung (quy trình, nghiệp vụ, thuật ngữ Core Banking). "
                 + "Dùng cho mọi câu hỏi cần thông tin từ tài liệu. Kết quả là các đoạn đánh số [n]; "
                 + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
+    }
+
+    public static ToolDefinition searchCommunity() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties").putObject("query").put("type", "string").put("minLength", 1)
+            .put("maxLength", 300).put("description", "Từ khoá cần tìm trong cộng đồng, tiếng Việt, tối đa 300 ký tự.");
+        parameters.putArray("required").add("query");
+
+        return new ToolDefinition(SEARCH_COMMUNITY,
+            "Tìm câu hỏi, bài viết, Wiki và tài liệu của cộng đồng nội bộ. Dùng khi người dùng muốn tìm hoặc xem "
+                + "bài viết, thảo luận, kinh nghiệm của đồng nghiệp trong cộng đồng. Chỉ đọc các nguồn người dùng "
+                + "được xem; kết quả là liên kết nguồn để mở đọc.", parameters);
     }
 
     /** {@code screens} are the screens of this user; the model may only name one of their codes. */
