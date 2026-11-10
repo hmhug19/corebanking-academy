@@ -25,6 +25,7 @@ import vn.com.coreacademy.learning.service.LevelService;
 import vn.com.coreacademy.learning.service.XpLedgerService;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static vn.com.coreacademy.assessment.support.ApiClient.delete;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER_2;
@@ -190,6 +191,15 @@ class GamificationNoticeIT extends AssessmentIntegrationTest {
 
         api.ok(LEARNER, api.post(Map.of(), REMINDERS + "/" + id + "/read"));
         assertThat(api.ok(LEARNER, get(REMINDERS)).findValuesAsText("id")).doesNotContain(String.valueOf(id));
+        JsonNode inbox = api.ok(LEARNER, get(REMINDERS + "/inbox"));
+        assertThat(inbox.findValuesAsText("id")).contains(String.valueOf(id));
+        assertThat(inbox.findValuesAsText("status")).contains("pending", "sent");
+
+        JsonNode deleted = api.ok(LEARNER, delete(REMINDERS + "/" + id));
+        assertThat(deleted.path("status").asText()).isEqualTo("cancelled");
+        api.ok(LEARNER, api.post(Map.of(), REMINDERS + "/" + id + "/read"));
+        assertThat(api.ok(LEARNER, get(REMINDERS + "/inbox")).findValuesAsText("id"))
+            .doesNotContain(String.valueOf(id));
     }
 
     @Test
@@ -200,6 +210,9 @@ class GamificationNoticeIT extends AssessmentIntegrationTest {
 
         api.http(LEARNER_2, api.post(Map.of(), REMINDERS + "/" + id + "/seen"), 403, "CORE-ACCESS_DENIED");
         api.http(LEARNER_2, api.post(Map.of(), REMINDERS + "/" + id + "/read"), 403, "CORE-ACCESS_DENIED");
+        api.http(LEARNER_2, delete(REMINDERS + "/" + id), 403, "CORE-ACCESS_DENIED");
         assertThat(api.ok(LEARNER_2, get(REMINDERS)).findValuesAsText("id")).doesNotContain(String.valueOf(id));
+        assertThat(api.ok(LEARNER_2, get(REMINDERS + "/inbox")).findValuesAsText("id"))
+            .doesNotContain(String.valueOf(id));
     }
 }

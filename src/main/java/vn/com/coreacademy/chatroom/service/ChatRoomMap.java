@@ -25,8 +25,11 @@ public class ChatRoomMap {
         }
     }
 
+    public record CaroTable(int desk, List<Integer> chairs) {
+    }
+
     public record Layout(int width, int height, double speed, double radius, Point spawn, List<Furniture> objects,
-        Area activityArea, Area diceArea) {
+        Area activityArea, Area diceArea, List<CaroTable> caroTables) {
     }
 
     private final Layout layout;
@@ -52,6 +55,17 @@ public class ChatRoomMap {
 
     public Layout layout() {
         return layout;
+    }
+
+    public int caroTable(Integer chair) {
+        if (chair != null) {
+            for (int i = 0; i < layout.caroTables().size(); i++) {
+                if (layout.caroTables().get(i).chairs().contains(chair)) {
+                    return i + 1;
+                }
+            }
+        }
+        return 0;
     }
 
     public boolean walkable(double x, double y) {
