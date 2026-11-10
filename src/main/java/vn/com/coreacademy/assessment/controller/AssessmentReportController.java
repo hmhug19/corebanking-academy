@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assessment.controller;
 
 import java.time.Instant;
+import java.util.List;
 
 import jakarta.validation.constraints.Positive;
 
@@ -57,6 +58,17 @@ public class AssessmentReportController {
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
         return BaseResponse.ok(reports.overview(new Filter(orgId, teamId, courseId, quizId, from, to)));
+    }
+
+    @GetMapping("/quiz-options")
+    @Operation(summary = "Danh sách bài kiểm tra để lọc báo cáo", description = """
+        Lọc bài kiểm tra theo khóa học, đơn vị và nhóm.
+        - Gồm cả bài đã mở nhưng chưa có lượt thi trong phạm vi học viên.
+        """)
+    public BaseResponse<List<AssessmentViews.ReportQuizOption>> quizOptions(
+        @RequestParam(required = false) @Positive Long orgId, @RequestParam(required = false) @Positive Long teamId,
+        @RequestParam(required = false) @Positive Long courseId, @RequestParam(required = false) @Positive Long quizId) {
+        return BaseResponse.ok(reports.quizOptions(new Filter(orgId, teamId, courseId, quizId, null, null)));
     }
 
     @GetMapping("/results")

@@ -420,6 +420,9 @@ public final class AssessmentViews {
                                Long inProgressAttempts) {
     }
 
+    public record ReportQuizOption(Long id, String name) {
+    }
+
     public record ReportGroupData(Long id, String name, Long gradedAttempts, Long learners, Long passedLearners,
                                   BigDecimal averageScore) {
     }

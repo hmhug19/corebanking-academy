@@ -96,6 +96,8 @@ public class LearningLearnerController {
     public BaseResponse<PageResponse<LearningDetails.CourseCard>> catalog(@RequestParam(required = false) String q,
         @RequestParam(required = false) Long fieldId, @RequestParam(required = false) Long programId,
         @RequestParam(required = false) Long moduleId, @RequestParam(required = false) String level,
+        @Parameter(description = "true chỉ lấy khóa chưa có phân hệ; không gửi cùng moduleId.")
+        @RequestParam(defaultValue = "false") boolean withoutModule,
         @RequestParam(required = false) String requirement, @RequestParam(required = false) String learningStatus,
         @RequestParam(required = false) String state, @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort,
@@ -106,7 +108,7 @@ public class LearningLearnerController {
         @Parameter(description = "true chỉ lấy khóa caller đã thi cuối khóa nhưng chưa đạt lượt nào, false loại các "
             + "khóa đó.") @RequestParam(required = false) Boolean failed) {
         return BaseResponse.ok(search.search(SearchMode.CATALOG, q, fieldId, programId, moduleId, level, requirement,
-            learningStatus, state, page, size, sort, overdue, assigned, failed));
+            learningStatus, state, page, size, sort, overdue, assigned, failed, withoutModule));
     }
 
     @GetMapping("/courses/{courseId}")
@@ -132,6 +134,7 @@ public class LearningLearnerController {
         description = """
             Chỉ trả giá trị được ít nhất một khóa trong danh mục của caller dùng (cùng quy tắc nhìn thấy với
             `/catalog`), sắp theo sortNo rồi tên. Chương trình và phân hệ có fieldId.
+            - fieldsWithUnclassifiedCourses là các lĩnh vực có khóa chưa có phân hệ, gồm null nếu chưa có lĩnh vực.
             """
     )
     public BaseResponse<LearningDetails.LearnerFacets> facets() {

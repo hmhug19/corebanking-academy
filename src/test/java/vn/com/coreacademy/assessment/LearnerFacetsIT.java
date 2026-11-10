@@ -26,6 +26,7 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
 /** Lĩnh vực, chương trình, phân hệ mà học viên thấy: chỉ giá trị có khóa nhìn thấy được, theo thứ tự sortNo rồi tên. */
 class LearnerFacetsIT extends AssessmentIntegrationTest {
     private static final String FACETS = "/api/v1/me/learning/facets";
+    private static final String CATALOG = "/api/v1/me/learning/catalog";
 
     @Autowired
     private MockMvc mvc;
@@ -71,7 +72,8 @@ class LearnerFacetsIT extends AssessmentIntegrationTest {
 
         JsonNode facets = api.ok(LEARNER, get(FACETS));
 
-        assertThat(facets.fieldNames()).toIterable().containsExactly("fields", "programs", "modules");
+        assertThat(facets.fieldNames()).toIterable()
+            .containsExactly("fields", "programs", "modules", "fieldsWithUnclassifiedCourses");
         assertThat(ids(facets.path("fields"))).contains(used.field());
         JsonNode program = item(facets.path("programs"), used.program());
         assertThat(program.path("fieldId").asLong()).isEqualTo(used.field());
@@ -81,6 +83,27 @@ class LearnerFacetsIT extends AssessmentIntegrationTest {
         assertThat(module.path("fieldId").asLong()).isEqualTo(used.field());
         JsonNode field = item(facets.path("fields"), used.field());
         assertThat(field.fieldNames()).toIterable().containsExactlyInAnyOrder("id", "code", "name");
+    }
+
+    @Test
+    void namedAndUnclassifiedModulesPartitionTheVisibleCoursesOfAField() {
+        Course named = fixtures.course(LEARNER);
+        Course unclassified = fixtures.course(LEARNER);
+        Values used = values(named);
+        jdbc.update("""
+            update learning_hub.course_revisions set program_id = ?, module_id = null where revision_id = ?
+            """, used.program(), unclassified.revisionId());
+
+        JsonNode facets = api.ok(LEARNER, get(FACETS));
+        assertThat(facets.path("fieldsWithUnclassifiedCourses"))
+            .anySatisfy(field -> assertThat(field.asLong()).isEqualTo(used.field()));
+
+        String url = CATALOG + "?fieldId=" + used.field();
+        long all = api.ok(LEARNER, get(url)).path("totalElements").asLong();
+        long namedCount = api.ok(LEARNER, get(url + "&moduleId=" + used.module())).path("totalElements").asLong();
+        JsonNode remaining = api.ok(LEARNER, get(url + "&withoutModule=true"));
+        assertThat(remaining.path("items").findValuesAsText("courseId")).containsExactly(Long.toString(unclassified.id()));
+        assertThat(all).isEqualTo(2).isEqualTo(namedCount + remaining.path("totalElements").asLong());
     }
 
     @Test
