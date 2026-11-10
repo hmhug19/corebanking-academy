@@ -37,14 +37,25 @@ phần mở rộng, kích thước (1 byte đến `max-file-size`), MIME khai b�
 `application/octet-stream`), và nội dung thật (PDF bắt đầu `%PDF-`; DOCX là zip có `word/document.xml`; Markdown là
 UTF-8 nghiêm ngặt, không có byte NUL). Loại tệp lưu là loại backend nhận diện.
 
+Tham số tùy chọn `scope` quyết định ai tìm thấy tài liệu: `personal` (chỉ người tải lên), `unit` (đơn vị của người tải lên
+và các đơn vị con; **mặc định**) hoặc `global` (mọi người; chỉ ADMIN/SUPER_ADMIN, vai trò khác nhận HTTP 403). Giá trị
+khác trả lỗi validation trên field `scope`. Tài liệu có sẵn trước khi có phạm vi được chuyển thành `global`.
+
 ### `GET /api/v1/knowledge/documents`
 
-Toàn bộ kho dùng chung, mới nhất trước. Tham số: `page` (từ 0), `size` (1..100, mặc định 20), `mine=true` (chỉ
+Các tài liệu người gọi được đọc (của mình, của đơn vị mình và đơn vị cha, và `global`), mới nhất trước. Tham số: `page` (từ 0), `size` (1..100, mặc định 20), `mine=true` (chỉ
 tài liệu của người gọi), `status` (lặp lại được: `?status=queued&status=processing`).
 
 ### `GET /api/v1/knowledge/documents/{documentId}`
 
-Một tài liệu; không có thì `CORE-RESOURCE_NOT_FOUND`.
+Một tài liệu; không có hoặc người gọi không được đọc thì `CORE-RESOURCE_NOT_FOUND`.
+
+### `DELETE /api/v1/knowledge/documents/{documentId}`
+
+Xóa tệp, các đoạn và bản ghi, nên câu hỏi sau không còn trích dẫn tài liệu. Người tải lên luôn xóa được; ADMIN/SUPER_ADMIN
+xóa được tài liệu `global` (phạm vi toàn hệ thống) hoặc `unit` nằm trong phạm vi của mình; tài liệu `personal` chỉ chủ
+sở hữu xóa. Không đủ quyền: HTTP 403. Tài liệu không đọc được: not found. Tài liệu đang `processing`: lỗi validation
+`PROCESSING` trên `documentId`; thử lại sau khi xử lý xong.
 
 ### `KnowledgeDocumentView`
 
@@ -54,6 +65,8 @@ Một tài liệu; không có thì `CORE-RESOURCE_NOT_FOUND`.
   "fileName": "Quy-trinh-EOD.pdf",
   "mimeType": "application/pdf",
   "sizeBytes": 812345,
+  "scope": "unit",
+  "scopeOrgId": 7,
   "status": "processing",
   "errorMessage": null,
   "pageCount": 12,

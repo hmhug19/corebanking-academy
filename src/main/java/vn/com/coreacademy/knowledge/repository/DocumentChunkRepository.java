@@ -4,6 +4,8 @@ import java.util.List;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /** Chunks of ready documents; JPA has no mapping for pgvector, so this uses JdbcTemplate. */
@@ -19,14 +21,18 @@ public class DocumentChunkRepository {
     // Cosine distance with the HNSW index; 1 - distance is the similarity. Only ready documents have chunks.
     private static final String SEARCH = """
         SELECT c.chunk_id, c.document_id, d.file_name, c.page_number, c.line_start, c.line_end, c.content,
-               1 - (c.embedding <=> CAST(? AS vector)) AS similarity
+               1 - (c.embedding <=> CAST(:vector AS vector)) AS similarity
           FROM learning_hub.knowledge_document_chunks c
           JOIN learning_hub.knowledge_documents d ON d.document_id = c.document_id
-         ORDER BY c.embedding <=> CAST(? AS vector)
-         LIMIT ?
+         WHERE d.scope = 'global'
+            OR (d.scope = 'personal' AND d.uploaded_by = :userId)
+            OR (d.scope = 'unit' AND d.scope_org_id IN (:orgIds))
+         ORDER BY c.embedding <=> CAST(:vector AS vector)
+         LIMIT :limit
         """;
 
     private final JdbcTemplate jdbc;
+    private final NamedParameterJdbcTemplate named;
 
     /** One chunk to store; {@code embedding} is the bge-m3 vector of {@code content}. */
     public record NewChunk(int index, String content, Integer page, int lineStart, int lineEnd, int tokenEstimate,
@@ -38,12 +44,24 @@ public class DocumentChunkRepository {
                            String content, double similarity) {
     }
 
-    /** The {@code limit} chunks closest to {@code query} across the whole shared knowledge base, best first. */
-    public List<ChunkHit> search(float[] query, int limit) {
-        String vector = toVectorLiteral(query);
-        return jdbc.query(SEARCH, (rs, rowNum) -> new ChunkHit(rs.getLong("chunk_id"), rs.getLong("document_id"),
-            rs.getString("file_name"), rs.getObject("page_number", Integer.class), rs.getInt("line_start"),
-            rs.getInt("line_end"), rs.getString("content"), rs.getDouble("similarity")), vector, vector, limit);
+    /**
+     * The {@code limit} chunks closest to {@code query} among the documents {@code visibility} may read, best first.
+     * The scope filter is part of the same statement as the ordering and the limit, so documents the user cannot read
+     * never take a place in the top results.
+     */
+    public List<ChunkHit> search(float[] query, int limit, DocumentVisibility visibility) {
+        MapSqlParameterSource parameters = new MapSqlParameterSource().addValue("vector", toVectorLiteral(query))
+            .addValue("limit", limit).addValue("userId", visibility.userId())
+            .addValue("orgIds", visibility.orgIdsOrPlaceholder());
+
+        return named.query(SEARCH, parameters, (rs, rowNum) -> new ChunkHit(rs.getLong("chunk_id"),
+            rs.getLong("document_id"), rs.getString("file_name"), rs.getObject("page_number", Integer.class),
+            rs.getInt("line_start"), rs.getInt("line_end"), rs.getString("content"), rs.getDouble("similarity")));
+    }
+
+    /** Removes every chunk of a document; the caller deletes the document row in the same transaction. */
+    public int deleteByDocument(long documentId) {
+        return jdbc.update("DELETE FROM learning_hub.knowledge_document_chunks WHERE document_id = ?", documentId);
     }
 
     /** Must run inside the transaction that marks the document ready, so a search never sees half a document. */

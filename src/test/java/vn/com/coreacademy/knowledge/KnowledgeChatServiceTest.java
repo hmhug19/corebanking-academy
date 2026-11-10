@@ -40,6 +40,8 @@ import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import vn.com.coreacademy.knowledge.dto.ChatViews.ChatAnswerView;
 import vn.com.coreacademy.knowledge.exception.KnowledgeResponseCode;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
+import vn.com.coreacademy.knowledge.repository.DocumentVisibility;
+import vn.com.coreacademy.knowledge.service.KnowledgeAccess;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 import vn.com.coreacademy.knowledge.service.ChatPromptBuilder;
 import vn.com.coreacademy.knowledge.service.KnowledgeChatService;
@@ -74,6 +76,7 @@ class KnowledgeChatServiceTest {
 
     private final OllamaClient ollama = mock(OllamaClient.class);
     private final DocumentChunkRepository chunks = mock(DocumentChunkRepository.class);
+    private final KnowledgeAccess access = mock(KnowledgeAccess.class);
     private final ObjectMapper json = new ObjectMapper();
     private final MutableClock clock = new MutableClock();
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
@@ -93,7 +96,8 @@ class KnowledgeChatServiceTest {
             clock);
         service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter,
             conversations, new AssistantMetrics(meters), vn.com.coreacademy.assistant.config.AssistantModels.defaults(),
-            new vn.com.coreacademy.assistant.skill.SkillCatalog());
+            new vn.com.coreacademy.assistant.skill.SkillCatalog(), access);
+        when(access.visibility(any())).thenReturn(new DocumentVisibility(USER, java.util.Set.of()));
         when(ollama.embed(anyList())).thenReturn(List.of(new float[1024]));
         signedInAs(USER);
     }
@@ -110,7 +114,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void aSecondStreamOfTheSameUserEndsBusyWithoutCallingTheModel() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         StreamingResponseBody body = service.stream("CIF là gì?");
         TurnLimiter.Turn running = ((TurnLimiter.Admission.Started) limiter.admit(USER)).turn();
 
@@ -125,7 +129,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void theStreamAfterTheHourlyLimitEndsRateLimitedWithTheWait() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of());
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of());
         for (int i = 0; i < 2; i++) {
             service.stream("Hỏi").writeTo(new ByteArrayOutputStream());
             clock.advance(Duration.ofMinutes(5));
@@ -140,7 +144,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void theNonStreamChatIsRefusedWhileTheUsersOtherTurnRunsAndAfterTheHourlyLimit() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of());
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of());
         TurnLimiter.Turn running = ((TurnLimiter.Admission.Started) limiter.admit(USER)).turn();
 
         assertThatThrownBy(() -> service.answer("Hỏi")).isInstanceOf(BusinessException.class)
@@ -156,7 +160,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void nothingAboveTheThresholdIsNotFoundAndTheModelIsNeverCalled() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(WEAK));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(WEAK));
 
         ChatAnswerView answer = service.answer("Câu hỏi không có trong tài liệu?");
 
@@ -169,7 +173,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void whenTheModelSaysNothingWasFoundThereAreNoCitations() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("  \"Không tìm thấy thông tin này trong tài liệu.\"  ");
 
         ChatAnswerView answer = service.answer("Hỏi gì đó");
@@ -181,7 +185,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void aNormalAnswerCitesOnlyTheChunksItMarksWithTheirPageAndLines() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, WEAK, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, WEAK, GL));
         when(ollama.chat(anyList(), any())).thenReturn("CIF là mã khách hàng duy nhất [1].");
 
         ChatAnswerView answer = service.answer("CIF là gì?");
@@ -202,7 +206,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void aCitationKeepsTheNumberTheModelSawEvenWhenEarlierChunksAreLeftOut() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("Đối chiếu GL trước EOD [2].");
 
         ChatAnswerView answer = service.answer("Trước EOD cần làm gì?");
@@ -216,7 +220,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void everyMarkerFormNamesItsChunksAndEachChunkIsCitedOnce() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("Ý một [2][1]. Ý hai [1, 2]. Lại [2].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
@@ -224,7 +228,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void withoutAUsableMarkerEveryRetrievedChunkIsASource() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn, chỉ [9] và [12345678901].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
@@ -232,7 +236,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void outOfRangeMarkersAreIgnoredBesideAValidOne() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("CIF [1][7].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1);
@@ -240,12 +244,12 @@ class KnowledgeChatServiceTest {
 
     @Test
     void aChunkStoredTwiceReachesThePromptAndTheSourcesOnce() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, CIF_COPY, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, CIF_COPY, GL));
         when(ollama.chat(anyList(), any())).thenReturn("CIF [1]. GL [2].");
 
         ChatAnswerView answer = service.answer("CIF và GL?");
 
-        verify(chunks).search(any(), eq(15));
+        verify(chunks).search(any(), eq(15), any());
         assertThat(answer.citations()).extracting(c -> c.n(), c -> c.documentId())
             .containsExactly(tuple(1, 42L), tuple(2, 43L));
         @SuppressWarnings("unchecked")
@@ -261,7 +265,7 @@ class KnowledgeChatServiceTest {
         List<ChunkHit> many = IntStream.range(0, 8)
             .mapToObj(i -> new ChunkHit(10 + i, 50 + i, "f" + i + ".md", null, 1, 1, "Đoạn " + i, 0.9 - i * 0.01))
             .toList();
-        when(chunks.search(any(), anyInt())).thenReturn(many);
+        when(chunks.search(any(), anyInt(), any())).thenReturn(many);
         when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn.");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2, 3, 4, 5);
@@ -269,7 +273,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void thePromptContainsOnlyTheRetrievedChunksAndTheQuestion() {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, WEAK, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, WEAK, GL));
         when(ollama.chat(anyList(), any())).thenReturn("ok");
 
         service.answer("  CIF là gì?  ");
@@ -295,7 +299,7 @@ class KnowledgeChatServiceTest {
             .extracting(e -> ((BusinessException) e).getResponseCode()).isEqualTo(KnowledgeResponseCode.AI_UNAVAILABLE);
 
         doReturn(List.of(new float[1024])).when(ollama).embed(anyList());
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         when(ollama.chat(anyList(), any())).thenThrow(new OllamaUnavailableException("down", null));
         assertThatThrownBy(() -> service.answer("Hỏi")).isInstanceOf(BusinessException.class)
             .extracting(e -> ((BusinessException) e).getResponseCode()).isEqualTo(KnowledgeResponseCode.AI_UNAVAILABLE);
@@ -312,7 +316,7 @@ class KnowledgeChatServiceTest {
     @Test
     void aLongChunkBecomesA280CharacterSnippetCutAtAWordBoundary() {
         String content = ("từ ").repeat(200);
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(
             new ChunkHit(1, 1, "a.md", null, 1, 2, content, 0.9)));
         when(ollama.chat(anyList(), any())).thenReturn("ok");
 
@@ -324,7 +328,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void streamEmitsRetrievedThenDeltasThenDone() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         streamDeltas("CIF là ", "mã khách hàng [1].");
 
         List<JsonNode> events = run(service.stream("CIF là gì?"));
@@ -342,7 +346,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void theFirstLineNamesTheNewConversationAndTheTurnIsStored() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         streamDeltas("CIF là ", "mã khách hàng [1].");
 
         List<JsonNode> events = runRaw(service.stream("CIF là gì?"));
@@ -360,7 +364,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void suggestionsLeaveTheAnswerAndTheStreamAndTheTurnStoresTheSkillAndPromptVersion() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         streamDeltas("CIF là mã khách hàng [1].\n@@GOI", "_Y@@\n- CIF cấp thế nào?\n- Ai quản lý CIF?");
 
         List<JsonNode> events = runRaw(service.stream("CIF là gì?"));
@@ -380,7 +384,7 @@ class KnowledgeChatServiceTest {
     @Test
     void aFollowUpGivesTheModelTheEarlierTurnsButRetrievesWithTheNewQuestionAlone() throws IOException {
         long id = conversations.seed(USER, "CIF là gì?", "CIF là mã khách hàng [1].");
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         streamDeltas("Có [1].");
 
         List<JsonNode> events = runRaw(service.stream("Còn ngoại lệ?", id));
@@ -399,7 +403,7 @@ class KnowledgeChatServiceTest {
     @Test
     void neitherTheQuestionNorTheAnswerReachesTheLogs() throws IOException {
         try (LogCapture logs = new LogCapture()) {
-            when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+            when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
             streamDeltas("Đáp án riêng tư 24680 [1].");
             run(service.stream("Câu hỏi riêng tư 13579"));
 
@@ -421,7 +425,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void streamWithNothingRetrievedSendsTheFixedSentenceWithoutCallingTheModel() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(WEAK));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(WEAK));
 
         List<JsonNode> events = run(service.stream("Hỏi"));
 
@@ -436,7 +440,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void aStreamedTurnAndANotFoundAnswerAreCountedWithoutAnyUserText() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(WEAK));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(WEAK));
 
         run(service.stream("Hỏi chuyện riêng tư"));
 
@@ -451,7 +455,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void streamWithdrawsCitationsWhenTheModelSaysNothingWasFound() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         streamDeltas("Không tìm thấy thông tin ", "này trong tài liệu.");
 
         List<JsonNode> events = run(service.stream("Hỏi"));
@@ -464,7 +468,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void streamReplacesTheTextWithTheFixedSentenceWhenTheModelAddsSourceMarkers() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         streamDeltas("Không tìm thấy thông tin này trong tài liệu.", "[1][2]");
 
         List<JsonNode> events = run(service.stream("Hỏi"));
@@ -477,7 +481,7 @@ class KnowledgeChatServiceTest {
 
     @Test
     void streamEndsWithAnErrorEventWhenOllamaFailsMidAnswer() throws IOException {
-        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         doAnswer(invocation -> {
             Consumer<String> onDelta = invocation.getArgument(2);
             onDelta.accept("CIF là ");

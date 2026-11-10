@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
+import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.entity.KnowledgeDocument;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.NewChunk;
@@ -63,6 +64,7 @@ class KnowledgeChatControllerTest extends KnowledgeIntegrationTest {
         jdbc.update("DELETE FROM learning_hub.knowledge_documents");
         KnowledgeDocument document = new KnowledgeDocument();
         document.setUploadedBy("000005");
+        document.setScope(DocumentScope.GLOBAL);
         document.setFileName("Quy-trinh-EOD.pdf");
         document.setMimeType("application/pdf");
         document.setSizeBytes(1);

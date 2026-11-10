@@ -37,6 +37,7 @@ import vn.com.coreacademy.knowledge.dto.ChatViews.ChatAnswerView;
 import vn.com.coreacademy.knowledge.exception.KnowledgeResponseCode;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
+import vn.com.coreacademy.knowledge.repository.DocumentVisibility;
 
 /**
  * Answers a question from the shared knowledge base only: embed, find the closest chunks, and let the local model
@@ -62,6 +63,7 @@ public class KnowledgeChatService {
     private final AssistantMetrics metrics;
     private final AssistantModels models;
     private final SkillCatalog catalog;
+    private final KnowledgeAccess access;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -74,11 +76,12 @@ public class KnowledgeChatService {
             throw BusinessException.validation("question", "OUT_OF_RANGE", "Câu hỏi phải từ 1 đến 300 ký tự.");
         }
 
+        DocumentVisibility visibility = access.visibility(SecurityContextUtils.getUserId());
         List<ChunkHit> hits;
         try {
             float[] vector = ollama.embed(List.of(question)).get(0);
             KnowledgeProperties.Retrieval retrieval = properties.retrieval();
-            List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR).stream()
+            List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR, visibility).stream()
                 .filter(hit -> hit.similarity() >= retrieval.minSimilarity()).toList();
             hits = distinct(candidates, retrieval.topK());
         } catch (OllamaUnavailableException | OllamaException exception) {

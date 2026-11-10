@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -15,10 +16,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
+import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.NewChunk;
 import vn.com.coreacademy.knowledge.support.KnowledgeIntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -33,6 +37,9 @@ class KnowledgeDocumentControllerTest extends KnowledgeIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private DocumentChunkRepository chunks;
 
     @Value("${app.knowledge.storage-dir}")
     private Path storageDir;
@@ -180,6 +187,105 @@ class KnowledgeDocumentControllerTest extends KnowledgeIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("ERROR"))
             .andExpect(jsonPath("$.messageCode").value("CORE-RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void uploadDefaultsToTheUploadersUnit() throws Exception {
+        mvc.perform(multipart(DOCUMENTS).file(markdown("don-vi.md", "x")).with(as("000005")))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.scope").value("unit"))
+            .andExpect(jsonPath("$.data.scopeOrgId").isNumber());
+    }
+
+    @Test
+    void anInstructorCannotShareWithEveryoneButAnAdminCan() throws Exception {
+        mvc.perform(multipart(DOCUMENTS).file(markdown("chung.md", "x")).param("scope", "global").with(as("000005")))
+            .andExpect(status().isForbidden());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents", Integer.class))
+            .isZero();
+
+        mvc.perform(multipart(DOCUMENTS).file(markdown("chung.md", "x")).param("scope", "global").with(as("000002")))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.scope").value("global"))
+            .andExpect(jsonPath("$.data.scopeOrgId").doesNotExist());
+    }
+
+    @Test
+    void anUnknownScopeIsRefused() throws Exception {
+        mvc.perform(multipart(DOCUMENTS).file(markdown("x.md", "x")).param("scope", "everyone").with(as("000005")))
+            .andExpect(jsonPath("$.errors[0].field").value("scope"));
+    }
+
+    @Test
+    void aPersonalDocumentIsNeitherListedNorReadableByAnotherUser() throws Exception {
+        long id = uploadScoped("000005", "rieng.md", "personal");
+
+        mvc.perform(get(DOCUMENTS).with(as("000004")))
+            .andExpect(jsonPath("$.data.items.length()").value(0));
+        mvc.perform(get(DOCUMENTS + "/" + id).with(as("000004")))
+            .andExpect(jsonPath("$.status").value("ERROR"));
+        mvc.perform(get(DOCUMENTS).with(as("000005")))
+            .andExpect(jsonPath("$.data.items.length()").value(1));
+        mvc.perform(delete(DOCUMENTS + "/" + id).with(as("000004")))
+            .andExpect(jsonPath("$.status").value("ERROR"));
+        assertThat(documentCount(id)).isEqualTo(1);
+    }
+
+    @Test
+    void theOwnerDeletesADocumentWithItsChunksAndFile() throws Exception {
+        long id = uploadScoped("000005", "xoa.md", "unit");
+        chunks.insertAll(id, List.of(new NewChunk(0, "noi dung", null, 1, 1, 1, new float[1024])));
+
+        mvc.perform(delete(DOCUMENTS + "/" + id).with(as("000005")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("SUCCESS"));
+
+        assertThat(documentCount(id)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_document_chunks", Integer.class))
+            .isZero();
+        assertThat(storedFiles()).isZero();
+    }
+
+    @Test
+    void aLearnerCannotDeleteAnotherUsersUnitDocument() throws Exception {
+        long id = uploadScoped("000005", "cua-giang-vien.md", "unit");
+
+        mvc.perform(delete(DOCUMENTS + "/" + id).with(as("000004"))).andExpect(status().isForbidden());
+
+        assertThat(documentCount(id)).isEqualTo(1);
+    }
+
+    @Test
+    void anAdminInScopeDeletesAUnitDocument() throws Exception {
+        long id = uploadScoped("000005", "cua-giang-vien.md", "unit");
+
+        mvc.perform(delete(DOCUMENTS + "/" + id).with(as("000003")))
+            .andExpect(jsonPath("$.status").value("SUCCESS"));
+
+        assertThat(documentCount(id)).isZero();
+    }
+
+    @Test
+    void aDocumentBeingProcessedCannotBeDeleted() throws Exception {
+        long id = uploadScoped("000005", "dang-xu-ly.md", "unit");
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET status = 'processing' WHERE document_id = ?", id);
+
+        mvc.perform(delete(DOCUMENTS + "/" + id).with(as("000005")))
+            .andExpect(jsonPath("$.errors[0].code").value("PROCESSING"));
+
+        assertThat(documentCount(id)).isEqualTo(1);
+    }
+
+    private long uploadScoped(String userId, String name, String scope) throws Exception {
+        String body = mvc.perform(multipart(DOCUMENTS).file(markdown(name, "nội dung " + name)).param("scope", scope)
+                .with(as(userId)))
+            .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        return new com.fasterxml.jackson.databind.ObjectMapper().readTree(body).path("data").path("id").asLong();
+    }
+
+    private int documentCount(long id) {
+        return jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents WHERE document_id = ?",
+            Integer.class, id);
     }
 
     private void refused(MockMultipartFile file, String messageCode) throws Exception {

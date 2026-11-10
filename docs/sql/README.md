@@ -32,6 +32,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5a | `upgrade/2026-11-10-assistant-conversations.sql` | Hội thoại và lượt hỏi-đáp của trợ lý AI; chạy trước backend mới (ddl-auto=validate). Rollback cùng tên `.rollback.sql` xoá hết hội thoại đã lưu |
 | 5b | `upgrade/2026-11-10-assistant-pending-actions.sql` | Thay đổi dữ liệu trợ lý đề xuất chờ người dùng xác nhận, lưu trong DB để không mất khi khởi động lại; chạy trước backend mới. Rollback cùng tên `.rollback.sql` bỏ các đề xuất đang chờ |
 | 5c | `upgrade/2026-11-10-assistant-feedback.sql` | Đánh giá 👍/👎 của người dùng cho câu trả lời của trợ lý; chạy trước backend mới. Rollback cùng tên `.rollback.sql` bỏ mọi đánh giá |
+| 5d | `upgrade/2026-11-11-knowledge-document-scope.sql` | Phạm vi tài liệu kho tri thức (personal, unit, global) để tài liệu cá nhân hoặc của đơn vị không lộ cho người khác; tài liệu cũ thành global; chạy trước backend mới |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |
