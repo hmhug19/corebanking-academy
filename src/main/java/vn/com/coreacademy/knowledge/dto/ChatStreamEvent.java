@@ -6,6 +6,10 @@ import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 
 /** One NDJSON line of the chat stream; {@code type} is the first field so a client can branch on it. */
 public sealed interface ChatStreamEvent {
+    /** First line of every stream: the conversation this turn is stored in (new when the request named none). */
+    record Conversation(String type, long conversationId) implements ChatStreamEvent {
+    }
+
     /** Retrieval is done and generation is starting. */
     record Retrieved(String type, int count) implements ChatStreamEvent {
     }
@@ -23,6 +27,10 @@ public sealed interface ChatStreamEvent {
 
     /** Last line on failure after the stream has started. */
     record Error(String type, String messageCode, String message) implements ChatStreamEvent {
+    }
+
+    static Conversation conversation(long conversationId) {
+        return new Conversation("conversation", conversationId);
     }
 
     static Retrieved retrieved(int count) {

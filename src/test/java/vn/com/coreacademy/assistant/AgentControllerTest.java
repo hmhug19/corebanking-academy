@@ -122,11 +122,14 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
         MvcResult result = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn();
         assertThat(result.getResponse().getContentType()).startsWith("application/x-ndjson");
         assertThat(result.getResponse().getHeader("X-Accel-Buffering")).isEqualTo("no");
-        return result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        List<String> all = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        // Every stream opens with the conversation it is stored in; the tests below read what follows.
+        assertThat(all.get(0)).matches("\\{\"type\":\"conversation\",\"conversationId\":\\d+}");
+        return all.subList(1, all.size());
     }
 
     private static String question(String text) {
-        return "{\"messages\":[{\"role\":\"user\",\"content\":\"" + text + "\"}]}";
+        return "{\"message\":\"" + text + "\"}";
     }
 
     @Test
@@ -174,11 +177,9 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
     void invalidRequestsAreEnvelopesNotStreams() throws Exception {
         doReturn(true).when(ollama).isAvailable();
         List<String> bodies = List.of(
-            "{\"messages\":[{\"role\":\"system\",\"content\":\"x\"},{\"role\":\"user\",\"content\":\"hi\"}]}",
-            "{\"messages\":[{\"role\":\"tool\",\"content\":\"x\"},{\"role\":\"user\",\"content\":\"hi\"}]}",
-            "{\"messages\":[]}",
             "{}",
-            "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"},{\"role\":\"assistant\",\"content\":\"hello\"}]}",
+            "{\"message\":null}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
             question("x".repeat(501)),
             question("   "));
 
@@ -193,14 +194,15 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
     }
 
     @Test
-    void anAssistantTurnOfFourThousandAndOneCharactersIsCutNotRefused() throws Exception {
+    void aConversationIdThatDoesNotExistIsAnEnvelopeNotAStream() throws Exception {
         doReturn(true).when(ollama).isAvailable();
-        doAnswer(invocation -> new ChatTurn("ok", List.of())).when(ollama)
-            .chatWithTools(anyList(), anyList(), any(), any());
-        String body = "{\"messages\":[{\"role\":\"user\",\"content\":\"a\"},{\"role\":\"assistant\",\"content\":\""
-            + "y".repeat(4001) + "\"},{\"role\":\"user\",\"content\":\"b\"}]}";
 
-        assertThat(lines("000004", body)).last().asString().contains("\"type\":\"done\"");
+        mvc.perform(post(AGENT + "/stream").with(as("000004")).accept(NDJSON, MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"conversationId\":999999999,\"message\":\"hi\"}"))
+            .andExpect(status().isOk())
+            .andExpect(request().asyncNotStarted())
+            .andExpect(jsonPath("$.messageCode").value("ASSISTANT-CONVERSATION_NOT_FOUND"));
     }
 
     @Test

@@ -148,7 +148,9 @@ class KnowledgeChatControllerTest extends KnowledgeIntegrationTest {
 
         assertThat(result.getResponse().getContentType()).startsWith("application/x-ndjson");
         assertThat(result.getResponse().getHeader("X-Accel-Buffering")).isEqualTo("no");
-        List<String> lines = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        List<String> all = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        assertThat(all.get(0)).matches("\\{\"type\":\"conversation\",\"conversationId\":\\d+}");
+        List<String> lines = all.subList(1, all.size());
         assertThat(lines).hasSize(4);
         assertThat(lines.get(0)).isEqualTo("{\"type\":\"retrieved\",\"count\":1}");
         assertThat(lines.get(1)).isEqualTo("{\"type\":\"delta\",\"text\":\"CIF là \"}");

@@ -24,11 +24,11 @@ import vn.com.coreacademy.assistant.action.PendingAction;
 import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.agent.AgentPrompt;
 import vn.com.coreacademy.assistant.agent.AgentService;
+import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
-import vn.com.coreacademy.assistant.dto.AgentMessage;
 import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.PendingActionView.Change;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
@@ -74,6 +74,7 @@ class AgentServiceTest {
     private final AssistantProperties properties = new AssistantProperties(4, 20, Duration.ofMinutes(10), 4);
     private final MutableClock clock = new MutableClock();
     private final TurnLimiter limiter = new TurnLimiter(properties, new AssistantLimits(3), clock);
+    private final InMemoryConversations conversations = new InMemoryConversations();
 
     @BeforeEach
     void setUp() {
@@ -91,7 +92,7 @@ class AgentServiceTest {
         @SuppressWarnings("unchecked")
         ObjectProvider<AgentTool> provider = mock(ObjectProvider.class);
         when(provider.orderedStream()).thenAnswer(invocation -> tools.stream());
-        return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, json);
+        return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, conversations, json);
     }
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
@@ -160,7 +161,13 @@ class AgentServiceTest {
         }).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
     }
 
+    /** The events after the opening {@code conversation} line, which has its own tests. */
     private List<JsonNode> events(StreamingResponseBody body) throws IOException {
+        List<JsonNode> all = rawEvents(body);
+        return all.get(0).path("type").asText().equals("conversation") ? all.subList(1, all.size()) : all;
+    }
+
+    private List<JsonNode> rawEvents(StreamingResponseBody body) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         body.writeTo(out);
         List<JsonNode> events = new ArrayList<>();
@@ -177,7 +184,7 @@ class AgentServiceTest {
     }
 
     private StreamingResponseBody ask(String question) {
-        return service().stream(List.of(ChatMessage.user(question)));
+        return service().stream(question, null);
     }
 
     @Test
@@ -221,25 +228,82 @@ class AgentServiceTest {
     }
 
     @Test
-    void theOldestTurnsAreDroppedSoTheHistoryStaysWithinItsCharacterBudget() throws IOException {
+    void theFirstLineNamesTheNewConversationAndTheTurnIsStoredWithItsAnswerAndTools() throws IOException {
+        tool("search_documents", true, (arguments, turn) -> new ToolOutcome.Result("[1] CIF là mã khách hàng."));
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("CIF là mã [1].", List.of()));
+
+        List<JsonNode> events = rawEvents(ask("CIF là gì?"));
+
+        assertThat(events.get(0).path("type").asText()).isEqualTo("conversation");
+        assertThat(events.get(0).path("conversationId").asLong()).isPositive();
+        assertThat(conversations.recorded).hasSize(1);
+        TurnRecord stored = conversations.recorded.get(0);
+        assertThat(stored.question()).isEqualTo("CIF là gì?");
+        assertThat(stored.answer()).isEqualTo("CIF là mã [1].");
+        assertThat(stored.toolNames()).containsExactly("search_documents");
+        assertThat(stored.status()).isEqualTo(TurnRecord.Status.DONE);
+        assertThat(stored.surface()).isEqualTo(TurnRecord.AGENT);
+    }
+
+    @Test
+    void aFollowUpSendsTheEarlierTurnsToTheModelAndTheClientSendsNoHistory() throws IOException {
+        long id = conversations.seed("000004", "CIF là gì?", "CIF là mã khách hàng.");
         modelAnswers(List.of("ok"), List.of());
-        List<AgentMessage> request = new ArrayList<>();
-        for (int i = 0; i < 9; i++) {
-            request.add(new AgentMessage("user", "câu " + i));
-            request.add(new AgentMessage("assistant", "x".repeat(4000)));
-        }
-        request.add(new AgentMessage("user", "câu cuối"));
 
-        events(service().stream(new AgentRequest(request)));
+        List<JsonNode> events = rawEvents(service().stream("Còn CIF doanh nghiệp?", id));
 
+        assertThat(events.get(0).path("conversationId").asLong()).isEqualTo(id);
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
         verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any());
-        List<ChatMessage> history = messages.getValue().subList(1, messages.getValue().size());
-        assertThat(history.stream().mapToInt(message -> message.content().length()).sum())
-            .isLessThanOrEqualTo(AgentService.MAX_HISTORY_CHARS);
-        assertThat(history.get(0).role()).isEqualTo("user");
-        assertThat(history.get(0).content()).isEqualTo("câu 6");
-        assertThat(history.get(history.size() - 1).content()).isEqualTo("câu cuối");
+        assertThat(messages.getValue()).extracting(ChatMessage::role).containsExactly("system", "user", "assistant",
+            "user");
+        assertThat(messages.getValue().get(1).content()).isEqualTo("CIF là gì?");
+        assertThat(messages.getValue().get(2).content()).isEqualTo("CIF là mã khách hàng.");
+        assertThat(messages.getValue().get(3).content()).isEqualTo("Còn CIF doanh nghiệp?");
+    }
+
+    @Test
+    void anotherUsersConversationIdIsRefusedBeforeTheStreamAsNotFound() {
+        long theirs = conversations.seed("000005", "Hỏi", "Đáp");
+
+        assertThatThrownBy(() -> service().stream("Xin chào", theirs)).isInstanceOf(BusinessException.class)
+            .extracting(exception -> ((BusinessException) exception).getResponseCode().getCode())
+            .isEqualTo("ASSISTANT-CONVERSATION_NOT_FOUND");
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+    }
+
+    @Test
+    void aFailedTurnIsStoredAsErrorWithoutAnAnswer() throws IOException {
+        when(ollama.chatWithTools(anyList(), anyList(), any(), any())).thenThrow(new IllegalStateException("boom"));
+
+        events(ask("Xin chào"));
+
+        assertThat(conversations.recorded).hasSize(1);
+        assertThat(conversations.recorded.get(0).status()).isEqualTo(TurnRecord.Status.ERROR);
+        assertThat(conversations.recorded.get(0).answer()).isNull();
+    }
+
+    @Test
+    void neitherTheQuestionNorTheAnswerReachesTheLogsOnASuccessfulOrAFailedTurn() throws IOException {
+        try (LogCapture logs = new LogCapture()) {
+            modelAnswers(List.of("Đáp án riêng tư 24680"), List.of());
+            events(ask("Câu hỏi riêng tư 13579"));
+            org.mockito.Mockito.doThrow(new IllegalStateException("Câu hỏi riêng tư 13579")).when(ollama)
+                .chatWithTools(anyList(), anyList(), any(), any());
+            events(ask("Câu hỏi riêng tư 13579"));
+
+            assertThat(logs.lines()).isNotEmpty();
+            assertThat(logs.lines()).allSatisfy(line -> assertThat(line)
+                .doesNotContain("riêng tư").doesNotContain("13579").doesNotContain("24680"));
+        }
+    }
+
+    @Test
+    void aMessageThatIsBlankOrOver500CharactersIsRefused() {
+        for (String message : new String[] {"   ", "x".repeat(501)}) {
+            assertThatThrownBy(() -> service().stream(new AgentRequest(null, message)))
+                .isInstanceOf(BusinessException.class);
+        }
     }
 
     @Test
@@ -306,17 +370,16 @@ class AgentServiceTest {
     }
 
     @Test
-    void theSystemPromptAndTheHistoryAreSentInOrder() throws IOException {
+    void theSystemPromptComesFirstThenTheQuestion() throws IOException {
         modelAnswers(List.of("ok"), List.of());
 
-        events(service().stream(List.of(ChatMessage.user("a"), ChatMessage.assistant("b"), ChatMessage.user("c"))));
+        events(ask("c"));
 
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
         verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any());
-        assertThat(messages.getValue()).extracting(ChatMessage::role).containsExactly("system", "user", "assistant",
-            "user");
+        assertThat(messages.getValue()).extracting(ChatMessage::role).containsExactly("system", "user");
         assertThat(messages.getValue().get(0).content()).isEqualTo(AgentPrompt.SYSTEM);
-        assertThat(messages.getValue().get(3).content()).isEqualTo("c");
+        assertThat(messages.getValue().get(1).content()).isEqualTo("c");
     }
 
     @Test

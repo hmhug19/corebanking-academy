@@ -1,8 +1,10 @@
 package vn.com.coreacademy.knowledge.service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Component;
+import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 
@@ -20,13 +22,29 @@ public class ChatPromptBuilder {
 
     /** {@code hits} are numbered [1]…[n] in the order given, and the same numbers name the citations. */
     public List<Message> build(String question, List<ChunkHit> hits) {
+        return build(question, hits, List.of());
+    }
+
+    /**
+     * Same, with the conversation's earlier exchanges ahead of the new question as plain turns, so a follow-up such
+     * as "còn trường hợp ngoại lệ?" is read in context. Only the new question gets chunks.
+     */
+    public List<Message> build(String question, List<ChunkHit> hits, List<Conversations.Exchange> history) {
         StringBuilder user = new StringBuilder("NGỮ CẢNH:\n");
         for (int i = 0; i < hits.size(); i++) {
             user.append(formatChunk(i + 1, hits.get(i))).append("\n\n");
         }
         user.append("CÂU HỎI: ").append(question);
 
-        return List.of(Message.system(SYSTEM), Message.user(user.toString()));
+        List<Message> messages = new ArrayList<>();
+        messages.add(Message.system(SYSTEM));
+        for (Conversations.Exchange exchange : history) {
+            messages.add(Message.user(exchange.question()));
+            messages.add(Message.assistant(exchange.answer()));
+        }
+        messages.add(Message.user(user.toString()));
+
+        return messages;
     }
 
     /** One numbered chunk as the model sees it: {@code [n] (file, trang p, dòng a–b)} then the text. */

@@ -37,7 +37,7 @@
         "description": "NDJSON: tool, delta..., done kèm citations. Cần Ollama chạy cục bộ.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"CIF là gì?\"\n    }\n  ]\n}"
+          "raw": "{\n  \"message\": \"CIF là gì?\"\n}"
         }
       },
       "event": [
@@ -80,7 +80,7 @@
         "description": "Cần tài khoản có màn hình đó (quantri: navigate tới /admin/users; hocvien: bị từ chối bằng lời, không có navigate).",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Mở trang quản lý người dùng\"\n    }\n  ]\n}"
+          "raw": "{\n  \"message\": \"Mở trang quản lý người dùng\"\n}"
         }
       },
       "event": [
@@ -123,7 +123,7 @@
         "description": "Kết thúc bằng action_required; script lưu actionId. Chưa có gì thay đổi cho tới khi xác nhận.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Đổi chức danh của tôi thành Chuyên viên chính\"\n    }\n  ]\n}"
+          "raw": "{\n  \"message\": \"Đổi chức danh của tôi thành Chuyên viên chính\"\n}"
         }
       },
       "event": [

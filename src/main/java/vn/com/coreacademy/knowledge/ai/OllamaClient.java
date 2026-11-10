@@ -56,6 +56,10 @@ public class OllamaClient {
         public static Message user(String content) {
             return new Message("user", content);
         }
+
+        public static Message assistant(String content) {
+            return new Message("assistant", content);
+        }
     }
 
     public record Options(double temperature, int numCtx) {

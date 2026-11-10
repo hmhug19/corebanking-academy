@@ -22,7 +22,10 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import vn.com.coreacademy.assistant.MutableClock;
+import vn.com.coreacademy.assistant.InMemoryConversations;
+import vn.com.coreacademy.assistant.LogCapture;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -73,6 +76,8 @@ class KnowledgeChatServiceTest {
     private TurnLimiter limiter;
     private KnowledgeChatService service;
 
+    private final InMemoryConversations conversations = new InMemoryConversations();
+
     @BeforeEach
     void setUp() {
         KnowledgeProperties properties = new KnowledgeProperties(Path.of("unused"), DataSize.ofMegabytes(20),
@@ -82,7 +87,8 @@ class KnowledgeChatServiceTest {
                 Duration.ofSeconds(180), Duration.ofMinutes(10)));
         limiter = new TurnLimiter(new AssistantProperties(4, 20, Duration.ofMinutes(10), 4), new AssistantLimits(2),
             clock);
-        service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter);
+        service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter,
+            conversations);
         when(ollama.embed(anyList())).thenReturn(List.of(new float[1024]));
         signedInAs(USER);
     }
@@ -330,6 +336,66 @@ class KnowledgeChatServiceTest {
     }
 
     @Test
+    void theFirstLineNamesTheNewConversationAndTheTurnIsStored() throws IOException {
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF, GL));
+        streamDeltas("CIF là ", "mã khách hàng [1].");
+
+        List<JsonNode> events = runRaw(service.stream("CIF là gì?"));
+
+        assertThat(events.get(0).path("type").asText()).isEqualTo("conversation");
+        assertThat(events.get(0).path("conversationId").asLong()).isPositive();
+        assertThat(conversations.recorded).hasSize(1);
+        TurnRecord stored = conversations.recorded.get(0);
+        assertThat(stored.surface()).isEqualTo(TurnRecord.KNOWLEDGE);
+        assertThat(stored.question()).isEqualTo("CIF là gì?");
+        assertThat(stored.answer()).isEqualTo("CIF là mã khách hàng [1].");
+        assertThat(stored.citations()).hasSize(1);
+        assertThat(stored.status()).isEqualTo(TurnRecord.Status.DONE);
+    }
+
+    @Test
+    void aFollowUpGivesTheModelTheEarlierTurnsButRetrievesWithTheNewQuestionAlone() throws IOException {
+        long id = conversations.seed(USER, "CIF là gì?", "CIF là mã khách hàng [1].");
+        when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+        streamDeltas("Có [1].");
+
+        List<JsonNode> events = runRaw(service.stream("Còn ngoại lệ?", id));
+
+        assertThat(events.get(0).path("conversationId").asLong()).isEqualTo(id);
+        ArgumentCaptor<List<OllamaClient.Message>> sent = ArgumentCaptor.captor();
+        verify(ollama).chatStream(sent.capture(), any(), any());
+        assertThat(sent.getValue()).extracting(OllamaClient.Message::role)
+            .containsExactly("system", "user", "assistant", "user");
+        assertThat(sent.getValue().get(1).content()).isEqualTo("CIF là gì?");
+        assertThat(sent.getValue().get(2).content()).isEqualTo("CIF là mã khách hàng [1].");
+        assertThat(sent.getValue().get(3).content()).contains("NGỮ CẢNH:").endsWith("CÂU HỎI: Còn ngoại lệ?");
+        verify(ollama).embed(List.of("Còn ngoại lệ?"));
+    }
+
+    @Test
+    void neitherTheQuestionNorTheAnswerReachesTheLogs() throws IOException {
+        try (LogCapture logs = new LogCapture()) {
+            when(chunks.search(any(), anyInt())).thenReturn(List.of(CIF));
+            streamDeltas("Đáp án riêng tư 24680 [1].");
+            run(service.stream("Câu hỏi riêng tư 13579"));
+
+            assertThat(logs.lines()).isNotEmpty();
+            assertThat(logs.lines()).allSatisfy(line -> assertThat(line)
+                .doesNotContain("riêng tư").doesNotContain("13579").doesNotContain("24680"));
+        }
+    }
+
+    @Test
+    void anotherUsersConversationIdIsRefusedBeforeTheStreamAsNotFound() {
+        long theirs = conversations.seed("000005", "Hỏi", "Đáp");
+
+        assertThatThrownBy(() -> service.stream("Hỏi", theirs)).isInstanceOf(BusinessException.class)
+            .extracting(e -> ((BusinessException) e).getResponseCode().getCode())
+            .isEqualTo("ASSISTANT-CONVERSATION_NOT_FOUND");
+        verify(ollama, never()).embed(anyList());
+    }
+
+    @Test
     void streamWithNothingRetrievedSendsTheFixedSentenceWithoutCallingTheModel() throws IOException {
         when(chunks.search(any(), anyInt())).thenReturn(List.of(WEAK));
 
@@ -402,8 +468,13 @@ class KnowledgeChatServiceTest {
         }).when(ollama).chatStream(anyList(), any(), any());
     }
 
-    private List<JsonNode> run(StreamingResponseBody body)
-        throws IOException {
+    /** The events after the opening {@code conversation} line, which has its own tests. */
+    private List<JsonNode> run(StreamingResponseBody body) throws IOException {
+        List<JsonNode> all = runRaw(body);
+        return all.get(0).path("type").asText().equals("conversation") ? all.subList(1, all.size()) : all;
+    }
+
+    private List<JsonNode> runRaw(StreamingResponseBody body) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         body.writeTo(bytes);
         return bytes.toString(StandardCharsets.UTF_8).lines().map(line -> {

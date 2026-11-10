@@ -67,7 +67,7 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
 
         return mvc.perform(post("/api/v1/assistant/agent/stream").with(as(userId))
                 .accept(NDJSON, MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"messages\":[{\"role\":\"user\",\"content\":\"mở trang quản lý người dùng\"}]}"))
+                .content("{\"message\":\"mở trang quản lý người dùng\"}"))
             .andExpect(request().asyncStarted()).andReturn();
     }
 
@@ -78,7 +78,9 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
         for (String line : result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList()) {
             events.add(JSON.readTree(line));
         }
-        return events;
+        // Every stream opens with the conversation it is stored in; these tests read what follows.
+        assertThat(events.get(0).path("type").asText()).isEqualTo("conversation");
+        return events.subList(1, events.size());
     }
 
     @Test

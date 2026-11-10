@@ -6,6 +6,10 @@ import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 
 /** One NDJSON line of the agent stream; {@code type} is the first field so a client can branch on it. */
 public sealed interface AgentStreamEvent {
+    /** First line of every stream: the conversation this turn is stored in (new when the request named none). */
+    record Conversation(String type, long conversationId) implements AgentStreamEvent {
+    }
+
     /** A tool started; the app shows a status line. */
     record Tool(String type, String name) implements AgentStreamEvent {
     }
@@ -28,6 +32,10 @@ public sealed interface AgentStreamEvent {
 
     /** Last line on failure after the stream has started. */
     record Error(String type, String messageCode, String message) implements AgentStreamEvent {
+    }
+
+    static Conversation conversation(long conversationId) {
+        return new Conversation("conversation", conversationId);
     }
 
     static Tool tool(String name) {

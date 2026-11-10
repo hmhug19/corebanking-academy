@@ -80,7 +80,8 @@ tiếng Việt). `pageCount` chỉ có với PDF đã xử lý. Không trả `st
 
 ## Hỏi đáp (chat)
 
-Một lượt, độc lập: backend không giữ hội thoại. Câu hỏi 1–300 ký tự sau khi bỏ khoảng trắng hai đầu. Quy trình:
+`/chat` (không stream) là một lượt độc lập, không lưu. `/chat/stream` lưu lượt vào hội thoại dùng chung với trợ lý nhanh
+(xem [ASSISTANT.md](ASSISTANT.md#hội-thoại-đã-lưu)). Câu hỏi 1–300 ký tự sau khi bỏ khoảng trắng hai đầu. Quy trình:
 nhúng câu hỏi (bge-m3) → tìm `top-k` đoạn gần nhất (cosine) → loại đoạn dưới `min-similarity` → nếu không còn đoạn nào,
 trả đúng câu "Không tìm thấy thông tin này trong tài liệu." mà **không gọi model** → ngược lại gửi các đoạn làm ngữ cảnh
 cho `qwen3:8b` (`think: false`, `temperature 0.1`). Trích dẫn dựng từ metadata của các đoạn, không phân tích từ văn bản
@@ -124,12 +125,15 @@ Không tìm thấy: `found = false`, `answer` là câu cố định, `citations 
 
 ### POST /api/v1/knowledge/chat/stream
 
-Cùng đầu vào, trả `application/x-ndjson` (mỗi dòng một JSON, không bọc `BaseResponse`, có header
+Đầu vào thêm `conversationId` tuỳ chọn (bỏ trống để bắt đầu hội thoại mới; mã của người khác là envelope
+`ASSISTANT-CONVERSATION_NOT_FOUND`). Với câu hỏi tiếp theo, các lượt trước của hội thoại được đưa cho mô hình làm lịch sử
+(tối đa 16 000 ký tự cùng câu hỏi mới); việc tìm đoạn vẫn chỉ dùng câu hỏi mới. Trả `application/x-ndjson` (mỗi dòng một JSON, không bọc `BaseResponse`, có header
 `X-Accel-Buffering: no`). Client nên gửi `Accept: application/x-ndjson, application/json` để một lời từ chối trước khi
 stream (envelope JSON) không bị trả 406.
 
 | type        | Trường                                | Ý nghĩa                                                       |
 | ----------- | ------------------------------------- | ------------------------------------------------------------- |
+| `conversation` | `conversationId`                   | Dòng đầu của stream: hội thoại lưu lượt này                   |
 | `retrieved` | `count`                               | Số đoạn đủ liên quan, gửi ngay khi tìm xong                   |
 | `delta`     | `text`                                | Một đoạn văn bản của câu trả lời, nối theo thứ tự             |
 | `done`      | `found`, `answer`, `citations`        | Kết thúc; `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `citations` như trên, rỗng khi `found = false` |

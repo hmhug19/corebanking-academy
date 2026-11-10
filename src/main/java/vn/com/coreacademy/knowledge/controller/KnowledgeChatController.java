@@ -53,14 +53,14 @@ public class KnowledgeChatController {
         summary = "Hỏi đáp trên kho tài liệu (stream)",
         description = """
             Trả application/x-ndjson, mỗi dòng một sự kiện JSON; không bọc BaseResponse.
-            - retrieved (đã tìm xong), nhiều delta (văn bản), done (found và citations) hoặc error (lỗi giữa chừng).
+            - conversation (mã hội thoại, dòng đầu), retrieved (đã tìm xong), nhiều delta (văn bản), done (found và citations) hoặc error (lỗi giữa chừng).
             - Từ chối trước khi bắt đầu stream (câu hỏi không hợp lệ, AI chưa sẵn sàng) là envelope JSON như /chat.
             - Client nên gửi Accept: application/x-ndjson, application/json.
             """
     )
     public ResponseEntity<StreamingResponseBody> stream(@Valid @RequestBody ChatRequest request) {
         gate.requireAccess();
-        StreamingResponseBody body = chat.stream(request.question());
+        StreamingResponseBody body = chat.stream(request.question(), request.conversationId());
         return ResponseEntity.ok().contentType(NDJSON).header("X-Accel-Buffering", "no").body(body);
     }
 }

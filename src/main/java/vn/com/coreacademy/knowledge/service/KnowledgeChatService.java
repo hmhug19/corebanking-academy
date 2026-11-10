@@ -17,6 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.conversation.Conversations;
+import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.security.SecurityContextUtils;
@@ -26,6 +28,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import vn.com.coreacademy.knowledge.dto.ChatStreamEvent;
+import vn.com.coreacademy.knowledge.dto.ChatViews;
 import vn.com.coreacademy.knowledge.dto.ChatViews.ChatAnswerView;
 import vn.com.coreacademy.knowledge.exception.KnowledgeResponseCode;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
@@ -51,6 +54,7 @@ public class KnowledgeChatService {
     private final KnowledgeProperties properties;
     private final ObjectMapper json;
     private final TurnLimiter limiter;
+    private final Conversations conversations;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -112,13 +116,20 @@ public class KnowledgeChatService {
         throw new BusinessException(AssistantResponseCode.BUSY);
     }
 
+    /** A stream that is not part of a conversation yet; kept for callers that do not name one. */
+    public StreamingResponseBody stream(String rawQuestion) {
+        return stream(rawQuestion, null);
+    }
+
     /**
      * Retrieval runs now, on the request thread, so refusals are still ordinary envelopes. Generation runs inside the
-     * returned body: one JSON line per event, flushed at once.
+     * returned body: one JSON line per event, flushed at once. The first line names the conversation; the earlier
+     * turns of that conversation go to the model as plain history, retrieval still uses the new question alone.
      */
-    public StreamingResponseBody stream(String rawQuestion) {
-        Retrieval retrieval = retrieve(rawQuestion);
+    public StreamingResponseBody stream(String rawQuestion, Long conversationId) {
         String userId = SecurityContextUtils.getUserId();
+        conversations.requireOwned(userId, conversationId);
+        Retrieval retrieval = retrieve(rawQuestion);
         return output -> {
             TurnLimiter.Admission admission = limiter.admit(userId);
             if (!(admission instanceof TurnLimiter.Admission.Started started)) {
@@ -126,7 +137,14 @@ public class KnowledgeChatService {
                 return;
             }
             try (TurnLimiter.Turn ignored = started.turn()) {
-                streamAnswer(output, retrieval);
+                Conversations.Opened opened = conversations.open(userId, conversationId, retrieval.question());
+                write(output, ChatStreamEvent.conversation(opened.conversationId()));
+                TurnLog turnLog = new TurnLog(retrieval.question());
+                try {
+                    streamAnswer(output, retrieval, opened.history(), turnLog);
+                } finally {
+                    store(opened.conversationId(), turnLog);
+                }
             }
         };
     }
@@ -139,29 +157,90 @@ public class KnowledgeChatService {
         return ChatStreamEvent.error(AssistantResponseCode.BUSY.getCode(), AssistantResponseCode.BUSY.getMessage());
     }
 
-    private void streamAnswer(OutputStream output, Retrieval retrieval) {
-        write(output, ChatStreamEvent.retrieved(retrieval.hits().size()));
+    private void streamAnswer(OutputStream output, Retrieval retrieval, List<Conversations.Exchange> history,
+                              TurnLog turnLog) {
+        emit(output, turnLog, ChatStreamEvent.retrieved(retrieval.hits().size()));
         if (retrieval.hits().isEmpty()) {
-            write(output, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
-            write(output, ChatStreamEvent.done(false, NotFoundAnswer.TEXT, List.of()));
+            emit(output, turnLog, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
+            emit(output, turnLog, ChatStreamEvent.done(false, NotFoundAnswer.TEXT, List.of()));
             return;
         }
 
         StringBuilder text = new StringBuilder();
         try {
-            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits()), OllamaClient.Options.GROUNDED,
+            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), OllamaClient.Options.GROUNDED,
                 delta -> {
                     text.append(delta);
-                    write(output, ChatStreamEvent.delta(delta));
+                    emit(output, turnLog, ChatStreamEvent.delta(delta));
                 });
+        } catch (UncheckedIOException exception) {
+            turnLog.stopped();
+            throw exception;
         } catch (OllamaUnavailableException | OllamaException exception) {
-            write(output, ChatStreamEvent.error(KnowledgeResponseCode.AI_UNAVAILABLE.getCode(),
+            emit(output, turnLog, ChatStreamEvent.error(KnowledgeResponseCode.AI_UNAVAILABLE.getCode(),
                 KnowledgeResponseCode.AI_UNAVAILABLE.getMessage()));
             return;
         }
 
         ChatAnswerView answer = conclude(text.toString().strip(), retrieval.hits());
-        write(output, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations()));
+        emit(output, turnLog, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations()));
+    }
+
+    private void emit(OutputStream output, TurnLog turnLog, ChatStreamEvent event) {
+        turnLog.observe(event);
+        write(output, event);
+    }
+
+    /** Stores the turn without ever failing the stream: the user already has the answer. */
+    private void store(long conversationId, TurnLog turnLog) {
+        try {
+            conversations.record(conversationId, turnLog.record());
+        } catch (RuntimeException exception) {
+            // The message could quote the user's text; log the type only.
+            log.error("Knowledge turn not stored conversationId={} type={}", conversationId,
+                exception.getClass().getName());
+        }
+    }
+
+    /** What the events of one turn add up to, for the stored turn. */
+    private static final class TurnLog {
+        private final String question;
+        private final long started = System.nanoTime();
+        private TurnRecord.Status status = TurnRecord.Status.STOPPED;
+        private String answer;
+        private List<ChatViews.CitationView> citations = List.of();
+        private Integer firstTokenMs;
+
+        TurnLog(String question) {
+            this.question = question;
+        }
+
+        void stopped() {
+            if (status != TurnRecord.Status.DONE && status != TurnRecord.Status.ERROR) {
+                status = TurnRecord.Status.STOPPED;
+            }
+        }
+
+        void observe(ChatStreamEvent event) {
+            if (event instanceof ChatStreamEvent.Delta && firstTokenMs == null) {
+                firstTokenMs = millisSince();
+            } else if (event instanceof ChatStreamEvent.Done done) {
+                status = TurnRecord.Status.DONE;
+                answer = done.answer();
+                citations = done.citations();
+            } else if (event instanceof ChatStreamEvent.Error) {
+                status = TurnRecord.Status.ERROR;
+            }
+        }
+
+        private int millisSince() {
+            return (int) ((System.nanoTime() - started) / 1_000_000);
+        }
+
+        TurnRecord record() {
+            return new TurnRecord(TurnRecord.KNOWLEDGE, question, answer, citations, List.of(), null, null, status,
+                firstTokenMs, millisSince());
+        }
     }
 
     private ChatAnswerView conclude(String text, List<ChunkHit> hits) {

@@ -17,7 +17,8 @@ thành một yêu cầu chờ và chỉ chạy khi người dùng xác nhận b�
 | Khóa                                   | Mặc định | Ý nghĩa                                                          |
 | -------------------------------------- | -------- | ---------------------------------------------------------------- |
 | `app.assistant.agent.max-steps`        | `4`      | Số lần gọi mô hình tối đa cho một lượt (`ASSISTANT_AGENT_MAX_STEPS`) |
-| `app.assistant.agent.history-messages` | `20`     | Số tin nhắn tối đa trong request (10 lượt)                       |
+| `app.assistant.agent.history-messages` | `20`     | Số tin nhắn lịch sử tối đa nạp từ hội thoại (10 lượt)            |
+| `app.assistant.history.retention` | `90d` (`ASSISTANT_HISTORY_RETENTION`) | Hội thoại không hoạt động quá thời gian này bị xoá hẳn mỗi đêm 03:30 |
 | `app.assistant.agent.action-ttl`       | `10m`    | Thời hạn của một yêu cầu chờ xác nhận (`ASSISTANT_ACTION_TTL`)   |
 | `app.assistant.agent.max-concurrent-turns` | `4`  | Số lượt chạy cùng lúc trên server (`ASSISTANT_MAX_CONCURRENT_TURNS`) |
 | `spring.mvc.async.request-timeout`     | `15m`    | Thời gian tối đa của một stream (`ASSISTANT_STREAM_TIMEOUT`); phải ≥ `max-steps` × `read-timeout` của Ollama |
@@ -32,26 +33,23 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 (envelope JSON) không bị trả 406.
 
 ```json
-{
-  "messages": [
-    { "role": "user", "content": "CIF là gì?" },
-    { "role": "assistant", "content": "CIF là mã khách hàng duy nhất… [1]" },
-    { "role": "user", "content": "Mở trang quản lý người dùng" }
-  ]
-}
+{ "conversationId": 42, "message": "Mở trang quản lý người dùng" }
 ```
 
-- 1–20 tin nhắn; `role` chỉ `user` hoặc `assistant`, vai trò khác là `CORE-VALIDATION_FAILED`. Tin nhắn cuối cùng phải là
-  `user`. Nội dung được bỏ khoảng trắng hai đầu: `user` 1–500 ký tự; `assistant` tối đa 4000 (dài hơn bị cắt, không từ
-  chối vì đó là câu trả lời trước đó của chính backend).
-- Hội thoại chỉ là văn bản. Backend không nhận lời gọi công cụ hay kết quả công cụ từ client; chúng chỉ tồn tại trong
-  một request.
-- Backend không giữ hội thoại: app gửi lại các lượt gần nhất mỗi lần.
+- `message` 1–500 ký tự sau khi bỏ khoảng trắng hai đầu, nếu không là `CORE-VALIDATION_FAILED`.
+- `conversationId` bỏ trống để bắt đầu hội thoại mới; sự kiện `conversation` đầu tiên của stream trả mã đó. Mã không
+  phải của người gọi (hoặc không tồn tại) là envelope `ASSISTANT-CONVERSATION_NOT_FOUND` trước khi stream bắt đầu.
+- Client **không gửi lịch sử**. Backend nạp các lượt `done` gần nhất của hội thoại sao cho cùng câu hỏi mới không quá
+  16 000 ký tự (cả lượt hoặc không, câu trả lời dài hơn 4000 ký tự bị cắt), không tóm tắt. Backend không nhận lời gọi
+  công cụ hay kết quả công cụ từ client.
+- Mỗi lượt được lưu vào hội thoại khi kết thúc (xong, lỗi hoặc bị dừng), kèm câu hỏi, câu trả lời, trích dẫn, tên công
+  cụ, màn hình đã mở, mã yêu cầu thay đổi dữ liệu và thời gian. Log không bao giờ chứa văn bản câu hỏi hay câu trả lời.
 
 ### Sự kiện
 
 | type              | Trường                          | Ý nghĩa                                                                                  |
 | ----------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `conversation`    | `conversationId`                | Dòng đầu của mọi stream: hội thoại lưu lượt này (mới nếu request không nêu mã)           |
 | `tool`            | `name`                          | Một công cụ bắt đầu chạy (app hiện dòng trạng thái)                                      |
 | `delta`           | `text`                          | Một đoạn văn bản của câu trả lời, nhiều dòng                                             |
 | `navigate`        | `path`, `title`                 | App chuyển trang (từ `open_screen`); lượt kết thúc ngay sau đó                           |
@@ -184,10 +182,29 @@ mất mọi yêu cầu; app báo yêu cầu đã hết hạn khi xác nhận.
 | `ASSISTANT-ACTION_NOT_FOUND` | 200  | Yêu cầu không có, hết hạn, đã xác nhận/huỷ, hoặc của người khác (cùng một mã, id không tiết lộ gì) |
 | `ASSISTANT-BUSY`             | —    | Người dùng đang có một lượt chạy, hoặc server đã đủ lượt (sự kiện `error`)        |
 | `ASSISTANT-RATE_LIMITED`     | —    | Người dùng đã hỏi quá `questions-per-hour` câu trong 1 giờ trượt (sự kiện `error`, kèm "thử lại sau X phút") |
+| `ASSISTANT-CONVERSATION_NOT_FOUND` | 200 | Hội thoại không tồn tại hoặc của người khác (cùng một mã)                         |
 | `ASSISTANT-ACTION_STALE`     | 200  | Dữ liệu đã đổi từ lúc trợ lý đề xuất (khi xác nhận)                                |
 | `CORE-VALIDATION_FAILED`     | 200  | Request `/stream` không hợp lệ                                                     |
 | `CORE-ACCESS_DENIED`         | 403  | Người gọi không có chức năng `AI_ASSISTANT` (mọi API của trợ lý nhanh)              |
 | `CORE-INTERNAL_ERROR`        | —    | Lỗi bất ngờ giữa stream (sự kiện `error`, thông báo chung)                         |
+
+## Hội thoại đã lưu
+
+Dùng chung cho trợ lý nhanh và `/assistant` (hỏi đáp tài liệu). Mọi API cần chức năng `AI_ASSISTANT` và chỉ thấy hội thoại
+của chính người gọi; quản trị viên không đọc được nội dung qua API. Trả `BaseResponse`.
+
+| Method | Đường dẫn                                | Ý nghĩa                                                                        |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------ |
+| GET    | `/api/v1/assistant/conversations`        | Danh sách mới nhất trước (`page`, `size`, `q` tìm theo tên không phân biệt hoa thường) |
+| GET    | `/api/v1/assistant/conversations/{id}`   | Hội thoại kèm các lượt, cũ nhất trước                                          |
+| PATCH  | `/api/v1/assistant/conversations/{id}`   | Đổi tên: `{ "title": "…" }`, 1–80 ký tự                                        |
+| DELETE | `/api/v1/assistant/conversations/{id}`   | Xoá hẳn một hội thoại cùng mọi lượt                                            |
+| DELETE | `/api/v1/assistant/conversations`        | Xoá hẳn mọi hội thoại của người gọi (không đụng tới của người khác)             |
+
+Tên mặc định là câu hỏi đầu tiên cắt còn 80 ký tự (không gọi mô hình). Mã của người khác trả
+`ASSISTANT-CONVERSATION_NOT_FOUND`, giống mã không tồn tại. Một lượt (`TurnView`) có `surface` (`AGENT`|`KNOWLEDGE`),
+`question`, `answer` (null nếu lỗi/dừng sớm), `citations`, `toolNames`, `navigation`, `actionId`, `status`
+(`done`|`error`|`stopped`) và `createTime`. Schema: [2026-11-10-assistant-conversations.sql](../sql/upgrade/2026-11-10-assistant-conversations.sql).
 
 ## Giới hạn đã biết
 

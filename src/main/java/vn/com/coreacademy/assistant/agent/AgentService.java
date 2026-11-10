@@ -16,7 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
-import vn.com.coreacademy.assistant.dto.AgentMessage;
+import vn.com.coreacademy.assistant.conversation.Conversations;
+import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.dto.AgentRequest;
 import vn.com.coreacademy.assistant.dto.AgentStreamEvent;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
@@ -34,6 +35,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.ai.ToolCall;
 import vn.com.coreacademy.knowledge.ai.ToolDefinition;
+import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 
 /**
  * Runs one user turn: asks the local model with the tools this user may use, runs the tools it calls and streams the
@@ -48,9 +50,6 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 @RequiredArgsConstructor
 public class AgentService {
     private static final int MAX_USER_LENGTH = 500;
-    private static final int MAX_ASSISTANT_LENGTH = 4000;
-    /** About 4k tokens of history, so the prompt, the tool definitions and the results still fit num_ctx 8192. */
-    public static final int MAX_HISTORY_CHARS = 16_000;
     /** The calls of one model step that run; qwen3 sometimes repeats a call many times in one answer. */
     public static final int MAX_CALLS_PER_STEP = 3;
 
@@ -67,72 +66,30 @@ public class AgentService {
     private final ToolRegistry registry;
     private final AssistantProperties properties;
     private final TurnLimiter limiter;
+    private final Conversations conversations;
     private final ObjectMapper json;
 
     /**
-     * Validates the request, then streams the turn. Roles other than {@code user} and {@code assistant} are refused,
-     * so a client cannot inject tool calls or results; a long {@code assistant} text is cut, since it is the
-     * server's own earlier answer.
+     * Validates the request, then streams the turn. The client sends only the new question and, for a follow-up, the
+     * conversation id; the server loads the earlier turns itself, so a client cannot inject tool calls or results.
      */
     public StreamingResponseBody stream(AgentRequest request) {
-        return stream(history(request));
-    }
-
-    private List<ChatMessage> history(AgentRequest request) {
-        List<AgentMessage> messages = request.messages();
-        if (messages == null || messages.isEmpty() || messages.size() > properties.historyMessages()) {
-            throw BusinessException.validation("messages", "INVALID_LENGTH",
-                "Hội thoại phải có từ 1 đến " + properties.historyMessages() + " tin nhắn.");
+        String question = request == null || request.message() == null ? "" : request.message().strip();
+        if (question.isEmpty() || question.length() > MAX_USER_LENGTH) {
+            throw BusinessException.validation("message", "OUT_OF_RANGE",
+                "Tin nhắn phải từ 1 đến " + MAX_USER_LENGTH + " ký tự.");
         }
 
-        List<ChatMessage> history = new ArrayList<>();
-        for (int i = 0; i < messages.size(); i++) {
-            AgentMessage message = messages.get(i);
-            String field = "messages[" + i + "]";
-            String content = message == null || message.content() == null ? "" : message.content().strip();
-            String role = message == null ? null : message.role();
-            if ("user".equals(role)) {
-                if (content.isEmpty() || content.length() > MAX_USER_LENGTH) {
-                    throw BusinessException.validation(field + ".content", "OUT_OF_RANGE",
-                        "Tin nhắn phải từ 1 đến " + MAX_USER_LENGTH + " ký tự.");
-                }
-                history.add(ChatMessage.user(content));
-            } else if ("assistant".equals(role)) {
-                history.add(ChatMessage.assistant(content.length() > MAX_ASSISTANT_LENGTH
-                    ? content.substring(0, MAX_ASSISTANT_LENGTH) : content));
-            } else {
-                throw BusinessException.validation(field + ".role", "INVALID_VALUE",
-                    "Vai trò chỉ có thể là user hoặc assistant.");
-            }
-        }
-        if (!"user".equals(history.get(history.size() - 1).role())) {
-            throw BusinessException.validation("messages", "INVALID_VALUE",
-                "Tin nhắn cuối cùng phải của người dùng.");
-        }
-
-        return withinBudget(history);
-    }
-
-    /** Drops the oldest messages until the text fits {@link #MAX_HISTORY_CHARS}, so it starts with a user message. */
-    private static List<ChatMessage> withinBudget(List<ChatMessage> history) {
-        int total = history.stream().mapToInt(message -> message.content().length()).sum();
-        int first = 0;
-        while (total > MAX_HISTORY_CHARS && first < history.size() - 1) {
-            total -= history.get(first++).content().length();
-        }
-        while (!"user".equals(history.get(first).role())) {
-            first++;
-        }
-
-        return history.subList(first, history.size());
+        return stream(question, request.conversationId());
     }
 
     /**
      * The context and the tool list are built now, on the request thread, so a refusal is still an ordinary envelope
-     * and the stream body never needs the security context. {@code history} holds the request's text turns only.
+     * and the stream body never needs the security context.
      */
-    public StreamingResponseBody stream(List<ChatMessage> history) {
+    public StreamingResponseBody stream(String question, Long conversationId) {
         AgentContext context = AgentContext.of(AssistantAccess.require(auth.me()));
+        conversations.requireOwned(context.userId(), conversationId);
         if (!ollama.isAvailable()) {
             throw new BusinessException(AssistantResponseCode.AI_UNAVAILABLE);
         }
@@ -146,7 +103,20 @@ public class AgentService {
                 return;
             }
             try (TurnLimiter.Turn ignored = started.turn()) {
-                run(output, history, context, tools, definitions);
+                Conversations.Opened opened = conversations.open(context.userId(), conversationId, question);
+                write(output, AgentStreamEvent.conversation(opened.conversationId()));
+                List<ChatMessage> history = new ArrayList<>();
+                for (Conversations.Exchange exchange : opened.history()) {
+                    history.add(ChatMessage.user(exchange.question()));
+                    history.add(ChatMessage.assistant(exchange.answer()));
+                }
+                history.add(ChatMessage.user(question));
+                TurnLog turnLog = new TurnLog(question);
+                try {
+                    run(output, history, context, tools, definitions, turnLog);
+                } finally {
+                    store(opened.conversationId(), turnLog);
+                }
             }
         };
     }
@@ -160,7 +130,7 @@ public class AgentService {
     }
 
     private void run(OutputStream output, List<ChatMessage> history, AgentContext context, List<AgentTool> tools,
-                     List<ToolDefinition> definitions) {
+                     List<ToolDefinition> definitions, TurnLog turnLog) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(AgentPrompt.SYSTEM));
         messages.addAll(history);
@@ -171,21 +141,21 @@ public class AgentService {
         try {
             for (int step = 0; step < properties.maxSteps(); step++) {
                 ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, OllamaClient.Options.AGENT,
-                    delta -> write(output, AgentStreamEvent.delta(delta)));
+                    delta -> emit(output, turnLog, AgentStreamEvent.delta(delta)));
                 if (answer.toolCalls().isEmpty()) {
-                    finish(output, turn, answer.content().strip());
+                    finish(output, turnLog, turn, answer.content().strip());
                     return;
                 }
 
                 List<ToolCall> calls = answer.toolCalls().stream().limit(MAX_CALLS_PER_STEP).toList();
                 messages.add(ChatMessage.assistant(answer.content(), calls));
                 for (ToolCall call : calls) {
-                    write(output, AgentStreamEvent.tool(call.name()));
+                    emit(output, turnLog, AgentStreamEvent.tool(call.name()));
                     AgentTool tool = find(tools, call.name());
                     ToolOutcome outcome = tool != null && tool.actsForUser() && readShared
                         ? new ToolOutcome.Result(ACTION_AFTER_DOCUMENTS)
                         : runTool(call, tool, context, turn);
-                    if (end(output, outcome)) {
+                    if (end(output, turnLog, outcome)) {
                         return;
                     }
                     if (tool != null && tool.readsSharedContent() && !readShared) {
@@ -195,18 +165,19 @@ public class AgentService {
                     messages.add(ChatMessage.tool(call.name(), ((ToolOutcome.Result) outcome).text()));
                 }
             }
-            write(output, AgentStreamEvent.done(STEP_CAP_ANSWER, List.of()));
+            emit(output, turnLog, AgentStreamEvent.done(STEP_CAP_ANSWER, List.of()));
         } catch (UncheckedIOException exception) {
             // The client went away: nobody is left to read an error event.
+            turnLog.stopped();
             throw exception;
         } catch (OllamaUnavailableException | OllamaException exception) {
-            write(output, AgentStreamEvent.error(AssistantResponseCode.AI_UNAVAILABLE.getCode(),
+            emit(output, turnLog, AgentStreamEvent.error(AssistantResponseCode.AI_UNAVAILABLE.getCode(),
                 AssistantResponseCode.AI_UNAVAILABLE.getMessage()));
         } catch (RuntimeException exception) {
             // The message could quote the user's text or profile; log the type and the stack only.
             log.error("Assistant turn failed type={} stack={}", exception.getClass().getName(),
                 Arrays.toString(exception.getStackTrace()));
-            write(output, AgentStreamEvent.error(ResponseCode.INTERNAL_ERROR.getCode(),
+            emit(output, turnLog, AgentStreamEvent.error(ResponseCode.INTERNAL_ERROR.getCode(),
                 ResponseCode.INTERNAL_ERROR.getMessage()));
         }
     }
@@ -245,29 +216,95 @@ public class AgentService {
     }
 
     /** Writes the closing events of a terminal outcome; false for a result that goes back to the model. */
-    private boolean end(OutputStream output, ToolOutcome outcome) {
+    private boolean end(OutputStream output, TurnLog turnLog, ToolOutcome outcome) {
         if (outcome instanceof ToolOutcome.Navigate navigate) {
-            write(output, AgentStreamEvent.navigate(navigate.path(), navigate.title()));
-            write(output, AgentStreamEvent.done(navigate.text(), List.of()));
+            emit(output, turnLog, AgentStreamEvent.navigate(navigate.path(), navigate.title()));
+            emit(output, turnLog, AgentStreamEvent.done(navigate.text(), List.of()));
             return true;
         }
         if (outcome instanceof ToolOutcome.ActionRequired required) {
-            write(output, AgentStreamEvent.actionRequired(required.action().view()));
-            write(output, AgentStreamEvent.done(required.text(), List.of()));
+            emit(output, turnLog, AgentStreamEvent.actionRequired(required.action().view()));
+            emit(output, turnLog, AgentStreamEvent.done(required.text(), List.of()));
             return true;
         }
 
         return false;
     }
 
-    private void finish(OutputStream output, TurnState turn, String answer) {
+    private void finish(OutputStream output, TurnLog turnLog, TurnState turn, String answer) {
         FinishedAnswer finished = turn.finisher().map(finisher -> finisher.finish(answer))
             .orElseGet(() -> new FinishedAnswer(answer, List.of()));
         if (finished.answer().isBlank()) {
             // qwen3 sometimes ends with nothing after a tool result; an empty bubble reads as a hang.
             finished = new FinishedAnswer(EMPTY_ANSWER, List.of());
         }
-        write(output, AgentStreamEvent.done(finished.answer(), finished.citations()));
+        emit(output, turnLog, AgentStreamEvent.done(finished.answer(), finished.citations()));
+    }
+
+    private void emit(OutputStream output, TurnLog turnLog, AgentStreamEvent event) {
+        turnLog.observe(event);
+        write(output, event);
+    }
+
+    /** Stores the turn without ever failing the stream: the user already has the answer. */
+    private void store(long conversationId, TurnLog turnLog) {
+        try {
+            conversations.record(conversationId, turnLog.record());
+        } catch (RuntimeException exception) {
+            // The message could quote the user's text; log the type only.
+            log.error("Assistant turn not stored conversationId={} type={}", conversationId,
+                exception.getClass().getName());
+        }
+    }
+
+    /** What the events of one turn add up to, for the stored turn; the first event that ends the turn decides it. */
+    private static final class TurnLog {
+        private final String question;
+        private final long started = System.nanoTime();
+        private final List<String> tools = new ArrayList<>();
+        private TurnRecord.Status status = TurnRecord.Status.STOPPED;
+        private String answer;
+        private List<CitationView> citations = List.of();
+        private TurnRecord.Navigation navigation;
+        private String actionId;
+        private Integer firstTokenMs;
+
+        TurnLog(String question) {
+            this.question = question;
+        }
+
+        void stopped() {
+            if (status != TurnRecord.Status.DONE && status != TurnRecord.Status.ERROR) {
+                status = TurnRecord.Status.STOPPED;
+            }
+        }
+
+        void observe(AgentStreamEvent event) {
+            if (event instanceof AgentStreamEvent.Delta && firstTokenMs == null) {
+                firstTokenMs = millisSince();
+            } else if (event instanceof AgentStreamEvent.Tool tool) {
+                tools.add(tool.name());
+            } else if (event instanceof AgentStreamEvent.Navigate navigate) {
+                navigation = new TurnRecord.Navigation(navigate.path(), navigate.title());
+            } else if (event instanceof AgentStreamEvent.ActionRequired required) {
+                actionId = required.action().id();
+            } else if (event instanceof AgentStreamEvent.Done done) {
+                status = TurnRecord.Status.DONE;
+                answer = done.answer();
+                citations = done.citations();
+            } else if (event instanceof AgentStreamEvent.Error) {
+                status = TurnRecord.Status.ERROR;
+            }
+        }
+
+        private int millisSince() {
+            return (int) ((System.nanoTime() - started) / 1_000_000);
+        }
+
+        TurnRecord record() {
+            return new TurnRecord(TurnRecord.AGENT, question, answer, citations, List.copyOf(tools), navigation,
+                actionId, status, firstTokenMs, millisSince());
+        }
     }
 
     private void write(OutputStream output, AgentStreamEvent event) {

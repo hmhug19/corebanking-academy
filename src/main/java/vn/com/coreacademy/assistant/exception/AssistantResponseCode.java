@@ -18,6 +18,9 @@ public enum AssistantResponseCode implements ApiResponseCode {
     // A user over the hour's questions; streams and the stream-less chat carry the wait time in the message.
     RATE_LIMITED("ASSISTANT-RATE_LIMITED", "Bạn đã hỏi nhiều, vui lòng thử lại sau ít phút.",
         "Đã đạt giới hạn câu hỏi"),
+    // One code for a missing or foreign conversation, so an id reveals nothing about other users.
+    CONVERSATION_NOT_FOUND("ASSISTANT-CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại này.",
+        "Không tìm thấy hội thoại"),
     ACTION_STALE("ASSISTANT-ACTION_STALE", "Dữ liệu đã thay đổi từ lúc trợ lý đề xuất. Vui lòng yêu cầu lại.",
         "Dữ liệu đã thay đổi");
 

@@ -81,6 +81,8 @@ app:
       max-concurrent-turns: ${ASSISTANT_MAX_CONCURRENT_TURNS:4}
     limits:
       questions-per-hour: ${ASSISTANT_QUESTIONS_PER_HOUR:60}
+    history:
+      retention: ${ASSISTANT_HISTORY_RETENTION:90d}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30
