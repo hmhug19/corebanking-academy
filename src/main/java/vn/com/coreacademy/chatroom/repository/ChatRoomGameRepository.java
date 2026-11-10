@@ -28,7 +28,7 @@ public class ChatRoomGameRepository {
     public record DiceRound(long id, Instant closesAt, List<Integer> dice) {}
     public record Bet(String userId, String side, long stake) {}
     public record CaroGame(UUID id, String xUser, String oUser, String xName, String oName, long stake,
-                           String board, int moves, String result, Instant expiresAt) {}
+                           String board, int moves, Integer lastCell, String result, Instant expiresAt) {}
 
     /** The dice round and the two wallets of a Caro wager must change as one operation. */
     public void lockGames() {
@@ -132,9 +132,9 @@ public class ChatRoomGameRepository {
 
     public void updateCaro(CaroGame game) {
         jdbc.sql("""
-            update learning_hub.chat_room_caro_games set board = ?, moves = ?, result = ?, expires_at = ?
+            update learning_hub.chat_room_caro_games set board = ?, moves = ?, last_cell = ?, result = ?, expires_at = ?
             where game_id = ?
-            """).param(game.board()).param(game.moves()).param(game.result()).param(at(game.expiresAt()))
+            """).param(game.board()).param(game.moves()).param(game.lastCell()).param(game.result()).param(at(game.expiresAt()))
             .param(game.id()).update();
     }
 
@@ -154,7 +154,8 @@ public class ChatRoomGameRepository {
     private static CaroGame caroGame(ResultSet row, int index) throws SQLException {
         return new CaroGame(row.getObject("game_id", UUID.class), row.getString("x_user_id"), row.getString("o_user_id"),
             row.getString("x_name"), row.getString("o_name"), row.getLong("stake"), row.getString("board"),
-            row.getInt("moves"), row.getString("result"), row.getObject("expires_at", OffsetDateTime.class).toInstant());
+            row.getInt("moves"), row.getObject("last_cell", Integer.class), row.getString("result"),
+            row.getObject("expires_at", OffsetDateTime.class).toInstant());
     }
 
     private static OffsetDateTime at(Instant instant) {

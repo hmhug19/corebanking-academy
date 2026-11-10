@@ -23,6 +23,7 @@ import vn.com.coreacademy.chatroom.repository.ChatRoomGameRepository.Rank;
 @RequiredArgsConstructor
 public class ChatRoomGames {
     public static final long MAX_STAKE = 1_000_000;
+    static final long MIN_CARO_STAKE = 10;
     private static final int DAILY_TOKENS = 50;
     private static final int ROUND_SECONDS = 30;
     private static final int CARO_IDLE_SECONDS = 120;
@@ -58,7 +59,7 @@ public class ChatRoomGames {
         repository.lockGames();
         Instant now = Instant.now();
         List<CaroGame> expired = repository.expiredCaro(now).stream()
-            .map(game -> finishCaro(game, "draw", now)).toList();
+            .map(game -> finishCaro(game, game.moves() % 2 == 0 ? "O" : "X", now)).toList();
         DiceRound round = repository.openDice().orElse(null);
         Instant nextDeadline = now.plusSeconds(ROUND_SECONDS);
         if (round != null && !round.closesAt().isAfter(now)) {
@@ -121,7 +122,7 @@ public class ChatRoomGames {
 
     @Transactional
     public Optional<CaroGame> startCaro(Participant x, Participant o, long stake) {
-        if (stake < 0 || stake > MAX_STAKE || x.userId().equals(o.userId())) {
+        if (stake < MIN_CARO_STAKE || stake > MAX_STAKE || x.userId().equals(o.userId())) {
             return Optional.empty();
         }
         repository.lockGames();
@@ -139,13 +140,13 @@ public class ChatRoomGames {
             }
         }
         CaroGame game = new CaroGame(UUID.randomUUID(), x.userId(), o.userId(), x.name(), o.name(), stake,
-            ".".repeat(MAX_CARO_CELLS), 0, null, Instant.now().plusSeconds(CARO_IDLE_SECONDS));
+            ".".repeat(MAX_CARO_CELLS), 0, null, null, Instant.now().plusSeconds(CARO_IDLE_SECONDS));
         repository.startCaro(game);
         return Optional.of(game);
     }
 
     @Transactional
-    public Optional<CaroGame> playCaro(String userId, String gameId, int move, int cell) {
+    public Optional<CaroGame> playCaro(String userId, String opponentId, String gameId, int move, int cell) {
         if (cell < 0 || cell >= MAX_CARO_CELLS) {
             return Optional.empty();
         }
@@ -157,14 +158,15 @@ public class ChatRoomGames {
             return Optional.empty();
         }
         boolean xTurn = move % 2 == 0;
-        if (!(xTurn ? game.xUser() : game.oUser()).equals(userId)) {
+        if (!(xTurn ? game.xUser() : game.oUser()).equals(userId)
+            || !(xTurn ? game.oUser() : game.xUser()).equals(opponentId)) {
             return Optional.empty();
         }
         char piece = xTurn ? 'X' : 'O';
         char[] board = game.board().toCharArray();
         board[cell] = piece;
         CaroGame played = new CaroGame(game.id(), game.xUser(), game.oUser(), game.xName(), game.oName(),
-            game.stake(), String.valueOf(board), move + 1, null, now.plusSeconds(CARO_IDLE_SECONDS));
+            game.stake(), String.valueOf(board), move + 1, cell, null, now.plusSeconds(CARO_IDLE_SECONDS));
         if (wins(board, cell, piece)) {
             return Optional.of(finishCaro(played, String.valueOf(piece), now));
         }
@@ -185,7 +187,7 @@ public class ChatRoomGames {
             }
         }
         CaroGame finished = new CaroGame(game.id(), game.xUser(), game.oUser(), game.xName(), game.oName(),
-            game.stake(), game.board(), game.moves(), result, now);
+            game.stake(), game.board(), game.moves(), game.lastCell(), result, now);
         repository.updateCaro(finished);
         return finished;
     }
@@ -204,7 +206,8 @@ public class ChatRoomGames {
             while (pieceAt(board, x + dx * after, y + dy * after) == piece) {
                 after++;
             }
-            if (before + after == 6 && (pieceAt(board, x - dx * before, y - dy * before) == '.'
+            int length = before + after - 1;
+            if (length > 5 || length == 5 && (pieceAt(board, x - dx * before, y - dy * before) == '.'
                 || pieceAt(board, x + dx * after, y + dy * after) == '.')) {
                 return true;
             }

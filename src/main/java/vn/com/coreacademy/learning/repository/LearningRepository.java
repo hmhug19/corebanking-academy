@@ -518,6 +518,17 @@ public class LearningRepository {
             .setParameter("pending", ReminderStatus.PENDING).setMaxResults(100).getResultList();
     }
 
+    public List<LearningReminder> readReminders(String userId) {
+        return query("""
+            select m
+            from LearningReminder m
+            where m.status = :sent
+            and ((m.recipientId is null and m.userId = :user)
+                or m.recipientId in (select r.id from AssignmentRecipient r where r.userId = :user))
+            order by m.sentAt desc, m.id desc
+            """, LearningReminder.class, Map.of("user", userId, "sent", ReminderStatus.SENT));
+    }
+
     public List<BlockAsset> assetUses(Long assetId) {
         return query("""
             select b

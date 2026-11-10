@@ -16,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -184,6 +185,12 @@ public class LearningLearnerController {
         return BaseResponse.ok(progress.reminders());
     }
 
+    @GetMapping("/reminders/inbox")
+    @Operation(summary = "Xem thông báo đã đọc và chưa đọc của học viên")
+    public BaseResponse<List<LearningViews.LearningReminderView>> reminderInbox() {
+        return BaseResponse.ok(progress.reminderInbox());
+    }
+
     @PostMapping("/reminders/{reminderId}/seen")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
@@ -209,6 +216,12 @@ public class LearningLearnerController {
     )
     public BaseResponse<LearningViews.LearningReminderView> read(@PathVariable @Positive Long reminderId) {
         return BaseResponse.ok(progress.dismissReminder(reminderId));
+    }
+
+    @DeleteMapping("/reminders/{reminderId}")
+    @Operation(summary = "Xóa thông báo khỏi hộp thư của người nhận")
+    public BaseResponse<LearningViews.LearningReminderView> deleteReminder(@PathVariable @Positive Long reminderId) {
+        return BaseResponse.ok(progress.deleteReminder(reminderId));
     }
 
     @PostMapping("/sessions")

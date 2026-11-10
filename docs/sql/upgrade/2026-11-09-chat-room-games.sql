@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS learning_hub.chat_room_caro_games (
 );
 -- Normalize the unpublished draft schema if it was already applied.
 ALTER TABLE learning_hub.chat_room_caro_games
+    ADD COLUMN IF NOT EXISTS last_cell smallint CHECK (last_cell BETWEEN 0 AND 2499),
     DROP CONSTRAINT IF EXISTS chat_room_caro_games_board_check,
     DROP CONSTRAINT IF EXISTS chat_room_caro_games_moves_check,
     ALTER COLUMN board TYPE varchar(2500),
