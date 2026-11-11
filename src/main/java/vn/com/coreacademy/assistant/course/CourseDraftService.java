@@ -46,6 +46,8 @@ import vn.com.coreacademy.learning.service.LearningContentService;
 @RequiredArgsConstructor
 public class CourseDraftService {
     private static final String DRAFT_CREATED = "DRAFT_CREATED";
+    /** Runs one step may have in total, regenerations and retries included, so a job cannot loop on the model. */
+    public static final int MAX_STEP_ATTEMPTS = 6;
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final Map<String, String> LEVELS = Map.of("BEGINNER", "basic", "INTERMEDIATE", "intermediate",
@@ -157,6 +159,9 @@ public class CourseDraftService {
         refuseWhenDrafted(job);
         StepRow step = jobs.stepByKey(job.id(), CourseGenerationRunner.LESSON, lessonKey)
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
+        if (step.attempts() >= MAX_STEP_ATTEMPTS) {
+            throw refuse("REGENERATION_LIMIT", "Bài này đã được tạo lại quá nhiều lần, hãy sửa nội dung thủ công.");
+        }
         if (!jobs.resetStep(step.id())) {
             throw refuse("LESSON_BUSY", "Bài này đang được viết, hãy chờ xong rồi tạo lại.");
         }
@@ -170,7 +175,7 @@ public class CourseDraftService {
     public ContentView retry(long jobId) {
         JobRow job = lock(jobId);
         refuseWhenDrafted(job);
-        if (jobs.requeueFailed(job.id()) == 0) {
+        if (jobs.requeueFailed(job.id(), MAX_STEP_ATTEMPTS) == 0) {
             throw refuse("NOTHING_FAILED", "Không có bước nào bị lỗi.");
         }
         jobs.reopen(job.id(), job.step(), job.progress());

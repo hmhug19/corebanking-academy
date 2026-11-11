@@ -295,12 +295,12 @@ public class CourseJobRepository {
             """, stepId) == 1;
     }
 
-    /** Failed steps run again (the author pressed retry). */
-    public int requeueFailed(long jobId) {
+    /** Failed steps that have run fewer than the attempts run again (the author pressed retry). */
+    public int requeueFailed(long jobId, int maxAttempts) {
         return jdbc.update("""
             UPDATE learning_hub.course_generation_steps SET status = 'pending', error_message = NULL, finished_at = NULL
-             WHERE job_id = ? AND status = 'failed'
-            """, jobId);
+             WHERE job_id = ? AND status = 'failed' AND attempts < ?
+            """, jobId, maxAttempts);
     }
 
     /** A step the source was not ready for goes back without costing an attempt. */

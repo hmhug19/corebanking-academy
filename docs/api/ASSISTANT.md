@@ -333,8 +333,10 @@ Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể
 | POST | `.../lessons/{key}/regenerate` | Viết lại đúng một bài; bài khác và câu hỏi giữ nguyên. |
 | PUT | `.../questions/{key}/{index}` | Body `{"decision":"accepted|rejected|pending"}`. |
 | POST | `.../retry` | Chạy lại các bước lỗi; bước đã xong giữ nguyên. |
-| POST | `.../draft` | Tạo khóa học nháp. Cần dàn ý đã duyệt và mọi bài xong. Gọi lại trả cùng bản nháp. |
+| POST | `.../draft` | Tạo khóa học nháp. Cần dàn ý đã duyệt, mọi bài xong và câu hỏi đã soạn xong. Gọi lại trả cùng bản nháp. |
 
+- Mỗi bước chạy tối đa 6 lần kể cả tạo lại và thử lại (`REGENERATION_LIMIT`); dàn ý tối đa 60 bài; sau khi tạo bản nháp
+  không tạo lại hay thử lại được nữa (`DRAFT_CREATED`).
 - Đầu ra của model được kiểm theo schema (`GenerationSchemas`): không hợp lệ thì hỏi lại đúng một lần kèm danh sách lỗi, rồi bước `failed` với
   thông báo đọc được. Giới hạn: ≤ 20 chương, ≤ 10 bài/chương, ≤ 6 khối/bài, thân khối ≤ 6000 ký tự.
 - Bản nháp được tạo bằng `LearningContentService.create` với quyền của tác giả, luôn ở trạng thái `draft` (không bao giờ tự xuất bản) và

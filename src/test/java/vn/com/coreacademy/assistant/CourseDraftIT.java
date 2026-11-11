@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assistant;
 
+import vn.com.coreacademy.assistant.course.CourseDraftService;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
@@ -205,6 +206,17 @@ class CourseDraftIT extends AssessmentIntegrationTest {
             + "WHERE job_id = ? AND kind = 'questions' AND item_key = 'c1l1'", job);
 
         api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")), "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
+    void aLessonCannotBeRegeneratedWithoutEnd() throws Exception {
+        long job = approved().path("jobId").asLong();
+        jdbc.update("UPDATE learning_hub.course_generation_steps SET attempts = ? "
+            + "WHERE job_id = ? AND kind = 'lesson' AND item_key = 'c1l1'", CourseDraftService.MAX_STEP_ATTEMPTS, job);
+
+        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/lessons/c1l1/regenerate")), "CORE-VALIDATION_FAILED");
+        // the other lesson still can
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/lessons/c1l2/regenerate")));
     }
 
     @Test
