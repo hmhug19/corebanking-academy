@@ -63,6 +63,9 @@ public abstract class KnowledgeIntegrationTest {
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-13-course-revision-ai-generated.sql"),
                     "/docker-entrypoint-initdb.d/04zc-course-revision-ai-generated.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-14-course-revision-review-confirmed.sql"),
+                    "/docker-entrypoint-initdb.d/04zd-course-revision-review-confirmed.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_community.sql"),
                     "/docker-entrypoint-initdb.d/05-community.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_assessment.sql"),

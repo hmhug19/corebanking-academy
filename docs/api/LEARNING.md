@@ -811,7 +811,7 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 ### Xuất bản kèm đối tượng giao và chia sẻ
 
 `POST /courses/{courseId}/revisions/{revisionId}/publish` nhận `PublishRequest`:
-`{expectedVersion, assignments?, shareOrgIds?}`. Chỉ có `expectedVersion` thì hành vi như trước.
+`{expectedVersion, assignments?, shareOrgIds?, reviewConfirmed?}`. Chỉ có `expectedVersion` thì hành vi như trước.
 
 - `assignments` tối đa 20 dòng, mỗi dòng `{startAt, dueAt?, reminderEnabled, reminderDaysBefore (0–365), target}`;
   `target` là `TargetInput` (user | team | org | learning_group). `shareOrgIds` tối đa 50 đơn vị. Hai danh sách null
@@ -827,6 +827,13 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
   `shareOrgIds[j]`, `code` và `message` là của lỗi gốc (ví dụ `LEARNING-EMPTY_TARGET`, `OUT_OF_RANGE`,
   `LEARNING-INVALID_REFERENCE`). Lỗi quyền với người nhận cũng trả theo dòng đó với `CORE-ACCESS_DENIED`, không phải
   403 trần. Lỗi kiểm tra định dạng giữ đường dẫn thường, ví dụ `assignments[0].target`.
+- **Nội dung do AI tạo:** revision có `aiGenerated`=true (xem `revision.aiGenerated` trong chi tiết khóa) chỉ xuất bản khi
+  `reviewConfirmed`=true; thiếu hoặc false trả `CORE-VALIDATION_FAILED` với `errors[0]` có `field`=`reviewConfirmed`,
+  `code`=`REVIEW_REQUIRED` và revision vẫn là bản nháp. Khi xuất bản, `review_confirmed_by` / `review_confirmed_at` của
+  revision ghi người và thời điểm xác nhận (`docs/sql/upgrade/2026-11-14-course-revision-review-confirmed.sql`), và audit
+  `COURSE_PUBLISHED` mang `aiGenerated`, `reviewConfirmedBy`, `reviewConfirmedAt`. Revision không có cờ xuất bản như cũ,
+  bỏ qua `reviewConfirmed`. Bản nháp tạo bằng `POST /courses/{id}/draft` (sao từ bản xuất bản) giữ `aiGenerated` nhưng
+  không giữ xác nhận, nên phải xác nhận lại.
 - **Audit:** theo thứ tự `COURSE_PUBLISHED`, `COURSE_SHARED` cho từng chia sẻ mới, rồi các sự kiện giao học.
 - **Khóa ghi:** `assign` và `share` gọi lại `LearningWriteLock.acquire()` trong cùng transaction; đó là
   `pg_advisory_xact_lock` của PostgreSQL, cho phép cùng một session lấy lại nhiều lần nên không tự khóa chết.

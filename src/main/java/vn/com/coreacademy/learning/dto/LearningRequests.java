@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -65,7 +66,9 @@ public final class LearningRequests {
     public record PublishRequest(
         @NotNull @Min(0) Long expectedVersion,
         @Size(max = LearningLimits.MAX_PUBLISH_ASSIGNMENTS) List<@Valid @NotNull PublishAssignment> assignments,
-        @Size(max = LearningLimits.MAX_PUBLISH_SHARES) List<@NotNull @Positive Long> shareOrgIds) {
+        @Size(max = LearningLimits.MAX_PUBLISH_SHARES) List<@NotNull @Positive Long> shareOrgIds,
+        @Schema(description = "Bắt buộc là true khi bản có nội dung do AI tạo (revision.aiGenerated): người xuất bản xác nhận "
+            + "đã rà soát. Bỏ qua với bản không do AI tạo.") Boolean reviewConfirmed) {
         public PublishRequest {
             assignments = assignments == null ? List.of() : assignments;
             shareOrgIds = shareOrgIds == null ? List.of() : shareOrgIds;

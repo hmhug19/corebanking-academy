@@ -34,7 +34,8 @@ public class LearningPublishService {
                                                 LearningRequests.PublishRequest request) {
         // Bước 1: xuất bản như cũ; version cũ hoặc nội dung chưa đủ sẽ dừng ở đây, chưa ghi chia sẻ nào.
         var detail = content.publish(courseId, revisionId,
-            new LearningRequests.VersionRequest(request.expectedVersion()));
+            new LearningRequests.VersionRequest(request.expectedVersion()),
+            Boolean.TRUE.equals(request.reviewConfirmed()));
 
         // Bước 2: chia sẻ rồi giao học theo thứ tự yêu cầu; lỗi ở dòng nào cũng hủy cả transaction.
         Course course = repository.require(Course.class, courseId);
