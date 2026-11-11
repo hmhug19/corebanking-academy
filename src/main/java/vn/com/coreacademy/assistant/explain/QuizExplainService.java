@@ -105,7 +105,7 @@ public class QuizExplainService {
         TurnTrace trace = new TurnTrace(opened.conversationId(), question);
         metrics.skill(SKILL);
         RetrievedChunks chunks = new RetrievedChunks(budget.retrieved());
-        var added = chunks.add(lesson);
+        var added = chunks.add("explain", lesson);
         try {
             List<ChatMessage> messages = List.of(ChatMessage.system(catalog.explainPrompt()),
                 ChatMessage.user(request(source, added)));

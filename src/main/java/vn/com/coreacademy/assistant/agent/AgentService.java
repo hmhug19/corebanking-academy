@@ -224,6 +224,7 @@ public class AgentService {
                     ToolOutcome outcome = tool != null && tool.actsForUser() && readShared
                         ? new ToolOutcome.Result(ACTION_AFTER_DOCUMENTS)
                         : runTool(call, tool, context, turn);
+                    traceSearches(turn, turnLog);
                     if (end(output, turnLog, outcome)) {
                         return;
                     }
@@ -305,6 +306,15 @@ public class AgentService {
     }
 
     /** Writes the closing events of a terminal outcome; false for a result that goes back to the model. */
+    /** Copies the searches the tool just made into the stored turn, and counts each one once. */
+    private void traceSearches(TurnState turn, TurnLog turnLog) {
+        List<TurnRecord.Search> trace = turn.retrievalTrace();
+        for (int i = turnLog.retrieval.size(); i < trace.size(); i++) {
+            metrics.search(AssistantMetrics.AGENT, trace.get(i));
+        }
+        turnLog.retrieval = trace;
+    }
+
     private boolean end(OutputStream output, TurnLog turnLog, ToolOutcome outcome) {
         if (outcome instanceof ToolOutcome.Navigate navigate) {
             emit(output, turnLog, AgentStreamEvent.navigate(navigate.path(), navigate.title()));
@@ -339,7 +349,8 @@ public class AgentService {
         }
         if (event instanceof AgentStreamEvent.Done done) {
             if (NotFoundAnswer.isNotFound(done.answer())) {
-                metrics.notFound(AssistantMetrics.AGENT);
+                metrics.notFound(AssistantMetrics.AGENT, turnLog.retrievedNothing()
+                    ? AssistantMetrics.EMPTY_RETRIEVAL : AssistantMetrics.MODEL_SAID_SO);
             }
             // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
             Long turnId = store(turnLog);
@@ -387,6 +398,7 @@ public class AgentService {
         private final long started = System.nanoTime();
         private final List<String> tools = new ArrayList<>();
         private TurnRecord.Status status = TurnRecord.Status.STOPPED;
+        private List<TurnRecord.Search> retrieval = List.of();
         private String answer;
         private List<CitationView> citations = List.of();
         private TurnRecord.Navigation navigation;
@@ -398,6 +410,11 @@ public class AgentService {
             this.question = question;
             this.skill = skill;
             this.promptVersion = promptVersion;
+        }
+
+        /** Searched, and every search came back empty: the "not found" is the retrieval's, not the model's. */
+        boolean retrievedNothing() {
+            return !retrieval.isEmpty() && retrieval.stream().allMatch(TurnRecord.Search::gaveNothing);
         }
 
         void stopped() {
@@ -430,7 +447,7 @@ public class AgentService {
 
         TurnRecord record() {
             return new TurnRecord(TurnRecord.AGENT, question, answer, citations, List.copyOf(tools), navigation,
-                actionId, status, firstTokenMs, millisSince(), skill, promptVersion);
+                actionId, status, firstTokenMs, millisSince(), skill, promptVersion, retrieval);
         }
     }
 

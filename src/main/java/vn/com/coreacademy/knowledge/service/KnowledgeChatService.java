@@ -174,6 +174,9 @@ public class KnowledgeChatService {
 
     private void streamAnswer(OutputStream output, Retrieval retrieval, List<Conversations.Exchange> history,
                               TurnLog turnLog) {
+        turnLog.retrieval = List.of(new TurnRecord.Search("search_documents", retrieval.hits().size(),
+            rankedGiven(retrieval.hits())));
+        metrics.search(AssistantMetrics.KNOWLEDGE, turnLog.retrieval.get(0));
         emit(output, turnLog, ChatStreamEvent.retrieved(retrieval.hits().size()));
         if (retrieval.hits().isEmpty()) {
             emit(output, turnLog, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
@@ -208,6 +211,15 @@ public class KnowledgeChatService {
             answer.found() ? split.suggestions() : List.of()));
     }
 
+    private static List<TurnRecord.Given> rankedGiven(List<ChunkHit> hits) {
+        List<TurnRecord.Given> given = new java.util.ArrayList<>();
+        for (int i = 0; i < hits.size(); i++) {
+            given.add(new TurnRecord.Given("document", hits.get(i).chunkId(), i + 1, hits.get(i).similarity()));
+        }
+
+        return given;
+    }
+
     private void emit(OutputStream output, TurnLog turnLog, ChatStreamEvent event) {
         turnLog.observe(event);
         if (event instanceof ChatStreamEvent.Error error) {
@@ -215,7 +227,8 @@ public class KnowledgeChatService {
         }
         if (event instanceof ChatStreamEvent.Done done) {
             if (!done.found()) {
-                metrics.notFound(AssistantMetrics.KNOWLEDGE);
+                metrics.notFound(AssistantMetrics.KNOWLEDGE, turnLog.retrieval.stream().allMatch(
+                    TurnRecord.Search::gaveNothing) ? AssistantMetrics.EMPTY_RETRIEVAL : AssistantMetrics.MODEL_SAID_SO);
             }
             // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
             Long turnId = store(turnLog);
@@ -257,6 +270,7 @@ public class KnowledgeChatService {
         private Long storedId;
         private final long started = System.nanoTime();
         private TurnRecord.Status status = TurnRecord.Status.STOPPED;
+        private List<TurnRecord.Search> retrieval = List.of();
         private String answer;
         private List<ChatViews.CitationView> citations = List.of();
         private Integer firstTokenMs;
@@ -291,7 +305,7 @@ public class KnowledgeChatService {
 
         TurnRecord record() {
             return new TurnRecord(TurnRecord.KNOWLEDGE, question, answer, citations, List.of(), null, null, status,
-                firstTokenMs, millisSince(), SkillCatalog.DEFAULT, promptVersion);
+                firstTokenMs, millisSince(), SkillCatalog.DEFAULT, promptVersion, retrieval);
         }
     }
 

@@ -23,6 +23,8 @@ public class AssistantMetrics {
     public static final String AGENT = "agent";
     public static final String KNOWLEDGE = "knowledge";
     /** The tag of a tool call whose name the server does not know, so a model inventing names cannot grow the meter. */
+    public static final String EMPTY_RETRIEVAL = "empty_retrieval";
+    public static final String MODEL_SAID_SO = "model_said_so";
     public static final String UNKNOWN_TOOL = "unknown";
 
     private final MeterRegistry registry;
@@ -73,6 +75,28 @@ public class AssistantMetrics {
         }
     }
 
+    /** One search of a turn: how many chunks it found, and the best similarity of those given to the model. */
+    public void search(String surface, TurnRecord.Search search) {
+        DistributionSummary.builder("assistant.retrieval.hits").description("Candidates found by one search")
+            .tag("surface", surface).tag("tool", search.tool()).register(registry).record(search.candidates());
+        if (search.candidates() == 0) {
+            Counter.builder("assistant.retrieval.empty").description("Searches that returned nothing")
+                .tag("surface", surface).tag("tool", search.tool()).register(registry).increment();
+            return;
+        }
+        search.given().stream().mapToDouble(TurnRecord.Given::similarity).max().ifPresent(top ->
+            DistributionSummary.builder("assistant.retrieval.top_similarity")
+                .description("Similarity of the best chunk given to the model, per search")
+                .tag("surface", surface).tag("tool", search.tool())
+                .serviceLevelObjectives(0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9).register(registry).record(top));
+    }
+
+    /** How long one embedding call took. */
+    public void embed(Duration took) {
+        Timer.builder("assistant.retrieval.embed").description("Time Ollama took to embed the inputs of one call")
+            .register(registry).record(took);
+    }
+
     public void toolCall(String tool) {
         count("assistant.tool.calls", "Tool calls by tool name", "tool", tool);
     }
@@ -83,7 +107,13 @@ public class AssistantMetrics {
 
     /** An answer that said the documents do not have it. */
     public void notFound(String surface) {
-        count("assistant.answers.not_found", "Answers that found nothing in the documents", "surface", surface);
+        notFound(surface, MODEL_SAID_SO);
+    }
+
+    /** {@code cause} is {@link #EMPTY_RETRIEVAL} (nothing was retrieved) or {@link #MODEL_SAID_SO} (the model gave up). */
+    public void notFound(String surface, String cause) {
+        Counter.builder("assistant.answers.not_found").description("Answers that found nothing in the documents")
+            .tag("surface", surface).tag("cause", cause).register(registry).increment();
     }
 
     /** A stream that ended with an error line; {@code code} is the response code the user was shown. */

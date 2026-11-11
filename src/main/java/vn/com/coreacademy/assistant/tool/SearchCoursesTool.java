@@ -60,7 +60,7 @@ public class SearchCoursesTool implements AgentTool {
         }
 
         RetrievedChunks chunks = turn.chunks();
-        var added = chunks.add(hits);
+        var added = chunks.add("search_courses", hits);
         turn.finishWith(chunks::finish);
         if (chunks.isEmpty()) {
             return new ToolOutcome.Result(SearchDocumentsTool.NOTHING_FOUND);

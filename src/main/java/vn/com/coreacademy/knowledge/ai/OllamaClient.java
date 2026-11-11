@@ -94,13 +94,22 @@ public class OllamaClient {
         }
     }
 
+    private volatile Consumer<Duration> onEmbed = took -> { };
+
+    /** Where the duration of each embedding call goes; the assistant's metrics register themselves here. */
+    public void onEmbed(Consumer<Duration> listener) {
+        this.onEmbed = listener;
+    }
+
     /** Embeds the inputs in batches of 16 and returns one vector per input, in order. */
     public List<float[]> embed(List<String> inputs) {
+        long startedAt = System.nanoTime();
         List<float[]> vectors = new ArrayList<>(inputs.size());
         for (int from = 0; from < inputs.size(); from += EMBED_BATCH_SIZE) {
             List<String> batch = inputs.subList(from, Math.min(from + EMBED_BATCH_SIZE, inputs.size()));
             vectors.addAll(embedBatch(batch));
         }
+        onEmbed.accept(Duration.ofNanos(System.nanoTime() - startedAt));
         return vectors;
     }
 

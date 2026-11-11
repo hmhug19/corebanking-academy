@@ -157,6 +157,7 @@ public class ConversationService implements Conversations {
         row.setStatus(turn.status().name());
         row.setFirstTokenMs(turn.firstTokenMs());
         row.setDurationMs(turn.durationMs());
+        row.setRetrievalTrace(write(turn.retrieval() == null ? List.of() : turn.retrieval()));
         row.setSkill(turn.skill());
         row.setPromptVersion(turn.promptVersion());
         long id = turns.save(row).getId();

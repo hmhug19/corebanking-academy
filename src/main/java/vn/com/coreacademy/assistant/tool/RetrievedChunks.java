@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 import vn.com.coreacademy.assistant.config.AssistantBudget;
+import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.knowledge.chunking.TokenEstimator;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 import vn.com.coreacademy.knowledge.service.CitationSelector;
@@ -26,6 +27,7 @@ public final class RetrievedChunks {
     private final int budgetTokens;
     private int usedTokens;
     private boolean dropped;
+    private final List<TurnRecord.Search> trace = new ArrayList<>();
 
     public RetrievedChunks() {
         this(AssistantBudget.defaults().retrieved());
@@ -57,6 +59,21 @@ public final class RetrievedChunks {
         }
 
         return added;
+    }
+
+    /** As {@link #add(List)}, and notes the search in the turn's retrieval trace (ids and numbers only). */
+    public List<Added> add(String tool, List<ChunkHit> found) {
+        List<Added> added = add(found);
+        trace.add(new TurnRecord.Search(tool, found.size(), added.stream().map(chunk -> new TurnRecord.Given(
+            chunk.hit().lesson() == null ? "document" : "lesson", chunk.hit().chunkId(), chunk.n(),
+            chunk.hit().similarity())).toList()));
+
+        return added;
+    }
+
+    /** The searches of the turn so far, in order. */
+    public List<TurnRecord.Search> trace() {
+        return List.copyOf(trace);
     }
 
     /** True when a chunk was left out of the turn because it did not fit the budget. */

@@ -34,6 +34,12 @@ public final class TurnState {
         return type.cast(state.computeIfAbsent(type, key -> create.get()));
     }
 
+    /** The searches of this turn so far; empty when the turn searched nothing. */
+    public java.util.List<vn.com.coreacademy.assistant.conversation.TurnRecord.Search> retrievalTrace() {
+        Object chunks = state.get(RetrievedChunks.class);
+        return chunks == null ? java.util.List.of() : ((RetrievedChunks) chunks).trace();
+    }
+
     /** Shapes the final answer; a tool that needs to (citations, fixed sentences) registers it. */
     public void finishWith(TurnFinisher finisher) {
         this.finisher = finisher;

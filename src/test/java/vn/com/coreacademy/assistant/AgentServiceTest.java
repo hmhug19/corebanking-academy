@@ -258,6 +258,66 @@ class AgentServiceTest {
         assertThat(meters.find("assistant.model.near_context_limit").counter()).isNull();
     }
 
+    private static vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit secretChunk(long id) {
+        return new vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit(id, 9L, "quy-trinh.pdf", 2,
+            3, 4, "NỘI DUNG BÍ MẬT CỦA ĐOẠN", 0.81);
+    }
+
+    private void searchTool(List<vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit> found) {
+        tool("search_documents", true, true, false, (arguments, turn) -> {
+            var added = turn.chunks().add("search_documents", found);
+            return new ToolOutcome.Result("found " + added.size());
+        });
+    }
+
+    @Test
+    void aStoredTurnCarriesTheRetrievalTraceWithIdsAndNumbersOnly() throws Exception {
+        searchTool(List.of(secretChunk(41), secretChunk(42)));
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("CIF là mã [1].", List.of()));
+
+        events(ask("CIF là gì?"));
+
+        var trace = conversations.lastRecord().retrieval();
+        assertThat(trace).hasSize(1);
+        assertThat(trace.get(0).tool()).isEqualTo("search_documents");
+        assertThat(trace.get(0).candidates()).isEqualTo(2);
+        assertThat(trace.get(0).given()).extracting(TurnRecord.Given::chunkId).containsExactly(41L, 42L);
+        assertThat(trace.get(0).given()).extracting(TurnRecord.Given::rank).containsExactly(1, 2);
+        assertThat(trace.get(0).given().get(0).kind()).isEqualTo("document");
+        assertThat(trace.get(0).given().get(0).similarity()).isEqualTo(0.81);
+        String stored = json.writeValueAsString(trace);
+        assertThat(stored).doesNotContain("BÍ MẬT").doesNotContain("CIF là gì").doesNotContain("CIF là mã");
+        assertThat(meters.get("assistant.retrieval.hits").tag("surface", "agent").summary().totalAmount()).isEqualTo(2);
+        assertThat(meters.get("assistant.retrieval.top_similarity").summary().count()).isEqualTo(1);
+    }
+
+    @Test
+    void aSearchThatFindsNothingIsCountedAndItsNotFoundIsBlamedOnTheRetrieval() throws IOException {
+        searchTool(List.of());
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn(vn.com.coreacademy.knowledge.service.NotFoundAnswer.TEXT, List.of()));
+
+        events(ask("Điều gì đó không có"));
+
+        assertThat(meters.get("assistant.retrieval.empty").counter().count()).isEqualTo(1);
+        assertThat(meters.get("assistant.answers.not_found").tag("cause", "empty_retrieval").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.find("assistant.answers.not_found").tag("cause", "model_said_so").counter()).isNull();
+    }
+
+    @Test
+    void aNotFoundAfterASearchThatFoundChunksIsTheModelsDoing() throws IOException {
+        searchTool(List.of(secretChunk(41)));
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn(vn.com.coreacademy.knowledge.service.NotFoundAnswer.TEXT, List.of()));
+
+        events(ask("CIF là gì?"));
+
+        assertThat(meters.get("assistant.answers.not_found").tag("cause", "model_said_so").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.find("assistant.answers.not_found").tag("cause", "empty_retrieval").counter()).isNull();
+    }
+
     private static String conversationOf(List<JsonNode> all) {
         return all.get(0).path("type").asText();
     }

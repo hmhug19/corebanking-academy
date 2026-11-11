@@ -328,6 +328,27 @@ class KnowledgeChatServiceTest {
     }
 
     @Test
+    void aStreamedTurnStoresItsRetrievalTraceAndNotFoundWithNoChunksIsBlamedOnTheRetrieval() throws IOException {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
+        streamDeltas("CIF là mã [1].");
+
+        run(service.stream("CIF là gì?"));
+
+        var trace = conversations.lastRecord().retrieval();
+        assertThat(trace).hasSize(1);
+        assertThat(trace.get(0).given()).extracting(vn.com.coreacademy.assistant.conversation.TurnRecord.Given::rank)
+            .containsExactly(1, 2);
+        assertThat(trace.get(0).given().get(0).kind()).isEqualTo("document");
+
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of());
+        run(service.stream("Điều không có"));
+
+        assertThat(meters.get("assistant.answers.not_found").tag("cause", "empty_retrieval").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.get("assistant.retrieval.empty").counter().count()).isEqualTo(1);
+    }
+
+    @Test
     void streamEmitsRetrievedThenDeltasThenDone() throws IOException {
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         streamDeltas("CIF là ", "mã khách hàng [1].");

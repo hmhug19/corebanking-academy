@@ -59,7 +59,7 @@ public class ReadLessonTool implements AgentTool {
             return new ToolOutcome.Result(NO_TEXT);
         }
         RetrievedChunks chunks = turn.chunks();
-        var added = chunks.add(read.hits());
+        var added = chunks.add("read_lesson", read.hits());
         turn.finishWith(chunks::finish);
         if (added.isEmpty()) {
             return new ToolOutcome.Result(SearchDocumentsTool.NOTHING_NEW + SearchDocumentsTool.INSTRUCTION);

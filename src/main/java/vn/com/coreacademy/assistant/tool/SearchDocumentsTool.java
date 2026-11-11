@@ -76,7 +76,7 @@ public class SearchDocumentsTool implements AgentTool {
         }
 
         RetrievedChunks chunks = turn.chunks();
-        var added = chunks.add(retrieval.hits());
+        var added = chunks.add("search_documents", retrieval.hits());
         turn.finishWith(chunks::finish);
         if (chunks.isEmpty()) {
             return new ToolOutcome.Result(NOTHING_FOUND);
