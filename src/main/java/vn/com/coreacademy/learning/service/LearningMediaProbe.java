@@ -23,7 +23,7 @@ public class LearningMediaProbe {
 
     public LearningMediaProbe(LearningMediaProperties properties, ObjectMapper json) {
         probe = new MediaProbe(new MediaProbe.Settings(properties.getFfprobe(), properties.getFfmpeg(),
-            properties.getProbeTimeout()), json);
+            properties.getProbeTimeout(), properties.getTranscodeTimeout()), json);
     }
 
     public static String type(String mime) {
@@ -59,7 +59,8 @@ public class LearningMediaProbe {
         try {
             String actualMime = expectedMime == null ? probe.detect(file, name) : expectedMime;
             validateName(name, actualMime, Files.size(file));
-            return probe.check(file, name, expectedMime, limit(actualMime), LearningLimits.MAX_MEDIA_DURATION_SECONDS);
+            return probe.check(file, name, expectedMime, limit(actualMime),
+                MediaMime.VIDEO_MP4.equals(actualMime) ? Long.MAX_VALUE : LearningLimits.MAX_MEDIA_DURATION_SECONDS);
         } catch (MediaProbe.Rejected exception) {
             throw new BusinessException(LearningResponseCode.valueOf(exception.getMessage()));
         }

@@ -52,6 +52,9 @@ public class LearningMediaProperties {
     private Duration probeTimeout = Duration.ofSeconds(120);
 
     @NotNull
+    private Duration transcodeTimeout = Duration.ofHours(6);
+
+    @NotNull
     private Duration initialDelay = Duration.ofSeconds(15);
 
     @Min(1)
@@ -74,7 +77,7 @@ public class LearningMediaProperties {
         "Media durations must be positive; heartbeat < processing lease and event gap < session lease")
     public boolean isTimingValid() {
         Duration[] durations = {sessionLease, mediaTokenTtl, uploadTtl, processingLease, processingHeartbeat,
-            retryDelay, reservationGrace, maxEventGap, probeTimeout, initialDelay};
+            retryDelay, reservationGrace, maxEventGap, probeTimeout, transcodeTimeout, initialDelay};
         for (Duration duration : durations) {
             if (duration == null) {
                 return true;

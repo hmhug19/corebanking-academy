@@ -208,6 +208,29 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void createKeepsAnInlineImageAndTableInTheTextBlock() {
+        Long asset = jdbc.queryForObject("""
+            INSERT INTO learning_hub.assets(owner_org_id, uploaded_by, storage_type, original_name, mime_type,
+                size_bytes, status, created_by, updated_by)
+            VALUES (?, ?, 'external', 'anh.png', 'image/png', 1000, 'ready', ?, ?) RETURNING asset_id
+            """, Long.class, org, INSTRUCTOR, INSTRUCTOR, INSTRUCTOR);
+        Map<String, Object> formatted = block("text");
+        formatted.put("bodyFormat", "html");
+        formatted.put("body", "<table><tbody><tr><td colspan='2'>Số liệu</td></tr></tbody></table>"
+            + "<img data-asset-id='" + asset + "' alt='Sơ đồ' onerror='alert(1)'>");
+        formatted.put("assets", List.of(Map.of("assetId", asset, "usage", "image")));
+        JsonNode created = api.ok(INSTRUCTOR, api.post(create(unique("CW"), "Ảnh trong bài", draft("Ảnh trong bài", formatted)), COURSES));
+        JsonNode saved = created.path("chapters").get(0).path("lessons").get(0).path("blocks").get(0);
+        assertThat(saved.path("block").path("body").asText()).contains("<table>", "colspan=\"2\"", "data-asset-id=\"" + asset + "\"")
+            .doesNotContain("onerror");
+        assertThat(saved.path("assets")).hasSize(1);
+
+        formatted.put("assets", List.of());
+        api.error(INSTRUCTOR, api.post(create(unique("CW"), "Thiếu tham chiếu", draft("Thiếu tham chiếu", formatted)), COURSES),
+            "LEARNING-ASSET_INVALID");
+    }
+
+    @Test
     void callerWithoutManageRightsIsRefused() {
         String code = unique("CW");
 
@@ -215,5 +238,57 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
             "CORE-ACCESS_DENIED");
 
         assertThat(courseCount(code)).isZero();
+    }
+
+    @Test
+    void courseAndSelectedExamAreSavedAtomicallyAndEnforceProgramAndVersions() {
+        var fixtures = new AssessmentFixtures(api, jdbc);
+        var bankCourse = fixtures.course();
+        long question = fixtures.question(bankCourse.id(), fixtures.competency(), "SINGLE", 0);
+        Long program = jdbc.queryForObject(
+            "SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Long.class, bankCourse.revisionId());
+        Map<String, Object> content = draft("Khóa kèm bài thi", block("text"));
+        content.put("programId", program);
+        Map<String, Object> quiz = AssessmentFixtures.quizBody(bankCourse.id());
+        quiz.remove("courseId");
+        quiz.put("quizType", "FINAL_EXAM");
+        quiz.put("questionCount", 1);
+        Map<String, Object> pool = Map.of("items", List.of(Map.of("questionId", question, "sortNo", 0)));
+        String code = unique("ATOMIC");
+        JsonNode saved = api.ok(INSTRUCTOR, api.post(
+            Map.of("course", create(code, "Khóa kèm bài thi", content), "quiz", quiz, "pool", pool),
+            "/api/v1/course-exams"));
+        long courseId = saved.path("course").path("id").asLong();
+        long quizId = saved.path("finalQuizId").asLong();
+        JsonNode exam = api.ok(INSTRUCTOR, ApiClient.get("/api/v1/quizzes/{id}", quizId));
+        assertThat(quizId).isPositive();
+        assertThat(exam.path("quiz").path("courseId").asLong()).isEqualTo(courseId);
+        assertThat(exam.path("pool")).hasSize(1);
+        assertThat(exam.path("pool").get(0).path("questionId").asLong()).isEqualTo(question);
+        assertThat(saved.path("completionRule").path("finalQuizId").asLong()).isEqualTo(quizId);
+
+        var foreignCourse = fixtures.course();
+        long foreignQuestion = fixtures.question(foreignCourse.id(), fixtures.competency(), "SINGLE", 0);
+        String rejectedCode = unique("ROLLBACK");
+        Integer before = jdbc.queryForObject("SELECT count(*) FROM learning_hub.quizzes", Integer.class);
+        api.error(INSTRUCTOR, api.post(Map.of("course", create(rejectedCode, "Không được tạo", content),
+            "quiz", quiz, "pool", Map.of("items", List.of(Map.of("questionId", foreignQuestion, "sortNo", 0)))),
+            "/api/v1/course-exams"), "ASSESSMENT-INVALID_REFERENCE");
+        assertThat(courseCount(rejectedCode)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.quizzes", Integer.class)).isEqualTo(before);
+
+        Map<String, Object> changed = new HashMap<>(content);
+        changed.put("expectedVersion", saved.path("revision").path("rowVersion").asLong());
+        changed.put("finalQuizId", quizId);
+        changed.put("title", "Khóa đã chỉnh và vẫn giữ bộ câu hỏi");
+        Map<String, Object> update = Map.of("courseId", courseId,
+            "revisionId", saved.path("revision").path("id").asLong(), "draft", changed,
+            "quizId", quizId, "expectedQuizVersion", exam.path("quiz").path("rowVersion").asLong(),
+            "quiz", quiz, "pool", pool);
+        JsonNode edited = api.ok(INSTRUCTOR, api.post(update, "/api/v1/course-exams"));
+        assertThat(edited.path("finalQuizId").asLong()).isEqualTo(quizId);
+        api.error(INSTRUCTOR, api.post(update, "/api/v1/course-exams"), "LEARNING-CONFLICT");
+        api.http(LEARNER, api.post(update, "/api/v1/course-exams"), 403, "CORE-ACCESS_DENIED");
     }
 }

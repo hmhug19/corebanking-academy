@@ -3,11 +3,13 @@ package vn.com.coreacademy.storage.media;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
@@ -27,7 +29,10 @@ import org.springframework.http.MediaType;
 public class MediaProbe {
     private final Settings properties;
 
-    public record Settings(String ffprobe, String ffmpeg, Duration probeTimeout) {
+    public record Settings(String ffprobe, String ffmpeg, Duration probeTimeout, Duration transcodeTimeout) {
+        public Settings(String ffprobe, String ffmpeg, Duration probeTimeout) {
+            this(ffprobe, ffmpeg, probeTimeout, Duration.ofHours(6));
+        }
     }
 
     public static final class Rejected extends RuntimeException {
@@ -67,42 +72,57 @@ public class MediaProbe {
             return new Checked(mime, null, null, null);
         }
         String details = run(List.of(properties.ffprobe(), "-v", "error", "-protocol_whitelist", "file,pipe",
-            "-show_entries", "format=duration:stream=codec_type,codec_name,pix_fmt", "-of", "json", file.toString()));
+            "-show_entries", "format=duration,format_name:stream=index,codec_type,codec_name,pix_fmt,duration,width,height,level,channels:stream_disposition=attached_pic",
+            "-of", "json", file.toString()));
         JsonNode parsed = json.readTree(details);
-        boolean video = false;
+        JsonNode video = null;
+        JsonNode audio = null;
         for (JsonNode stream : parsed.path("streams")) {
-            String codec = stream.path("codec_name").asText();
-            if ("video".equals(stream.path("codec_type").asText())) {
-                video = true;
-                boolean supported = MediaFormats.VIDEO_MP4.equals(mime)
-                    ? "h264".equals(codec) && "yuv420p".equals(stream.path("pix_fmt").asText())
-                    : List.of("vp8", "vp9").contains(codec);
-                if (!supported) {
-                    throw new Rejected("ASSET_CODEC_UNSUPPORTED");
-                }
-            } else if ("audio".equals(stream.path("codec_type").asText())
-                && !(MediaFormats.VIDEO_MP4.equals(mime) ? "aac".equals(codec) : List.of("opus",
-                    "vorbis").contains(codec))) {
-                throw new Rejected("ASSET_CODEC_UNSUPPORTED");
+            if (video == null && "video".equals(stream.path("codec_type").asText())
+                && stream.path("disposition").path("attached_pic").asInt() == 0) {
+                video = stream;
+            } else if (audio == null && "audio".equals(stream.path("codec_type").asText())) {
+                audio = stream;
             }
         }
-        BigDecimal duration;
-        try {
-            duration = new BigDecimal(parsed.path("format").path("duration").asText());
-        } catch (NumberFormatException exception) {
-            throw new Rejected("ASSET_INVALID");
-        }
-        if (!video || duration.signum() <= 0 ||
+        BigDecimal duration = durationOf(parsed);
+        if (video == null || duration.signum() <= 0 ||
             duration.compareTo(BigDecimal.valueOf(maxDurationSeconds)) > 0) {
             throw new Rejected("ASSET_INVALID");
         }
+        boolean mp4 = MediaFormats.VIDEO_MP4.equals(mime);
+        boolean compatible = mp4
+            ? "h264".equals(video.path("codec_name").asText()) && "yuv420p".equals(video.path("pix_fmt").asText())
+                && video.path("width").asInt() <= 1920 && video.path("height").asInt() <= 1080
+                && video.path("level").asInt() > 0 && video.path("level").asInt() <= 42
+                && (audio == null || "aac".equals(audio.path("codec_name").asText()) && audio.path("channels").asInt() <= 2)
+            : List.of("vp8", "vp9").contains(video.path("codec_name").asText())
+                && (audio == null || List.of("opus", "vorbis").contains(audio.path("codec_name").asText()));
+        if (!mp4 && !compatible) {
+            throw new Rejected("ASSET_CODEC_UNSUPPORTED");
+        }
         Path playback = null;
-        if (MediaFormats.VIDEO_MP4.equals(mime)) {
+        if (mp4) {
             playback = Files.createTempFile(file.getParent(), "academy-playback-", ".mp4");
             try {
-                run(List.of(properties.ffmpeg(), "-v", "error", "-nostdin", "-y", "-protocol_whitelist", "file,pipe",
-                    "-i", file.toString(), "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
-                    "-movflags", "+faststart", playback.toString()));
+                List<String> command = mp4Command(file, playback, video, audio, duration, maxBytes, compatible);
+                try {
+                    run(command, properties.transcodeTimeout());
+                } catch (Rejected exception) {
+                    if (!compatible) throw exception;
+                    // A valid codec can still have timestamps or stream headers that cannot be remuxed.
+                    run(mp4Command(file, playback, video, audio, duration, maxBytes, false),
+                        properties.transcodeTimeout());
+                }
+                if (Files.size(playback) == 0) throw new Rejected("ASSET_INVALID");
+                JsonNode rendition = json.readTree(run(List.of(properties.ffprobe(), "-v", "error",
+                    "-protocol_whitelist", "file,pipe", "-select_streams", "v:0", "-show_entries",
+                    "format=duration:stream=duration", "-of", "json", playback.toString())));
+                BigDecimal playbackDuration = durationOf(rendition);
+                if (!rendition.path("streams").isArray() || rendition.path("streams").isEmpty()
+                    || playbackDuration.signum() <= 0) throw new Rejected("ASSET_INVALID");
+                // Progress is measured against the file learners play, including normalized timestamps.
+                duration = playbackDuration;
             } catch (IOException | RuntimeException exception) {
                 deleteTemporaryFile(playback);
                 throw exception;
@@ -111,12 +131,56 @@ public class MediaProbe {
         return new Checked(mime, duration, null, playback);
     }
 
+    private List<String> mp4Command(Path source, Path destination, JsonNode video, JsonNode audio,
+                                   BigDecimal duration, long maxBytes, boolean copy) {
+        List<String> command = new ArrayList<>(List.of(properties.ffmpeg(), "-v", "error", "-nostdin", "-y",
+            "-protocol_whitelist", "file,pipe", "-i", source.toString(), "-map", "0:" + video.path("index").asInt()));
+        if (audio != null) command.addAll(List.of("-map", "0:" + audio.path("index").asInt()));
+        command.addAll(List.of("-map_metadata", "-1", "-map_chapters", "-1", "-sn", "-dn"));
+        if (copy) {
+            command.addAll(List.of("-c", "copy"));
+        } else {
+            // Bound rendition growth relative to the accepted source limit, leaving room for the MP4 container.
+            long budget = BigDecimal.valueOf(maxBytes).multiply(new BigDecimal("7.2"))
+                .divide(duration, 0, RoundingMode.DOWN).min(BigDecimal.valueOf(4_000_000)).max(BigDecimal.valueOf(8_000))
+                .longValue();
+            long audioRate = audio == null ? 0 : Math.min(128_000, budget / 4);
+            long videoRate = budget - audioRate;
+            command.addAll(List.of("-c:v", "libx264", "-preset", "veryfast", "-threads", "2", "-pix_fmt", "yuv420p",
+                "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+                "-fpsmax", "60", "-b:v", Long.toString(videoRate), "-maxrate", Long.toString(videoRate),
+                "-bufsize", Long.toString(videoRate * 2)));
+            if (audio != null) command.addAll(List.of("-c:a", "aac", "-b:a", Long.toString(audioRate), "-ac", "2", "-ar", "48000"));
+        }
+        command.addAll(List.of("-movflags", "+faststart", destination.toString()));
+        return command;
+    }
+
+    private BigDecimal durationOf(JsonNode details) {
+        BigDecimal duration = BigDecimal.ZERO;
+        List<JsonNode> candidates = new ArrayList<>();
+        candidates.add(details.path("format").path("duration"));
+        details.path("streams").forEach(stream -> candidates.add(stream.path("duration")));
+        for (JsonNode value : candidates) {
+            try {
+                duration = duration.max(new BigDecimal(value.asText()));
+            } catch (NumberFormatException ignored) {
+                // Fragmented MP4s may have a duration only on a stream.
+            }
+        }
+        return duration;
+    }
+
     private String run(List<String> command) throws IOException {
+        return run(command, properties.probeTimeout());
+    }
+
+    private String run(List<String> command, Duration timeout) throws IOException {
         Path output = Files.createTempFile("academy-probe-", ".log");
         Process process = null;
         try {
             process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start();
-            if (!process.waitFor(properties.probeTimeout().toMillis(), TimeUnit.MILLISECONDS)) {
+            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly();
                 throw new IllegalStateException("Media probe timed out");
             }
@@ -156,9 +220,14 @@ public class MediaProbe {
             && lower.endsWith(".webp")) {
             return MediaFormats.IMAGE_WEBP;
         }
-        if (header.length >= 8 && new String(header, 4, 4, StandardCharsets.US_ASCII).equals("ftyp")
-            && lower.endsWith(".mp4")) {
-            return MediaFormats.VIDEO_MP4;
+        if (lower.endsWith(".mp4")) {
+            if (header.length >= 8 && new String(header, 4, 4, StandardCharsets.US_ASCII).equals("ftyp")) {
+                return MediaFormats.VIDEO_MP4;
+            }
+            String format = json.readTree(run(List.of(properties.ffprobe(), "-v", "error",
+                "-protocol_whitelist", "file,pipe", "-show_entries", "format=format_name", "-of", "json",
+                path.toString()))).path("format").path("format_name").asText();
+            if (List.of(format.split(",")).contains("mp4")) return MediaFormats.VIDEO_MP4;
         }
         if (hex.startsWith("1a45dfa3") && lower.endsWith(".webm")) {
             return MediaFormats.VIDEO_WEBM;

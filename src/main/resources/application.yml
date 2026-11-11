@@ -91,7 +91,7 @@ app:
       poll-interval: ${ASSISTANT_GENERATION_POLL:3s}
   jwt:
     secret: ${JWT_SECRET}
-    expiry-minutes: 30
+    expiry-minutes: 60
   chat-room:
     ticket-ttl: ${CHAT_ROOM_TICKET_TTL:20s}
     idle-timeout: ${CHAT_ROOM_IDLE_TIMEOUT:60s}
