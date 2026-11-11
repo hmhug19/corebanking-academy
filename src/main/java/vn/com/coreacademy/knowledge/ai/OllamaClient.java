@@ -56,9 +56,18 @@ public class OllamaClient {
         public static Message user(String content) {
             return new Message("user", content);
         }
+
+        public static Message assistant(String content) {
+            return new Message("assistant", content);
+        }
     }
 
-    public record Options(double temperature, int numCtx) {
+    public record Options(double temperature, int numCtx, String model) {
+        /** Same settings on the configured chat model. */
+        public Options(double temperature, int numCtx) {
+            this(temperature, numCtx, null);
+        }
+
         /** Low temperature and a context wide enough for the retrieved chunks. */
         public static final Options GROUNDED = new Options(0.1, 8192);
 
@@ -225,7 +234,7 @@ public class OllamaClient {
 
     private Map<String, Object> chatBody(List<?> messages, Options options, boolean stream) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", config.chatModel());
+        body.put("model", options.model() == null ? config.chatModel() : options.model());
         body.put("messages", messages);
         body.put("stream", stream);
         // qwen3 would otherwise spend the budget on a hidden reasoning pass.

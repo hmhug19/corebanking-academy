@@ -118,6 +118,9 @@ public final class LearningViews {
         String coverColor,
         Instant publishedAt,
         String publishedBy,
+        boolean aiGenerated,
+        String reviewConfirmedBy,
+        Instant reviewConfirmedAt,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {

@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
+import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.entity.KnowledgeDocument;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.NewChunk;
@@ -63,6 +64,7 @@ class KnowledgeChatControllerTest extends KnowledgeIntegrationTest {
         jdbc.update("DELETE FROM learning_hub.knowledge_documents");
         KnowledgeDocument document = new KnowledgeDocument();
         document.setUploadedBy("000005");
+        document.setScope(DocumentScope.GLOBAL);
         document.setFileName("Quy-trinh-EOD.pdf");
         document.setMimeType("application/pdf");
         document.setSizeBytes(1);
@@ -148,7 +150,9 @@ class KnowledgeChatControllerTest extends KnowledgeIntegrationTest {
 
         assertThat(result.getResponse().getContentType()).startsWith("application/x-ndjson");
         assertThat(result.getResponse().getHeader("X-Accel-Buffering")).isEqualTo("no");
-        List<String> lines = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        List<String> all = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        assertThat(all.get(0)).matches("\\{\"type\":\"conversation\",\"conversationId\":\\d+}");
+        List<String> lines = all.subList(1, all.size());
         assertThat(lines).hasSize(4);
         assertThat(lines.get(0)).isEqualTo("{\"type\":\"retrieved\",\"count\":1}");
         assertThat(lines.get(1)).isEqualTo("{\"type\":\"delta\",\"text\":\"CIF là \"}");
@@ -165,6 +169,25 @@ class KnowledgeChatControllerTest extends KnowledgeIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"CIF là gì?\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.messageCode").value("KNOWLEDGE-AI_UNAVAILABLE"));
+    }
+
+    @Test
+    void aCallerWithoutTheAssistantFunctionIsRefusedOnBothChatEndpointsAndTheModelIsNotCalled() throws Exception {
+        // A temporary password empties the user's rights, AI_ASSISTANT included.
+        jdbc.update("UPDATE learning_hub.users SET must_change_password = true WHERE user_id = ?", "000004");
+        try {
+            mvc.perform(post(CHAT).with(as("000004")).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"question\":\"CIF là gì?\"}"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+            mvc.perform(post(CHAT + "/stream").with(as("000004")).accept(NDJSON, MediaType.APPLICATION_JSON)
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"CIF là gì?\"}"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
+        } finally {
+            jdbc.update("UPDATE learning_hub.users SET must_change_password = false WHERE user_id = ?", "000004");
+        }
+
+        verify(ollama, never()).embed(anyList());
+        verify(ollama, never()).chat(anyList(), any());
     }
 
     private static RequestPostProcessor as(String userId) {

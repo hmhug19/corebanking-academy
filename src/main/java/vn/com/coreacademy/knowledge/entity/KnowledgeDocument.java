@@ -46,6 +46,13 @@ public class KnowledgeDocument extends CreatedEntity {
     @Convert(converter = DocumentStatusConverter.class)
     private DocumentStatus status = DocumentStatus.QUEUED;
 
+    @Column(name = "scope", length = 10, nullable = false)
+    @Convert(converter = DocumentScopeConverter.class)
+    private DocumentScope scope = DocumentScope.PERSONAL;
+
+    @Column(name = "scope_org_id")
+    private Long scopeOrgId;
+
     @Column(name = "error_message", length = 500)
     private String errorMessage;
 

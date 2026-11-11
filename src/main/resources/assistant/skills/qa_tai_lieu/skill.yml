@@ -1,0 +1,7 @@
+description: hỏi đáp nghiệp vụ, quy trình, thuật ngữ, tài liệu, nội dung khóa học và tìm trong cộng đồng
+tools:
+  - search_documents
+  - search_courses
+  - search_community
+roles: []
+output: Trả lời có số đoạn nguồn [n]; nếu tài liệu không có thì nói không tìm thấy.

@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,10 +21,13 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import vn.com.coreacademy.assistant.agent.AssistantGate;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.PageResponse;
+import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.knowledge.dto.KnowledgeViews.KnowledgeDocumentView;
+import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
 
 @RestController
@@ -33,6 +37,7 @@ import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
 @Validated
 @RequiredArgsConstructor
 public class KnowledgeDocumentController {
+    private final AssistantGate gate;
     private final KnowledgeDocumentService documents;
 
     @PostMapping(value = "/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -42,20 +47,23 @@ public class KnowledgeDocumentController {
         summary = "Tải tài liệu lên kho tri thức",
         description = """
             Nhận .pdf, .md hoặc .docx tối đa theo app.knowledge.max-file-size, trả ngay với status queued.
-            - Mọi người dùng đã đăng nhập đều được tải lên; kho dùng chung cho mọi vai trò.
+            - Mọi người dùng đã đăng nhập đều được tải lên.
+            - scope: personal (chỉ mình tôi), unit (đơn vị của tôi và đơn vị con, mặc định) hoặc global (mọi người, chỉ ADMIN/SUPER_ADMIN; vai trò khác nhận 403).
             - Loại tệp được xác định từ phần mở rộng và nội dung thật, không tin MIME do trình duyệt khai báo.
             - Xử lý nền (trích xuất, chia đoạn, nhúng vector); theo dõi bằng GET /documents/{documentId}.
             """
     )
-    public BaseResponse<KnowledgeDocumentView> upload(@RequestPart MultipartFile file) {
-        return BaseResponse.ok(documents.upload(file));
+    public BaseResponse<KnowledgeDocumentView> upload(@RequestPart MultipartFile file,
+                                                      @RequestParam(required = false) String scope) {
+        gate.requireAccess();
+        return BaseResponse.ok(documents.upload(file, parseScope(scope)));
     }
 
     @GetMapping(value = "/documents", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(
         summary = "Danh sách tài liệu",
         description = """
-            Toàn bộ kho dùng chung, mới nhất trước, phân trang tại database.
+            Các tài liệu người gọi được đọc (của mình, của đơn vị mình và toàn hệ thống), mới nhất trước, phân trang tại database.
             - mine=true chỉ lấy tài liệu do người gọi tải lên (dùng để theo dõi tiến độ xử lý).
             - status lặp lại được (status=queued&status=processing); bỏ trống để lấy mọi trạng thái.
             """
@@ -65,6 +73,7 @@ public class KnowledgeDocumentController {
         @RequestParam(defaultValue = "false") boolean mine,
         @Parameter(description = "queued, processing, ready hoặc failed") @RequestParam(required = false)
         List<String> status) {
+        gate.requireAccess();
         return BaseResponse.ok(documents.list(page, size, mine, status));
     }
 
@@ -72,10 +81,37 @@ public class KnowledgeDocumentController {
     @Operation(
         summary = "Chi tiết tài liệu",
         description = """
-            Trả trạng thái xử lý hiện tại của một tài liệu trong kho dùng chung.
+            Trả trạng thái xử lý hiện tại của một tài liệu người gọi được đọc; tài liệu không đọc được trả not found.
             """
     )
     public BaseResponse<KnowledgeDocumentView> get(@PathVariable @Positive Long documentId) {
+        gate.requireAccess();
         return BaseResponse.ok(documents.get(documentId));
+    }
+
+    @DeleteMapping(value = "/documents/{documentId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+        summary = "Xóa tài liệu",
+        description = """
+            Xóa tệp, các đoạn và bản ghi để câu hỏi sau không còn trích dẫn tài liệu này.
+            - Người tải lên luôn xóa được; ADMIN/SUPER_ADMIN xóa được tài liệu toàn hệ thống hoặc của đơn vị trong phạm vi của mình.
+            - Tài liệu đang xử lý trả lỗi validation PROCESSING; tài liệu không đọc được trả not found; không đủ quyền trả 403.
+            """
+    )
+    public BaseResponse<Void> delete(@PathVariable @Positive Long documentId) {
+        gate.requireAccess();
+        documents.delete(documentId);
+        return BaseResponse.ok();
+    }
+
+    private static DocumentScope parseScope(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return DocumentScope.fromValue(value);
+        } catch (IllegalArgumentException exception) {
+            throw BusinessException.validation("scope", "INVALID_VALUE", "Phạm vi phải là personal, unit hoặc global.");
+        }
     }
 }

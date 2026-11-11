@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.agent.AssistantGate;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 import vn.com.coreacademy.knowledge.dto.ChatRequest;
@@ -28,6 +29,7 @@ import vn.com.coreacademy.knowledge.service.KnowledgeChatService;
 public class KnowledgeChatController {
     private static final MediaType NDJSON = MediaType.parseMediaType("application/x-ndjson");
 
+    private final AssistantGate gate;
     private final KnowledgeChatService chat;
 
     @PostMapping(produces = MediaType.APPLICATION_JSON_VALUE)
@@ -42,6 +44,7 @@ public class KnowledgeChatController {
             """
     )
     public BaseResponse<ChatAnswerView> ask(@Valid @RequestBody ChatRequest request) {
+        gate.requireAccess();
         return BaseResponse.ok(chat.answer(request.question()));
     }
 
@@ -50,13 +53,14 @@ public class KnowledgeChatController {
         summary = "Hỏi đáp trên kho tài liệu (stream)",
         description = """
             Trả application/x-ndjson, mỗi dòng một sự kiện JSON; không bọc BaseResponse.
-            - retrieved (đã tìm xong), nhiều delta (văn bản), done (found và citations) hoặc error (lỗi giữa chừng).
+            - conversation (mã hội thoại, dòng đầu), retrieved (đã tìm xong), nhiều delta (văn bản), done (found và citations) hoặc error (lỗi giữa chừng).
             - Từ chối trước khi bắt đầu stream (câu hỏi không hợp lệ, AI chưa sẵn sàng) là envelope JSON như /chat.
             - Client nên gửi Accept: application/x-ndjson, application/json.
             """
     )
     public ResponseEntity<StreamingResponseBody> stream(@Valid @RequestBody ChatRequest request) {
-        StreamingResponseBody body = chat.stream(request.question());
+        gate.requireAccess();
+        StreamingResponseBody body = chat.stream(request.question(), request.conversationId());
         return ResponseEntity.ok().contentType(NDJSON).header("X-Accel-Buffering", "no").body(body);
     }
 }

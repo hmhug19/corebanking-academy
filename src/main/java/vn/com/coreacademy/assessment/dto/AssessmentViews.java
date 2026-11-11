@@ -265,6 +265,22 @@ public final class AssessmentViews {
         String explanation) {
     }
 
+    /**
+     * One reviewed question of the caller's own submitted attempt, with the lesson it is linked to, for the assistant
+     * to explain. It exists only when the quiz's review policy lets the learner see answers now.
+     */
+    public record ExplainSource(
+        String quizTitle,
+        Integer displayOrder,
+        String questionType,
+        String content,
+        List<ReviewOption> options,
+        Boolean correct,
+        String explanation,
+        Long courseId,
+        Long lessonId) {
+    }
+
     public record AttemptResult(
         Long attemptId,
         Long quizId,

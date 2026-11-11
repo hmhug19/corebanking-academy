@@ -11,8 +11,12 @@ import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 /** What the model is told about each tool: name, when to use it and its arguments. No behaviour lives here. */
 public final class ToolDefinitions {
     public static final String SEARCH_DOCUMENTS = "search_documents";
+    public static final String SEARCH_COURSES = "search_courses";
+    public static final String READ_LESSON = "read_lesson";
+    public static final String SEARCH_COMMUNITY = "search_community";
     public static final String OPEN_SCREEN = "open_screen";
     public static final String UPDATE_PROFILE = "update_profile";
+    public static final String START_COURSE_JOB = "start_course_job";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -33,6 +37,43 @@ public final class ToolDefinitions {
             "Tìm trong kho tài liệu nội bộ dùng chung (quy trình, nghiệp vụ, thuật ngữ Core Banking). "
                 + "Dùng cho mọi câu hỏi cần thông tin từ tài liệu. Kết quả là các đoạn đánh số [n]; "
                 + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
+    }
+
+    public static ToolDefinition searchCourses() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties").putObject("query").put("type", "string").put("minLength", 1)
+            .put("maxLength", 300).put("description", "Câu hỏi hoặc từ khoá về nội dung bài học, tiếng Việt.");
+        parameters.putArray("required").add("query");
+
+        return new ToolDefinition(SEARCH_COURSES,
+            "Tìm trong nội dung các bài học của khóa học mà người dùng đang học hoặc được quản lý. Dùng khi câu hỏi "
+                + "về nội dung khóa học, bài học hoặc kiến thức được dạy trong khóa. Kết quả là các đoạn đánh số [n]; "
+                + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
+    }
+
+    public static ToolDefinition readLesson() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties");
+
+        return new ToolDefinition(READ_LESSON,
+            "Đọc nội dung bài học mà người dùng đang xem (không cần tham số). Dùng khi người dùng muốn tóm tắt hoặc "
+                + "hỏi bài này nói gì. Kết quả là các đoạn đánh số [n] theo thứ tự trong bài; chỉ trả lời từ các đoạn "
+                + "đó và ghi [n] sau mỗi ý.", parameters);
+    }
+
+    public static ToolDefinition searchCommunity() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties").putObject("query").put("type", "string").put("minLength", 1)
+            .put("maxLength", 300).put("description", "Từ khoá cần tìm trong cộng đồng, tiếng Việt, tối đa 300 ký tự.");
+        parameters.putArray("required").add("query");
+
+        return new ToolDefinition(SEARCH_COMMUNITY,
+            "Tìm câu hỏi, bài viết, Wiki và tài liệu của cộng đồng nội bộ. Dùng khi người dùng muốn tìm hoặc xem "
+                + "bài viết, thảo luận, kinh nghiệm của đồng nghiệp trong cộng đồng. Chỉ đọc các nguồn người dùng "
+                + "được xem; kết quả là liên kết nguồn để mở đọc.", parameters);
     }
 
     /** {@code screens} are the screens of this user; the model may only name one of their codes. */
@@ -61,6 +102,29 @@ public final class ToolDefinitions {
         return new ToolDefinition(UPDATE_PROFILE,
             "Đề xuất sửa hồ sơ của chính người dùng: họ tên, email, chức danh. Chỉ gửi trường người dùng muốn đổi. "
                 + "Thay đổi chỉ có hiệu lực sau khi người dùng bấm xác nhận.", parameters);
+    }
+
+    public static ToolDefinition startCourseJob() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        ObjectNode properties = parameters.putObject("properties");
+        properties.putObject("targetLearners").put("type", "string").put("maxLength", 500)
+            .put("description", "Đối tượng học viên của khóa, ví dụ: giao dịch viên mới vào làm.");
+        properties.putObject("level").put("type", "string")
+            .set("enum", JSON.createArrayNode().add("BEGINNER").add("INTERMEDIATE").add("ADVANCED"));
+        properties.putObject("chapters").put("type", "integer").put("minimum", 1).put("maximum", 20)
+            .put("description", "Số chương mong muốn. Cần số chương hoặc thời lượng.");
+        properties.putObject("durationMinutes").put("type", "integer").put("minimum", 15).put("maximum", 1200)
+            .put("description", "Tổng thời lượng mong muốn, phút.");
+        properties.putObject("programmeName").put("type", "string")
+            .put("description", "Tên chương trình đào tạo do người dùng nói. Không tự đoán.");
+        properties.putObject("competencyName").put("type", "string")
+            .put("description", "Tên năng lực gán cho câu hỏi do người dùng nói. Không tự đoán.");
+
+        return new ToolDefinition(START_COURSE_JOB,
+            "Bắt đầu tạo khóa học nháp từ tệp tài liệu người dùng đã đính kèm. Chỉ gọi khi người dùng muốn tạo khóa học; "
+                + "hỏi người dùng những thông tin còn thiếu thay vì tự đặt. Công cụ chỉ đề xuất, người dùng xác nhận "
+                + "bằng thẻ bên dưới.", parameters);
     }
 
     private static ObjectNode object() {

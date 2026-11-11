@@ -29,6 +29,8 @@ public enum AssessmentResponseCode implements ApiResponseCode {
     RETAKE_WAIT("ASSESSMENT-RETAKE_WAIT", "Chưa hết thời gian chờ giữa hai lượt thi.", "Chưa thể làm bài"),
     ATTEMPT_CLOSED("ASSESSMENT-ATTEMPT_CLOSED", "Lượt thi đã nộp hoặc đã hết giờ, không thể sửa đáp án.",
         "Chưa thể lưu"),
+    REVIEW_NOT_AVAILABLE("ASSESSMENT-REVIEW_NOT_AVAILABLE",
+        "Đề thi chưa cho xem đáp án ở thời điểm này nên chưa giải thích được câu hỏi.", "Chưa xem được đáp án"),
     ATTEMPT_IN_PROGRESS("ASSESSMENT-ATTEMPT_IN_PROGRESS", "Lượt thi chưa được nộp nên chưa có kết quả.",
         "Chưa có kết quả"),
     QUESTION_IN_USE("ASSESSMENT-QUESTION_IN_USE",

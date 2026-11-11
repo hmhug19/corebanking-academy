@@ -2,10 +2,16 @@ package vn.com.coreacademy.assistant.dto;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 
 /** One NDJSON line of the agent stream; {@code type} is the first field so a client can branch on it. */
 public sealed interface AgentStreamEvent {
+    /** First line of every stream: the conversation this turn is stored in (new when the request named none). */
+    record Conversation(String type, long conversationId) implements AgentStreamEvent {
+    }
+
     /** A tool started; the app shows a status line. */
     record Tool(String type, String name) implements AgentStreamEvent {
     }
@@ -23,11 +29,21 @@ public sealed interface AgentStreamEvent {
     }
 
     /** Last line on success; {@code answer} replaces what the deltas added up to. */
-    record Done(String type, String answer, List<CitationView> citations) implements AgentStreamEvent {
+    record Done(String type, String answer, List<CitationView> citations,
+                @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId,
+                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions) implements AgentStreamEvent {
+        /** The same line naming the stored turn, so the client can send feedback on it. */
+        public Done withTurnId(long id) {
+            return new Done(type, answer, citations, id, suggestions);
+        }
     }
 
     /** Last line on failure after the stream has started. */
     record Error(String type, String messageCode, String message) implements AgentStreamEvent {
+    }
+
+    static Conversation conversation(long conversationId) {
+        return new Conversation("conversation", conversationId);
     }
 
     static Tool tool(String name) {
@@ -47,7 +63,11 @@ public sealed interface AgentStreamEvent {
     }
 
     static Done done(String answer, List<CitationView> citations) {
-        return new Done("done", answer, citations);
+        return new Done("done", answer, citations, null, List.of());
+    }
+
+    static Done done(String answer, List<CitationView> citations, List<String> suggestions) {
+        return new Done("done", answer, citations, null, suggestions);
     }
 
     static Error error(String messageCode, String message) {

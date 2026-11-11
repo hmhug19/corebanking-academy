@@ -228,7 +228,7 @@ public class LearningContentService {
 
     @Transactional
     public LearningDetails.CourseDetail publish(Long courseId, Long revisionId,
-                                                LearningRequests.VersionRequest request) {
+                                                LearningRequests.VersionRequest request, boolean reviewConfirmed) {
         // Bước 1: chỉ người có quyền sửa khóa mới được publish; version cũ không được ghi đè.
         var actor = access.actor();
         Course course = repository.require(Course.class, courseId);
@@ -240,6 +240,15 @@ public class LearningContentService {
         version(revision, request.expectedVersion());
         requirePublishable(course, revision);
         resourceExtensions.forEach(extension -> extension.validateBeforePublish(revisionId));
+        // Nội dung do AI tạo chỉ xuất bản được khi người xuất bản xác nhận đã rà soát; ghi lại ai và khi nào.
+        if (revision.isAiGenerated()) {
+            if (!reviewConfirmed) {
+                throw BusinessException.validation("reviewConfirmed", "REVIEW_REQUIRED",
+                    "Bản này có nội dung do AI tạo; hãy xác nhận đã rà soát nội dung trước khi xuất bản.");
+            }
+            revision.setReviewConfirmedBy(actor.person().id());
+            revision.setReviewConfirmedAt(Instant.now());
+        }
 
         // Bước 2: đóng băng bản nội dung và chuyển con trỏ; enrollment cũ giữ revision_id cũ.
         revision.setState(RevisionState.PUBLISHED);
@@ -248,7 +257,14 @@ public class LearningContentService {
         course.setPublishedRevisionId(revision.getId());
         repository.save(revision, actor.person().id());
         repository.save(course, actor.person().id());
-        record(actor.person().id(), AuditAction.COURSE_PUBLISHED, course);
+        if (revision.isAiGenerated()) {
+            audit.record(actor.person().id(), AuditAction.COURSE_PUBLISHED, "course", course.getId().toString(),
+                course.getOwnerOrgId(), Map.of("revisionId", revision.getId(), "aiGenerated", true,
+                    "reviewConfirmedBy", actor.person().id(), "reviewConfirmedAt",
+                    revision.getReviewConfirmedAt().toString()));
+        } else {
+            record(actor.person().id(), AuditAction.COURSE_PUBLISHED, course);
+        }
         repository.flush();
         return detail(course, revision);
     }
@@ -751,6 +767,8 @@ public class LearningContentService {
                               boolean keepQuizLinks) {
         var original = detail(repository.require(Course.class, source.getCourseId()), source);
         target.setBasedOnRevisionId(source.getId());
+        // A draft cloned from AI-generated content is still AI-generated: publishing it asks for the review again.
+        target.setAiGenerated(source.isAiGenerated());
         target.setProgramId(source.getProgramId());
         target.setModuleId(source.getModuleId());
         target.setSummary(source.getSummary());

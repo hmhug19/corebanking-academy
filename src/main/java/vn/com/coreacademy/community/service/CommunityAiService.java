@@ -78,8 +78,8 @@ public class CommunityAiService {
     }
 
     public AIAnswerView answer(AnswerRequest request) {
-        if (new HashSet<>(request.sourceTypes()).size() != request.sourceTypes().size()
-            || !properties.ollama().embedModel().equals("bge-m3")) {
+        // The embed model is configurable; OllamaClient.embed rejects any model whose vectors are not 1024-wide.
+        if (new HashSet<>(request.sourceTypes()).size() != request.sourceTypes().size()) {
             throw new BusinessException(CommunityResponseCode.INVALID_REFERENCE);
         }
         var reservation = write(() -> reserve(request));

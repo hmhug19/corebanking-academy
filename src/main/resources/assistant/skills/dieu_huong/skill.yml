@@ -1,0 +1,5 @@
+description: mở một màn hình hoặc chuyển tới một chức năng của ứng dụng
+tools:
+  - open_screen
+roles: []
+output: Một câu xác nhận việc mở màn hình.

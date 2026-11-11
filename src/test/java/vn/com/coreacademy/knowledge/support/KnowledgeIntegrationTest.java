@@ -39,6 +39,36 @@ public abstract class KnowledgeIntegrationTest {
                     "/docker-entrypoint-initdb.d/03-media-progress.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_knowledge.sql"),
                     "/docker-entrypoint-initdb.d/04-knowledge.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-10-assistant-conversations.sql"),
+                    "/docker-entrypoint-initdb.d/04a-assistant-conversations.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-10-assistant-pending-actions.sql"),
+                    "/docker-entrypoint-initdb.d/04b-assistant-pending-actions.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-10-assistant-feedback.sql"),
+                    "/docker-entrypoint-initdb.d/04c-assistant-feedback.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-knowledge-document-scope.sql"),
+                    "/docker-entrypoint-initdb.d/04z-knowledge-document-scope.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-course-content-index.sql"),
+                    "/docker-entrypoint-initdb.d/04y-course-content-index.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-assistant-conversation-lesson-context.sql"),
+                    "/docker-entrypoint-initdb.d/04za-assistant-conversation-lesson-context.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-12-course-generation-jobs.sql"),
+                    "/docker-entrypoint-initdb.d/04zb-course-generation-jobs.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-13-course-revision-ai-generated.sql"),
+                    "/docker-entrypoint-initdb.d/04zc-course-revision-ai-generated.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-14-course-revision-review-confirmed.sql"),
+                    "/docker-entrypoint-initdb.d/04zd-course-revision-review-confirmed.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-15-course-job-soft-delete.sql"),
+                    "/docker-entrypoint-initdb.d/04ze-course-job-soft-delete.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_community.sql"),
                     "/docker-entrypoint-initdb.d/05-community.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_assessment.sql"),
@@ -78,6 +108,8 @@ public abstract class KnowledgeIntegrationTest {
         registry.add("app.storage.s3.secret-key", () -> "test-only-secret");
         // Tests call the worker themselves; the scheduler must never fire on its own.
         registry.add("app.knowledge.worker.poll-interval", () -> "1h");
+        registry.add("app.learning.course-index.poll-interval", () -> "1h");
+        registry.add("app.assistant.generation.poll-interval", () -> "1h");
         registry.add("app.knowledge.storage-dir", () -> System.getProperty("java.io.tmpdir") + "/knowledge-test");
     }
 }

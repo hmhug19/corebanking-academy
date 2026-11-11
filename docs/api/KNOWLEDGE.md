@@ -7,6 +7,9 @@ backend xử lý nền (trích xuất theo trang/dòng, chia đoạn, nhúng vec
 - Schema: [learning_hub_knowledge.sql](../sql/learning_hub_knowledge.sql) (cần pgvector; chạy sau Identity và Learning).
 - Chức năng menu `AI_ASSISTANT` (route `/assistant`) nằm trong seed Identity và được cấp cho mọi vai trò.
 - Request mẫu: [Postman](../postman/knowledge.postman_collection.json). Swagger: `/swagger-ui.html`.
+- Mọi API dưới `/api/v1/knowledge` (tải lên, danh sách, chi tiết, hỏi đáp) yêu cầu người gọi có chức năng `AI_ASSISTANT`,
+  thiếu thì `CORE-ACCESS_DENIED` (HTTP 403). Hỏi đáp dùng chung hạn mức câu hỏi/giờ và lượt chạy với trợ lý nhanh
+  (`ASSISTANT-BUSY`, `ASSISTANT-RATE_LIMITED`; xem [ASSISTANT.md](ASSISTANT.md)).
 - Mọi API dưới `/api/v1/knowledge`, yêu cầu JWT hợp lệ, trả `BaseResponse` (xem [API_CONTRACT.md](API_CONTRACT.md))
   trừ luồng NDJSON của chat.
 
@@ -34,14 +37,25 @@ phần mở rộng, kích thước (1 byte đến `max-file-size`), MIME khai b�
 `application/octet-stream`), và nội dung thật (PDF bắt đầu `%PDF-`; DOCX là zip có `word/document.xml`; Markdown là
 UTF-8 nghiêm ngặt, không có byte NUL). Loại tệp lưu là loại backend nhận diện.
 
+Tham số tùy chọn `scope` quyết định ai tìm thấy tài liệu: `personal` (chỉ người tải lên), `unit` (đơn vị của người tải lên
+và các đơn vị con; **mặc định**) hoặc `global` (mọi người; chỉ ADMIN/SUPER_ADMIN, vai trò khác nhận HTTP 403). Giá trị
+khác trả lỗi validation trên field `scope`. Tài liệu có sẵn trước khi có phạm vi được chuyển thành `global`.
+
 ### `GET /api/v1/knowledge/documents`
 
-Toàn bộ kho dùng chung, mới nhất trước. Tham số: `page` (từ 0), `size` (1..100, mặc định 20), `mine=true` (chỉ
+Các tài liệu người gọi được đọc (của mình, của đơn vị mình và đơn vị cha, và `global`), mới nhất trước. Tham số: `page` (từ 0), `size` (1..100, mặc định 20), `mine=true` (chỉ
 tài liệu của người gọi), `status` (lặp lại được: `?status=queued&status=processing`).
 
 ### `GET /api/v1/knowledge/documents/{documentId}`
 
-Một tài liệu; không có thì `CORE-RESOURCE_NOT_FOUND`.
+Một tài liệu; không có hoặc người gọi không được đọc thì `CORE-RESOURCE_NOT_FOUND`.
+
+### `DELETE /api/v1/knowledge/documents/{documentId}`
+
+Xóa tệp, các đoạn và bản ghi, nên câu hỏi sau không còn trích dẫn tài liệu. Người tải lên luôn xóa được; ADMIN/SUPER_ADMIN
+xóa được tài liệu `global` (phạm vi toàn hệ thống) hoặc `unit` nằm trong phạm vi của mình; tài liệu `personal` chỉ chủ
+sở hữu xóa. Không đủ quyền: HTTP 403. Tài liệu không đọc được: not found. Tài liệu đang `processing`: lỗi validation
+`PROCESSING` trên `documentId`; thử lại sau khi xử lý xong.
 
 ### `KnowledgeDocumentView`
 
@@ -51,6 +65,8 @@ Một tài liệu; không có thì `CORE-RESOURCE_NOT_FOUND`.
   "fileName": "Quy-trinh-EOD.pdf",
   "mimeType": "application/pdf",
   "sizeBytes": 812345,
+  "scope": "unit",
+  "scopeOrgId": 7,
   "status": "processing",
   "errorMessage": null,
   "pageCount": 12,
@@ -77,7 +93,8 @@ tiếng Việt). `pageCount` chỉ có với PDF đã xử lý. Không trả `st
 
 ## Hỏi đáp (chat)
 
-Một lượt, độc lập: backend không giữ hội thoại. Câu hỏi 1–300 ký tự sau khi bỏ khoảng trắng hai đầu. Quy trình:
+`/chat` (không stream) là một lượt độc lập, không lưu. `/chat/stream` lưu lượt vào hội thoại dùng chung với trợ lý nhanh
+(xem [ASSISTANT.md](ASSISTANT.md#hội-thoại-đã-lưu)). Câu hỏi 1–300 ký tự sau khi bỏ khoảng trắng hai đầu. Quy trình:
 nhúng câu hỏi (bge-m3) → tìm `top-k` đoạn gần nhất (cosine) → loại đoạn dưới `min-similarity` → nếu không còn đoạn nào,
 trả đúng câu "Không tìm thấy thông tin này trong tài liệu." mà **không gọi model** → ngược lại gửi các đoạn làm ngữ cảnh
 cho `qwen3:8b` (`think: false`, `temperature 0.1`). Trích dẫn dựng từ metadata của các đoạn, không phân tích từ văn bản
@@ -121,15 +138,18 @@ Không tìm thấy: `found = false`, `answer` là câu cố định, `citations 
 
 ### POST /api/v1/knowledge/chat/stream
 
-Cùng đầu vào, trả `application/x-ndjson` (mỗi dòng một JSON, không bọc `BaseResponse`, có header
+Đầu vào thêm `conversationId` tuỳ chọn (bỏ trống để bắt đầu hội thoại mới; mã của người khác là envelope
+`ASSISTANT-CONVERSATION_NOT_FOUND`). Với câu hỏi tiếp theo, các lượt trước của hội thoại được đưa cho mô hình làm lịch sử
+(tối đa 16 000 ký tự cùng câu hỏi mới); việc tìm đoạn vẫn chỉ dùng câu hỏi mới. Trả `application/x-ndjson` (mỗi dòng một JSON, không bọc `BaseResponse`, có header
 `X-Accel-Buffering: no`). Client nên gửi `Accept: application/x-ndjson, application/json` để một lời từ chối trước khi
 stream (envelope JSON) không bị trả 406.
 
 | type        | Trường                                | Ý nghĩa                                                       |
 | ----------- | ------------------------------------- | ------------------------------------------------------------- |
+| `conversation` | `conversationId`                   | Dòng đầu của stream: hội thoại lưu lượt này                   |
 | `retrieved` | `count`                               | Số đoạn đủ liên quan, gửi ngay khi tìm xong                   |
 | `delta`     | `text`                                | Một đoạn văn bản của câu trả lời, nối theo thứ tự             |
-| `done`      | `found`, `answer`, `citations`        | Kết thúc; `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `citations` như trên, rỗng khi `found = false` |
+| `done`      | `found`, `answer`, `citations`, `turnId`, `suggestions` | Kết thúc; `turnId` là lượt đã lưu, dùng để gửi đánh giá (bỏ khi không lưu được); `answer` là văn bản cuối cùng (client thay văn bản đã nhận bằng nó); `citations` như trên, rỗng khi `found = false`; `suggestions` là tối đa 3 gợi ý hỏi tiếp, bỏ khi không có |
 | `error`     | `messageCode`, `message`              | Lỗi giữa chừng (Ollama dừng sau khi đã bắt đầu), kết thúc dòng |
 
 Khi không có đoạn nào đủ liên quan: `retrieved(0)`, một `delta` là câu cố định, `done(found=false)`.

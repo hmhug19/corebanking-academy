@@ -16,17 +16,28 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.conversation.Conversations;
+import vn.com.coreacademy.assistant.conversation.TurnRecord;
+import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
+import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
+import vn.com.coreacademy.assistant.config.AssistantModels;
+import vn.com.coreacademy.assistant.skill.SkillCatalog;
+import vn.com.coreacademy.assistant.skill.Suggestions;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.security.SecurityContextUtils;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
 import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import vn.com.coreacademy.knowledge.dto.ChatStreamEvent;
+import vn.com.coreacademy.knowledge.dto.ChatViews;
 import vn.com.coreacademy.knowledge.dto.ChatViews.ChatAnswerView;
 import vn.com.coreacademy.knowledge.exception.KnowledgeResponseCode;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
+import vn.com.coreacademy.knowledge.repository.DocumentVisibility;
 
 /**
  * Answers a question from the shared knowledge base only: embed, find the closest chunks, and let the local model
@@ -47,6 +58,12 @@ public class KnowledgeChatService {
     private final ChatPromptBuilder prompts;
     private final KnowledgeProperties properties;
     private final ObjectMapper json;
+    private final TurnLimiter limiter;
+    private final Conversations conversations;
+    private final AssistantMetrics metrics;
+    private final AssistantModels models;
+    private final SkillCatalog catalog;
+    private final KnowledgeAccess access;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -59,11 +76,12 @@ public class KnowledgeChatService {
             throw BusinessException.validation("question", "OUT_OF_RANGE", "Câu hỏi phải từ 1 đến 300 ký tự.");
         }
 
+        DocumentVisibility visibility = access.visibility(SecurityContextUtils.getUserId());
         List<ChunkHit> hits;
         try {
             float[] vector = ollama.embed(List.of(question)).get(0);
             KnowledgeProperties.Retrieval retrieval = properties.retrieval();
-            List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR).stream()
+            List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR, visibility).stream()
                 .filter(hit -> hit.similarity() >= retrieval.minSimilarity()).toList();
             hits = distinct(candidates, retrieval.topK());
         } catch (OllamaUnavailableException | OllamaException exception) {
@@ -77,51 +95,201 @@ public class KnowledgeChatService {
     /** One complete answer, the contract of record for tests and tooling. */
     public ChatAnswerView answer(String rawQuestion) {
         Retrieval retrieval = retrieve(rawQuestion);
-        if (retrieval.hits().isEmpty()) {
-            return notFound();
+        try (TurnLimiter.Turn ignored = admitOrRefuse(SecurityContextUtils.getUserId())) {
+            if (retrieval.hits().isEmpty()) {
+                return notFound();
+            }
+
+            String text;
+            try {
+                text = ollama.chat(prompts.build(retrieval.question(), retrieval.hits()),
+                    models.groundedOptions()).strip();
+            } catch (OllamaUnavailableException | OllamaException exception) {
+                throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
+            }
+
+            return conclude(Suggestions.split(text).answer(), retrieval.hits());
+        }
+    }
+
+    /** The shared per-user limits of the agent apply to the document chat too; a refusal is an ordinary envelope. */
+    private TurnLimiter.Turn admitOrRefuse(String userId) {
+        TurnLimiter.Admission admission = limiter.admit(userId);
+        if (admission instanceof TurnLimiter.Admission.Started started) {
+            return started.turn();
+        }
+        if (admission instanceof TurnLimiter.Admission.RateLimited limited) {
+            throw BusinessException.field(AssistantResponseCode.RATE_LIMITED, "question", "RATE_LIMITED",
+                limited.message());
         }
 
-        String text;
-        try {
-            text = ollama.chat(prompts.build(retrieval.question(), retrieval.hits()), OllamaClient.Options.GROUNDED)
-                .strip();
-        } catch (OllamaUnavailableException | OllamaException exception) {
-            throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
-        }
+        throw new BusinessException(AssistantResponseCode.BUSY);
+    }
 
-        return conclude(text, retrieval.hits());
+    /** A stream that is not part of a conversation yet; kept for callers that do not name one. */
+    public StreamingResponseBody stream(String rawQuestion) {
+        return stream(rawQuestion, null);
     }
 
     /**
      * Retrieval runs now, on the request thread, so refusals are still ordinary envelopes. Generation runs inside the
-     * returned body: one JSON line per event, flushed at once.
+     * returned body: one JSON line per event, flushed at once. The first line names the conversation; the earlier
+     * turns of that conversation go to the model as plain history, retrieval still uses the new question alone.
      */
-    public StreamingResponseBody stream(String rawQuestion) {
+    public StreamingResponseBody stream(String rawQuestion, Long conversationId) {
+        String userId = SecurityContextUtils.getUserId();
+        conversations.requireOwned(userId, conversationId);
         Retrieval retrieval = retrieve(rawQuestion);
         return output -> {
-            write(output, ChatStreamEvent.retrieved(retrieval.hits().size()));
-            if (retrieval.hits().isEmpty()) {
-                write(output, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
-                write(output, ChatStreamEvent.done(false, NotFoundAnswer.TEXT, List.of()));
+            TurnLimiter.Admission admission = limiter.admit(userId);
+            if (!(admission instanceof TurnLimiter.Admission.Started started)) {
+                metrics.refused(AssistantMetrics.KNOWLEDGE,
+                    admission instanceof TurnLimiter.Admission.RateLimited ? "rate_limited" : "busy");
+                write(output, refusal(admission));
                 return;
             }
-
-            StringBuilder text = new StringBuilder();
-            try {
-                ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits()), OllamaClient.Options.GROUNDED,
-                    delta -> {
-                        text.append(delta);
-                        write(output, ChatStreamEvent.delta(delta));
-                    });
-            } catch (OllamaUnavailableException | OllamaException exception) {
-                write(output, ChatStreamEvent.error(KnowledgeResponseCode.AI_UNAVAILABLE.getCode(),
-                    KnowledgeResponseCode.AI_UNAVAILABLE.getMessage()));
-                return;
+            try (TurnLimiter.Turn ignored = started.turn()) {
+                Conversations.Opened opened = conversations.open(userId, conversationId, retrieval.question());
+                write(output, ChatStreamEvent.conversation(opened.conversationId()));
+                metrics.skill(SkillCatalog.DEFAULT);
+                TurnLog turnLog = new TurnLog(opened.conversationId(), retrieval.question(), catalog.version());
+                try {
+                    streamAnswer(output, retrieval, opened.history(), turnLog);
+                } finally {
+                    store(turnLog);
+                }
             }
-
-            ChatAnswerView answer = conclude(text.toString().strip(), retrieval.hits());
-            write(output, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations()));
         };
+    }
+
+    private static ChatStreamEvent refusal(TurnLimiter.Admission admission) {
+        if (admission instanceof TurnLimiter.Admission.RateLimited limited) {
+            return ChatStreamEvent.error(AssistantResponseCode.RATE_LIMITED.getCode(), limited.message());
+        }
+
+        return ChatStreamEvent.error(AssistantResponseCode.BUSY.getCode(), AssistantResponseCode.BUSY.getMessage());
+    }
+
+    private void streamAnswer(OutputStream output, Retrieval retrieval, List<Conversations.Exchange> history,
+                              TurnLog turnLog) {
+        emit(output, turnLog, ChatStreamEvent.retrieved(retrieval.hits().size()));
+        if (retrieval.hits().isEmpty()) {
+            emit(output, turnLog, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
+            emit(output, turnLog, ChatStreamEvent.done(false, NotFoundAnswer.TEXT, List.of()));
+            return;
+        }
+
+        StringBuilder text = new StringBuilder();
+        Suggestions.Filter filter = new Suggestions.Filter();
+        try {
+            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), models.groundedOptions(),
+                delta -> {
+                    text.append(delta);
+                    String shown = filter.accept(delta);
+                    if (!shown.isEmpty()) {
+                        emit(output, turnLog, ChatStreamEvent.delta(shown));
+                    }
+                });
+        } catch (UncheckedIOException exception) {
+            turnLog.stopped();
+            throw exception;
+        } catch (OllamaUnavailableException | OllamaException exception) {
+            emit(output, turnLog, ChatStreamEvent.error(KnowledgeResponseCode.AI_UNAVAILABLE.getCode(),
+                KnowledgeResponseCode.AI_UNAVAILABLE.getMessage()));
+            return;
+        }
+
+        Suggestions.Split split = Suggestions.split(text.toString().strip());
+        ChatAnswerView answer = conclude(split.answer(), retrieval.hits());
+        emit(output, turnLog, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations(),
+            answer.found() ? split.suggestions() : List.of()));
+    }
+
+    private void emit(OutputStream output, TurnLog turnLog, ChatStreamEvent event) {
+        turnLog.observe(event);
+        if (event instanceof ChatStreamEvent.Error error) {
+            metrics.error(AssistantMetrics.KNOWLEDGE, error.messageCode());
+        }
+        if (event instanceof ChatStreamEvent.Done done) {
+            if (!done.found()) {
+                metrics.notFound(AssistantMetrics.KNOWLEDGE);
+            }
+            // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
+            Long turnId = store(turnLog);
+            write(output, turnId == null ? done : done.withTurnId(turnId));
+            return;
+        }
+        write(output, event);
+    }
+
+    /**
+     * Stores the turn once, without ever failing the stream: the user already has the answer. Returns the stored id,
+     * or null when the turn could not be stored.
+     */
+    private Long store(TurnLog turnLog) {
+        if (turnLog.attempted) {
+            return turnLog.storedId;
+        }
+        turnLog.attempted = true;
+        TurnRecord record = turnLog.record();
+        // Counted whether or not the store works: the meters describe what the user went through.
+        metrics.turn(AssistantMetrics.KNOWLEDGE, record.status(), record.firstTokenMs(), record.durationMs());
+        try {
+            turnLog.storedId = conversations.record(turnLog.conversationId, record);
+        } catch (RuntimeException exception) {
+            // The message could quote the user's text; log the type only.
+            log.error("Knowledge turn not stored conversationId={} type={}", turnLog.conversationId,
+                exception.getClass().getName());
+        }
+
+        return turnLog.storedId;
+    }
+
+    /** What the events of one turn add up to, for the stored turn. */
+    private static final class TurnLog {
+        private final String question;
+        private final long conversationId;
+        private final String promptVersion;
+        private boolean attempted;
+        private Long storedId;
+        private final long started = System.nanoTime();
+        private TurnRecord.Status status = TurnRecord.Status.STOPPED;
+        private String answer;
+        private List<ChatViews.CitationView> citations = List.of();
+        private Integer firstTokenMs;
+
+        TurnLog(long conversationId, String question, String promptVersion) {
+            this.conversationId = conversationId;
+            this.question = question;
+            this.promptVersion = promptVersion;
+        }
+
+        void stopped() {
+            if (status != TurnRecord.Status.DONE && status != TurnRecord.Status.ERROR) {
+                status = TurnRecord.Status.STOPPED;
+            }
+        }
+
+        void observe(ChatStreamEvent event) {
+            if (event instanceof ChatStreamEvent.Delta && firstTokenMs == null) {
+                firstTokenMs = millisSince();
+            } else if (event instanceof ChatStreamEvent.Done done) {
+                status = TurnRecord.Status.DONE;
+                answer = done.answer();
+                citations = done.citations();
+            } else if (event instanceof ChatStreamEvent.Error) {
+                status = TurnRecord.Status.ERROR;
+            }
+        }
+
+        private int millisSince() {
+            return (int) ((System.nanoTime() - started) / 1_000_000);
+        }
+
+        TurnRecord record() {
+            return new TurnRecord(TurnRecord.KNOWLEDGE, question, answer, citations, List.of(), null, null, status,
+                firstTokenMs, millisSince(), SkillCatalog.DEFAULT, promptVersion);
+        }
     }
 
     private ChatAnswerView conclude(String text, List<ChunkHit> hits) {

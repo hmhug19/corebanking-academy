@@ -55,6 +55,15 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
 
     @TestConfiguration
     static class StubTools {
+        /** The stub tools belong to no real skill, so the document skill is told to offer them. */
+        @Bean
+        @org.springframework.context.annotation.Primary
+        vn.com.coreacademy.assistant.skill.SkillCatalog stubSkills() {
+            return new vn.com.coreacademy.assistant.skill.SkillCatalog("base", List.of(
+                new vn.com.coreacademy.assistant.skill.Skill("qa_tai_lieu", "hỏi đáp",
+                    List.of("stub_read", "stub_change"), List.of(), "system", "", "")), "test");
+        }
+
         @Bean
         AgentTool stubRead() {
             return new StubTool("stub_read") {
@@ -122,11 +131,14 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
         MvcResult result = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn();
         assertThat(result.getResponse().getContentType()).startsWith("application/x-ndjson");
         assertThat(result.getResponse().getHeader("X-Accel-Buffering")).isEqualTo("no");
-        return result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        List<String> all = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        // Every stream opens with the conversation it is stored in; the tests below read what follows.
+        assertThat(all.get(0)).matches("\\{\"type\":\"conversation\",\"conversationId\":\\d+}");
+        return all.subList(1, all.size());
     }
 
     private static String question(String text) {
-        return "{\"messages\":[{\"role\":\"user\",\"content\":\"" + text + "\"}]}";
+        return "{\"message\":\"" + text + "\"}";
     }
 
     @Test
@@ -145,11 +157,11 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
 
         List<String> lines = lines("000004", question("Xin chào"));
 
-        assertThat(lines).containsExactly(
+        assertThat(lines.subList(0, 3)).containsExactly(
             "{\"type\":\"tool\",\"name\":\"stub_read\"}",
             "{\"type\":\"delta\",\"text\":\"Xin \"}",
-            "{\"type\":\"delta\",\"text\":\"chào\"}",
-            "{\"type\":\"done\",\"answer\":\"Xin chào\",\"citations\":[]}");
+            "{\"type\":\"delta\",\"text\":\"chào\"}");
+        assertThat(lines.get(3)).matches("\\{\"type\":\"done\",\"answer\":\"Xin chào\",\"citations\":\\[],\"turnId\":\\d+}");
     }
 
     @Test
@@ -167,18 +179,17 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
         assertThat(card.path("expiresAt").asText()).matches("\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z");
         assertThat(card.has("userId")).isFalse();
         assertThat(card.has("arguments")).isFalse();
-        assertThat(lines.get(2)).isEqualTo("{\"type\":\"done\",\"answer\":\"Vui lòng xác nhận.\",\"citations\":[]}");
+        assertThat(lines.get(2))
+            .matches("\\{\"type\":\"done\",\"answer\":\"Vui lòng xác nhận.\",\"citations\":\\[],\"turnId\":\\d+}");
     }
 
     @Test
     void invalidRequestsAreEnvelopesNotStreams() throws Exception {
         doReturn(true).when(ollama).isAvailable();
         List<String> bodies = List.of(
-            "{\"messages\":[{\"role\":\"system\",\"content\":\"x\"},{\"role\":\"user\",\"content\":\"hi\"}]}",
-            "{\"messages\":[{\"role\":\"tool\",\"content\":\"x\"},{\"role\":\"user\",\"content\":\"hi\"}]}",
-            "{\"messages\":[]}",
             "{}",
-            "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"},{\"role\":\"assistant\",\"content\":\"hello\"}]}",
+            "{\"message\":null}",
+            "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
             question("x".repeat(501)),
             question("   "));
 
@@ -193,14 +204,15 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
     }
 
     @Test
-    void anAssistantTurnOfFourThousandAndOneCharactersIsCutNotRefused() throws Exception {
+    void aConversationIdThatDoesNotExistIsAnEnvelopeNotAStream() throws Exception {
         doReturn(true).when(ollama).isAvailable();
-        doAnswer(invocation -> new ChatTurn("ok", List.of())).when(ollama)
-            .chatWithTools(anyList(), anyList(), any(), any());
-        String body = "{\"messages\":[{\"role\":\"user\",\"content\":\"a\"},{\"role\":\"assistant\",\"content\":\""
-            + "y".repeat(4001) + "\"},{\"role\":\"user\",\"content\":\"b\"}]}";
 
-        assertThat(lines("000004", body)).last().asString().contains("\"type\":\"done\"");
+        mvc.perform(post(AGENT + "/stream").with(as("000004")).accept(NDJSON, MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"conversationId\":999999999,\"message\":\"hi\"}"))
+            .andExpect(status().isOk())
+            .andExpect(request().asyncNotStarted())
+            .andExpect(jsonPath("$.messageCode").value("ASSISTANT-CONVERSATION_NOT_FOUND"));
     }
 
     @Test

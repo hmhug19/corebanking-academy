@@ -30,6 +30,16 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 4 | `learning_hub_assessment.sql` | Quiz Engine; cần Identity + Learning, nằm trước Knowledge/Community |
 | 4a | `upgrade/2026-11-07-flashcards.sql` | Flashcard, trạng thái ôn và đánh dấu theo học viên |
 | 5 | `learning_hub_knowledge.sql` | pgvector (image `pgvector/pgvector:pg16`) |
+| 5a | `upgrade/2026-11-10-assistant-conversations.sql` | Hội thoại và lượt hỏi-đáp của trợ lý AI; chạy trước backend mới (ddl-auto=validate). Rollback cùng tên `.rollback.sql` xoá hết hội thoại đã lưu |
+| 5b | `upgrade/2026-11-10-assistant-pending-actions.sql` | Thay đổi dữ liệu trợ lý đề xuất chờ người dùng xác nhận, lưu trong DB để không mất khi khởi động lại; chạy trước backend mới. Rollback cùng tên `.rollback.sql` bỏ các đề xuất đang chờ |
+| 5c | `upgrade/2026-11-10-assistant-feedback.sql` | Đánh giá 👍/👎 của người dùng cho câu trả lời của trợ lý; chạy trước backend mới. Rollback cùng tên `.rollback.sql` bỏ mọi đánh giá |
+| 5d | `upgrade/2026-11-11-knowledge-document-scope.sql` | Phạm vi tài liệu kho tri thức (personal, unit, global) để tài liệu cá nhân hoặc của đơn vị không lộ cho người khác; tài liệu cũ thành global; chạy trước backend mới |
+| 5e | `upgrade/2026-11-11-course-content-index.sql` | Chỉ mục nội dung khóa học đã xuất bản (đoạn + vector) cho trợ lý AI tìm bài học; cần pgvector và baseline Learning; chạy trước backend mới |
+| 5f | `upgrade/2026-11-11-assistant-conversation-lesson-context.sql` | Hội thoại trợ lý gắn với bài học (4 cột context_*); chạy trước backend mới |
+| 5g | `upgrade/2026-11-12-course-generation-jobs.sql` | Công việc tạo khóa học bằng AI (jobs và steps); chạy trước backend mới |
+| 5h | `upgrade/2026-11-13-course-revision-ai-generated.sql` | Cờ ai_generated trên revision khóa học (nội dung do AI tạo); chạy trước backend mới |
+| 5i | `upgrade/2026-11-14-course-revision-review-confirmed.sql` | Người và thời điểm xác nhận đã rà soát khi xuất bản bản do AI tạo; chạy trước backend mới |
+| 5j | `upgrade/2026-11-15-course-job-soft-delete.sql` | Đánh dấu job tạo khóa học bằng AI đã xóa thay vì xóa dòng, để hạn mức trong ngày vẫn tính (cột deleted_at). |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |

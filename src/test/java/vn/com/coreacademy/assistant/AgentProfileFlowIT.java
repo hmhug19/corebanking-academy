@@ -82,11 +82,13 @@ class AgentProfileFlowIT extends KnowledgeIntegrationTest {
 
         MvcResult started = mvc.perform(post(AGENT + "/stream").with(as(LEARNER)).accept(NDJSON, MediaType.APPLICATION_JSON)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"messages\":[{\"role\":\"user\",\"content\":\"Đổi chức danh của tôi thành Chuyên viên chính\"}]}"))
+                .content("{\"message\":\"Đổi chức danh của tôi thành Chuyên viên chính\",\"skill\":\"ho_so\"}"))
             .andExpect(request().asyncStarted()).andReturn();
         MvcResult result = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn();
 
-        List<String> lines = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        List<String> all = result.getResponse().getContentAsString(StandardCharsets.UTF_8).lines().toList();
+        assertThat(all.get(0)).startsWith("{\"type\":\"conversation\"");
+        List<String> lines = all.subList(1, all.size());
         assertThat(lines).hasSize(3);
         JsonNode card = JSON.readTree(lines.get(1));
         assertThat(card.path("type").asText()).isEqualTo("action_required");
@@ -158,7 +160,7 @@ class AgentProfileFlowIT extends KnowledgeIntegrationTest {
         try {
             mvc.perform(post(AGENT + "/stream").with(as(LEARNER)).accept(NDJSON, MediaType.APPLICATION_JSON)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"messages\":[{\"role\":\"user\",\"content\":\"Xin chào\"}]}"))
+                    .content("{\"message\":\"Xin chào\"}"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
             mvc.perform(post(AGENT + "/actions/" + actionId + "/cancel").with(as(LEARNER)))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.messageCode").value("CORE-ACCESS_DENIED"));
