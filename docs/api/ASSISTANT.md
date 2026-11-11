@@ -318,3 +318,26 @@ riêng việc dùng còn cần vai trò quản lý khóa học (INSTRUCTOR, ADMI
   từng bước bằng `FOR UPDATE SKIP LOCKED` sau một khóa advisory của giao dịch, nên chỉ một job chạy trên toàn hệ thống (job còn lại ở
   `queued`; job `waiting_approval` không chiếm chỗ). Khởi động lại đưa bước đang chạy về `pending`, các bước đã xong giữ nguyên đầu ra.
 - Trạng thái job: `queued`, `running`, `waiting_approval`, `completed`, `failed`, `cancelled`.
+
+### Nội dung, duyệt và bản nháp (`/api/v1/assistant/course-jobs/{jobId}/...`)
+
+Đường ống: `summarise_sections` → `outline` (job chuyển `waiting_approval`) → **tác giả duyệt dàn ý** → các bài `lesson` (`c{chương}l{bài}`)
+→ `questions` của từng bài → job `waiting_approval` ở bước `review` → tác giả tạo bản nháp. Không bước nào sau `outline` chạy trước khi duyệt.
+Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể cả ghi chú nguồn (`sourceNotes`) trong nội dung từng bài.
+
+| Method | Path | Ý nghĩa |
+|---|---|---|
+| GET | `.../content` | Dàn ý, `outlineLocked`, các bài (khối nội dung, ghi chú nguồn) và câu hỏi đề xuất (`decision`: `pending|accepted|rejected`). |
+| PUT | `.../outline` | Sửa dàn ý (JSON đúng schema); chỉ trước khi duyệt, sau đó `OUTLINE_LOCKED`. |
+| POST | `.../outline/approve` | Khóa dàn ý, tạo các bước bài rồi câu hỏi, job → `running`. |
+| POST | `.../lessons/{key}/regenerate` | Viết lại đúng một bài; bài khác và câu hỏi giữ nguyên. |
+| PUT | `.../questions/{key}/{index}` | Body `{"decision":"accepted|rejected|pending"}`. |
+| POST | `.../retry` | Chạy lại các bước lỗi; bước đã xong giữ nguyên. |
+| POST | `.../draft` | Tạo khóa học nháp. Cần dàn ý đã duyệt và mọi bài xong. Gọi lại trả cùng bản nháp. |
+
+- Đầu ra của model được kiểm theo schema (`GenerationSchemas`): không hợp lệ thì hỏi lại đúng một lần kèm danh sách lỗi, rồi bước `failed` với
+  thông báo đọc được. Giới hạn: ≤ 20 chương, ≤ 10 bài/chương, ≤ 6 khối/bài, thân khối ≤ 6000 ký tự.
+- Bản nháp được tạo bằng `LearningContentService.create` với quyền của tác giả, luôn ở trạng thái `draft` (không bao giờ tự xuất bản) và
+  `course_revisions.ai_generated = true` (`docs/sql/upgrade/2026-11-13-course-revision-ai-generated.sql`).
+- Chỉ câu hỏi `accepted` được ghi vào ngân hàng câu hỏi (qua `QuestionService`, kèm chương trình và năng lực do người dùng chọn, chưa gắn khóa/bài).
+- Thời lượng mỗi bước ghi vào meter `assistant.generation.step.duration` (tag `kind`, `outcome`).

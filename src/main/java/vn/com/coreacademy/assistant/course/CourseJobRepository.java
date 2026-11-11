@@ -221,6 +221,71 @@ public class CourseJobRepository {
         return jdbc.update("UPDATE learning_hub.course_generation_steps SET status = 'pending' WHERE status = 'running'");
     }
 
+    public Optional<StepRow> stepByKey(long jobId, String kind, String itemKey) {
+        return jdbc.query("SELECT " + STEP_COLUMNS + " FROM learning_hub.course_generation_steps "
+            + "WHERE job_id = ? AND kind = ? AND item_key = ?", STEP, jobId, kind, itemKey).stream().findFirst();
+    }
+
+    public List<StepRow> stepsOfKind(long jobId, String kind) {
+        return jdbc.query("SELECT " + STEP_COLUMNS + " FROM learning_hub.course_generation_steps "
+            + "WHERE job_id = ? AND kind = ? ORDER BY step_id", STEP, jobId, kind);
+    }
+
+    /** Serialises the changes of one job (an edit, an approval, a decision) for the rest of the transaction. */
+    public Optional<JobRow> lockJob(long jobId) {
+        return jdbc.query("SELECT " + JOB_COLUMNS + " FROM learning_hub.course_generation_jobs WHERE job_id = ? "
+            + "FOR UPDATE", JOB, jobId).stream().findFirst();
+    }
+
+    /** Replaces the stored output of a finished step (the author's edit or a decision); never touches its status. */
+    public void setOutput(long stepId, String outputJson) {
+        jdbc.update("UPDATE learning_hub.course_generation_steps SET output = ?::jsonb WHERE step_id = ?", outputJson,
+            stepId);
+    }
+
+    /** A finished or failed step runs again; its old output is dropped so nothing stale is read meanwhile. */
+    public boolean resetStep(long stepId) {
+        return jdbc.update("""
+            UPDATE learning_hub.course_generation_steps
+               SET status = 'pending', output = NULL, error_message = NULL, finished_at = NULL
+             WHERE step_id = ? AND status IN ('done', 'failed')
+            """, stepId) == 1;
+    }
+
+    /** Failed steps run again (the author pressed retry). */
+    public int requeueFailed(long jobId) {
+        return jdbc.update("""
+            UPDATE learning_hub.course_generation_steps SET status = 'pending', error_message = NULL, finished_at = NULL
+             WHERE job_id = ? AND status = 'failed'
+            """, jobId);
+    }
+
+    /** A step the source was not ready for goes back without costing an attempt. */
+    public void releaseStep(long stepId) {
+        jdbc.update("""
+            UPDATE learning_hub.course_generation_steps SET status = 'pending', attempts = GREATEST(attempts - 1, 0)
+             WHERE step_id = ? AND status = 'running'
+            """, stepId);
+    }
+
+    /** Puts a job waiting for the author, or one that failed, back to work; a cancelled or completed job stays. */
+    public boolean reopen(long jobId, String step, int progress) {
+        return jdbc.update("""
+            UPDATE learning_hub.course_generation_jobs
+               SET status = 'running', step = ?, progress = ?, error_message = NULL, update_time = now()
+             WHERE job_id = ? AND status IN ('waiting_approval', 'failed')
+            """, step, progress, jobId) == 1;
+    }
+
+    public long countSteps(long jobId, String kind, String status) {
+        Long count = jdbc.queryForObject("""
+            SELECT count(*) FROM learning_hub.course_generation_steps
+             WHERE job_id = ? AND kind = ? AND (?::text IS NULL OR status = ?)
+            """, Long.class, jobId, kind, status, status);
+
+        return count == null ? 0 : count;
+    }
+
     /** Whether the job has a step that still has to run (pending or running). */
     public boolean hasOpenSteps(long jobId) {
         Integer open = jdbc.queryForObject("""

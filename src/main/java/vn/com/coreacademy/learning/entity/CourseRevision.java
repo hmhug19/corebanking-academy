@@ -72,4 +72,8 @@ public class CourseRevision extends LearningRecord {
 
     @Column(name = "published_by", length = 20)
     private String publishedBy;
+
+    /** The content was written by the AI course generation; publishing needs the author's review confirmation. */
+    @Column(name = "ai_generated", nullable = false)
+    private boolean aiGenerated;
 }

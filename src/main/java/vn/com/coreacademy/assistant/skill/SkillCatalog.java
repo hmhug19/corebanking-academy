@@ -29,9 +29,13 @@ public class SkillCatalog {
     public static final String DEFAULT = "qa_tai_lieu";
     private static final String ROOT = "assistant/";
     private static final int VERSION_CHARS = 12;
+    /** The prompts of course generation, one file per step in {@code skills/tao_khoa_hoc/steps/}. */
+    private static final List<String> GENERATION_STEPS = List.of("summarise_sections", "outline", "lesson",
+        "questions");
 
     private final String base;
     private final String explain;
+    private final Map<String, String> generationSteps = new LinkedHashMap<>();
     private final Map<String, Skill> skills = new LinkedHashMap<>();
     private final String version;
 
@@ -40,6 +44,10 @@ public class SkillCatalog {
         MessageDigest digest = digest();
         this.base = read(resolver.getResource("classpath:" + ROOT + "base.md"), digest);
         this.explain = read(resolver.getResource("classpath:" + ROOT + "explain.md"), digest);
+        for (String step : GENERATION_STEPS) {
+            generationSteps.put(step, read(resolver.getResource(
+                "classpath:" + ROOT + "skills/tao_khoa_hoc/steps/" + step + ".md"), digest));
+        }
         try {
             List<String> ids = new ArrayList<>();
             for (Resource config : resolver.getResources("classpath*:" + ROOT + "skills/*/skill.yml")) {
@@ -133,6 +141,16 @@ public class SkillCatalog {
     /** The system prompt that explains one reviewed quiz question: the shared style, then the explanation rules. */
     public String explainPrompt() {
         return base + "\n\n" + explain;
+    }
+
+    /** The system prompt of one course generation step: the shared style, then that step's rules and output shape. */
+    public String generationPrompt(String step) {
+        String rules = generationSteps.get(step);
+        if (rules == null) {
+            throw new IllegalArgumentException("Unknown generation step " + step);
+        }
+
+        return base + "\n\n" + rules;
     }
 
     /** The shared style alone, for the grounded document chat. */

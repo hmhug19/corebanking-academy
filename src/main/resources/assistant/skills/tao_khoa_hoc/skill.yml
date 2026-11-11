@@ -1,0 +1,7 @@
+description: tạo khóa học nháp từ một tài liệu nguồn (chỉ giảng viên và quản trị)
+tools: []
+roles:
+  - INSTRUCTOR
+  - ADMIN
+  - SUPER_ADMIN
+output: Báo đã bắt đầu tạo khóa học và đưa liên kết tới màn hình rà soát.

@@ -56,6 +56,7 @@ FILES=(
   upgrade/2026-11-11-course-content-index.sql
   upgrade/2026-11-11-assistant-conversation-lesson-context.sql
   upgrade/2026-11-12-course-generation-jobs.sql
+  upgrade/2026-11-13-course-revision-ai-generated.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

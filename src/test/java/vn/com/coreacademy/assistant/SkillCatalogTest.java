@@ -17,7 +17,7 @@ class SkillCatalogTest {
         SkillCatalog catalog = new SkillCatalog();
 
         assertThat(catalog.all()).extracting(Skill::id)
-            .containsExactlyInAnyOrder("qa_tai_lieu", "dieu_huong", "ho_so", "tom_tat_bai", "tro_chuyen");
+            .containsExactlyInAnyOrder("qa_tai_lieu", "dieu_huong", "ho_so", "tom_tat_bai", "tro_chuyen", "tao_khoa_hoc");
         assertThat(catalog.find("qa_tai_lieu").orElseThrow().tools())
             .containsExactly("search_documents", "search_courses", "search_community");
         assertThat(catalog.find("tro_chuyen").orElseThrow().tools()).isEmpty();

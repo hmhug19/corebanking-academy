@@ -48,6 +48,12 @@ public class AssistantMetrics {
             .tag("surface", surface).register(registry).record(steps);
     }
 
+    /** One course generation step: how long it ran, by step kind and outcome (done, failed, waiting). */
+    public void generationStep(String kind, String outcome, long durationMs) {
+        Timer.builder("assistant.generation.step.duration").description("Time one course generation step took")
+            .tag("kind", kind).tag("outcome", outcome).register(registry).record(Duration.ofMillis(durationMs));
+    }
+
     public void toolCall(String tool) {
         count("assistant.tool.calls", "Tool calls by tool name", "tool", tool);
     }

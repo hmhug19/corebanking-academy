@@ -46,4 +46,22 @@ public final class CourseJobViews {
     public record JobSummary(long jobId, String status, String step, int progress, String error, String sourceFileName,
                              Long createdDraftId, OffsetDateTime createTime) {
     }
+
+    public record LessonView(String key, String title, String status, String error,
+                             com.fasterxml.jackson.databind.JsonNode blocks,
+                             com.fasterxml.jackson.databind.JsonNode sourceNotes) {
+    }
+
+    public record QuestionsView(String lessonKey, String status, String error,
+                                com.fasterxml.jackson.databind.JsonNode questions) {
+    }
+
+    @Schema(description = "Nội dung model đã tạo cho job, để tác giả rà soát. Chỉ chủ job đọc được.")
+    public record ContentView(long jobId, String status, String step, int progress, String error,
+                              com.fasterxml.jackson.databind.JsonNode outline, boolean outlineLocked,
+                              List<LessonView> lessons, List<QuestionsView> questions, Long createdDraftId) {
+    }
+
+    public record DecisionRequest(String decision) {
+    }
 }

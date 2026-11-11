@@ -192,7 +192,7 @@ public class CourseJobService {
             "Bạn đã tạo " + properties.jobsPerDay() + " khóa học bằng AI trong ngày, thử lại sau " + text + ".");
     }
 
-    private JobRow owned(long jobId) {
+    JobRow owned(long jobId) {
         // A job of someone else answers the same as a missing one, so an id reveals nothing.
         return jobs.job(jobId).filter(row -> row.ownerUserId().equals(SecurityContextUtils.getUserId()))
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));

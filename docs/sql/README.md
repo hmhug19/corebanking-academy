@@ -36,6 +36,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5e | `upgrade/2026-11-11-course-content-index.sql` | Chỉ mục nội dung khóa học đã xuất bản (đoạn + vector) cho trợ lý AI tìm bài học; cần pgvector và baseline Learning; chạy trước backend mới |
 | 5f | `upgrade/2026-11-11-assistant-conversation-lesson-context.sql` | Hội thoại trợ lý gắn với bài học (4 cột context_*); chạy trước backend mới |
 | 5g | `upgrade/2026-11-12-course-generation-jobs.sql` | Công việc tạo khóa học bằng AI (jobs và steps); chạy trước backend mới |
+| 5h | `upgrade/2026-11-13-course-revision-ai-generated.sql` | Cờ ai_generated trên revision khóa học (nội dung do AI tạo); chạy trước backend mới |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |
