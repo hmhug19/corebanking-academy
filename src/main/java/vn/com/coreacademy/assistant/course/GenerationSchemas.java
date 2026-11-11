@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant.course;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -20,6 +21,9 @@ public final class GenerationSchemas {
     static final int MAX_TITLE = 255;
     static final int MAX_STEPS = 30;
     static final Set<String> DIFFICULTIES = Set.of("EASY", "MEDIUM", "HARD");
+
+    /** Links, images and HTML in model text: the skill forbids them, and a source document must not smuggle them in. */
+    private static final Pattern LINK = Pattern.compile("(?i)(https?:|ftp:|javascript:)|www\\.|\\]\\(|<\\s*[a-z/!]");
 
     private GenerationSchemas() {
     }
@@ -96,6 +100,7 @@ public final class GenerationSchemas {
                 problems.add("block type must be text or process");
             }
         }
+        noLinks(node, problems, "lesson");
         JsonNode notes = node.path("sourceNotes");
         if (!notes.isArray() || notes.size() > 30) {
             problems.add("lesson.sourceNotes must be an array of up to 30 items");
@@ -114,6 +119,7 @@ public final class GenerationSchemas {
             problems.add("questions must have 1 to 8 items");
             return problems;
         }
+        noLinks(node, problems, "questions");
         for (JsonNode question : questions) {
             String type = question.path("type").asText("");
             if (!type.equals("SINGLE") && !type.equals("MULTIPLE")) {
@@ -148,6 +154,13 @@ public final class GenerationSchemas {
             }
         }
         return problems;
+    }
+
+    private static void noLinks(JsonNode node, List<String> problems, String where) {
+        if (node.isTextual() && LINK.matcher(node.asText()).find()) {
+            problems.add(where + " must not contain links, images or HTML");
+        }
+        node.forEach(child -> noLinks(child, problems, where));
     }
 
     private static void text(JsonNode node, String field, int max, List<String> problems, String where) {

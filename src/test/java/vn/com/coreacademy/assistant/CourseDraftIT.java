@@ -220,6 +220,24 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void nobodyButTheOwnerCanChangeOrDraftAJob() throws Exception {
+        long job = approved().path("jobId").asLong();
+        String other = "CORE-RESOURCE_NOT_FOUND";
+
+        api.error(ADMIN, api.put(Map.of("title", "x"), path(job, "/outline")), other);
+        api.error(ADMIN, api.post(Map.of(), path(job, "/outline/approve")), other);
+        api.error(ADMIN, api.post(Map.of(), path(job, "/lessons/c1l1/regenerate")), other);
+        api.error(ADMIN, api.put(Map.of("decision", "accepted"), path(job, "/questions/c1l1/0")), other);
+        api.error(ADMIN, api.post(Map.of(), path(job, "/retry")), other);
+        api.error(ADMIN, api.post(Map.of(), path(job, "/draft")), other);
+        api.error(ADMIN, api.post(Map.of(), path(job, "/cancel")), other);
+        api.error(ADMIN, ApiClient.delete(JOBS + "/{id}", job), other);
+
+        assertThat(jdbc.queryForObject("SELECT created_draft_id FROM learning_hub.course_generation_jobs "
+            + "WHERE job_id = ?", Long.class, job)).isNull();
+    }
+
+    @Test
     void aLessonOrAFailedStepCannotRunAgainOnceTheDraftExists() throws Exception {
         long job = approved().path("jobId").asLong();
         api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")));
