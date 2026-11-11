@@ -96,6 +96,7 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 45 | GET `/api/v1/reports/assessment/{type}/export` | CSV cho `results/learners/competency/questions`, tối đa 10.000 dòng |
 | 46 | GET `/api/v1/me/competency?courseId` | Năng lực của chính học viên |
 | 47 | GET `/api/v1/me/courses/{courseId}/quizzes` | Đề đã xuất bản của khóa (FINAL_EXAM cuối) kèm lượt còn lại, lý do chặn và `lessonId` của bài quiz |
+| 48 | POST `/api/v1/course-exams` | Lưu khóa học kèm bài thi cuối khóa và bộ câu hỏi trong một giao dịch |
 
 API 21–28, 30–33, 37–39 yêu cầu quyền quản lý khóa chứa câu hỏi/đề; API 36 cần vai trò giảng viên/quản trị; bulk cần
 quyền trên mọi khóa trong lô. API 29 chỉ dành cho quản trị GLOBAL; API 34–35, 46 chỉ trả dữ liệu của caller. API 40–45
@@ -108,6 +109,64 @@ với `quizId` và `status` theo AND (ví dụ `status=VOIDED&graded=true` trả
 `expectedVersion` là `rowVersion` vừa đọc; lệch trả `ASSESSMENT-CONFLICT`.
 
 ## Quy tắc chính
+
+**Soạn khóa học kèm bài thi.** `POST /api/v1/course-exams` nhận JSON, trả envelope
+`BaseResponse<CourseDetail>` giống API chi tiết khóa học; `finalQuizId` và
+`completionRule.finalQuizId` chứa ID đề vừa liên kết. Không tự xuất bản khóa/đề.
+Hai dạng request:
+
+```json
+{
+  "course": {
+    "ownerOrgId": 1,
+    "code": "CB-NEW",
+    "title": "Khóa học Core Banking",
+    "draft": {
+      "programId": 2,
+      "title": "Khóa học Core Banking",
+      "level": "basic",
+      "defaultRequirement": "mandatory",
+      "objectives": [],
+      "chapters": [],
+      "rewardPoints": 0
+    }
+  },
+  "quiz": {
+    "title": "Bài thi cuối khóa",
+    "quizType": "FINAL_EXAM",
+    "selectionMode": "FIXED",
+    "questionCount": 2,
+    "shuffleQuestions": true,
+    "shuffleOptions": true,
+    "timeLimitMinutes": 15,
+    "graceSeconds": 0,
+    "passPercent": 70,
+    "scoringMode": "ALL_OR_NOTHING",
+    "scoreMethod": "BEST",
+    "reviewPolicy": "AFTER_SUBMIT",
+    "maxAttempts": 3,
+    "retakeWaitHours": 0,
+    "allowRetakeAfterPass": false,
+    "requireLessonsCompleted": true
+  },
+  "pool": { "items": [{ "questionId": 101, "sortNo": 0 }, { "questionId": 102, "sortNo": 1 }] }
+}
+```
+
+Với khóa đã lưu, thay `course` bằng `courseId`, `revisionId` và `draft` (payload
+`DraftRequest` đầy đủ, gồm `expectedVersion`). Khi sửa đề, gửi thêm `quizId` và
+`expectedQuizVersion` (rowVersion mới nhất của đề). Không gửi đồng thời `course` và
+`courseId/draft`; tạo khóa mới không nhận quizId. `quiz` dùng cùng `QuizRequest`
+như API lập đề; chỉ nhận `FINAL_EXAM`. Bỏ `quiz.courseId` để server tự gán; nếu gửi
+phải khớp khóa. `openAt/closeAt` tùy chọn, ISO-8601; `pool.items[].points`
+tùy chọn theo contract thay pool.
+
+Server kiểm quyền tạo/quản lý khóa, revision nháp, phiên bản và phạm vi chương trình
+của từng câu theo service hiện hành. Pool phải đủ câu ACTIVE; FIXED có đúng
+`questionCount` câu. Lỗi ở bất kỳ bước nào rollback cả khóa/nháp, đề, pool và liên kết
+hoàn thành; không để lại khóa hay đề rời. Học viên không có quyền gọi API ghi này.
+Lệch phiên bản trả `LEARNING-CONFLICT` hoặc `ASSESSMENT-CONFLICT`; sai câu/chương trình
+trả `ASSESSMENT-INVALID_REFERENCE`. Không cần migration riêng cho endpoint này.
 
 **Ngân hàng chương trình.** Câu hỏi dùng chung gửi `programId`, không cần `courseId` hoặc `lessonId`. Người quản lý
 khóa (ví dụ giảng viên OWN) thêm câu vào cùng ngân hàng bằng `courseId`, qua form hoặc nhập Excel; đây là đường

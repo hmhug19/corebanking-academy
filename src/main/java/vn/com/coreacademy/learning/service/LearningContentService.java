@@ -66,7 +66,11 @@ import vn.com.coreacademy.learning.repository.LearningRepository;
 public class LearningContentService {
     private static final Cleaner LESSON_HTML = new Cleaner(new Safelist()
         .addTags("p", "div", "br", "h2", "h3", "h4", "ul", "ol", "li", "blockquote", "pre", "code",
-            "b", "strong", "i", "em", "u", "s", "strike", "a")
+            "b", "strong", "i", "em", "u", "s", "strike", "a", "table", "caption", "thead", "tbody",
+            "tfoot", "tr", "th", "td", "img")
+        .addAttributes("td", "colspan", "rowspan")
+        .addAttributes("th", "colspan", "rowspan")
+        .addAttributes("img", "data-asset-id", "alt")
         .addAttributes("a", "href")
         .addProtocols("a", "href", "https", "http"));
 
@@ -153,6 +157,28 @@ public class LearningContentService {
         record(actor.person().id(), AuditAction.DRAFT_SAVED, course);
         repository.flush();
         repository.incrementVersion(revision);
+        return detail(course, revision);
+    }
+
+    /** Gắn đề sau khi Assessment đã ghi cấu hình và pool, không ghi lại toàn bộ cây bài học lần thứ hai. */
+    @Transactional
+    public LearningDetails.CourseDetail attachFinalExam(Long courseId, Long revisionId, Long expectedVersion,
+                                                       Long quizId) {
+        var actor = access.actor();
+        Course course = repository.require(Course.class, courseId);
+        access.requireManage(actor, course);
+        writeLock.acquire();
+        CourseRevision revision = repository.require(CourseRevision.class, revisionId);
+        requireDraft(course, revision);
+        version(revision, expectedVersion);
+        var quiz = validateFinalQuiz(course, quizId);
+        CourseCompletionRule rule = repository.rules(revisionId).get(0);
+        rule.setFinalQuizId(quizId);
+        repository.save(rule, actor.person().id());
+        writeFinalAssessment(revision, quiz.orElse(null), actor.person().id());
+        repository.flush();
+        repository.incrementVersion(revision);
+        record(actor.person().id(), AuditAction.DRAFT_SAVED, course);
         return detail(course, revision);
     }
 
@@ -542,6 +568,17 @@ public class LearningContentService {
             throw BusinessException.validation("completionThreshold", "REQUIRED", "Vui lòng đặt tỷ lệ xem video.");
         }
         validatePlayerLists(course, block);
+        if (BlockType.TEXT.equals(block.blockType()) && BodyFormat.HTML.equals(block.bodyFormat()) && block.body() != null) {
+            Document html = Jsoup.parseBodyFragment(block.body());
+            Set<Long> attachedImages = block.assets().stream().filter(asset -> AssetUsage.IMAGE.equals(asset.usage()))
+                .map(LearningRequests.AssetUse::assetId).collect(Collectors.toSet());
+            for (var image : html.select("img")) {
+                String id = image.attr("data-asset-id");
+                if (id.matches("[1-9][0-9]{0,17}") && !attachedImages.contains(Long.valueOf(id))) {
+                    throw new BusinessException(LearningResponseCode.ASSET_INVALID);
+                }
+            }
+        }
         for (var link : block.assets()) {
             LearningAsset asset = usableAsset(course, link.assetId());
             boolean matches = switch (block.blockType()) {
@@ -557,6 +594,9 @@ public class LearningContentService {
                     && (MediaType.APPLICATION_PDF_VALUE.equals(asset.getMimeType())
                         || asset.getMimeType().startsWith(MediaMime.OFFICE_PREFIX));
                 case BlockType.PROCESS -> Set.of(AssetUsage.ATTACHMENT, AssetUsage.IMAGE).contains(link.usage());
+                case BlockType.TEXT -> AssetUsage.IMAGE.equals(link.usage())
+                    && Set.of(MediaType.IMAGE_PNG_VALUE, MediaType.IMAGE_JPEG_VALUE, MediaMime.IMAGE_WEBP)
+                        .contains(asset.getMimeType());
                 default -> false;
             };
             if (!matches) {
@@ -782,9 +822,18 @@ public class LearningContentService {
         if (source == null || source.isBlank()) {
             return null;
         }
-        Document cleaned = LESSON_HTML.clean(Jsoup.parseBodyFragment(source));
+        Document parsed = Jsoup.parseBodyFragment(source);
+        parsed.select("img").stream().filter(image -> !image.attr("data-asset-id").matches("[1-9][0-9]{0,17}"))
+            .forEach(org.jsoup.nodes.Element::remove);
+        Document cleaned = LESSON_HTML.clean(parsed);
+        for (var cell : cleaned.select("td,th")) {
+            for (String span : List.of("colspan", "rowspan")) {
+                String value = cell.attr(span);
+                if (!value.matches("[1-9][0-9]?|100")) cell.removeAttr(span);
+            }
+        }
         cleaned.outputSettings().prettyPrint(false);
-        return cleaned.body().hasText() ? cleaned.body().html() : null;
+        return cleaned.body().hasText() || !cleaned.select("img,table").isEmpty() ? cleaned.body().html() : null;
     }
 
     private void cloneContent(Course course, CourseRevision source, CourseRevision target, String actor,

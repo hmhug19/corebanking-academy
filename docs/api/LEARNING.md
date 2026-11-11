@@ -220,8 +220,14 @@ Init ví dụ (ID và hash chỉ minh họa, phải lấy theo file/đơn vị t
   Không áp dụng retry này cho checksum/codec/file không hợp lệ.
 - GET upload trả mimeType/durationSeconds/pageCount/mediaCheckedAt sau xác minh; FE không tự suy ready từ uploadedBytes.
 - PDFBox xác định số trang PDF, từ chối PDF mã hóa/lỗi; ffprobe xác định codec/duration.
-  MP4 hỗ trợ H.264/yuv420p + AAC (audio có thể không có); WebM VP8/VP9 + Opus/Vorbis.
-  MP4 được remux faststart, không transcode; file gốc và rendition có key/size/MIME/hash riêng.
+  MP4 hợp lệ đến 500 MB được chuẩn hóa để phát trên trình duyệt. H.264/yuv420p + AAC được remux
+  faststart; HEVC, video 10-bit, MPEG-4 hoặc audio khác được chuyển sang H.264/yuv420p + AAC.
+  Audio là tùy chọn, chỉ track hình chính và track audio đầu tiên được dùng. File hỏng/mã hóa hoặc
+  không có video vẫn trả lỗi xác minh. MP4 học tập áp dụng giới hạn dung lượng, không giới hạn 24 giờ.
+  Timeout chuyển đổi riêng là `app.learning.media.transcode-timeout` (mặc định 6 giờ); worker tiếp tục
+  gia hạn lease trong khi chạy. Bản chuyển đổi tối đa 1920×1080, bitrate theo thời lượng để giới hạn
+  dung lượng rendition. File gốc và rendition có key/size/MIME/hash riêng.
+  WebM giữ VP8/VP9 + Opus/Vorbis.
 - POST upload một request cũ vẫn dùng được, nay kiểm file thật cùng pipeline đồng bộ; durationSeconds/pageCount
   vẫn nhận để tương thích nhưng không dùng làm dữ liệu xác minh. Không còn đường bỏ qua kiểm codec/page count.
 - Cần `ffprobe`, `ffmpeg` trên PATH máy chạy BE hoặc cấu hình app.learning.media.ffprobe/ffmpeg.
@@ -230,6 +236,14 @@ Init ví dụ (ID và hash chỉ minh họa, phải lấy theo file/đơn vị t
 - Chỉ asset ready, chưa xóa mềm, đúng quyền/đơn vị mới được attach. Dùng chung qua tham chiếu;
   xóa block không xóa file. Asset còn được revision, attachment, cover hoặc tiến độ tham chiếu không được xóa mềm.
   Tài nguyên/upload hết hạn vẫn giữ để vận hành đối soát; chưa có tự purge hoặc tự abort theo lịch.
+
+Khối văn bản HTML hỗ trợ bảng (`table/thead/tbody/tr/th/td`, colspan/rowspan 1–100) và ảnh nội tuyến.
+Ảnh lưu bằng `<img data-asset-id="123" alt="…">`, kèm `assets[{assetId:123,usage:"image"}]` của chính khối.
+Ảnh PNG/JPEG/WebP dùng cùng upload chia phần và hạn mức 5 MB, tối đa 20 ảnh mỗi khối.
+Backend kiểm ownership/readiness và tham chiếu asset, loại URL ảnh bên ngoài, event handler và script.
+Frontend tải blob qua API content có token, học viên gửi enrollmentId/blockId. URL blob chỉ tồn tại lúc xem.
+Chế độ mã HTML và dán bảng qua clipboard dùng chung sanitizer. Script nhập trong chế độ mã được hiển thị
+dưới dạng `pre/code` trong nội dung bài học.
 
 ### Nguồn mã nghiệp vụ, giới hạn và cấu hình
 
