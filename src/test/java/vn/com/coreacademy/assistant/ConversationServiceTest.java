@@ -266,6 +266,9 @@ class ConversationServiceTest {
         assertThat(views.get(1).action().message()).isEqualTo("Đã cập nhật.");
         assertThat(views.get(3).action().message()).isEqualTo("Không thực hiện được.");
         assertThat(views.get(0).action().changes().get(0).to()).isEqualTo("Mới");
+        assertThat(views.get(2).action().message()).isEqualTo("Đã huỷ thay đổi");
+        assertThat(views.get(4).action().message()).isEqualTo("Đề xuất đã hết hạn");
+        assertThat(views.get(0).action().message()).isNull();
     }
 
     @Test

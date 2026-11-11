@@ -281,9 +281,18 @@ public class ConversationService implements Conversations {
         String status = PendingActionStore.PENDING.equals(action.getStatus()) && !action.getExpiresAt().isAfter(now)
             ? "expired" : action.getStatus().toLowerCase(java.util.Locale.ROOT);
 
+        String message = action.getResultMessage();
+        if (message == null || message.isBlank()) {
+            // Cancelled and expired cards had no text before; give them the one a new row stores.
+            message = switch (status) {
+                case "cancelled" -> PendingActionStore.CANCELLED_MESSAGE;
+                case "expired" -> PendingActionStore.EXPIRED_MESSAGE;
+                default -> message;
+            };
+        }
+
         return new ActionState(action.getId(), action.getTool(), action.getTitle(),
-            read(action.getChanges(), CHANGES, List.of()), status, action.getExpiresAt(),
-            action.getResultMessage());
+            read(action.getChanges(), CHANGES, List.of()), status, action.getExpiresAt(), message);
     }
 
     private <T> T read(String text, TypeReference<T> type, T fallback) {
