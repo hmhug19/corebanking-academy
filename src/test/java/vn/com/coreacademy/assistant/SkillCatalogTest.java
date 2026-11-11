@@ -1,6 +1,8 @@
 package vn.com.coreacademy.assistant;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import vn.com.coreacademy.assistant.config.AssistantModels;
@@ -25,6 +27,24 @@ class SkillCatalogTest {
         assertThat(catalog.version()).hasSize(12).isEqualTo(new SkillCatalog().version());
         assertThat(catalog.systemPrompt(catalog.defaultSkill())).contains("mình").contains("search_documents")
             .contains(Suggestions.MARKER);
+    }
+
+    @Test
+    void anExampleReplyNeverShowsAToolCallAsText() {
+        SkillCatalog catalog = new SkillCatalog();
+        Set<String> toolNames = Stream.concat(catalog.all().stream().flatMap(skill -> skill.tools().stream()),
+            Stream.of("start_course_job", "open_course_form")).collect(java.util.stream.Collectors.toSet());
+
+        for (Skill skill : catalog.all()) {
+            skill.examples().lines().filter(line -> line.startsWith("Trợ lý:")).forEach(reply ->
+                assertThat(toolNames).as(skill.id() + " example: " + reply).noneMatch(reply::contains));
+        }
+    }
+
+    @Test
+    void everySkillWithToolsSaysTheToolCallIsMandatory() {
+        new SkillCatalog().all().stream().filter(skill -> !skill.tools().isEmpty()).forEach(skill ->
+            assertThat(skill.output().toLowerCase()).as(skill.id()).contains("bắt buộc gọi công cụ"));
     }
 
     @Test

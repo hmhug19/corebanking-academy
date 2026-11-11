@@ -3,4 +3,4 @@ tools:
   - update_profile
   - open_screen
 roles: []
-output: Nêu rõ thay đổi đang chờ xác nhận.
+output: Nêu rõ thay đổi đang chờ xác nhận. Bắt buộc gọi công cụ sửa hồ sơ trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
