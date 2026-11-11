@@ -81,19 +81,19 @@ public class CourseJobRepository {
     }
 
     public Optional<JobRow> job(long jobId) {
-        return jdbc.query("SELECT " + JOB_COLUMNS + " FROM learning_hub.course_generation_jobs WHERE job_id = ?", JOB,
-            jobId).stream().findFirst();
+        return jdbc.query("SELECT " + JOB_COLUMNS + " FROM learning_hub.course_generation_jobs "
+            + "WHERE job_id = ? AND deleted_at IS NULL", JOB, jobId).stream().findFirst();
     }
 
     /** Newest first. */
     public List<JobRow> jobsOf(String ownerUserId, int limit) {
         return jdbc.query("SELECT " + JOB_COLUMNS + """
-             FROM learning_hub.course_generation_jobs WHERE owner_user_id = ?
+             FROM learning_hub.course_generation_jobs WHERE owner_user_id = ? AND deleted_at IS NULL
              ORDER BY create_time DESC, job_id DESC LIMIT ?
             """, JOB, ownerUserId, limit);
     }
 
-    /** Create times of the owner's jobs since the instant, oldest first (cancelled and failed ones count too). */
+    /** Create times of the owner's jobs since the instant, oldest first (cancelled, failed and deleted ones count too). */
     public List<OffsetDateTime> createdSince(String ownerUserId, OffsetDateTime since) {
         return jdbc.queryForList("""
             SELECT create_time FROM learning_hub.course_generation_jobs
@@ -122,8 +122,19 @@ public class CourseJobRepository {
             """, courseId, jobId);
     }
 
+    /**
+     * Removes the job for its owner but keeps the row, marked deleted and cancelled without its source document, so the
+     * daily limit still counts it. The steps (and the model output in them) go.
+     */
     public void deleteJob(long jobId) {
-        jdbc.update("DELETE FROM learning_hub.course_generation_jobs WHERE job_id = ?", jobId);
+        jdbc.update("DELETE FROM learning_hub.course_generation_steps WHERE job_id = ?", jobId);
+        jdbc.update("""
+            UPDATE learning_hub.course_generation_jobs
+               SET deleted_at = now(), source_document_id = NULL, inputs = '{}'::jsonb,
+                   status = CASE WHEN status IN ('queued', 'running', 'waiting_approval') THEN 'cancelled' ELSE status END,
+                   update_time = now()
+             WHERE job_id = ?
+            """, jobId);
     }
 
     public record DocumentInfo(long id, String fileName, String status) {
@@ -266,7 +277,7 @@ public class CourseJobRepository {
     /** Serialises the changes of one job (an edit, an approval, a decision) for the rest of the transaction. */
     public Optional<JobRow> lockJob(long jobId) {
         return jdbc.query("SELECT " + JOB_COLUMNS + " FROM learning_hub.course_generation_jobs WHERE job_id = ? "
-            + "FOR UPDATE", JOB, jobId).stream().findFirst();
+            + "AND deleted_at IS NULL FOR UPDATE", JOB, jobId).stream().findFirst();
     }
 
     /** Replaces the stored output of a finished step (the author's edit or a decision); never touches its status. */

@@ -304,7 +304,7 @@ riêng việc dùng còn cần vai trò quản lý khóa học (INSTRUCTOR, ADMI
 | GET | `/api/v1/assistant/course-jobs` | Các job của tôi, mới nhất trước (tối đa 50). |
 | GET | `/api/v1/assistant/course-jobs/{jobId}` | Trạng thái, bước, tiến độ, các bước đã có. Job của người khác: `CORE-RESOURCE_NOT_FOUND`. |
 | POST | `/api/v1/assistant/course-jobs/{jobId}/cancel` | Hủy job chưa kết thúc (`CORE-VALIDATION_FAILED`/`JOB_FINISHED` nếu đã kết thúc). |
-| DELETE | `/api/v1/assistant/course-jobs/{jobId}` | Xóa job, bước và tài liệu nguồn; job đang chạy phải hủy trước (`JOB_RUNNING`). |
+| DELETE | `/api/v1/assistant/course-jobs/{jobId}` | Xóa job khỏi danh sách, xóa bước và tài liệu nguồn; dòng job được giữ (`deleted_at`) nên vẫn tính vào hạn mức trong ngày. Job đang chạy phải hủy trước (`JOB_RUNNING`). |
 
 `inputs`: `targetLearners` (1–500 ký tự), `level` (`BEGINNER|INTERMEDIATE|ADVANCED`), `chapters` (1–20) hoặc
 `durationMinutes` (15–1200) — cần ít nhất một, `programmeId`, `competencyId` (người dùng chọn, không do model), `ownerOrgId`.

@@ -38,6 +38,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5g | `upgrade/2026-11-12-course-generation-jobs.sql` | Công việc tạo khóa học bằng AI (jobs và steps); chạy trước backend mới |
 | 5h | `upgrade/2026-11-13-course-revision-ai-generated.sql` | Cờ ai_generated trên revision khóa học (nội dung do AI tạo); chạy trước backend mới |
 | 5i | `upgrade/2026-11-14-course-revision-review-confirmed.sql` | Người và thời điểm xác nhận đã rà soát khi xuất bản bản do AI tạo; chạy trước backend mới |
+| 5j | `upgrade/2026-11-15-course-job-soft-delete.sql` | Đánh dấu job tạo khóa học bằng AI đã xóa thay vì xóa dòng, để hạn mức trong ngày vẫn tính (cột deleted_at). |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |

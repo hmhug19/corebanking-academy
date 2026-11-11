@@ -191,6 +191,20 @@ class CourseJobIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void deletingJobsDoesNotGiveTheAllowanceBackButTheyLeaveTheList() {
+        for (int i = 0; i < 3; i++) {
+            long job = create(INSTRUCTOR, null);
+            api.ok(INSTRUCTOR, delete(JOBS + "/{id}", job));
+            api.error(INSTRUCTOR, get(JOBS + "/{id}", job), "CORE-RESOURCE_NOT_FOUND");
+        }
+
+        assertThat(api.ok(INSTRUCTOR, get(JOBS))).isEmpty();
+        api.error(INSTRUCTOR, start(inputs(null)), "ASSISTANT-JOB_RATE_LIMITED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_steps",
+            Integer.class)).isZero();
+    }
+
+    @Test
     void aSecondJobWaitsForTheFirstAndStartsOnceItIsWaitingForApproval() {
         long first = create(INSTRUCTOR, null);
         long second = create(ADMIN, ownOrg);
@@ -254,8 +268,9 @@ class CourseJobIT extends AssessmentIntegrationTest {
         api.error(INSTRUCTOR, api.post(Map.of(), JOBS + "/{id}/cancel", job), "CORE-VALIDATION_FAILED");
 
         api.ok(INSTRUCTOR, delete(JOBS + "/{id}", job));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs WHERE job_id = ?",
-            Integer.class, job)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs "
+            + "WHERE job_id = ? AND deleted_at IS NOT NULL AND source_document_id IS NULL", Integer.class, job))
+            .isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_steps WHERE job_id = ?",
             Integer.class, job)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents WHERE document_id = ?",
