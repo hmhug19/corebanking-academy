@@ -115,8 +115,20 @@ public class OllamaClient {
 
     /** One complete answer ({@code stream:false}). */
     public String chat(List<Message> messages, Options options) {
+        return chat(messages, options, null);
+    }
+
+    /**
+     * One complete answer constrained to a JSON schema (Ollama structured output): the model can only produce text that
+     * parses and has the schema's fields, so the answer is the JSON itself. {@code format} null leaves it free.
+     */
+    public String chat(List<Message> messages, Options options, JsonNode format) {
         long started = System.nanoTime();
-        JsonNode response = post("/api/chat", chatBody(messages, options, false), JsonNode.class);
+        Map<String, Object> body = chatBody(messages, options, false);
+        if (format != null) {
+            body.put("format", format);
+        }
+        JsonNode response = post("/api/chat", body, JsonNode.class);
         log.info("Ollama chat model={} messages={} durationMs={}", config.chatModel(), messages.size(),
             millisSince(started));
         return response.path("message").path("content").asText("");

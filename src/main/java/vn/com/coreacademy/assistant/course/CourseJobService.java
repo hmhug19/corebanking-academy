@@ -55,12 +55,12 @@ public class CourseJobService {
     private final ObjectMapper json;
 
     /**
-     * Checks who may start a job and for which unit and the day's limit, stores the file as the caller's personal
-     * document (which the ingestion worker then reads like any other), and queues the job with its first step.
+     * Checks who may start a job and for which unit and the day's limit, stores the file as a course source
+     * (a document only its uploader reads, never listed or searched; the ingestion worker reads it like any other), and queues the job with its first step.
      */
     public JobView create(MultipartFile file, Inputs requested) {
         Prepared prepared = prepare(requested);
-        long documentId = documents.upload(file, DocumentScope.PERSONAL).id();
+        long documentId = documents.upload(file, DocumentScope.COURSE_SOURCE).id();
         try {
             return queue(prepared, documentId);
         } catch (RuntimeException exception) {

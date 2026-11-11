@@ -157,6 +157,9 @@ public class CourseDraftService {
     public ContentView regenerateLesson(long jobId, String lessonKey) {
         JobRow job = lock(jobId);
         refuseWhenDrafted(job);
+        if (job.sourceDocumentId() == null) {
+            throw refuse("SOURCE_REQUIRED", "Tệp nguồn đã được xóa theo thời hạn lưu trữ. Hãy đính kèm lại tệp để viết lại bài này.");
+        }
         StepRow step = jobs.stepByKey(job.id(), CourseGenerationRunner.LESSON, lessonKey)
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
         if (step.attempts() >= MAX_STEP_ATTEMPTS) {

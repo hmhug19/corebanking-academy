@@ -109,7 +109,7 @@ public class KnowledgeDocumentController {
             return null;
         }
         try {
-            return DocumentScope.fromValue(value);
+            return DocumentScope.fromRequest(value);
         } catch (IllegalArgumentException exception) {
             throw BusinessException.validation("scope", "INVALID_VALUE", "Phạm vi phải là personal, unit hoặc global.");
         }

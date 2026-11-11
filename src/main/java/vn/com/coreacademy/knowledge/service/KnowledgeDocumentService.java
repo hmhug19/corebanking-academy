@@ -148,6 +148,29 @@ public class KnowledgeDocumentService {
         store.discard(document.getStorageKey());
     }
 
+    /**
+     * Removes a document without a caller: the retention job of course sources runs with nobody signed in. Returns
+     * false and leaves it when the worker is processing it right now; the next run tries again.
+     */
+    public boolean deleteForSystem(long documentId) {
+        KnowledgeDocument document = documents.findById(documentId).orElse(null);
+        if (document == null) {
+            return true;
+        }
+        if (document.getStatus() == DocumentStatus.PROCESSING) {
+            return false;
+        }
+        transaction.executeWithoutResult(status -> {
+            chunks.deleteByDocument(documentId);
+            documents.deleteById(documentId);
+            audit.record("system", DELETED_ACTION, "knowledge_document", String.valueOf(documentId), null,
+                Map.of("scope", document.getScope().getValue()));
+        });
+        store.discard(document.getStorageKey());
+
+        return true;
+    }
+
     /** A document the caller may read, or not-found: a hidden document must not be told apart from a missing one. */
     private KnowledgeDocument readable(long documentId) {
         String userId = SecurityContextUtils.getUserId();
@@ -157,6 +180,7 @@ public class KnowledgeDocumentService {
             case GLOBAL -> true;
             case PERSONAL -> userId.equals(document.getUploadedBy());
             case UNIT -> access.visibility(userId).orgIds().contains(document.getScopeOrgId());
+            case COURSE_SOURCE -> userId.equals(document.getUploadedBy());
         };
         if (!visible) {
             throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);

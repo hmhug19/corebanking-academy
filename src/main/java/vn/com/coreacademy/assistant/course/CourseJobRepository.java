@@ -32,6 +32,10 @@ public class CourseJobRepository {
                          OffsetDateTime createTime, OffsetDateTime updateTime) {
     }
 
+    /** A job's source file that may be deleted. */
+    public record ExpiredSource(long jobId, long documentId) {
+    }
+
     public record StepRow(long id, long jobId, String kind, String itemKey, String inputHash, String output,
                           String status, int attempts, String errorMessage) {
     }
@@ -171,6 +175,21 @@ public class CourseJobRepository {
             + "WHERE NOT is_deleted AND lower(name) LIKE lower(?) "
             + "ORDER BY (lower(name) = lower(?)) DESC, name LIMIT 6",
             (rs, row) -> new Named(rs.getLong(1), rs.getString(2)), "%" + text.strip() + "%", text.strip());
+    }
+
+    /** Sources of jobs that ended (finished, stopped, failed or cancelled) before {@code cutoff}. */
+    public List<ExpiredSource> expiredSources(OffsetDateTime cutoff) {
+        return jdbc.query("""
+            SELECT job_id, source_document_id FROM learning_hub.course_generation_jobs
+             WHERE source_document_id IS NOT NULL AND status IN ('completed', 'failed', 'cancelled', 'stopped')
+               AND update_time < ?
+            """, (rs, row) -> new ExpiredSource(rs.getLong("job_id"), rs.getLong("source_document_id")), cutoff);
+    }
+
+    /** The job no longer has a source file; its steps keep what they wrote. */
+    public void clearSource(long jobId) {
+        jdbc.update("UPDATE learning_hub.course_generation_jobs SET source_document_id = NULL, update_time = now() "
+            + "WHERE job_id = ?", jobId);
     }
 
     /** A document the user uploaded for themselves that no job uses yet. */

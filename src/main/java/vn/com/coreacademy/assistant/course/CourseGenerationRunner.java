@@ -43,6 +43,8 @@ public class CourseGenerationRunner implements GenerationStepRunner {
     static final String QUESTIONS = "questions";
     static final String WAITING_APPROVAL = "waiting_approval";
 
+    /** Tries per step: the first ask and two retries (Q24, Q41). */
+    public static final int ATTEMPTS = 3;
     private static final Pattern KEY = Pattern.compile("c(\\d+)l(\\d+)");
     private static final int SECTION_CHARS = 4000;
     private static final int MAX_SECTIONS = 12;
@@ -175,15 +177,19 @@ public class CourseGenerationRunner implements GenerationStepRunner {
 
     // ---- helpers ---------------------------------------------------------------------------------------------------
 
-    /** Asks the model for JSON, once more with the problems named when the first answer does not fit. */
+    /**
+     * Asks the model for JSON constrained to the step's schema (structured output), up to {@link #ATTEMPTS} times, each
+     * retry naming the problems of the last answer; the checks of {@link GenerationSchemas} stay as the last word.
+     */
     private JsonNode ask(String stepKind, String user, Function<JsonNode, List<String>> check) {
         String system = catalog.generationPrompt(stepKind);
+        JsonNode format = GenerationSchemas.format(stepKind);
         List<String> problems = List.of();
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
             String message = attempt == 0 ? user : user + "\n\nKết quả trước không hợp lệ ("
                 + String.join("; ", problems.stream().limit(5).toList()) + "). Hãy trả lại đúng một đối tượng JSON.";
             String reply = ollama.chat(List.of(Message.system(system), Message.user(message)),
-                models.generationOptions());
+                models.generationOptions(), format);
             JsonNode node = extract(reply);
             problems = node == null ? List.of("không phải JSON hợp lệ") : check.apply(node);
             if (problems.isEmpty()) {
