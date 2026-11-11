@@ -2,6 +2,8 @@ package vn.com.coreacademy.assistant.course;
 
 import java.util.List;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Positive;
@@ -21,6 +23,7 @@ import vn.com.coreacademy.assistant.course.CourseJobViews.Inputs;
 import vn.com.coreacademy.assistant.course.CourseJobViews.JobSummary;
 import vn.com.coreacademy.assistant.course.CourseJobViews.JobView;
 import vn.com.coreacademy.common.dto.BaseResponse;
+import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 
 @RestController
@@ -32,6 +35,7 @@ import vn.com.coreacademy.common.web.StandardApiErrors;
 public class CourseJobController {
     private final AssistantGate gate;
     private final CourseJobService jobs;
+    private final ObjectMapper json;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
@@ -45,9 +49,18 @@ public class CourseJobController {
             - Chỉ một job chạy cùng lúc trên toàn hệ thống; job tiếp theo ở trạng thái queued cho đến lượt.
             """
     )
-    public BaseResponse<JobView> create(@RequestPart MultipartFile file, @RequestPart Inputs inputs) {
+    public BaseResponse<JobView> create(@RequestPart MultipartFile file, @RequestPart("inputs") String inputs) {
         gate.requireAccess();
-        return BaseResponse.ok(jobs.create(file, inputs));
+        return BaseResponse.ok(jobs.create(file, parse(inputs)));
+    }
+
+    /** The part is JSON text, whether the client labelled it application/json or sent a plain form field. */
+    private Inputs parse(String text) {
+        try {
+            return json.readValue(text, Inputs.class);
+        } catch (JsonProcessingException exception) {
+            throw BusinessException.validation("inputs", "INVALID_JSON", "Thông tin khởi tạo không hợp lệ.");
+        }
     }
 
     @GetMapping

@@ -59,6 +59,33 @@ public class CourseJobService {
      * document (which the ingestion worker then reads like any other), and queues the job with its first step.
      */
     public JobView create(MultipartFile file, Inputs requested) {
+        Prepared prepared = prepare(requested);
+        long documentId = documents.upload(file, DocumentScope.PERSONAL).id();
+        try {
+            return queue(prepared, documentId);
+        } catch (RuntimeException exception) {
+            documents.delete(documentId);
+            throw exception;
+        }
+    }
+
+    /**
+     * The same job, for a file the caller already uploaded as their own personal document (the chat composer does that
+     * first). The document must be theirs and not used by another job; the same checks and limits apply.
+     */
+    public JobView createFromDocument(long documentId, Inputs requested) {
+        Prepared prepared = prepare(requested);
+        if (!jobs.isFreePersonalDocument(documentId, prepared.userId())) {
+            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+
+        return queue(prepared, documentId);
+    }
+
+    private record Prepared(String userId, long ownerOrgId, Inputs inputs) {
+    }
+
+    private Prepared prepare(Inputs requested) {
         Actor actor = access.actor();
         requireManager(actor);
         long ownerOrgId = ownerOrg(actor, requested);
@@ -66,21 +93,21 @@ public class CourseJobService {
         String userId = SecurityContextUtils.getUserId();
         requireWithinDailyLimit(userId, jobs.createdSince(userId, OffsetDateTime.now().minus(DAY)));
 
-        long documentId = documents.upload(file, DocumentScope.PERSONAL).id();
-        try {
-            long jobId = transaction.execute(status -> {
-                jobs.lockOwner(userId);
-                requireWithinDailyLimit(userId, jobs.createdSince(userId, OffsetDateTime.now().minus(DAY)));
-                long created = jobs.insertJob(userId, ownerOrgId, documentId, write(inputs));
-                jobs.insertStep(created, FIRST_STEP, "");
-                return created;
-            });
+        return new Prepared(userId, ownerOrgId, inputs);
+    }
 
-            return get(jobId);
-        } catch (RuntimeException exception) {
-            documents.delete(documentId);
-            throw exception;
-        }
+    private JobView queue(Prepared prepared, long documentId) {
+        long jobId = transaction.execute(status -> {
+            jobs.lockOwner(prepared.userId());
+            requireWithinDailyLimit(prepared.userId(),
+                jobs.createdSince(prepared.userId(), OffsetDateTime.now().minus(DAY)));
+            long created = jobs.insertJob(prepared.userId(), prepared.ownerOrgId(), documentId,
+                write(prepared.inputs()));
+            jobs.insertStep(created, FIRST_STEP, "");
+            return created;
+        });
+
+        return get(jobId);
     }
 
     public JobView get(long jobId) {

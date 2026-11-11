@@ -145,6 +145,38 @@ public class CourseJobRepository {
         return found;
     }
 
+    public record Named(long id, String name) {
+    }
+
+    /** Programmes whose name matches the text, ignoring case and spaces at both ends; at most 6. */
+    public List<Named> programmesNamed(String text) {
+        return jdbc.query("SELECT program_id, name FROM learning_hub.training_programs "
+            + "WHERE lower(name) LIKE lower(?) ORDER BY (lower(name) = lower(?)) DESC, name LIMIT 6",
+            (rs, row) -> new Named(rs.getLong(1), rs.getString(2)), "%" + text.strip() + "%", text.strip());
+    }
+
+    public List<Named> competenciesNamed(String text) {
+        return jdbc.query("SELECT competency_id, name FROM learning_hub.competencies "
+            + "WHERE NOT is_deleted AND lower(name) LIKE lower(?) "
+            + "ORDER BY (lower(name) = lower(?)) DESC, name LIMIT 6",
+            (rs, row) -> new Named(rs.getLong(1), rs.getString(2)), "%" + text.strip() + "%", text.strip());
+    }
+
+    /** A document the user uploaded for themselves that no job uses yet. */
+    public boolean isFreePersonalDocument(long documentId, String userId) {
+        Integer n = jdbc.queryForObject("""
+            SELECT count(*) FROM learning_hub.knowledge_documents d
+             WHERE d.document_id = ? AND d.uploaded_by = ? AND d.scope = 'personal'
+               AND NOT EXISTS (SELECT 1 FROM learning_hub.course_generation_jobs j WHERE j.source_document_id = d.document_id)
+            """, Integer.class, documentId, userId);
+
+        return n != null && n > 0;
+    }
+
+    public Optional<DocumentInfo> document(long documentId) {
+        return Optional.ofNullable(documents(List.of(documentId)).get(documentId));
+    }
+
     public boolean programmeExists(long programmeId) {
         Integer n = jdbc.queryForObject(
             "SELECT count(*) FROM learning_hub.training_programs WHERE program_id = ?", Integer.class, programmeId);

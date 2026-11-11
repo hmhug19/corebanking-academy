@@ -1,5 +1,6 @@
 description: tạo khóa học nháp từ một tài liệu nguồn (chỉ giảng viên và quản trị)
-tools: []
+tools:
+  - start_course_job
 roles:
   - INSTRUCTOR
   - ADMIN

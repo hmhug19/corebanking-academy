@@ -341,3 +341,16 @@ Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể
   `course_revisions.ai_generated = true` (`docs/sql/upgrade/2026-11-13-course-revision-ai-generated.sql`).
 - Chỉ câu hỏi `accepted` được ghi vào ngân hàng câu hỏi (qua `QuestionService`, kèm chương trình và năng lực do người dùng chọn, chưa gắn khóa/bài).
 - Thời lượng mỗi bước ghi vào meter `assistant.generation.step.duration` (tag `kind`, `outcome`).
+
+### Bắt đầu tạo khóa học từ chatbot (kỹ năng `tao_khoa_hoc`, công cụ `start_course_job`)
+
+- Ô soạn tin tải tệp lên như tài liệu `personal` (`POST /api/v1/knowledge/documents?scope=personal`) rồi gửi lượt với `skill: "tao_khoa_hoc"` và
+  `attachmentDocumentId`. Id này chỉ là yêu cầu của client: công cụ chỉ dùng khi tài liệu là `personal` của chính người gọi và chưa gắn với job nào.
+  Model không bao giờ thấy hay đặt id tài liệu.
+- Kỹ năng và công cụ chỉ dành cho INSTRUCTOR, ADMIN, SUPER_ADMIN. Học viên không được cấp kỹ năng; `base.md` bảo trợ lý trả lời ngắn rằng tính năng
+  dành cho giảng viên.
+- Công cụ chỉ **đề xuất**: thiếu thông tin thì trả danh sách còn thiếu để trợ lý hỏi lại; chương trình và năng lực được tra theo tên người dùng nói,
+  tên mơ hồ được trả lại để người dùng chọn. Đủ thông tin thì tạo thẻ chờ xác nhận (`action_required`, tool `start_course_job`).
+- `POST /api/v1/assistant/agent/actions/{id}/confirm` tạo job như form (`CourseJobService.createFromDocument`, cùng kiểm vai trò, đơn vị và giới hạn
+  ngày) và trả `data: { jobId, path: "/admin/courses/ai-drafts/{jobId}" }`.
+- Quản trị viên cần chọn đơn vị sở hữu nên được hướng tới nút "Tạo bằng AI" ở Khóa học mới; giảng viên luôn dùng đơn vị của mình.

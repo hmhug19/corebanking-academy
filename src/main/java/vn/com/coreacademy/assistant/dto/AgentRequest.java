@@ -10,8 +10,14 @@ public record AgentRequest(
     String message,
     @Schema(description = "Kỹ năng do app chọn (qa_tai_lieu, dieu_huong, ho_so, tro_chuyen). Bỏ trống để server tự phân loại; giá trị lạ hoặc không được phép bị bỏ qua.") String skill,
     @Schema(description = "Bài học đang xem; có thì trợ lý ưu tiên nội dung bài đó. Bài không đọc được: ASSISTANT-LESSON_NOT_FOUND.")
-    LessonContext context) {
+    LessonContext context,
+    @Schema(description = "Tài liệu cá nhân người dùng vừa tải lên từ ô soạn tin để tạo khóa học; chỉ dùng với kỹ năng tao_khoa_hoc. "
+        + "Không phải của người gọi thì bị bỏ qua khi tạo khóa.") Long attachmentDocumentId) {
+    public AgentRequest(Long conversationId, String message, String skill, LessonContext context) {
+        this(conversationId, message, skill, context, null);
+    }
+
     public AgentRequest(Long conversationId, String message, String skill) {
-        this(conversationId, message, skill, null);
+        this(conversationId, message, skill, null, null);
     }
 }
