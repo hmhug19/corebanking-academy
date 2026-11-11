@@ -153,7 +153,7 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
             onDelta.accept("Xin ");
             onDelta.accept("chào");
             return new ChatTurn("Xin chào", List.of());
-        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
 
         List<String> lines = lines("000004", question("Xin chào"));
 
@@ -168,7 +168,7 @@ class AgentControllerTest extends KnowledgeIntegrationTest {
     void anActionRequiredEventCarriesTheCardWithAnIsoExpiryAndNoOwner() throws Exception {
         doReturn(true).when(ollama).isAvailable();
         doAnswer(invocation -> new ChatTurn("", List.of(ToolCall.of("stub_change", JSON.createObjectNode()))))
-            .when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+            .when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
 
         List<String> lines = lines("000004", question("đổi chức danh"));
 

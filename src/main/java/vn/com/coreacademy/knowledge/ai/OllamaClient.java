@@ -131,6 +131,15 @@ public class OllamaClient {
      */
     public ChatTurn chatWithTools(List<ChatMessage> messages, List<ToolDefinition> tools, Options options,
                                   Consumer<String> onDelta) {
+        return chatWithTools(messages, tools, options, onDelta, Cancellation.NONE);
+    }
+
+    /**
+     * As above; {@code cancellation.cancel()} from another thread aborts the HTTP call, and this then ends with a
+     * {@link TurnCancelledException}.
+     */
+    public ChatTurn chatWithTools(List<ChatMessage> messages, List<ToolDefinition> tools, Options options,
+                                  Consumer<String> onDelta, Cancellation cancellation) {
         long started = System.nanoTime();
         Map<String, Object> body = chatBody(messages, options, true);
         body.put("tools", tools.stream().map(OllamaClient::toolBody).toList());
@@ -142,6 +151,7 @@ public class OllamaClient {
                     if (response.getStatusCode().isError()) {
                         throw new OllamaException("Ollama answered HTTP " + response.getStatusCode().value());
                     }
+                    cancellation.attach(response);
                     BufferedReader reader =
                         new BufferedReader(new InputStreamReader(response.getBody(), StandardCharsets.UTF_8));
                     readStream(reader, delta -> {
@@ -150,8 +160,17 @@ public class OllamaClient {
                     }, toolCalls);
                     return null;
                 });
-        } catch (ResourceAccessException exception) {
-            throw new OllamaUnavailableException("Ollama is not reachable", exception);
+        } catch (RuntimeException exception) {
+            if (cancellation.isCancelled()) {
+                throw new TurnCancelledException();
+            }
+            if (exception instanceof ResourceAccessException) {
+                throw new OllamaUnavailableException("Ollama is not reachable", exception);
+            }
+            throw exception;
+        }
+        if (cancellation.isCancelled()) {
+            throw new TurnCancelledException();
         }
         log.info("Ollama chat tools model={} messages={} tools={} calls={} durationMs={}", config.chatModel(),
             messages.size(), tools.size(), loggedToolNames(toolCalls, tools), millisSince(started));

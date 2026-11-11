@@ -36,7 +36,9 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.identity.service.AuthService;
 import vn.com.coreacademy.knowledge.ai.ChatMessage;
+import vn.com.coreacademy.knowledge.ai.Cancellation;
 import vn.com.coreacademy.knowledge.ai.ChatTurn;
+import vn.com.coreacademy.knowledge.ai.TurnCancelledException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
@@ -143,8 +145,9 @@ public class AgentService {
                 write(output, refusal(admission));
                 return;
             }
-            try (TurnLimiter.Turn ignored = started.turn()) {
+            try (TurnLimiter.Turn turnSlot = started.turn()) {
                 Conversations.Opened opened = conversations.open(asked.userId(), conversationId, question, focus);
+                turnSlot.bind(opened.conversationId());
                 write(output, AgentStreamEvent.conversation(opened.conversationId()));
                 List<ChatMessage> history = new ArrayList<>();
                 for (Conversations.Exchange exchange : opened.history()) {
@@ -159,12 +162,19 @@ public class AgentService {
                 List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(asked)).toList();
                 TurnLog turnLog = new TurnLog(opened.conversationId(), question, skill.id(), catalog.version());
                 try {
-                    run(output, history, asked, skill, tools, definitions, turnLog);
+                    run(output, history, asked, skill, tools, definitions, turnLog, turnSlot.cancellation());
                 } finally {
                     store(turnLog);
                 }
             }
         };
+    }
+
+    /** Stops the caller's running turn of this conversation; refused when the conversation is not the caller's. */
+    public void cancel(Long conversationId) {
+        String userId = AssistantAccess.require(auth.me()).user().userId();
+        conversations.requireOwned(userId, conversationId);
+        limiter.cancel(userId, conversationId);
     }
 
     private static AgentStreamEvent refusal(TurnLimiter.Admission admission) {
@@ -176,7 +186,8 @@ public class AgentService {
     }
 
     private void run(OutputStream output, List<ChatMessage> history, AgentContext context, Skill skill,
-                     List<AgentTool> tools, List<ToolDefinition> definitions, TurnLog turnLog) {
+                     List<AgentTool> tools, List<ToolDefinition> definitions, TurnLog turnLog,
+                     Cancellation cancellation) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(catalog.systemPrompt(skill) + lessonNote(context) + attachmentNote(context)));
         messages.addAll(history);
@@ -194,7 +205,7 @@ public class AgentService {
                         if (!shown.isEmpty()) {
                             emit(output, turnLog, AgentStreamEvent.delta(shown));
                         }
-                    });
+                    }, cancellation);
                 if (answer.toolCalls().isEmpty()) {
                     finish(output, turnLog, turn, answer.content().strip());
                     return;
@@ -220,6 +231,9 @@ public class AgentService {
                 }
             }
             emit(output, turnLog, AgentStreamEvent.done(STEP_CAP_ANSWER, List.of()));
+        } catch (TurnCancelledException exception) {
+            // The user pressed "Dung": the turn is stored as stopped and no error is shown.
+            turnLog.stopped();
         } catch (UncheckedIOException exception) {
             // The client went away: nobody is left to read an error event.
             turnLog.stopped();

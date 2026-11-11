@@ -34,6 +34,28 @@ class TurnLimiterTest {
     }
 
     @Test
+    void cancellingARunningTurnAbortsItsModelCallAndFreesTheUserAtOnce() {
+        TurnLimiter.Turn first = started(limiter.admit("000004"));
+        first.bind(7);
+
+        assertThat(limiter.cancel("000004", 7)).isTrue();
+
+        assertThat(first.cancellation().isCancelled()).isTrue();
+        assertThat(limiter.admit("000004")).isInstanceOf(Admission.Started.class);
+    }
+
+    @Test
+    void aCancelNamesTheUsersOwnTurnOfThatConversationOnly() {
+        TurnLimiter.Turn first = started(limiter.admit("000004"));
+        first.bind(7);
+
+        assertThat(limiter.cancel("000005", 7)).isFalse();
+        assertThat(limiter.cancel("000004", 8)).isFalse();
+        assertThat(first.cancellation().isCancelled()).isFalse();
+        assertThat(limiter.admit("000004")).isInstanceOf(Admission.Busy.class);
+    }
+
+    @Test
     void theServerRunsAtMostTheConfiguredNumberOfTurnsAndARefusalHoldsNothing() {
         TurnLimiter.Turn first = started(limiter.admit("000002"));
         started(limiter.admit("000003"));

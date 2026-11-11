@@ -184,6 +184,17 @@ class OllamaClientTest {
     }
 
     @Test
+    void aCancelledCallEndsAsACancelledTurnNotAsAnOllamaError() {
+        handler = exchange -> new Reply(200, "{\"message\":{\"role\":\"assistant\",\"content\":\"a\"},\"done\":false}\n");
+        Cancellation cancellation = new Cancellation();
+        cancellation.cancel();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> client().chatWithTools(
+            List.of(ChatMessage.user("u")), List.of(), OllamaClient.Options.AGENT, delta -> { }, cancellation))
+            .isInstanceOf(TurnCancelledException.class);
+    }
+
+    @Test
     void chatWithToolsSerialisesToolCallsAndToolResultsOfEarlierSteps() {
         handler = exchange -> new Reply(200, "{\"message\":{\"content\":\"\"},\"done\":true}\n");
         ToolCall call = ToolCall.of("search_documents", json.createObjectNode().put("query", "CIF"));
