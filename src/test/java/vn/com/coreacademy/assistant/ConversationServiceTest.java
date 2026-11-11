@@ -272,6 +272,27 @@ class ConversationServiceTest {
     }
 
     @Test
+    void theLatestConversationOfALessonIsTheCallersOwnMostRecentOneOrNothing() {
+        AssistantConversation mine = owned(7L, ME);
+        mine.setContextCourseId(26L);
+        mine.setContextRevisionId(3L);
+        mine.setContextLessonId(88L);
+        mine.setContextLabel("Bài 1");
+        when(conversations.findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(ME, 88L))
+            .thenReturn(Optional.of(mine));
+        when(conversations.findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(ME, 71L))
+            .thenReturn(Optional.empty());
+
+        var found = service.latestForLesson(ME, 88L);
+
+        assertThat(found).isNotNull();
+        assertThat(found.id()).isEqualTo(7L);
+        assertThat(found.context().lessonId()).isEqualTo(88L);
+        assertThat(service.latestForLesson(ME, 71L)).isNull();
+        verify(conversations, never()).findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(THEM, 88L);
+    }
+
+    @Test
     void deleteRemovesTheTurnsAndTheConversationAndDeleteAllOnlyTheCallers() {
         AssistantConversation mine = owned(5L, ME);
         when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(mine));

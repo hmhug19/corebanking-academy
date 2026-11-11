@@ -177,6 +177,13 @@ public class ConversationService implements Conversations {
         return PageResponse.from(result.map(ConversationService::summary));
     }
 
+    /** The caller's latest conversation about this lesson, or null: "Hỏi về bài này" continues it. */
+    @Transactional(readOnly = true)
+    public ConversationSummary latestForLesson(String ownerId, long lessonId) {
+        return conversations.findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(ownerId, lessonId)
+            .map(ConversationService::summary).orElse(null);
+    }
+
     @Transactional(readOnly = true)
     public ConversationDetail get(String ownerId, long conversationId) {
         AssistantConversation conversation = conversations.findByIdAndOwnerId(conversationId, ownerId)
