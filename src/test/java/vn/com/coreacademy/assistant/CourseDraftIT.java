@@ -199,6 +199,15 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void theDraftWaitsForTheQuestionsOfEveryLesson() throws Exception {
+        long job = approved().path("jobId").asLong();
+        jdbc.update("UPDATE learning_hub.course_generation_steps SET status = 'pending' "
+            + "WHERE job_id = ? AND kind = 'questions' AND item_key = 'c1l1'", job);
+
+        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")), "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
     void aLessonOrAFailedStepCannotRunAgainOnceTheDraftExists() throws Exception {
         long job = approved().path("jobId").asLong();
         api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")));

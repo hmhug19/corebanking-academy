@@ -26,6 +26,7 @@ import vn.com.coreacademy.assistant.course.CourseJobViews.JobView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.LessonView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.QuestionsView;
 import vn.com.coreacademy.common.exception.BusinessException;
+import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseDetail;
 import vn.com.coreacademy.learning.dto.LearningRequests.BlockInput;
 import vn.com.coreacademy.learning.dto.LearningRequests.ChapterInput;
@@ -44,6 +45,7 @@ import vn.com.coreacademy.learning.service.LearningContentService;
 @Service
 @RequiredArgsConstructor
 public class CourseDraftService {
+    private static final String DRAFT_CREATED = "DRAFT_CREATED";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final Map<String, String> LEVELS = Map.of("BEGINNER", "basic", "INTERMEDIATE", "intermediate",
@@ -154,7 +156,7 @@ public class CourseDraftService {
         JobRow job = lock(jobId);
         refuseWhenDrafted(job);
         StepRow step = jobs.stepByKey(job.id(), CourseGenerationRunner.LESSON, lessonKey)
-            .orElseThrow(() -> new BusinessException(vn.com.coreacademy.common.exception.ResponseCode.RESOURCE_NOT_FOUND));
+            .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
         if (!jobs.resetStep(step.id())) {
             throw refuse("LESSON_BUSY", "Bài này đang được viết, hãy chờ xong rồi tạo lại.");
         }
@@ -185,14 +187,14 @@ public class CourseDraftService {
         JobRow job = lock(jobId);
         StepRow step = jobs.stepByKey(job.id(), CourseGenerationRunner.QUESTIONS, lessonKey)
             .filter(row -> row.output() != null)
-            .orElseThrow(() -> new BusinessException(vn.com.coreacademy.common.exception.ResponseCode.RESOURCE_NOT_FOUND));
+            .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
         if (job.createdDraftId() != null) {
-            throw refuse("DRAFT_CREATED", "Bản nháp đã được tạo nên không đổi lựa chọn được nữa.");
+            throw refuse(DRAFT_CREATED, "Bản nháp đã được tạo nên không đổi lựa chọn được nữa.");
         }
         ObjectNode output = (ObjectNode) parse(step.output());
         JsonNode list = output.path("questions");
         if (index < 0 || index >= list.size()) {
-            throw new BusinessException(vn.com.coreacademy.common.exception.ResponseCode.RESOURCE_NOT_FOUND);
+            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
         }
         ((ObjectNode) list.get(index)).put("decision", decision);
         jobs.setOutput(step.id(), write(output));
@@ -219,6 +221,10 @@ public class CourseDraftService {
         List<StepRow> lessons = jobs.stepsOfKind(job.id(), CourseGenerationRunner.LESSON);
         if (lessons.isEmpty() || lessons.stream().anyMatch(step -> !"done".equals(step.status()))) {
             throw refuse("LESSONS_NOT_READY", "Cần viết xong mọi bài học trước khi tạo bản nháp.");
+        }
+        if (jobs.stepsOfKind(job.id(), CourseGenerationRunner.QUESTIONS).stream()
+            .anyMatch(step -> "pending".equals(step.status()) || "running".equals(step.status()))) {
+            throw refuse("QUESTIONS_NOT_READY", "Cần soạn xong câu hỏi cho mọi bài học trước khi tạo bản nháp.");
         }
         Inputs inputs = read(job.inputs(), Inputs.class);
         JsonNode outline = outputOf(job.id(), CourseGenerationRunner.OUTLINE, "");
@@ -309,7 +315,7 @@ public class CourseDraftService {
 
     private void refuseWhenDrafted(JobRow job) {
         if (job.createdDraftId() != null) {
-            throw refuse("DRAFT_CREATED", "Bản nháp đã được tạo nên không chạy lại được nữa.");
+            throw refuse(DRAFT_CREATED, "Bản nháp đã được tạo nên không chạy lại được nữa.");
         }
     }
 
