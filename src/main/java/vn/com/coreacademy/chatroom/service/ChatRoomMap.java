@@ -16,7 +16,7 @@ public class ChatRoomMap {
     public record Point(double x, double y) {
     }
 
-    public record Furniture(String kind, double x, double y, double w, double h) {
+    public record Furniture(String kind, double x, double y, double w, double h, String facing) {
     }
 
     public record Area(double x, double y, double w, double h) {
@@ -34,6 +34,7 @@ public class ChatRoomMap {
 
     private final Layout layout;
     private final List<Point> corners;
+    private final boolean[][] visibleCorners;
 
     public ChatRoomMap(ObjectMapper mapper) throws IOException {
         try (var stream = new ClassPathResource("chat-room/room.json").getInputStream()) {
@@ -51,6 +52,15 @@ public class ChatRoomMap {
             }
         }
         corners = List.copyOf(nodes);
+        visibleCorners = new boolean[corners.size()][corners.size()];
+        for (int i = 0; i < corners.size(); i++) {
+            Point from = corners.get(i);
+            for (int j = 0; j < i; j++) {
+                Point to = corners.get(j);
+                boolean visible = clearPath(from.x(), from.y(), to.x(), to.y());
+                visibleCorners[i][j] = visibleCorners[j][i] = visible;
+            }
+        }
     }
 
     public Layout layout() {
@@ -79,12 +89,34 @@ public class ChatRoomMap {
     }
 
     public boolean clearPath(double x, double y, double toX, double toY) {
-        if (!walkable(toX, toY)) {
+        if (!walkable(x, y) || !walkable(toX, toY)) {
             return false;
         }
-        int steps = (int) Math.ceil(Math.hypot(toX - x, toY - y) / 4);
-        for (int i = 1; i <= steps; i++) {
-            if (!walkable(x + (toX - x) * i / steps, y + (toY - y) * i / steps)) {
+        double r = layout.radius();
+        for (Furniture object : layout.objects()) {
+            double left = object.x() - r;
+            double right = object.x() + object.w() + r;
+            double top = object.y() - r;
+            double bottom = object.y() + object.h() + r;
+            if (Math.max(x, toX) <= left || Math.min(x, toX) >= right
+                || Math.max(y, toY) <= top || Math.min(y, toY) >= bottom) {
+                continue;
+            }
+            double enter = 0;
+            double exit = 1;
+            if (toX != x) {
+                double a = (left - x) / (toX - x);
+                double b = (right - x) / (toX - x);
+                enter = Math.max(enter, Math.min(a, b));
+                exit = Math.min(exit, Math.max(a, b));
+            }
+            if (toY != y) {
+                double a = (top - y) / (toY - y);
+                double b = (bottom - y) / (toY - y);
+                enter = Math.max(enter, Math.min(a, b));
+                exit = Math.min(exit, Math.max(a, b));
+            }
+            if (enter < exit) {
                 return false;
             }
         }
@@ -128,7 +160,8 @@ public class ChatRoomMap {
             for (int i = 1; i < nodes.size(); i++) {
                 Point next = nodes.get(i);
                 double nextCost = cost[current] + distance(origin, next);
-                if (!visited[i] && nextCost < cost[i] && clearPath(origin.x(), origin.y(), next.x(), next.y())) {
+                if (!visited[i] && nextCost < cost[i] && (current >= 2 && i >= 2
+                    ? visibleCorners[current - 2][i - 2] : clearPath(origin.x(), origin.y(), next.x(), next.y()))) {
                     cost[i] = nextCost;
                     previous[i] = current;
                     frontier.add(new Step(i, nextCost + distance(next, to)));

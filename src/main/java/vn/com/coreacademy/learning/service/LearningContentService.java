@@ -14,6 +14,10 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.safety.Cleaner;
+import org.jsoup.safety.Safelist;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,6 +64,12 @@ import vn.com.coreacademy.learning.repository.LearningRepository;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class LearningContentService {
+    private static final Cleaner LESSON_HTML = new Cleaner(new Safelist()
+        .addTags("p", "div", "br", "h2", "h3", "h4", "ul", "ol", "li", "blockquote", "pre", "code",
+            "b", "strong", "i", "em", "u", "s", "strike", "a")
+        .addAttributes("a", "href")
+        .addProtocols("a", "href", "https", "http"));
+
     private final LearningRepository repository;
     private final LearningAccessPolicy access;
     private final LearningIdentityService identity;
@@ -78,9 +88,15 @@ public class LearningContentService {
         // Bước 1: xác định caller và kiểm tra scope tổ chức/nhóm trước khi tạo tài nguyên.
         var actor = access.actor();
         writeLock.acquire();
-        access.requireManage(actor, request.ownerOrgId(), request.ownerTeamId(), actor.person().id());
-        if (request.ownerTeamId() != null
-            && !identity.activeTeam(request.ownerTeamId()).orgId().equals(request.ownerOrgId())) {
+        Long ownerTeamId = request.ownerTeamId();
+        if (ownerTeamId == null
+            && Objects.equals(actor.person().orgId(), request.ownerOrgId())
+            && !access.canManage(actor, request.ownerOrgId(), null, actor.person().id())) {
+            ownerTeamId = actor.person().teamId();
+        }
+        access.requireManage(actor, request.ownerOrgId(), ownerTeamId, actor.person().id());
+        if (ownerTeamId != null
+            && !identity.activeTeam(ownerTeamId).orgId().equals(request.ownerOrgId())) {
             throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
         }
 
@@ -91,7 +107,7 @@ public class LearningContentService {
         Course course = new Course();
         course.setCode(request.code().strip());
         course.setOwnerOrgId(request.ownerOrgId());
-        course.setOwnerTeamId(request.ownerTeamId());
+        course.setOwnerTeamId(ownerTeamId);
         course.setOwnerUserId(actor.person().id());
         course.setLifecycleStatus(CourseStatus.ACTIVE);
         repository.save(course, actor.person().id());
@@ -518,10 +534,9 @@ public class LearningContentService {
             || (CompletionMode.PDF_END.equals(block.completionMode()) && !BlockType.PDF.equals(block.blockType()))
             || (!BlockType.PROCESS.equals(block.blockType()) && !block.steps().isEmpty())
             || (BlockType.VIDEO.equals(block.blockType())
-                && !CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()))
-            || (BlockType.TEXT.equals(block.blockType()) && BodyFormat.HTML.equals(block.bodyFormat()))) {
+                && !CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()))) {
             throw BusinessException.validation("chapters", "INVALID_VALUE",
-                "Loại khối/cách hoàn thành chưa phù hợp; văn bản hiện hỗ trợ Markdown hoặc plain.");
+                "Loại khối và cách hoàn thành chưa phù hợp.");
         }
         if (CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()) && block.completionThreshold() == null) {
             throw BusinessException.validation("completionThreshold", "REQUIRED", "Vui lòng đặt tỷ lệ xem video.");
@@ -730,7 +745,7 @@ public class LearningContentService {
         block.setLessonId(lessonId);
         block.setBlockType(input.blockType());
         block.setTitle(input.title());
-        block.setBody(input.body());
+        block.setBody(BodyFormat.HTML.equals(input.bodyFormat()) ? cleanLessonHtml(input.body()) : input.body());
         block.setBodyFormat(input.bodyFormat());
         block.setCompletionMode(input.completionMode());
         block.setCompletionThreshold(input.completionThreshold());
@@ -761,6 +776,15 @@ public class LearningContentService {
             step.setSortNo(i);
             repository.save(step, actor);
         }
+    }
+
+    private String cleanLessonHtml(String source) {
+        if (source == null || source.isBlank()) {
+            return null;
+        }
+        Document cleaned = LESSON_HTML.clean(Jsoup.parseBodyFragment(source));
+        cleaned.outputSettings().prettyPrint(false);
+        return cleaned.body().hasText() ? cleaned.body().html() : null;
     }
 
     private void cloneContent(Course course, CourseRevision source, CourseRevision target, String actor,

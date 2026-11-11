@@ -19,6 +19,7 @@ import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
+import static vn.com.coreacademy.assessment.support.AssessmentFixtures.REPORT_VIEWER;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.unique;
 
 /** POST /courses kèm {@code draft}: ghi khóa, revision 1 và cây nội dung trong một transaction. */
@@ -160,7 +161,7 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
     void invalidBlockLeavesNoCourse() {
         String code = unique("CW");
         Map<String, Object> bad = block("text");
-        bad.put("bodyFormat", "html");
+        bad.put("completionMode", "pdf_end");
 
         api.error(INSTRUCTOR, api.post(create(code, "Khóa lỗi", draft("Khóa lỗi", bad)), COURSES),
             "CORE-VALIDATION_FAILED");
@@ -168,6 +169,42 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
         assertThat(courseCount(code)).isZero();
         // Mã vẫn còn trống nên tạo lại với nội dung hợp lệ phải thành công.
         api.ok(INSTRUCTOR, api.post(create(code, "Khóa lỗi", draft("Khóa lỗi", block("text"))), COURSES));
+    }
+
+    @Test
+    void createKeepsFormattedTextAndRemovesUntrustedMarkup() {
+        Map<String, Object> formatted = block("text");
+        formatted.put("bodyFormat", "html");
+        formatted.put("body", "<h2>Quy trình</h2><p><strong><u>Nội dung</u></strong>"
+            + "<img src='https://example.org/remote.png'><a href='javascript:alert(1)'>Mốc</a>"
+            + "<script>alert(1)</script></p>");
+
+        JsonNode created = api.ok(INSTRUCTOR, api.post(
+            create(unique("CW"), "Soạn bài", draft("Soạn bài", formatted)), COURSES));
+        JsonNode saved = created.path("chapters").get(0).path("lessons").get(0).path("blocks").get(0).path("block");
+        assertThat(saved.path("bodyFormat").asText()).isEqualTo("html");
+        assertThat(saved.path("body").asText()).contains("<h2>Quy trình</h2>", "<strong><u>Nội dung</u></strong>", "Mốc")
+            .doesNotContain("<script", "<img", "javascript:", "alert(1)");
+    }
+
+    @Test
+    void createInfersTheAuthorsTeamForATeamScopedInstructor() {
+        Long team = jdbc.queryForObject(
+            "SELECT team_id FROM learning_hub.users WHERE user_id = ?", Long.class, REPORT_VIEWER);
+        Long role = jdbc.queryForObject(
+            "SELECT role_id FROM learning_hub.roles WHERE code = 'INSTRUCTOR'", Long.class);
+        jdbc.update("""
+            INSERT INTO learning_hub.user_roles(user_id, role_id, scope, org_id, team_id, granted_by)
+            VALUES (?, ?, 'TEAM', ?, ?, '000001')
+            """, REPORT_VIEWER, role, org, team);
+        try {
+            JsonNode created = api.ok(REPORT_VIEWER, api.post(create(unique("CW"), "Khóa theo nhóm", null), COURSES));
+            assertThat(created.path("course").path("ownerTeamId").asLong()).isEqualTo(team);
+        } finally {
+            jdbc.update("""
+                DELETE FROM learning_hub.user_roles WHERE user_id = ? AND role_id = ? AND scope = 'TEAM' AND team_id = ?
+                """, REPORT_VIEWER, role, team);
+        }
     }
 
     @Test

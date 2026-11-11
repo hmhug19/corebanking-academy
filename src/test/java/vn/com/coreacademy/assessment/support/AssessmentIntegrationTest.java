@@ -100,7 +100,7 @@ public abstract class AssessmentIntegrationTest {
                 boolean pgvector = hasExtension(statement, "vector");
                 for (String script : SCRIPTS) {
                     String sql = Files.readString(Path.of("docs/sql", script), StandardCharsets.UTF_8);
-                    if ((script.contains("knowledge") || script.contains("community")) && !pgvector) {
+                    if (!pgvector && sql.contains("vector(1024)")) {
                         sql = withoutPgvector(sql);
                     }
                     // Mỗi file có BEGIN/COMMIT riêng; PgJDBC gửi cả file trong một lệnh như khi vận hành chạy psql -f.
@@ -123,10 +123,10 @@ public abstract class AssessmentIntegrationTest {
         /** Chỉ dùng cho server không cài pgvector: bỏ extension/HNSW index, cột embedding thành real[]. */
         private static String withoutPgvector(String sql) {
             return sql.lines()
-                .filter(line -> !line.startsWith("CREATE EXTENSION"))
+            .filter(line -> !line.startsWith("CREATE EXTENSION") || !line.contains(" vector"))
                 .map(line -> line.replace("vector(1024)", "real[]"))
                 .collect(Collectors.joining("\n"))
-                .replaceAll("(?s)CREATE INDEX idx_knowledge_chunks_embedding.*?vector_cosine_ops\\);", "");
+                .replaceAll("(?is)CREATE INDEX [^;]*\\bUSING hnsw\\s*\\([^;]*;", "");
         }
     }
 
