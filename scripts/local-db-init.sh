@@ -44,6 +44,7 @@ esac
 FILES=(
   learning_hub_identity.sql
   learning_hub_learning.sql
+  upgrade/2026-11-09-chat-room-games.sql
   learning_hub_media_progress.sql
   learning_hub_assessment.sql
   upgrade/2026-11-07-flashcards.sql

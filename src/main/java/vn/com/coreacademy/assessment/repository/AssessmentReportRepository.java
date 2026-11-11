@@ -16,9 +16,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.AttemptStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.LearnerStatus;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.ScoreMethod;
 import vn.com.coreacademy.assessment.dto.AssessmentViews;
 import vn.com.coreacademy.common.persistence.NativeSearchQuery;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 
 /**
  * Truy vấn báo cáo Quiz Engine trên dữ liệu gốc (không lưu số liệu cố định). Phạm vi và bộ lọc do service tính rồi
@@ -48,15 +50,7 @@ public class AssessmentReportRepository {
     /** Điều kiện lọc lượt thi theo alias; trả SQL bắt đầu bằng "and" và ghi tham số vào params. */
     private static String attemptConditions(String alias, Criteria criteria, Map<String, Object> params) {
         StringBuilder sql = new StringBuilder();
-        scope(sql, alias + ".org_id", alias + ".team_id", criteria, params);
-        if (criteria.orgIds() != null) {
-            sql.append(" and ").append(alias).append(".org_id in (:filterOrgs)");
-            params.put("filterOrgs", criteria.orgIds().isEmpty() ? List.of(-1L) : criteria.orgIds());
-        }
-        if (criteria.teamId() != null) {
-            sql.append(" and ").append(alias).append(".team_id = :filterTeam");
-            params.put("filterTeam", criteria.teamId());
-        }
+        snapshotConditions(sql, alias + ".org_id", alias + ".team_id", criteria, params);
         if (criteria.quizId() != null) {
             sql.append(" and ").append(alias).append(".quiz_id = :filterQuiz");
             params.put("filterQuiz", criteria.quizId());
@@ -81,6 +75,19 @@ public class AssessmentReportRepository {
         return sql.toString();
     }
 
+    private static void snapshotConditions(StringBuilder sql, String orgColumn, String teamColumn,
+                                           Criteria criteria, Map<String, Object> params) {
+        scope(sql, orgColumn, teamColumn, criteria, params);
+        if (criteria.orgIds() != null) {
+            sql.append(" and ").append(orgColumn).append(" in (:filterOrgs)");
+            params.put("filterOrgs", criteria.orgIds().isEmpty() ? List.of(-1L) : criteria.orgIds());
+        }
+        if (criteria.teamId() != null) {
+            sql.append(" and ").append(teamColumn).append(" = :filterTeam");
+            params.put("filterTeam", criteria.teamId());
+        }
+    }
+
     /** Ngoài global, chỉ giữ dòng thuộc đơn vị hoặc nhóm trong phạm vi; phạm vi rỗng không làm rộng quyền. */
     private static void scope(StringBuilder sql, String orgColumn, String teamColumn, Criteria criteria,
                               Map<String, Object> params) {
@@ -91,6 +98,49 @@ public class AssessmentReportRepository {
             .append(" in (:scopeTeams))");
         params.put("scopeOrgs", criteria.scopeOrgIds().isEmpty() ? List.of(-1L) : criteria.scopeOrgIds());
         params.put("scopeTeams", criteria.scopeTeamIds().isEmpty() ? List.of(-1L) : criteria.scopeTeamIds());
+    }
+
+    /** Hiện đề nếu scope có lượt thi, hoặc đề đã mở và scope có học viên ở lần học hiện hành. */
+    public List<AssessmentViews.ReportQuizOption> quizOptions(Criteria criteria) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        StringBuilder attempts = new StringBuilder();
+        snapshotConditions(attempts, "a.org_id", "a.team_id", criteria, params);
+        StringBuilder enrollments = new StringBuilder();
+        snapshotConditions(enrollments, "e.org_id_snapshot", "e.team_id_snapshot", criteria, params);
+        params.put("visibleStatuses", List.of(QuizStatus.PUBLISHED, QuizStatus.CLOSED));
+        params.put("withdrawn", ProgressStatus.WITHDRAWN);
+        StringBuilder filters = new StringBuilder();
+        if (criteria.courseId() != null) {
+            filters.append(" and z.course_id = :course");
+            params.put("course", criteria.courseId());
+        }
+        if (criteria.quizId() != null) {
+            filters.append(" and z.quiz_id = :quiz");
+            params.put("quiz", criteria.quizId());
+        }
+        String sql = """
+            select z.quiz_id, z.title
+            from learning_hub.quizzes z
+            where not z.is_deleted {filters}
+              and (exists (
+                    select 1 from learning_hub.quiz_attempts a
+                    where a.quiz_id = z.quiz_id {attempts}
+                  ) or (z.status in (:visibleStatuses) and exists (
+                    select 1 from learning_hub.course_enrollments e
+                    where e.course_id = z.course_id and e.status <> :withdrawn {enrollments}
+                      and not exists (
+                          select 1 from learning_hub.course_enrollments newer
+                          where newer.course_id = e.course_id and newer.user_id = e.user_id
+                            and newer.status <> :withdrawn and newer.cycle_no > e.cycle_no
+                      )
+                  )))
+            order by z.title, z.quiz_id
+            """.replace("{filters}", filters).replace("{attempts}", attempts).replace("{enrollments}", enrollments);
+        List<?> rows = bind(entityManager.createNativeQuery(sql), params).getResultList();
+        return rows.stream().map(value -> {
+            Object[] row = (Object[]) value;
+            return new AssessmentViews.ReportQuizOption(((Number) row[0]).longValue(), (String) row[1]);
+        }).toList();
     }
 
     /** CTE (đề, học viên) với điểm cuối/đạt theo score_method của từng đề; lượt mới nhất quyết định đơn vị. */

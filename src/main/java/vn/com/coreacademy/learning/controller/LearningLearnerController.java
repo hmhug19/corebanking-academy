@@ -16,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -95,6 +96,8 @@ public class LearningLearnerController {
     public BaseResponse<PageResponse<LearningDetails.CourseCard>> catalog(@RequestParam(required = false) String q,
         @RequestParam(required = false) Long fieldId, @RequestParam(required = false) Long programId,
         @RequestParam(required = false) Long moduleId, @RequestParam(required = false) String level,
+        @Parameter(description = "true chỉ lấy khóa chưa có phân hệ; không gửi cùng moduleId.")
+        @RequestParam(defaultValue = "false") boolean withoutModule,
         @RequestParam(required = false) String requirement, @RequestParam(required = false) String learningStatus,
         @RequestParam(required = false) String state, @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "20") int size, @RequestParam(defaultValue = "id,asc") String sort,
@@ -105,7 +108,7 @@ public class LearningLearnerController {
         @Parameter(description = "true chỉ lấy khóa caller đã thi cuối khóa nhưng chưa đạt lượt nào, false loại các "
             + "khóa đó.") @RequestParam(required = false) Boolean failed) {
         return BaseResponse.ok(search.search(SearchMode.CATALOG, q, fieldId, programId, moduleId, level, requirement,
-            learningStatus, state, page, size, sort, overdue, assigned, failed));
+            learningStatus, state, page, size, sort, overdue, assigned, failed, withoutModule));
     }
 
     @GetMapping("/courses/{courseId}")
@@ -131,6 +134,7 @@ public class LearningLearnerController {
         description = """
             Chỉ trả giá trị được ít nhất một khóa trong danh mục của caller dùng (cùng quy tắc nhìn thấy với
             `/catalog`), sắp theo sortNo rồi tên. Chương trình và phân hệ có fieldId.
+            - fieldsWithUnclassifiedCourses là các lĩnh vực có khóa chưa có phân hệ, gồm null nếu chưa có lĩnh vực.
             """
     )
     public BaseResponse<LearningDetails.LearnerFacets> facets() {
@@ -184,6 +188,12 @@ public class LearningLearnerController {
         return BaseResponse.ok(progress.reminders());
     }
 
+    @GetMapping("/reminders/inbox")
+    @Operation(summary = "Xem thông báo đã đọc và chưa đọc của học viên")
+    public BaseResponse<List<LearningViews.LearningReminderView>> reminderInbox() {
+        return BaseResponse.ok(progress.reminderInbox());
+    }
+
     @PostMapping("/reminders/{reminderId}/seen")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)
@@ -209,6 +219,12 @@ public class LearningLearnerController {
     )
     public BaseResponse<LearningViews.LearningReminderView> read(@PathVariable @Positive Long reminderId) {
         return BaseResponse.ok(progress.dismissReminder(reminderId));
+    }
+
+    @DeleteMapping("/reminders/{reminderId}")
+    @Operation(summary = "Xóa thông báo khỏi hộp thư của người nhận")
+    public BaseResponse<LearningViews.LearningReminderView> deleteReminder(@PathVariable @Positive Long reminderId) {
+        return BaseResponse.ok(progress.deleteReminder(reminderId));
     }
 
     @PostMapping("/sessions")

@@ -152,7 +152,8 @@ public final class LearningDetails {
     public record FieldFacet(Long id, Long fieldId, String code, String name) {
     }
 
-    public record LearnerFacets(List<Facet> fields, List<FieldFacet> programs, List<FieldFacet> modules) {
+    public record LearnerFacets(List<Facet> fields, List<FieldFacet> programs, List<FieldFacet> modules,
+                                List<Long> fieldsWithUnclassifiedCourses) {
     }
 
     /**

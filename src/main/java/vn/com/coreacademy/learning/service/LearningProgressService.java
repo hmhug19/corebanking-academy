@@ -179,9 +179,22 @@ public class LearningProgressService {
     public List<LearningViews.LearningReminderView> reminders() {
         var actor = access.actor();
         access.requireLearner(actor);
-        List<LearningReminder> due = repository.dueReminders(actor.person().id());
-        List<LearningReminder> notices = repository.notices(actor.person().id());
-        return java.util.stream.Stream.concat(due.stream(), notices.stream()).map(mapper::view).toList();
+        return unreadReminders(actor.person().id()).map(mapper::view).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<LearningViews.LearningReminderView> reminderInbox() {
+        var actor = access.actor();
+        access.requireLearner(actor);
+        String userId = actor.person().id();
+        return java.util.stream.Stream.concat(unreadReminders(userId), repository.readReminders(userId).stream())
+            .distinct().map(mapper::view).toList();
+    }
+
+    private java.util.stream.Stream<LearningReminder> unreadReminders(String userId) {
+        List<LearningReminder> due = repository.dueReminders(userId);
+        List<LearningReminder> notices = repository.notices(userId);
+        return java.util.stream.Stream.concat(due.stream(), notices.stream());
     }
 
     /** Đánh dấu thông báo gamification đã hiện toast: sentAt được ghi, thông báo vẫn nằm trong dòng nhắc học. */
@@ -192,7 +205,7 @@ public class LearningProgressService {
         lock.acquire();
         LearningReminder reminder = repository.require(LearningReminder.class, id);
         requireOwner(reminder, actor.person().id());
-        if (reminder.getSentAt() == null) {
+        if (ReminderStatus.PENDING.equals(reminder.getStatus()) && reminder.getSentAt() == null) {
             reminder.setSentAt(Instant.now());
             repository.save(reminder, actor.person().id());
             repository.flush();
@@ -210,13 +223,27 @@ public class LearningProgressService {
 
     @Transactional
     public LearningViews.LearningReminderView dismissReminder(Long id) {
+        return updateReminder(id, ReminderStatus.SENT);
+    }
+
+    @Transactional
+    public LearningViews.LearningReminderView deleteReminder(Long id) {
+        return updateReminder(id, ReminderStatus.CANCELLED);
+    }
+
+    private LearningViews.LearningReminderView updateReminder(Long id, String status) {
         var actor = access.actor();
         access.requireLearner(actor);
         lock.acquire();
         LearningReminder reminder = repository.require(LearningReminder.class, id);
         requireOwner(reminder, actor.person().id());
-        reminder.setStatus(ReminderStatus.SENT);
-        reminder.setSentAt(Instant.now());
+        if (status.equals(reminder.getStatus()) || ReminderStatus.CANCELLED.equals(reminder.getStatus())) {
+            return mapper.view(reminder);
+        }
+        reminder.setStatus(status);
+        if (ReminderStatus.SENT.equals(status)) {
+            reminder.setSentAt(Instant.now());
+        }
         repository.save(reminder, actor.person().id());
         repository.flush();
         return mapper.view(reminder);

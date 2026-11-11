@@ -10,7 +10,6 @@ public final class ChatRoomLimits {
     public static final int CHAT_INTERVAL_MILLIS = 750;
     public static final int GESTURE_INTERVAL_MILLIS = 1200;
     public static final int WAVE_RANGE_PIXELS = 220;
-    public static final int SEAT_RANGE_PIXELS = 145;
     public static final int HIGH_FIVE_RANGE_PIXELS = 145;
     public static final int HIGH_FIVE_MIN_PIXELS = 72;
     public static final int HIGH_FIVE_INVITE_MILLIS = 10000;

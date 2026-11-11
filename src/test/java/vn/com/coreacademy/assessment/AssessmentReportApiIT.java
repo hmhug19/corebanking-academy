@@ -101,6 +101,24 @@ class AssessmentReportApiIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void quizOptionsIncludePublishedQuizzesWithoutAttemptsAndRespectScope() {
+        AssessmentFixtures fixtures = new AssessmentFixtures(api, jdbc);
+        Map<String, Object> draft = new HashMap<>(quizBody(course.id()));
+        draft.put("title", "Kiểm tra chưa có lượt thi");
+        long newQuiz = fixtures.quiz(draft, List.of(singleId, multipleId), true);
+        long team = jdbc.queryForObject("""
+            select team_id_snapshot from learning_hub.course_enrollments where course_id = ? and user_id = ?
+            """, Long.class, course.id(), LEARNER);
+        assertThat(api.ok(INSTRUCTOR, get(URL + "/quiz-options?courseId={c}&teamId={t}", course.id(), team))
+            .findValuesAsText("id")).contains(Long.toString(newQuiz));
+        assertThat(api.ok(REPORT_VIEWER, get(URL + "/quiz-options?courseId={c}&teamId={t}", course.id(), team)))
+            .isEmpty();
+        assertThat(api.ok(ADMIN, get(URL + "/quiz-options?courseId={c}&teamId={t}", course.id(), Long.MAX_VALUE)))
+            .isEmpty();
+        api.http(LEARNER, get(URL + "/quiz-options?courseId={c}", course.id()), 403, "CORE-ACCESS_DENIED");
+    }
+
+    @Test
     void resultsCarryNamesAndFilter() {
         JsonNode page = api.ok(ADMIN, get(URL + "/results?quizId={q}&sort=scorePercent,desc", quizId));
         assertThat(page.path("totalElements").asLong()).isEqualTo(2);

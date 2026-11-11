@@ -65,10 +65,21 @@ public class LearningSearchService {
                                            String level, String requirement, String learningStatus, String state,
                                            int page, int size, String sort, Boolean overdue, Boolean assigned,
                                            Boolean failed) {
+        return search(mode, q, fieldId, programId, moduleId, level, requirement, learningStatus, state,
+            page, size, sort, overdue, assigned, failed, false);
+    }
+
+    public PageResponse<CourseCard> search(String mode, String q, Long fieldId, Long programId, Long moduleId,
+                                           String level, String requirement, String learningStatus, String state,
+                                           int page, int size, String sort, Boolean overdue, Boolean assigned,
+                                           Boolean failed, boolean withoutModule) {
+        if (withoutModule && moduleId != null) {
+            throw BusinessException.validation("moduleId", "INVALID_VALUE", "Chỉ chọn một tiêu chí phân hệ.");
+        }
         var pageable = PageQuery.of(page, size, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
             "startedAt", "lastAccessAt", "completedAt"));
         return PageResponse.from(withRatings(withBestScores(mode, query(mode, q, fieldId, programId, moduleId, level,
-            requirement, learningStatus, state, overdue, assigned, failed, pageable))));
+            requirement, learningStatus, state, overdue, assigned, failed, withoutModule, pageable))));
     }
 
     public Page<CourseCard> export(String q, Long fieldId, Long programId, Long moduleId, String level,
@@ -77,13 +88,13 @@ public class LearningSearchService {
         var order = PageQuery.of(0, 1, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
             "startedAt", "lastAccessAt", "completedAt")).getSort();
         return withBestScores(SearchMode.MINE, query(SearchMode.MINE, q, fieldId, programId, moduleId, level,
-            requirement, learningStatus, state, overdue, assigned, failed,
+            requirement, learningStatus, state, overdue, assigned, failed, false,
             PageRequest.of(0, LearningLimits.MAX_EXPORT_ROWS + 1, order)));
     }
 
     private Page<CourseCard> query(String mode, String q, Long fieldId, Long programId, Long moduleId, String level,
                                    String requirement, String learningStatus, String state, Boolean overdue,
-                                   Boolean assigned, Boolean failed, Pageable pageable) {
+                                   Boolean assigned, Boolean failed, boolean withoutModule, Pageable pageable) {
         // Bước 1: scope xuất phát từ grant đang hiệu lực; client chỉ được gửi filter nghiệp vụ.
         var actor = access.actor();
         if (!SearchMode.MANAGE.equals(mode)) {
@@ -98,7 +109,8 @@ public class LearningSearchService {
         var filter = new CourseSearch(mode, actor.person().id(), actor.person().orgId(),
             identity.activeAncestorIds(actor.person().orgId()), scope, q, fieldId, programId, moduleId, level,
             requirement, learningStatus, state, overdue, assigned, failed, null,
-            SearchMode.MANAGE.equals(mode) ? Set.of() : quizzes.failedFinalExamCourseIds(actor.person().id()));
+            SearchMode.MANAGE.equals(mode) ? Set.of() : quizzes.failedFinalExamCourseIds(actor.person().id()),
+            withoutModule);
 
         // Bước 2: repository lọc quyền và đếm trên grain khóa học trước phân trang; không lọc trang trong memory.
         return repository.search(filter, pageable);
@@ -133,7 +145,7 @@ public class LearningSearchService {
 
     /** Số khóa trong danh sách khóa của tôi theo requirement/assigned; cùng truy vấn với list nên khớp tổng của list. */
     public long mineTotal(String requirement, Boolean assigned) {
-        return query(SearchMode.MINE, null, null, null, null, null, requirement, null, null, null, assigned, null,
+        return query(SearchMode.MINE, null, null, null, null, null, requirement, null, null, null, assigned, null, false,
             PageRequest.of(0, 1, Sort.by("id"))).getTotalElements();
     }
 
@@ -146,7 +158,7 @@ public class LearningSearchService {
         Page<CourseCard> page;
         int number = 0;
         do {
-            page = query(SearchMode.MINE, null, null, null, null, null, null, null, null, null, null, null,
+            page = query(SearchMode.MINE, null, null, null, null, null, null, null, null, null, null, null, false,
                 PageRequest.of(number++, MINE_IDS_PAGE_SIZE, Sort.by("id")));
             page.forEach(card -> ids.add(card.courseId()));
         } while (page.hasNext());
@@ -191,7 +203,7 @@ public class LearningSearchService {
     private CourseSearch catalogFilter(Actor actor, Long courseId, Set<Long> failedCourseIds) {
         return new CourseSearch(SearchMode.CATALOG, actor.person().id(), actor.person().orgId(),
             identity.activeAncestorIds(actor.person().orgId()), access.searchScope(actor), null, null, null, null,
-            null, null, null, null, null, null, null, courseId, failedCourseIds);
+            null, null, null, null, null, null, null, courseId, failedCourseIds, false);
     }
 
     private static CourseDetail withoutBlocks(CourseDetail detail) {

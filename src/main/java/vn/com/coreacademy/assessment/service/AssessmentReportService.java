@@ -70,6 +70,14 @@ public class AssessmentReportService {
             byOrg.stream().map(g -> group(g, orgNames.get(g.id()))).toList());
     }
 
+    public List<AssessmentViews.ReportQuizOption> quizOptions(Filter filter) {
+        Criteria criteria = criteria(filter, null);
+        if (criteria.courseId() == null && criteria.quizId() == null) {
+            throw BusinessException.validation("courseId", "REQUIRED", "Chọn khóa học trước.");
+        }
+        return reports.quizOptions(criteria);
+    }
+
     public PageResponse<AssessmentViews.ReportResultRow> results(Filter filter, String userId, String status,
                                                                  Boolean passed, int page, int size, String sort) {
         return PageResponse.from(results(filter, userId, status, passed, PageQuery.of(page, size, sort,

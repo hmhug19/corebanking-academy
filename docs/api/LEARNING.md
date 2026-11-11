@@ -167,10 +167,14 @@ Trên thẻ học viên, `assigned`, nghĩa vụ bắt buộc và `dueAt` chỉ 
 nếu chỉ có lượt giao tương lai thì không lấy hạn tương lai làm hạn hiện hành. Với `/me/learning/courses`, lọc
 `requirement=mandatory` yêu cầu có nghĩa vụ bắt buộc hiện hành; lọc loại khóa trong catalog vẫn theo contract tìm kiếm catalog.
 
-GET `/me/learning/facets` trả `{ fields[], programs[], modules[] }`, mỗi mục `{ id, code, name }`; chương trình và phân
-hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong `/catalog` dùng (cùng quy tắc nhìn thấy, gồm
+GET `/me/learning/facets` trả `{ fields[], programs[], modules[], fieldsWithUnclassifiedCourses[] }`, mỗi mục danh mục
+gồm `{ id, code, name }`; chương trình và phân hệ có thêm `fieldId`. Chỉ có giá trị được ít nhất một khóa nhìn thấy trong
+`/catalog` dùng (cùng quy tắc nhìn thấy, gồm
 khóa đã đăng ký, khóa của đơn vị mình và khóa được chia sẻ), sắp theo `sortNo` rồi tên. Học viên không cần quyền đọc
 `/training-catalog`.
+
+`fieldsWithUnclassifiedCourses` chứa ID lĩnh vực có khóa chưa có phân hệ hợp lệ, hoặc `null` nếu khóa không có lĩnh vực.
+GET `/me/learning/catalog?withoutModule=true` lọc nhóm này cùng các bộ lọc khác. Không gửi cùng `moduleId`.
 
 GET `/me/learning/courses/{courseId}` trả `{ card: CourseCard, content: CourseDetail }`. `card` là kết quả search CATALOG
 theo `courseId`, nên quy tắc nhìn thấy, bản revision và cờ failed giống `/catalog`. `content` là bản revision của `card`:
@@ -801,6 +805,8 @@ Chưa tự áp dụng DDL lên DB cấu hình thật của người dùng.
 | 33 | GET `/api/v1/me/learning/reminders` | Dòng thông báo của học viên: nhắc hạn (`kind = DEADLINE`) và thông báo gamification chưa đọc (`BADGE_EARNED`, `LEVEL_UP`, mới nhất trước, `subject` là tên huy hiệu hoặc tên cấp, `recipientId` null). Thông báo chỉ tạo khi đạt do sự kiện: trao bù huy hiệu khi tạo huy hiệu không tạo thông báo, lần đầu có cấp (cấp 1) cũng không; mỗi (người, huy hiệu) và mỗi (người, cấp) một thông báo |
 | 34 | POST `/api/v1/me/learning/reminders/{reminderId}/read` | Đánh dấu đã đọc nhắc học |
 | 34a | POST `/api/v1/me/learning/reminders/{reminderId}/seen` | Ghi `sentAt` khi toast của thông báo đã hiện; thông báo vẫn nằm trong dòng cho đến khi đọc; ghi lại không đổi gì; người khác nhận 403 |
+| 34b | GET `/api/v1/me/learning/reminders/inbox` | Hộp thư của học viên, gồm thông báo chưa đọc (`pending`) và lịch sử đã đọc (`sent`). |
+| 34c | DELETE `/api/v1/me/learning/reminders/{reminderId}` | Ẩn thông báo khỏi hộp thư bằng trạng thái `cancelled`. Trả thông báo sau cập nhật. Chỉ người nhận được xóa. |
 | 35 | POST `/api/v1/learning-assets` | Upload tài nguyên |
 | 36 | GET `/api/v1/learning-assets/{assetId}/content` | Tải tài nguyên |
 | 37 | GET `/api/v1/learning-assignments` | Danh sách đợt giao của đơn vị qua mọi khóa, kèm số liệu người nhận |
