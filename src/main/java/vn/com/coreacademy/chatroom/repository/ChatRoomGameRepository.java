@@ -27,8 +27,6 @@ public class ChatRoomGameRepository {
     public record Rank(String name, long balance) {}
     public record DiceRound(long id, Instant closesAt, List<Integer> dice) {}
     public record Bet(String userId, String side, long stake) {}
-    public record CaroGame(UUID id, String xUser, String oUser, String xName, String oName, long stake,
-                           String board, int moves, Integer lastCell, String result, Instant expiresAt) {}
 
     /** The dice round and the two wallets of a Caro wager must change as one operation. */
     public void lockGames() {
@@ -63,17 +61,29 @@ public class ChatRoomGameRepository {
             """).query((row, index) -> new Rank(row.getString(1), row.getLong(2))).list();
     }
 
-    public boolean debit(String userId, long amount) {
+    public boolean debit(String userId, long amount, long reserved) {
         return amount == 0 || jdbc.sql("""
             update learning_hub.chat_room_wallets set balance = balance - ? where user_id = ? and balance >= ?
-            """).params(amount, userId, amount).update() == 1;
+            """).params(amount, userId, amount + reserved).update() == 1;
     }
 
-    public void credit(String userId, long amount) {
-        if (amount > 0) {
-            jdbc.sql("update learning_hub.chat_room_wallets set balance = balance + ? where user_id = ?")
-                .params(amount, userId).update();
-        }
+    public boolean credit(String userId, long amount) {
+        return amount == 0 || jdbc.sql("update learning_hub.chat_room_wallets set balance = balance + ? where user_id = ?")
+            .params(amount, userId).update() == 1;
+    }
+
+    public boolean debitRoomTransfer(String userId, long amount, UUID transfer) {
+        return jdbc.sql("""
+            update learning_hub.chat_room_wallets
+            set balance = balance - ?, last_room_transfer = ?
+            where user_id = ? and balance >= ? and last_room_transfer is distinct from ?
+            """).params(amount, transfer, userId, amount, transfer).update() == 1;
+    }
+
+    public boolean roomTransferApplied(String userId, UUID transfer) {
+        return jdbc.sql("""
+            select exists (select 1 from learning_hub.chat_room_wallets where user_id = ? and last_room_transfer = ?)
+            """).params(userId, transfer).query(Boolean.class).single();
     }
 
     public Optional<DiceRound> openDice() {
@@ -108,36 +118,6 @@ public class ChatRoomGameRepository {
             .params(round, userId, side, stake).update();
     }
 
-    public Optional<CaroGame> activeCaro(String userId) {
-        return jdbc.sql("""
-            select * from learning_hub.chat_room_caro_games
-            where result is null and (x_user_id = ? or o_user_id = ?)
-            """).params(userId, userId).query(ChatRoomGameRepository::caroGame).optional();
-    }
-
-    public List<CaroGame> expiredCaro(Instant now) {
-        return jdbc.sql("""
-            select * from learning_hub.chat_room_caro_games where result is null and expires_at <= ?
-            """).param(at(now)).query(ChatRoomGameRepository::caroGame).list();
-    }
-
-    public void startCaro(CaroGame game) {
-        jdbc.sql("""
-            insert into learning_hub.chat_room_caro_games
-              (game_id, x_user_id, o_user_id, x_name, o_name, stake, board, expires_at)
-            values (?,?,?,?,?,?,?,?)
-            """).params(game.id(), game.xUser(), game.oUser(), game.xName(), game.oName(), game.stake(), game.board(),
-                at(game.expiresAt())).update();
-    }
-
-    public void updateCaro(CaroGame game) {
-        jdbc.sql("""
-            update learning_hub.chat_room_caro_games set board = ?, moves = ?, last_cell = ?, result = ?, expires_at = ?
-            where game_id = ?
-            """).param(game.board()).param(game.moves()).param(game.lastCell()).param(game.result()).param(at(game.expiresAt()))
-            .param(game.id()).update();
-    }
-
     private static DiceRound diceRound(ResultSet row, int index) throws SQLException {
         Array array = row.getArray("dice");
         List<Integer> dice = List.of();
@@ -149,13 +129,6 @@ public class ChatRoomGameRepository {
             }
         }
         return new DiceRound(row.getLong("round_id"), row.getObject("closes_at", OffsetDateTime.class).toInstant(), dice);
-    }
-
-    private static CaroGame caroGame(ResultSet row, int index) throws SQLException {
-        return new CaroGame(row.getObject("game_id", UUID.class), row.getString("x_user_id"), row.getString("o_user_id"),
-            row.getString("x_name"), row.getString("o_name"), row.getLong("stake"), row.getString("board"),
-            row.getInt("moves"), row.getObject("last_cell", Integer.class), row.getString("result"),
-            row.getObject("expires_at", OffsetDateTime.class).toInstant());
     }
 
     private static OffsetDateTime at(Instant instant) {

@@ -3,6 +3,7 @@ package vn.com.coreacademy.chatroom.constants;
 public final class ChatRoomLimits {
     public static final int NAME_LENGTH = 24;
     public static final int MESSAGE_LENGTH = 280;
+    public static final int CHAT_HISTORY_LENGTH = 50;
     public static final int MAX_PLAYERS = 60;
     public static final int PACKET_BYTES = 4096;
     public static final int OUTBOUND_BUFFER_BYTES = 65536;

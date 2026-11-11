@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
@@ -31,7 +32,6 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import vn.com.coreacademy.chatroom.config.ChatRoomProperties;
 import vn.com.coreacademy.chatroom.constants.ChatRoomLimits;
-import vn.com.coreacademy.chatroom.repository.ChatRoomGameRepository.CaroGame;
 import vn.com.coreacademy.chatroom.service.ChatRoomMap.Point;
 import vn.com.coreacademy.common.exception.BusinessException;
 
@@ -42,6 +42,7 @@ import vn.com.coreacademy.common.exception.BusinessException;
 public class ChatRoomService {
     private static final long CARO_INVITE_MILLIS = 20_000;
     private static final int APPROACH_TICK_MILLIS = 80;
+    private static final double APPROACH_SPEED_MULTIPLIER = 2.4;
     private static final Set<String> COLORS = Set.of("teal", "slate", "amber", "blue", "rose");
     private static final List<String> FACINGS = List.of("east", "southeast", "south", "southwest",
         "west", "northwest", "north", "northeast");
@@ -61,7 +62,10 @@ public class ChatRoomService {
     private final Map<String, Guest> guests = new LinkedHashMap<>();
     private final Map<String, HighFiveInvite> invitations = new LinkedHashMap<>();
     private final Map<Integer, CaroTableSession> caroTables = new LinkedHashMap<>();
-    private long knownDiceRound;
+    private final Map<String, ChatRoomCaro> caroMatches = new LinkedHashMap<>();
+    private final Deque<Map<String, Object>> chatHistory = new ArrayDeque<>();
+    private long knownDiceRound = -1;
+    private long diceClosesAt;
     private long lastWalletRefresh;
     private long gameRetryAt;
     private String hostId;
@@ -83,7 +87,13 @@ public class ChatRoomService {
         private CaroInvite invite;
     }
 
-    private record Approach(Integer chair, Guest partner, Deque<Point> path) {
+    private record Approach(Integer chair, Guest partner, Deque<Point> path, double speed) {
+        private Map<String, Object> route(Guest guest) {
+            List<Point> points = new ArrayList<>(path.size() + 1);
+            points.add(point(guest));
+            points.addAll(path);
+            return Map.of("points", points, "speed", speed);
+        }
     }
 
     private static final class Round {
@@ -111,9 +121,11 @@ public class ChatRoomService {
         private boolean roomGames;
         private boolean diceViewing;
         private long wallet = -1;
+        private long shownWallet = -1;
         private UUID activeCaroId;
         private Integer seat;
         private Approach approach;
+        private long lastApproachStep;
         private long highFiveUntil;
         private double x;
         private double y;
@@ -136,6 +148,10 @@ public class ChatRoomService {
                 "color", color, "avatar", avatar, "x", x, "y", y, "facing", facing));
             if (seat != null) {
                 player.put("seat", seat);
+            }
+            if (approach != null) {
+                player.put("approaching", true);
+                player.put("route", approach.route(this));
             }
             return player;
         }
@@ -241,7 +257,7 @@ public class ChatRoomService {
         guest.y = spawn.y();
         guest.lastMove = System.nanoTime();
         send(guest, Map.of("type", "welcome", "id", guest.session.getId(), "players", guests.values().stream()
-            .filter(g -> g.name != null).map(Guest::view).toList(), "history", List.of(), "gestures", guest.gestures,
+            .filter(g -> g.name != null).map(Guest::view).toList(), "history", List.copyOf(chatHistory), "gestures", guest.gestures,
             "interactions", guest.interactions));
         broadcast(Map.of("type", "joined", "player", guest.view()));
         if (guest.activities) {
@@ -261,11 +277,16 @@ public class ChatRoomService {
             if (!wantsGames) {
                 return;
             }
-            CaroGame active = games.activeCaro(guest.access.userId()).orElse(null);
             guest.roomGames = true;
             sendWallet(guest, balance);
-            if (active != null && active.expiresAt().isAfter(Instant.now())) {
-                sendCaro(guest, active, false);
+            long now = System.currentTimeMillis();
+            ChatRoomCaro match = caroMatches.get(guest.access.userId());
+            if (match != null) {
+                if (match.expire(now) || match.presence(guest.access.userId(), true)) {
+                    publishCaro(match);
+                } else {
+                    sendCaro(guest, match);
+                }
             }
         } catch (DataAccessException | TransactionException exception) {
             if (wantsGames) {
@@ -327,12 +348,12 @@ public class ChatRoomService {
             return;
         }
         boolean accepted = games.bet(guest.access.userId(), integer(packet, "round"), packet.path("side").asText(),
-            integer(packet, "stake"));
+            integer(packet, "stake"), reserved(guest.access.userId()));
         publishGames(true);
         refreshWallets();
         if (!accepted) {
             send(guest, Map.of("type", "dice-error", "message",
-                "Không đặt được cược. Hãy kiểm tra số dư và lượt đang mở."));
+                "Chưa gửi được CPoint. Hãy kiểm tra số dư và lượt đang mở."));
         }
     }
 
@@ -340,10 +361,23 @@ public class ChatRoomService {
     public synchronized void gameTick() throws IOException {
         long now = System.currentTimeMillis();
         expireCaroInvites(now);
+        for (ChatRoomCaro match : caroMatches.values().stream().distinct().toList()) {
+            if (match.expire(now)) {
+                publishCaro(match);
+            }
+        }
+        caroMatches.values().removeIf(match -> match.settled && now - match.finishedAt > ChatRoomCaro.TURN_MILLIS);
         if (now < gameRetryAt) {
             return;
         }
         try {
+            for (ChatRoomCaro match : caroMatches.values().stream().distinct().toList()) {
+                if (match.result != null && !match.settled) {
+                    games.settleCaro(match.winner().id(), match.loser().id(), match.points, match.walletTransfer);
+                    match.settled = true;
+                    refreshWallets();
+                }
+            }
             publishGames(false);
             if (now - lastWalletRefresh >= 5000) {
                 refreshWallets();
@@ -356,15 +390,16 @@ public class ChatRoomService {
 
     private void publishGames(boolean refreshDice) throws IOException {
         boolean watching = guests.values().stream().anyMatch(guest -> guest.diceViewing && guest.session.isOpen());
-        ChatRoomGames.GameTick tick = games.tick(watching, knownDiceRound, refreshDice);
-        for (CaroGame game : tick.expired()) {
-            publishCaro(game, true);
+        if (!refreshDice && (diceClosesAt > System.currentTimeMillis() || !watching && knownDiceRound == 0)) {
+            return;
         }
-        ChatRoomGames.DiceTable table = tick.dice();
+        ChatRoomGames.DiceTick tick = games.tickDice(watching, knownDiceRound, refreshDice);
+        knownDiceRound = tick.openRound();
+        diceClosesAt = tick.closesAt();
+        ChatRoomGames.DiceTable table = tick.table();
         if (table == null) {
             return;
         }
-        knownDiceRound = table.round().id();
         for (Guest guest : List.copyOf(guests.values())) {
             if (!guest.diceViewing) {
                 continue;
@@ -389,10 +424,25 @@ public class ChatRoomService {
     }
 
     private void sendWallet(Guest guest, long balance) {
-        if (guest.wallet != balance) {
-            guest.wallet = balance;
-            sendGame(guest, Map.of("type", "wallet", "balance", balance));
+        guest.wallet = balance;
+        showWallet(guest);
+    }
+
+    private void showWallet(Guest guest) {
+        long available = available(guest);
+        if (guest.shownWallet != available) {
+            guest.shownWallet = available;
+            sendGame(guest, Map.of("type", "wallet", "balance", available));
         }
+    }
+
+    private long available(Guest guest) {
+        return Math.max(0, guest.wallet - reserved(guest.access.userId()));
+    }
+
+    private long reserved(String userId) {
+        ChatRoomCaro match = caroMatches.get(userId);
+        return match != null && !match.settled ? match.points : 0;
     }
 
     private void sendGame(Guest guest, Object event) {
@@ -421,32 +471,28 @@ public class ChatRoomService {
                     && (partner == null || partner.activeCaroId == null)) {
                     if (stake < ChatRoomGames.MIN_CARO_STAKE) {
                         sendGame(guest, Map.of("type", "caro-error", "message",
-                            "Mức cược tối thiểu là " + ChatRoomGames.MIN_CARO_STAKE + " CPoint mỗi bên."));
+                            "Mỗi bạn góp ít nhất " + ChatRoomGames.MIN_CARO_STAKE + " CPoint nhé."));
                         return;
                     }
-                    if (stake > ChatRoomGames.MAX_STAKE || stake > guest.wallet) {
+                    if (stake > ChatRoomGames.MAX_STAKE || stake > available(guest)) {
                         sendGame(guest, Map.of("type", "caro-error", "message",
-                            "Mức cược vượt giới hạn hoặc số dư CPoint."));
+                            "Số CPoint góp vượt giới hạn hoặc số dư của bạn."));
                         return;
                     }
                     table.stake = stake;
                     refreshCaroTable(number, now);
                 }
             }
-            case "caro-reply" -> replyCaro(guest, table, packet);
+            case "caro-reply" -> replyCaro(guest, table, packet, now);
             case "caro-move" -> {
                 long cell = integer(packet, "cell");
                 long move = integer(packet, "move");
-                if (atSameGame(guest, partner) && cell >= 0 && cell < ChatRoomGames.MAX_CARO_CELLS
-                    && move >= 0 && move < ChatRoomGames.MAX_CARO_CELLS) {
-                    games.playCaro(guest.access.userId(), partner.access.userId(),
-                        packet.path("gameId").asText(), (int) move, (int) cell)
-                        .ifPresent(game -> {
-                            publishCaro(game, false);
-                            if (game.result() != null) {
-                                refreshWallets();
-                            }
-                        });
+                if (atSameGame(guest, partner)) {
+                    ChatRoomCaro match = caroMatches.get(guest.access.userId());
+                    if (match != null && (match.expire(now) || match.play(guest.access.userId(),
+                        packet.path("gameId").asText(), move, cell, now))) {
+                        publishCaro(match);
+                    }
                 }
             }
             default -> { }
@@ -514,7 +560,7 @@ public class ChatRoomService {
         sendGame(viewer, event);
     }
 
-    private void replyCaro(Guest guest, CaroTableSession table, JsonNode packet) throws IOException {
+    private void replyCaro(Guest guest, CaroTableSession table, JsonNode packet, long now) throws IOException {
         CaroInvite invite = table.invite;
         if (invite == null || invite.to() != guest || !invite.id().equals(packet.path("inviteId").asText())
             || !packet.path("accept").isBoolean()) {
@@ -526,19 +572,24 @@ public class ChatRoomService {
         }
         Guest sender = invite.from();
         int number = map.caroTable(guest.seat);
-        CaroGame game = atCaroTable(sender, number) && table.host == sender
-            ? games.startCaro(participant(sender), participant(guest), invite.stake()).orElse(null) : null;
-        if (game == null) {
+        String xUser = sender.access.userId();
+        String oUser = guest.access.userId();
+        if (!atCaroTable(sender, number) || table.host != sender || xUser.equals(oUser)
+            || reserved(xUser) > 0 || reserved(oUser) > 0
+            || invite.stake() > available(sender) || invite.stake() > available(guest)) {
             leaveSeat(guest);
             Object event = Map.of("type", "caro-error", "message", "Không thể mở ván. Hãy kiểm tra số dư CPoint của hai người.");
             sendGame(sender, event);
             sendGame(guest, event);
             return;
         }
+        ChatRoomCaro match = new ChatRoomCaro(new ChatRoomCaro.Player(xUser, sender.name),
+            new ChatRoomCaro.Player(oUser, guest.name), invite.stake(), now);
+        caroMatches.put(xUser, match);
+        caroMatches.put(oUser, match);
         endCaroInvite(table);
         table.stake = null;
-        publishCaro(game, false);
-        refreshWallets();
+        publishCaro(match);
     }
 
     private void expireCaroInvites(long now) throws IOException {
@@ -559,16 +610,14 @@ public class ChatRoomService {
         }
     }
 
-    private static ChatRoomGames.Participant participant(Guest guest) {
-        return new ChatRoomGames.Participant(guest.access.userId(), guest.name);
-    }
-
-    private void publishCaro(CaroGame game, boolean timedOut) {
+    private void publishCaro(ChatRoomCaro match) {
         Set<Integer> tables = new HashSet<>();
         for (Guest guest : List.copyOf(guests.values())) {
-            if (guest.roomGames && (guest.access.userId().equals(game.xUser()) || guest.access.userId().equals(game.oUser()))) {
-                boolean changed = !game.id().equals(guest.activeCaroId) || game.result() != null;
-                sendCaro(guest, game, timedOut);
+            String userId = guest.access.userId();
+            if (guest.roomGames && (userId.equals(match.x.id()) || userId.equals(match.o.id()))) {
+                boolean changed = !match.id.equals(guest.activeCaroId) || match.result != null;
+                sendCaro(guest, match);
+                showWallet(guest);
                 int table = map.caroTable(guest.seat);
                 if (changed && table != 0) {
                     tables.add(table);
@@ -578,20 +627,24 @@ public class ChatRoomService {
         tables.forEach(table -> refreshCaroTable(table, System.currentTimeMillis()));
     }
 
-    private void sendCaro(Guest guest, CaroGame game, boolean timedOut) {
-        guest.activeCaroId = game.result() == null ? game.id() : null;
-        Map<String, Object> state = new LinkedHashMap<>(Map.of("type", "caro-state", "id", game.id(),
-            "xName", game.xName(), "oName", game.oName(), "piece", guest.access.userId().equals(game.xUser()) ? "X" : "O",
-            "stake", game.stake(), "board", game.board(), "moves", game.moves(),
-            "expiresAt", game.expiresAt().toEpochMilli(), "serverTime", System.currentTimeMillis()));
-        if (game.result() != null) {
-            state.put("result", game.result());
+    private void sendCaro(Guest guest, ChatRoomCaro match) {
+        guest.activeCaroId = match.result == null ? match.id : null;
+        Map<String, Object> state = new LinkedHashMap<>(Map.of("type", "caro-state", "id", match.id,
+            "xName", match.x.name(), "oName", match.o.name(), "piece", match.piece(guest.access.userId()),
+            "stake", match.points, "board", String.valueOf(match.board), "moves", match.moves,
+            "expiresAt", match.result == null ? match.deadline() : match.finishedAt, "serverTime", System.currentTimeMillis()));
+        if (match.result != null) {
+            state.put("result", match.result);
         }
-        if (game.lastCell() != null) {
-            state.put("lastCell", game.lastCell());
+        if (match.lastCell != null) {
+            state.put("lastCell", match.lastCell);
         }
-        if (timedOut) {
+        if (match.waitingForReturn()) {
+            state.put("waitingForReturn", true);
+        }
+        if (match.timeout != null) {
             state.put("timedOut", true);
+            state.put("timeout", match.timeout);
         }
         sendGame(guest, state);
     }
@@ -742,11 +795,18 @@ public class ChatRoomService {
     }
 
     private void broadcastPosition(Guest guest) throws IOException {
+        broadcastPosition(guest, false);
+    }
+
+    private void broadcastPosition(Guest guest, boolean includeRoute) throws IOException {
         Map<String, Object> position = new LinkedHashMap<>(Map.of("type", "moved", "id", guest.session.getId(),
             "x", guest.x, "y", guest.y, "facing", guest.facing));
         if (guest.interactions) {
             position.put("seat", guest.seat);
             position.put("approaching", guest.approach != null);
+            if (includeRoute && guest.approach != null) {
+                position.put("route", guest.approach.route(guest));
+            }
         }
         broadcast(position);
     }
@@ -773,11 +833,41 @@ public class ChatRoomService {
             .filter(index -> !onlyCaro || map.caroTable(index) != 0)
             .filter(index -> canTakeSeat(guest, index))
             .sorted(Comparator.comparingDouble(index -> ChatRoomMap.distance(origin, seatApproach(index)))).toList();
-        for (int chair : chairs) {
-            if (startApproach(guest, chair, null, map.path(origin, seatApproach(chair)))) {
-                return;
+        if (requested == null && onlyCaro && guest.activeCaroId != null) {
+            int partnerTable = guests.values().stream()
+                .filter(other -> other != guest && other.roomGames && other.session.isOpen()
+                    && guest.activeCaroId.equals(other.activeCaroId))
+                .mapToInt(other -> map.caroTable(other.seat)).filter(table -> table != 0).findFirst().orElse(0);
+            List<Integer> atPartnerTable = chairs.stream().filter(index -> map.caroTable(index) == partnerTable).toList();
+            if (!atPartnerTable.isEmpty()) {
+                chairs = atPartnerTable;
             }
         }
+        Integer nearest = null;
+        double shortest = Double.POSITIVE_INFINITY;
+        List<Point> bestPath = List.of();
+        for (int chair : chairs) {
+            Point destination = seatApproach(chair);
+            if (ChatRoomMap.distance(origin, destination) >= shortest) {
+                break;
+            }
+            List<Point> path = map.path(origin, destination);
+            if (path.isEmpty()) {
+                continue;
+            }
+            double length = 0;
+            Point previous = origin;
+            for (Point next : path) {
+                length += ChatRoomMap.distance(previous, next);
+                previous = next;
+            }
+            if (length < shortest) {
+                nearest = chair;
+                shortest = length;
+                bestPath = path;
+            }
+        }
+        startApproach(guest, nearest, null, bestPath);
     }
 
     private boolean canTakeSeat(Guest guest, int index) {
@@ -798,14 +888,16 @@ public class ChatRoomService {
 
     private Point seatApproach(int index) {
         ChatRoomMap.Furniture chair = map.layout().objects().get(index);
-        return new Point(chair.x() + chair.w() / 2, chair.y() + chair.h() + map.layout().radius() + 8);
+        double clearance = map.layout().radius() + 8;
+        double behind = "south".equals(chair.facing()) ? chair.y() - clearance : chair.y() + chair.h() + clearance;
+        return new Point(chair.x() + chair.w() / 2, behind);
     }
 
     private void takeSeat(Guest guest, int chair, Point destination) throws IOException {
         guest.seat = chair;
         guest.x = destination.x();
         guest.y = destination.y();
-        guest.facing = "north";
+        guest.facing = "south".equals(map.layout().objects().get(chair).facing()) ? "south" : "north";
         broadcastPosition(guest);
         int table = map.caroTable(chair);
         if (table != 0) {
@@ -858,9 +950,10 @@ public class ChatRoomService {
         if (path.isEmpty()) {
             return false;
         }
-        guest.approach = new Approach(chair, partner, new ArrayDeque<>(path));
+        guest.approach = new Approach(chair, partner, new ArrayDeque<>(path), map.layout().speed() * APPROACH_SPEED_MULTIPLIER);
+        guest.lastApproachStep = System.nanoTime();
         guest.diceViewing = false;
-        broadcastPosition(guest);
+        broadcastPosition(guest, true);
         return true;
     }
 
@@ -874,6 +967,7 @@ public class ChatRoomService {
     @Scheduled(fixedDelay = APPROACH_TICK_MILLIS)
     public synchronized void walkApproaches() throws IOException {
         long now = System.currentTimeMillis();
+        long stepAt = System.nanoTime();
         for (Guest guest : List.copyOf(guests.values())) {
             Approach approach = guest.approach;
             if (approach == null || !guest.session.isOpen()) {
@@ -885,19 +979,10 @@ public class ChatRoomService {
                 stopApproach(guest);
                 continue;
             }
-            Point next = approach.path().getFirst();
-            double distance = ChatRoomMap.distance(point(guest), next);
-            double stride = map.layout().speed() * APPROACH_TICK_MILLIS / 1000;
-            guest.facing = facingFrom(guest, next.x(), next.y());
-            if (distance > stride) {
-                guest.x += (next.x() - guest.x) * stride / distance;
-                guest.y += (next.y() - guest.y) * stride / distance;
-            } else {
-                guest.x = next.x();
-                guest.y = next.y();
-                approach.path().removeFirst();
-            }
-            if (approach.path().isEmpty() || (partner != null && inHighFiveRange(guest, partner))) {
+            double stride = approach.speed() * (stepAt - guest.lastApproachStep) / 1e9;
+            guest.lastApproachStep = stepAt;
+            advanceApproach(guest, approach.path(), stride);
+            if (approach.path().isEmpty()) {
                 guest.approach = null;
                 if (approach.chair() != null) {
                     takeSeat(guest, approach.chair(), point(guest));
@@ -908,6 +993,25 @@ public class ChatRoomService {
                 }
             }
             broadcastPosition(guest);
+        }
+    }
+
+    private void advanceApproach(Guest guest, Deque<Point> path, double stride) {
+        while (!path.isEmpty() && stride > 0) {
+            Point next = path.getFirst();
+            double distance = ChatRoomMap.distance(point(guest), next);
+            if (distance > 0) {
+                guest.facing = facingFrom(guest, next.x(), next.y());
+            }
+            if (distance > stride) {
+                guest.x += (next.x() - guest.x) * stride / distance;
+                guest.y += (next.y() - guest.y) * stride / distance;
+                return;
+            }
+            guest.x = next.x();
+            guest.y = next.y();
+            path.removeFirst();
+            stride -= distance;
         }
     }
 
@@ -1023,6 +1127,10 @@ public class ChatRoomService {
         var event = Map.<String, Object>of("type", "chat", "id", UUID.randomUUID().toString(),
             "playerId", guest.session.getId(), "name", guest.name, "color", guest.color,
             "text", text, "at", Instant.ofEpochMilli(now).toString());
+        if (chatHistory.size() == ChatRoomLimits.CHAT_HISTORY_LENGTH) {
+            chatHistory.removeFirst();
+        }
+        chatHistory.addLast(event);
         broadcast(event);
     }
 
@@ -1061,12 +1169,23 @@ public class ChatRoomService {
     public synchronized void disconnect(WebSocketSession session) throws IOException {
         Guest guest = guests.remove(session.getId());
         if (guest != null && guest.name != null) {
+            String userId = guest.access.userId();
+            ChatRoomCaro match = caroMatches.get(userId);
+            long now = System.currentTimeMillis();
+            if (guest.roomGames && match != null && guests.values().stream().noneMatch(other ->
+                other.roomGames && other.session.isOpen() && other.access.userId().equals(userId))
+                && (match.expire(now) || match.presence(userId, false))) {
+                publishCaro(match);
+            }
             int table = map.caroTable(guest.seat);
             if (table != 0) {
                 refreshCaroTable(table, System.currentTimeMillis());
             }
             invitations.values().removeIf(invite -> invite.from() == guest || invite.to() == guest);
             broadcast(Map.of("type", "left", "id", session.getId(), "name", guest.name));
+            if (guests.values().stream().noneMatch(other -> other.name != null && other.session.isOpen())) {
+                chatHistory.clear();
+            }
             if (session.getId().equals(hostId)) {
                 hostId = guests.values().stream()
                     .filter(candidate -> candidate.activities && candidate.session.isOpen())

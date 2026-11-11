@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS learning_hub.chat_room_wallets (
     last_claim_day date
 );
 CREATE INDEX IF NOT EXISTS ix_chat_room_wallet_rank ON learning_hub.chat_room_wallets (balance DESC, user_id);
+ALTER TABLE learning_hub.chat_room_wallets ADD COLUMN IF NOT EXISTS last_room_transfer uuid;
 
 CREATE TABLE IF NOT EXISTS learning_hub.chat_room_dice_rounds (
     round_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -23,31 +24,27 @@ CREATE TABLE IF NOT EXISTS learning_hub.chat_room_dice_bets (
     PRIMARY KEY (round_id, user_id)
 );
 
-CREATE TABLE IF NOT EXISTS learning_hub.chat_room_caro_games (
-    game_id uuid PRIMARY KEY,
-    x_user_id varchar(20) NOT NULL,
-    o_user_id varchar(20) NOT NULL,
-    x_name varchar(24) NOT NULL,
-    o_name varchar(24) NOT NULL,
-    stake bigint NOT NULL CHECK (stake BETWEEN 0 AND 1000000),
-    board varchar(2500) NOT NULL,
-    moves smallint NOT NULL DEFAULT 0,
-    result varchar(4) CHECK (result IN ('X', 'O', 'draw')),
-    expires_at timestamptz NOT NULL,
-    CHECK (x_user_id <> o_user_id)
-);
--- Normalize the unpublished draft schema if it was already applied.
-ALTER TABLE learning_hub.chat_room_caro_games
-    ADD COLUMN IF NOT EXISTS last_cell smallint CHECK (last_cell BETWEEN 0 AND 2499),
-    DROP CONSTRAINT IF EXISTS chat_room_caro_games_board_check,
-    DROP CONSTRAINT IF EXISTS chat_room_caro_games_moves_check,
-    ALTER COLUMN board TYPE varchar(2500),
-    ADD CONSTRAINT chat_room_caro_games_board_check CHECK (char_length(board) = 2500 AND board !~ '[^.XO]'),
-    ADD CONSTRAINT chat_room_caro_games_moves_check CHECK (moves BETWEEN 0 AND 2500);
-
-CREATE INDEX IF NOT EXISTS ix_chat_room_active_caro_x ON learning_hub.chat_room_caro_games (x_user_id) WHERE result IS NULL;
-CREATE INDEX IF NOT EXISTS ix_chat_room_active_caro_o ON learning_hub.chat_room_caro_games (o_user_id) WHERE result IS NULL;
-CREATE INDEX IF NOT EXISTS ix_chat_room_active_caro_expiry ON learning_hub.chat_room_caro_games (expires_at) WHERE result IS NULL;
+-- Refund any unfinished matches from the previous, database-backed implementation.
+DO $$
+BEGIN
+    IF to_regclass('learning_hub.chat_room_caro_games') IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(72151, 1);
+        WITH closed AS (
+            UPDATE learning_hub.chat_room_caro_games
+            SET result = 'draw', expires_at = now()
+            WHERE result IS NULL
+            RETURNING x_user_id, o_user_id, stake
+        ), refunds AS (
+            SELECT x_user_id AS user_id, stake FROM closed
+            UNION ALL
+            SELECT o_user_id, stake FROM closed
+        )
+        INSERT INTO learning_hub.chat_room_wallets AS wallet (user_id, balance)
+        SELECT user_id, sum(stake) FROM refunds GROUP BY user_id
+        ON CONFLICT (user_id) DO UPDATE SET balance = wallet.balance + EXCLUDED.balance;
+    END IF;
+END;
+$$;
 
 -- An XP entry credits the same account in the transaction that records the award.
 -- Existing XP rows predate the token programme and are not replayed.
