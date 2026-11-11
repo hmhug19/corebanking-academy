@@ -9,6 +9,7 @@ import java.util.Map;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -92,9 +93,33 @@ public class CourseDraftService {
         if (!problems.isEmpty()) {
             throw BusinessException.validation("outline", "INVALID_OUTLINE", "Dàn ý chưa hợp lệ: " + problems.get(0));
         }
-        jobs.setOutput(step.id(), write(outline));
+        jobs.setOutput(step.id(), write(whitelisted(outline)));
 
         return content(jobId);
+    }
+
+    /** Keeps only the outline fields the draft uses, so a client cannot store extra data in the job. */
+    private ObjectNode whitelisted(JsonNode outline) {
+        ObjectNode clean = json.createObjectNode();
+        clean.put("title", outline.path("title").asText());
+        clean.put("summary", outline.path("summary").asText());
+        ArrayNode objectives = clean.putArray("objectives");
+        outline.path("objectives").forEach(objective -> objectives.add(objective.asText()));
+        ArrayNode chapters = clean.putArray("chapters");
+        for (JsonNode chapter : outline.path("chapters")) {
+            ObjectNode copy = chapters.addObject();
+            copy.put("title", chapter.path("title").asText());
+            ArrayNode lessons = copy.putArray("lessons");
+            for (JsonNode lesson : chapter.path("lessons")) {
+                ObjectNode item = lessons.addObject();
+                item.put("title", lesson.path("title").asText());
+                ArrayNode lessonObjectives = item.putArray("objectives");
+                lesson.path("objectives").forEach(objective -> lessonObjectives.add(objective.asText()));
+                item.put("estimatedMinutes", lesson.path("estimatedMinutes").asInt());
+            }
+        }
+
+        return clean;
     }
 
     /** Approves the outline: from now it is locked and the lessons, then their questions, are generated. */
@@ -127,6 +152,7 @@ public class CourseDraftService {
     @Transactional
     public ContentView regenerateLesson(long jobId, String lessonKey) {
         JobRow job = lock(jobId);
+        refuseWhenDrafted(job);
         StepRow step = jobs.stepByKey(job.id(), CourseGenerationRunner.LESSON, lessonKey)
             .orElseThrow(() -> new BusinessException(vn.com.coreacademy.common.exception.ResponseCode.RESOURCE_NOT_FOUND));
         if (!jobs.resetStep(step.id())) {
@@ -141,6 +167,7 @@ public class CourseDraftService {
     @Transactional
     public ContentView retry(long jobId) {
         JobRow job = lock(jobId);
+        refuseWhenDrafted(job);
         if (jobs.requeueFailed(job.id()) == 0) {
             throw refuse("NOTHING_FAILED", "Không có bước nào bị lỗi.");
         }
@@ -279,6 +306,12 @@ public class CourseDraftService {
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------------------
+
+    private void refuseWhenDrafted(JobRow job) {
+        if (job.createdDraftId() != null) {
+            throw refuse("DRAFT_CREATED", "Bản nháp đã được tạo nên không chạy lại được nữa.");
+        }
+    }
 
     private JobRow lock(long jobId) {
         owned.owned(jobId);

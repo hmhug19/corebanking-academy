@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 public final class GenerationSchemas {
     static final int MAX_CHAPTERS = 20;
     static final int MAX_LESSONS_PER_CHAPTER = 10;
+    static final int MAX_TOTAL_LESSONS = 60;
     static final int MAX_BLOCKS = 6;
     static final int MAX_BODY = 6000;
     static final int MAX_TITLE = 255;
@@ -42,8 +43,10 @@ public final class GenerationSchemas {
             return problems;
         }
         int number = 0;
+        int totalLessons = 0;
         for (JsonNode chapter : chapters) {
             number++;
+            totalLessons += chapter.path("lessons").size();
             text(chapter, "title", MAX_TITLE, problems, "chapter " + number);
             JsonNode lessons = chapter.path("lessons");
             if (!lessons.isArray() || lessons.isEmpty() || lessons.size() > MAX_LESSONS_PER_CHAPTER) {
@@ -58,6 +61,9 @@ public final class GenerationSchemas {
                     problems.add("lesson estimatedMinutes must be 1 to 240");
                 }
             }
+        }
+        if (totalLessons > MAX_TOTAL_LESSONS) {
+            problems.add("outline must have at most " + MAX_TOTAL_LESSONS + " lessons in total");
         }
         return problems;
     }

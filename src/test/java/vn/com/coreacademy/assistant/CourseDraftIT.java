@@ -176,6 +176,38 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void theStoredOutlineKeepsOnlyKnownFieldsAndHasABoundedLessonCount() throws Exception {
+        long job = startJob();
+        runAll();
+        JsonNode content = api.ok(INSTRUCTOR, get(path(job, "/content")));
+
+        Map<String, Object> edited = json.convertValue(content.path("outline"), Map.class);
+        edited.put("injected", "x".repeat(1000));
+        api.ok(INSTRUCTOR, api.put(edited, path(job, "/outline")));
+        assertThat(api.ok(INSTRUCTOR, get(path(job, "/content"))).path("outline").has("injected")).isFalse();
+
+        java.util.List<Map<String, Object>> chapters = new java.util.ArrayList<>();
+        for (int c = 0; c < 7; c++) {
+            java.util.List<Map<String, Object>> lessons = new java.util.ArrayList<>();
+            for (int l = 0; l < 10; l++) {
+                lessons.add(Map.of("title", "B" + l, "objectives", java.util.List.of(), "estimatedMinutes", 5));
+            }
+            chapters.add(Map.of("title", "C" + c, "lessons", lessons));
+        }
+        edited.put("chapters", chapters);
+        api.error(INSTRUCTOR, api.put(edited, path(job, "/outline")), "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
+    void aLessonOrAFailedStepCannotRunAgainOnceTheDraftExists() throws Exception {
+        long job = approved().path("jobId").asLong();
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")));
+
+        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/lessons/c1l1/regenerate")), "CORE-VALIDATION_FAILED");
+        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/retry")), "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
     void regeneratingOneLessonChangesOnlyThatLesson() throws Exception {
         JsonNode before = approved();
         long job = before.path("jobId").asLong();
