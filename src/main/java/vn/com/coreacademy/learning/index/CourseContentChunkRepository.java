@@ -74,6 +74,16 @@ public class CourseContentChunkRepository {
             rs.getString("body_format"), rs.getString("steps"), parse(rs.getString("transcript"))), revisionId);
     }
 
+    /** The blocks of one lesson of a revision in reading order, as {@link #blocks(long)} reads them. */
+    public List<SourceBlock> lessonBlocks(long revisionId, long lessonId) {
+        return jdbc.query(BLOCKS.replace("WHERE ch.revision_id = ?", "WHERE ch.revision_id = ? AND l.lesson_id = ?"),
+            (rs, rowNum) -> new SourceBlock(rs.getLong("chapter_id"), rs.getString("chapter_title"),
+                rs.getLong("lesson_id"), rs.getString("lesson_title"), rs.getLong("block_id"),
+                rs.getString("block_title"), rs.getString("block_type"), rs.getString("body"),
+                rs.getString("body_format"), rs.getString("steps"), parse(rs.getString("transcript"))),
+            revisionId, lessonId);
+    }
+
     /**
      * Replaces everything indexed for a revision. Run it inside one transaction: the old chunks, the new chunks and
      * the completion marker commit together, so an interrupted run leaves the revision as pending, never half indexed.

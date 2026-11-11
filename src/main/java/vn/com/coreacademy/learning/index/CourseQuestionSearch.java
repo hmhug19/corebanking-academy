@@ -42,6 +42,14 @@ public class CourseQuestionSearch {
      * user asked about that lesson ("bài này nói gì?" is close to nothing in particular); other chunks fill the rest.
      */
     public List<ChunkHit> hits(String question, Long lessonId) {
+        return hits(question, lessonId, null);
+    }
+
+    /**
+     * As {@link #hits(String, Long)}; with a {@code courseId} (the course of the lesson the user has open) the chunks
+     * that fill the rest come from that course only, so an answer about "bài này" never cites another course.
+     */
+    public List<ChunkHit> hits(String question, Long lessonId, Long courseId) {
         KnowledgeProperties.Retrieval limits = properties.retrieval();
         float[] vector = ollama.embed(List.of(question)).get(0);
         List<CourseHit> chosen = new ArrayList<>();
@@ -50,6 +58,7 @@ public class CourseQuestionSearch {
         }
         Set<Long> seen = chosen.stream().map(CourseHit::chunkId).collect(Collectors.toSet());
         retrieval.search(vector, limits.topK() * CANDIDATE_FACTOR).stream()
+            .filter(hit -> courseId == null || hit.courseId() == courseId)
             .filter(hit -> hit.similarity() >= limits.minSimilarity() && seen.add(hit.chunkId()))
             .limit(Math.max(0, limits.topK() - chosen.size())).forEach(chosen::add);
         List<ChunkHit> hits = chosen.stream().map(CourseQuestionSearch::asChunkHit).toList();

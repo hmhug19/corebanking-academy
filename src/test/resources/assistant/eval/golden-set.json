@@ -1007,16 +1007,16 @@
    "prompt": "Bài này nói về lãi suất thả nổi như thế nào?",
    "lesson": true,
    "requestedSkill": null,
-   "expectedSkill": "qa_tai_lieu",
-   "expectedTool": "search_courses"
+   "expectedSkill": "hoi_bai_hoc",
+   "expectedTool": "read_lesson"
   },
   {
    "id": "T04",
    "prompt": "Giải thích khái niệm tài sản bảo đảm trong khóa này",
    "lesson": true,
    "requestedSkill": null,
-   "expectedSkill": "qa_tai_lieu",
-   "expectedTool": "search_courses"
+   "expectedSkill": "hoi_bai_hoc",
+   "expectedTool": "read_lesson"
   },
   {
    "id": "T05",
@@ -1065,6 +1065,22 @@
    "requestedSkill": null,
    "expectedSkill": "tro_chuyen",
    "expectedTool": "(none)"
+  },
+  {
+   "id": "T11",
+   "prompt": "Bài này có nhắc đến hạn mức không?",
+   "lesson": true,
+   "requestedSkill": null,
+   "expectedSkill": "hoi_bai_hoc",
+   "expectedTool": "read_lesson"
+  },
+  {
+   "id": "T12",
+   "prompt": "Giải thích giúp mình bước 2 trong bài đang học",
+   "lesson": true,
+   "requestedSkill": null,
+   "expectedSkill": "hoi_bai_hoc",
+   "expectedTool": "read_lesson"
   }
  ]
 }

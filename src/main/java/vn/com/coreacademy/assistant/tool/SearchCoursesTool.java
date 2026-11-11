@@ -52,7 +52,8 @@ public class SearchCoursesTool implements AgentTool {
 
         List<ChunkHit> hits;
         try {
-            hits = courses.hits(query, context.lesson() == null ? null : context.lesson().lessonId());
+            hits = context.lesson() == null ? courses.hits(query)
+                : courses.hits(query, context.lesson().lessonId(), context.lesson().courseId());
         } catch (OllamaException exception) {
             // The runtime ends the stream with ASSISTANT-AI_UNAVAILABLE for this exception.
             throw new OllamaUnavailableException("Retrieval needs Ollama", exception);

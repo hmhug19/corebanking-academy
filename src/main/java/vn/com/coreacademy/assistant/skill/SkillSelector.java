@@ -19,6 +19,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaClient;
 @Component
 @RequiredArgsConstructor
 public class SkillSelector {
+    public static final String LESSON_SKILL = "hoi_bai_hoc";
     private static final Pattern LABEL = Pattern.compile("[a-z_]+");
 
     private final OllamaClient ollama;
@@ -31,8 +32,9 @@ public class SkillSelector {
             return named;
         }
         if (context.lesson() != null) {
-            // Asked from a lesson page: the question is about that lesson, so no classifier call is needed.
-            return catalog.defaultSkill();
+            // Asked from a lesson page: the question is about that lesson, so no classifier call is needed; the
+            // lesson skill reads the lesson itself first.
+            return catalog.find(LESSON_SKILL).orElse(catalog.defaultSkill());
         }
 
         List<Skill> allowed = catalog.all().stream().filter(skill -> offered(skill, context)).toList();

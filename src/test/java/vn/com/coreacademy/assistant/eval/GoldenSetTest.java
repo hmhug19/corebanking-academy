@@ -18,7 +18,7 @@ class GoldenSetTest {
     void hasTheSizesTheSpecAsksFor() {
         assertThat(set.answers().size() + set.notFound().size()).isBetween(40, 60);
         assertThat(set.injection()).hasSize(10);
-        assertThat(set.toolChoice()).hasSize(10);
+        assertThat(set.toolChoice()).hasSize(12);
         assertThat(set.version()).isNotBlank();
     }
 
