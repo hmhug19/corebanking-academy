@@ -18,7 +18,13 @@ public final class CourseJobViews {
         @Schema(description = "Chương trình đào tạo của khóa; do người dùng chọn, không do model.") Long programmeId,
         @Schema(description = "Năng lực gán cho câu hỏi; do người dùng chọn, không do model.") Long competencyId,
         @Schema(description = "Chỉ ADMIN/SUPER_ADMIN: đơn vị sở hữu khóa, trong phạm vi quản lý của họ. "
-            + "Giảng viên không được gửi giá trị khác đơn vị của mình.") Long ownerOrgId) {
+            + "Giảng viên không được gửi giá trị khác đơn vị của mình.") Long ownerOrgId,
+        @Schema(description = "Tên khóa học nháp; bỏ trống thì AI đặt khi viết dàn ý.") String title,
+        @Schema(description = "Mô tả khóa học; bỏ trống thì AI điền, có thì AI không đụng tới.") String description) {
+        public Inputs(String targetLearners, String level, Integer chapters, Integer durationMinutes,
+                      Long programmeId, Long competencyId, Long ownerOrgId) {
+            this(targetLearners, level, chapters, durationMinutes, programmeId, competencyId, ownerOrgId, null, null);
+        }
     }
 
     public record SourceView(Long documentId, String fileName, String status) {
@@ -30,7 +36,8 @@ public final class CourseJobViews {
     @Schema(description = "Một job tạo khóa học: trạng thái, bước hiện tại, tiến độ và các đầu ra đã có.")
     public record JobView(
         long jobId,
-        @Schema(description = "queued | running | waiting_approval | completed | failed | cancelled.") String status,
+        @Schema(description = "queued | running | waiting_approval | completed | failed | cancelled | stopped.")
+        String status,
         String step,
         @Schema(description = "0–100.") int progress,
         @Schema(description = "Lý do thất bại, đọc được.") String error,
@@ -40,7 +47,9 @@ public final class CourseJobViews {
         @Schema(description = "Khóa học nháp đã tạo; null khi chưa tạo.") Long createdDraftId,
         @Schema(description = "Các bước đã tạo ra cho job, theo thứ tự.") List<StepView> steps,
         OffsetDateTime createTime,
-        OffsetDateTime updateTime) {
+        OffsetDateTime updateTime,
+        @Schema(description = "Khóa học nháp job tạo và ghi nội dung vào; có ngay khi tạo job.") Long courseId,
+        @Schema(description = "Bản nháp của khóa học trên.") Long revisionId) {
     }
 
     public record JobSummary(long jobId, String status, String step, int progress, String error, String sourceFileName,

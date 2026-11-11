@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant.course;
 
 import java.time.Duration;
+import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +29,12 @@ import vn.com.coreacademy.identity.constants.RoleCodes;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
+import vn.com.coreacademy.learning.dto.LearningDetails.CourseDetail;
+import vn.com.coreacademy.learning.dto.LearningRequests.CreateCourse;
+import vn.com.coreacademy.learning.dto.LearningRequests.DraftContent;
 import vn.com.coreacademy.learning.service.LearningAccessPolicy;
+import vn.com.coreacademy.learning.service.LearningAiDraftService;
+import vn.com.coreacademy.learning.service.LearningContentService;
 import vn.com.coreacademy.security.SecurityContextUtils;
 
 /**
@@ -46,6 +52,11 @@ public class CourseJobService {
     private static final Set<String> MANAGERS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN, RoleCodes.INSTRUCTOR);
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
     private static final int LIST_LIMIT = 50;
+    private static final String DEFAULT_TITLE = "Khóa học mới (AI)";
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final Map<String, String> COURSE_LEVELS = Map.of("BEGINNER", "basic",
+        "INTERMEDIATE", "intermediate", "ADVANCED", "advanced");
 
     private final CourseJobRepository jobs;
     private final KnowledgeDocumentService documents;
@@ -53,6 +64,8 @@ public class CourseJobService {
     private final GenerationProperties properties;
     private final TransactionTemplate transaction;
     private final ObjectMapper json;
+    private final LearningContentService courses;
+    private final LearningAiDraftService draftWriter;
 
     /**
      * Checks who may start a job and for which unit and the day's limit, stores the file as a course source
@@ -97,12 +110,21 @@ public class CourseJobService {
     }
 
     private JobView queue(Prepared prepared, long documentId) {
+        // The draft course and its first revision are made with the job, in one transaction: when either fails, neither
+        // exists. The course service decides again whether the caller may create it for that unit.
         long jobId = transaction.execute(status -> {
             jobs.lockOwner(prepared.userId());
             requireWithinDailyLimit(prepared.userId(),
                 jobs.createdSince(prepared.userId(), OffsetDateTime.now().minus(DAY)));
-            long created = jobs.insertJob(prepared.userId(), prepared.ownerOrgId(), documentId,
-                write(prepared.inputs()));
+            Inputs inputs = prepared.inputs();
+            String title = inputs.title() == null || inputs.title().isBlank() ? DEFAULT_TITLE : inputs.title().strip();
+            CourseDetail course = courses.create(new CreateCourse(prepared.ownerOrgId(), null, newCode(), title,
+                new DraftContent(inputs.programmeId(), null, title,
+                    inputs.description() == null ? "" : inputs.description().strip(), COURSE_LEVELS.get(inputs.level()),
+                    "mandatory", null, null, null, List.of(), List.of(), 0)));
+            jobs.markAiGenerated(course.revision().id());
+            long created = jobs.insertJob(prepared.userId(), prepared.ownerOrgId(), documentId, write(inputs),
+                course.course().id(), course.revision().id());
             jobs.insertStep(created, FIRST_STEP, "");
             return created;
         });
@@ -128,6 +150,28 @@ public class CourseJobService {
     public JobView cancel(long jobId) {
         JobRow job = owned(jobId);
         if (!jobs.setStatus(job.id(), CourseJobRepository.CANCELLED, null)) {
+            throw BusinessException.validation("jobId", "JOB_FINISHED", "Công việc này đã kết thúc.");
+        }
+
+        return get(jobId);
+    }
+
+    /**
+     * Stops a job that has not finished: lessons already written stay, the one being written and the ones not started
+     * are left empty and {@code pending} for the author to fill by hand. The structure is unlocked.
+     */
+    public JobView stop(long jobId) {
+        JobRow job = owned(jobId);
+        boolean stopped = Boolean.TRUE.equals(transaction.execute(status -> {
+            if (!jobs.setStatus(job.id(), CourseJobRepository.STOPPED, null)) {
+                return false;
+            }
+            if (job.courseId() != null && job.revisionId() != null) {
+                draftWriter.revertWriting(job.courseId(), job.revisionId(), job.ownerUserId());
+            }
+            return true;
+        }));
+        if (!stopped) {
             throw BusinessException.validation("jobId", "JOB_FINISHED", "Công việc này đã kết thúc.");
         }
 
@@ -202,8 +246,26 @@ public class CourseJobService {
             throw BusinessException.validation("competencyId", "NOT_FOUND", "Năng lực không tồn tại.");
         }
 
+        String title = in.title() == null ? null : in.title().strip();
+        if (title != null && title.length() > 255) {
+            throw BusinessException.validation("title", "INVALID_LENGTH", "Tên khóa học tối đa 255 ký tự.");
+        }
+        String description = in.description() == null ? null : in.description().strip();
+        if (description != null && description.length() > 30000) {
+            throw BusinessException.validation("description", "INVALID_LENGTH", "Mô tả tối đa 30000 ký tự.");
+        }
+
         return new Inputs(learners, in.level(), in.chapters(), in.durationMinutes(), in.programmeId(),
-            in.competencyId(), ownerOrgId);
+            in.competencyId(), ownerOrgId, title, description);
+    }
+
+    private static String newCode() {
+        StringBuilder code = new StringBuilder("AI-");
+        for (int i = 0; i < 8; i++) {
+            code.append(CODE_ALPHABET.charAt(RANDOM.nextInt(CODE_ALPHABET.length())));
+        }
+
+        return code.toString();
     }
 
     /** Refuses the job after the day's allowance, telling the user when the oldest one leaves the 24 hours. */
@@ -236,7 +298,7 @@ public class CourseJobService {
 
         return new JobView(row.id(), row.status(), row.step(), row.progress(), row.errorMessage(), read(row.inputs()),
             row.ownerOrgId(), source == null ? null : new SourceView(source.id(), source.fileName(), source.status()),
-            row.createdDraftId(), steps, row.createTime(), row.updateTime());
+            row.createdDraftId(), steps, row.createTime(), row.updateTime(), row.courseId(), row.revisionId());
     }
 
     private static String name(Map<Long, DocumentInfo> sources, JobRow row) {

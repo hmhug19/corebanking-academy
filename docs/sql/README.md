@@ -42,6 +42,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5j | `upgrade/2026-11-15-course-job-soft-delete.sql` | Đánh dấu job tạo khóa học bằng AI đã xóa thay vì xóa dòng, để hạn mức trong ngày vẫn tính (cột deleted_at). |
 | 5k | `upgrade/2026-11-16-assistant-retrieval-trace.sql` | Cột `retrieval_trace` của lượt hỏi đáp (dấu vết truy xuất, chỉ ID và số); chạy trước backend mới |
 | 5l | `upgrade/2026-11-16-knowledge-document-course-source-scope.sql` | Phạm vi tài liệu `course_source` cho tệp nguồn của job tạo khóa học; chạy trước backend mới |
+| 5m | `upgrade/2026-11-17-course-job-owns-course.sql` | Job tạo khóa học sở hữu khóa nháp (`course_id`, `revision_id`), trạng thái `stopped`, `course_lessons.ai_state`; chạy trước backend mới |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |

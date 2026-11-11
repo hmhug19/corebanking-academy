@@ -53,6 +53,7 @@ public abstract class AssessmentIntegrationTest {
         "upgrade/2026-11-10-assistant-conversations.sql", "upgrade/2026-11-10-assistant-pending-actions.sql",
         "upgrade/2026-11-10-assistant-feedback.sql", "upgrade/2026-11-11-knowledge-document-scope.sql", "upgrade/2026-11-11-course-content-index.sql", "upgrade/2026-11-11-assistant-conversation-lesson-context.sql", "upgrade/2026-11-12-course-generation-jobs.sql", "upgrade/2026-11-13-course-revision-ai-generated.sql", "upgrade/2026-11-14-course-revision-review-confirmed.sql", "upgrade/2026-11-15-course-job-soft-delete.sql",
         "upgrade/2026-11-16-assistant-retrieval-trace.sql", "upgrade/2026-11-16-knowledge-document-course-source-scope.sql",
+        "upgrade/2026-11-17-course-job-owns-course.sql",
         "learning_hub_community.sql", "learning_hub_reporting.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */

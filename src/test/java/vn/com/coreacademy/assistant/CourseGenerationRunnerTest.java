@@ -17,6 +17,7 @@ import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationExcept
 import vn.com.coreacademy.assistant.course.SourceTextRepository;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
+import vn.com.coreacademy.learning.service.LearningAiDraftService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,13 +42,14 @@ class CourseGenerationRunnerTest {
     private final CourseJobRepository jobs = mock(CourseJobRepository.class);
     private final SourceTextRepository sources = mock(SourceTextRepository.class);
     private final OllamaClient ollama = mock(OllamaClient.class);
+    private final LearningAiDraftService drafts = mock(LearningAiDraftService.class);
     private final CourseGenerationRunner runner = new CourseGenerationRunner(jobs, sources, ollama, new SkillCatalog(),
-        AssistantModels.defaults(), json);
+        AssistantModels.defaults(), json, drafts);
 
     private StepRow outlineStep() {
         JobRow job = new JobRow(5, "000004", 1, 9L,
             "{\"targetLearners\":\"Giao dịch viên\",\"level\":\"BEGINNER\",\"chapters\":3,\"programmeId\":1,\"competencyId\":2}",
-            "running", "outline", 20, null, null, null, null);
+            "running", "outline", 20, null, null, null, null, 70L, 71L);
         when(jobs.job(5)).thenReturn(Optional.of(job));
         when(jobs.stepByKey(anyLong(), eq("summarise_sections"), eq(""))).thenReturn(Optional.of(new StepRow(1, 5,
             "summarise_sections", "", null, "{\"sections\":[{\"title\":\"Mở\",\"summary\":\"Nội dung.\"}]}", "done", 1,
@@ -71,6 +73,36 @@ class CourseGenerationRunnerTest {
         assertThat(format.getValue().path("type").asText()).isEqualTo("object");
         assertThat(format.getValue().path("required")).extracting(JsonNode::asText)
             .contains("title", "summary", "objectives", "chapters");
+    }
+
+    @Test
+    void theOutlineIsWrittenStraightIntoTheDraftCourseOfTheJob() {
+        when(ollama.chat(anyList(), any(), any())).thenReturn(VALID_OUTLINE);
+
+        runner.run(outlineStep());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<vn.com.coreacademy.learning.dto.LearningRequests.ChapterInput>> chapters =
+            ArgumentCaptor.forClass(List.class);
+        verify(drafts).writeOutline(eq(70L), eq(71L), eq("000004"), eq("Quy trình mở tài khoản."), anyList(),
+            chapters.capture());
+        assertThat(chapters.getValue()).hasSize(1);
+        assertThat(chapters.getValue().get(0).lessons().get(0).title()).isEqualTo("Điều kiện");
+        assertThat(chapters.getValue().get(0).lessons().get(0).blocks()).isEmpty();
+    }
+
+    @Test
+    void aLessonTheAuthorEditedMeanwhileIsNotWrittenAndTheModelIsNotAsked() {
+        StepRow lesson = new StepRow(3, 5, "lesson", "c1l1", null, null, "running", 1, null);
+        outlineStep();
+        when(drafts.startLesson(70L, 71L, 0, 0, "000004")).thenReturn(false);
+
+        var result = runner.run(lesson);
+
+        verify(ollama, times(0)).chat(anyList(), any(), any());
+        verify(drafts, times(0)).writeLesson(anyLong(), anyLong(), org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyInt(), anyList(), any());
+        assertThat(result.outputJson()).contains("user_edited");
     }
 
     @Test

@@ -62,6 +62,7 @@ FILES=(
   upgrade/2026-11-15-course-job-soft-delete.sql
   upgrade/2026-11-16-assistant-retrieval-trace.sql
   upgrade/2026-11-16-knowledge-document-course-source-scope.sql
+  upgrade/2026-11-17-course-job-owns-course.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

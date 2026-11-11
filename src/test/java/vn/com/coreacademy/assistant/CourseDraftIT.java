@@ -81,7 +81,7 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         badAnswers.set(0);
         badLessons = false;
         when(ollama.isAvailable()).thenReturn(true);
-        when(ollama.chat(any(), any())).thenAnswer(invocation -> {
+        when(ollama.chat(any(), any(), any())).thenAnswer(invocation -> {
             List<Message> messages = invocation.getArgument(0);
             if (messages == null) {
                 return null;
@@ -233,17 +233,16 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         api.error(ADMIN, api.post(Map.of(), path(job, "/cancel")), other);
         api.error(ADMIN, ApiClient.delete(JOBS + "/{id}", job), other);
 
-        assertThat(jdbc.queryForObject("SELECT created_draft_id FROM learning_hub.course_generation_jobs "
-            + "WHERE job_id = ?", Long.class, job)).isNull();
+        api.error(ADMIN, api.post(Map.of(), path(job, "/stop")), other);
     }
 
     @Test
-    void aLessonOrAFailedStepCannotRunAgainOnceTheDraftExists() throws Exception {
+    void afterTheJobFinishedALessonCanStillBeRegeneratedButThereIsNothingToRetry() throws Exception {
         long job = approved().path("jobId").asLong();
-        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")));
+        assertThat(api.ok(INSTRUCTOR, get(path(job, "/content"))).path("status").asText()).isEqualTo("completed");
 
-        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/lessons/c1l1/regenerate")), "CORE-VALIDATION_FAILED");
         api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/retry")), "CORE-VALIDATION_FAILED");
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/lessons/c1l1/regenerate")));
     }
 
     @Test
@@ -262,7 +261,7 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void invalidModelJsonIsAskedOnceMoreThenFailsReadablyAndRetryResumes() throws Exception {
+    void invalidModelJsonIsAskedThreeTimesThenFailsReadablyAndRetryResumes() throws Exception {
         long job = startJob();
         runAll();
         badLessons = true;
@@ -272,13 +271,13 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         JsonNode failed = api.ok(INSTRUCTOR, get(path(job, "/content")));
         assertThat(failed.path("status").asText()).isEqualTo("failed");
         assertThat(failed.path("error").asText()).contains("không hợp lệ");
-        assertThat(badAnswers.get()).isEqualTo(2);
+        assertThat(badAnswers.get()).isEqualTo(3);
 
         badLessons = false;
         api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/retry")));
         runAll();
         assertThat(api.ok(INSTRUCTOR, get(path(job, "/content"))).path("status").asText())
-            .isEqualTo("waiting_approval");
+            .isEqualTo("completed");
     }
 
     @Test
@@ -307,11 +306,93 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void theDraftNeedsAnApprovedOutlineAndFinishedLessons() throws Exception {
+    void askingForQuestionsToBeBankedBeforeAnyWereProposedWritesNothing() throws Exception {
         long job = startJob();
         runAll();
+        int before = jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class);
 
-        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")), "CORE-VALIDATION_FAILED");
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class)).isEqualTo(before);
+    }
+
+    // ---- ticket 01: the job owns a draft course ---------------------------------------------------------------
+
+    private Map<String, Object> jobRow(long job) {
+        return jdbc.queryForMap("SELECT course_id, revision_id, status FROM "
+            + "learning_hub.course_generation_jobs WHERE job_id = ?", job);
+    }
+
+    private static final String LESSONS_OF_REVISION = "FROM learning_hub.course_lessons l JOIN "
+        + "learning_hub.course_chapters c ON c.chapter_id = l.chapter_id WHERE c.revision_id = ?";
+
+    @Test
+    void creatingAJobCreatesTheDraftCourseAndItsAiGeneratedRevisionWithIt() throws Exception {
+        long job = startJob();
+
+        Map<String, Object> row = jobRow(job);
+        assertThat(((Number) row.get("course_id")).longValue()).isPositive();
+        assertThat(jdbc.queryForMap("SELECT state, ai_generated FROM learning_hub.course_revisions "
+            + "WHERE revision_id = ?", row.get("revision_id")))
+            .containsEntry("state", "draft").containsEntry("ai_generated", true);
+        assertThat(api.ok(INSTRUCTOR, get(path(job, ""))).path("courseId").asLong())
+            .isEqualTo(((Number) row.get("course_id")).longValue());
+    }
+
+    @Test
+    void aJobThatFailsToStartLeavesNeitherAJobNorACourse() throws Exception {
+        int courses = jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses", Integer.class);
+        Map<String, Object> inputs = new HashMap<>();
+        inputs.put("targetLearners", "Giao dịch viên");
+        inputs.put("level", "BEGINNER");
+        inputs.put("chapters", 1);
+        inputs.put("programmeId", -1);
+        inputs.put("competencyId", competency);
+
+        api.error(INSTRUCTOR, multipart(JOBS)
+            .file(new MockMultipartFile("file", "q.md", "text/markdown", "# Q".getBytes(StandardCharsets.UTF_8)))
+            .file(new MockMultipartFile("inputs", "", "application/json", json.writeValueAsBytes(inputs))),
+            "CORE-VALIDATION_FAILED");
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses", Integer.class)).isEqualTo(courses);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs", Integer.class))
+            .isZero();
+    }
+
+    @Test
+    void theOutlineAndLessonsAreWrittenIntoTheRevisionAndAUserEditedLessonIsNeverOverwritten() throws Exception {
+        long job = startJob();
+        runAll();
+        Object revision = jobRow(job).get("revision_id");
+        assertThat(jdbc.queryForObject("SELECT count(*) " + LESSONS_OF_REVISION + " AND l.ai_state = 'pending'",
+            Integer.class, revision)).isEqualTo(2);
+
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/outline/approve")));
+        // the author edits the first lesson before the job reaches it
+        jdbc.update("UPDATE learning_hub.course_lessons SET ai_state = 'user_edited' WHERE lesson_id = "
+            + "(SELECT min(l.lesson_id) " + LESSONS_OF_REVISION + ")", revision);
+        runAll();
+
+        assertThat(jdbc.queryForList("SELECT l.ai_state " + LESSONS_OF_REVISION + " ORDER BY c.sort_no, l.sort_no",
+            String.class, revision)).containsExactly("user_edited", "written");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.lesson_blocks b JOIN "
+            + "learning_hub.course_lessons l ON l.lesson_id = b.lesson_id JOIN learning_hub.course_chapters c "
+            + "ON c.chapter_id = l.chapter_id WHERE c.revision_id = ?", Integer.class, revision)).isEqualTo(1);
+    }
+
+    @Test
+    void stopKeepsTheJobFinishedStateOfItsLessonsAndFinishedJobsCannotBeStopped() throws Exception {
+        long job = startJob();
+        runAll();
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/outline/approve")));
+        Object revision = jobRow(job).get("revision_id");
+
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/stop")));
+
+        assertThat(jobRow(job).get("status")).isEqualTo("stopped");
+        assertThat(jdbc.queryForObject("SELECT count(*) " + LESSONS_OF_REVISION + " AND l.ai_state = 'pending'",
+            Integer.class, revision)).isEqualTo(2);
+        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/stop")), "CORE-VALIDATION_FAILED");
     }
 
     @Test

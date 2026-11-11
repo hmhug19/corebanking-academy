@@ -1,7 +1,6 @@
 package vn.com.coreacademy.assistant.course;
 
 import java.math.BigDecimal;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,7 +11,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.assessment.dto.AssessmentRequests.OptionInput;
@@ -27,14 +25,9 @@ import vn.com.coreacademy.assistant.course.CourseJobViews.LessonView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.QuestionsView;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
-import vn.com.coreacademy.learning.dto.LearningDetails.CourseDetail;
-import vn.com.coreacademy.learning.dto.LearningRequests.BlockInput;
-import vn.com.coreacademy.learning.dto.LearningRequests.ChapterInput;
-import vn.com.coreacademy.learning.dto.LearningRequests.CreateCourse;
-import vn.com.coreacademy.learning.dto.LearningRequests.DraftContent;
-import vn.com.coreacademy.learning.dto.LearningRequests.LessonInput;
-import vn.com.coreacademy.learning.dto.LearningRequests.StepInput;
-import vn.com.coreacademy.learning.service.LearningContentService;
+import vn.com.coreacademy.learning.service.LearningAiDraftService;
+import vn.com.coreacademy.learning.service.LearningAiDraftService.ChapterState;
+import vn.com.coreacademy.learning.service.LearningAiOwnership;
 
 /**
  * What the author does with a generation job after the model has written something: edit and approve the outline,
@@ -45,19 +38,13 @@ import vn.com.coreacademy.learning.service.LearningContentService;
 @Service
 @RequiredArgsConstructor
 public class CourseDraftService {
-    private static final String DRAFT_CREATED = "DRAFT_CREATED";
     /** Runs one step may have in total, regenerations and retries included, so a job cannot loop on the model. */
     public static final int MAX_STEP_ATTEMPTS = 6;
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    private static final Map<String, String> LEVELS = Map.of("BEGINNER", "basic", "INTERMEDIATE", "intermediate",
-        "ADVANCED", "advanced");
 
     private final CourseJobRepository jobs;
     private final CourseJobService owned;
-    private final LearningContentService courses;
+    private final LearningAiDraftService course;
     private final QuestionService questions;
-    private final JdbcTemplate jdbc;
     private final ObjectMapper json;
 
     // ---- reading ---------------------------------------------------------------------------------------------------
@@ -97,7 +84,9 @@ public class CourseDraftService {
         if (!problems.isEmpty()) {
             throw BusinessException.validation("outline", "INVALID_OUTLINE", "Dàn ý chưa hợp lệ: " + problems.get(0));
         }
-        jobs.setOutput(step.id(), write(whitelisted(outline)));
+        ObjectNode clean = whitelisted(outline);
+        jobs.setOutput(step.id(), write(clean));
+        writeIntoCourse(job, clean);
 
         return content(jobId);
     }
@@ -134,7 +123,8 @@ public class CourseDraftService {
         if (outlineLocked(job.id())) {
             throw refuse("OUTLINE_LOCKED", "Dàn ý đã được duyệt rồi.");
         }
-        JsonNode outline = parse(step.output());
+        JsonNode outline = outlineFromCourse(job, parse(step.output()));
+        jobs.setOutput(step.id(), write(outline));
         List<String> keys = new ArrayList<>();
         int chapter = 0;
         for (JsonNode chapterNode : outline.path("chapters")) {
@@ -145,6 +135,9 @@ public class CourseDraftService {
         }
         keys.forEach(key -> jobs.insertStep(job.id(), CourseGenerationRunner.LESSON, key));
         keys.forEach(key -> jobs.insertStep(job.id(), CourseGenerationRunner.QUESTIONS, key));
+        if (keys.isEmpty()) {
+            jobs.setStatus(job.id(), CourseJobRepository.COMPLETED, null);
+        }
         jobs.reopen(job.id(), CourseGenerationRunner.LESSON, 35);
 
         return content(jobId);
@@ -156,7 +149,6 @@ public class CourseDraftService {
     @Transactional
     public ContentView regenerateLesson(long jobId, String lessonKey) {
         JobRow job = lock(jobId);
-        refuseWhenDrafted(job);
         if (job.sourceDocumentId() == null) {
             throw refuse("SOURCE_REQUIRED", "Tệp nguồn đã được xóa theo thời hạn lưu trữ. Hãy đính kèm lại tệp để viết lại bài này.");
         }
@@ -168,7 +160,14 @@ public class CourseDraftService {
         if (!jobs.resetStep(step.id())) {
             throw refuse("LESSON_BUSY", "Bài này đang được viết, hãy chờ xong rồi tạo lại.");
         }
+        int[] place = CourseOutlineMapper.position(lessonKey);
+        if (place != null && job.courseId() != null) {
+            // The author asked for it, so even a lesson they edited goes back to the job: pending, then rewritten.
+            course.setLessonState(job.courseId(), job.revisionId(), place[0], place[1], LearningAiOwnership.PENDING,
+                job.ownerUserId());
+        }
         jobs.reopen(job.id(), CourseGenerationRunner.LESSON, job.progress());
+        jobs.resetStepIfDone(job.id(), CourseGenerationRunner.QUESTIONS, lessonKey);
 
         return content(jobId);
     }
@@ -177,7 +176,6 @@ public class CourseDraftService {
     @Transactional
     public ContentView retry(long jobId) {
         JobRow job = lock(jobId);
-        refuseWhenDrafted(job);
         if (jobs.requeueFailed(job.id(), MAX_STEP_ATTEMPTS) == 0) {
             throw refuse("NOTHING_FAILED", "Không có bước nào bị lỗi.");
         }
@@ -196,9 +194,6 @@ public class CourseDraftService {
         StepRow step = jobs.stepByKey(job.id(), CourseGenerationRunner.QUESTIONS, lessonKey)
             .filter(row -> row.output() != null)
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
-        if (job.createdDraftId() != null) {
-            throw refuse(DRAFT_CREATED, "Bản nháp đã được tạo nên không đổi lựa chọn được nữa.");
-        }
         ObjectNode output = (ObjectNode) parse(step.output());
         JsonNode list = output.path("questions");
         if (index < 0 || index >= list.size()) {
@@ -210,70 +205,21 @@ public class CourseDraftService {
         return content(jobId);
     }
 
-    // ---- the draft -------------------------------------------------------------------------------------------------
+    // ---- the questions ---------------------------------------------------------------------------------------------
 
     /**
-     * Builds the whole course from the approved outline and the lessons and writes it once through the course service,
-     * with the accepted questions going to the bank with the programme and competency the author chose. The revision is
-     * marked AI generated in the same transaction. Asking again after it was made returns the same draft.
+     * Writes the accepted proposed questions to the question bank, with the programme and competency the author chose,
+     * once each (a written question is marked {@code added}), and returns the job. The course itself already exists:
+     * the job wrote it into the draft as it went, and nothing here publishes anything.
      */
     @Transactional
     public JobView createDraft(long jobId) {
         JobRow job = lock(jobId);
-        if (job.createdDraftId() != null) {
-            return owned.get(jobId);
-        }
-        if (!outlineLocked(job.id())) {
-            throw refuse("OUTLINE_NOT_APPROVED", "Hãy duyệt dàn ý trước khi tạo bản nháp.");
-        }
-        List<StepRow> lessons = jobs.stepsOfKind(job.id(), CourseGenerationRunner.LESSON);
-        if (lessons.isEmpty() || lessons.stream().anyMatch(step -> !"done".equals(step.status()))) {
-            throw refuse("LESSONS_NOT_READY", "Cần viết xong mọi bài học trước khi tạo bản nháp.");
-        }
         if (jobs.stepsOfKind(job.id(), CourseGenerationRunner.QUESTIONS).stream()
             .anyMatch(step -> "pending".equals(step.status()) || "running".equals(step.status()))) {
-            throw refuse("QUESTIONS_NOT_READY", "Cần soạn xong câu hỏi cho mọi bài học trước khi tạo bản nháp.");
+            throw refuse("QUESTIONS_NOT_READY", "Cần soạn xong câu hỏi cho mọi bài học trước khi thêm vào ngân hàng.");
         }
-        Inputs inputs = read(job.inputs(), Inputs.class);
-        JsonNode outline = outputOf(job.id(), CourseGenerationRunner.OUTLINE, "");
-
-        List<ChapterInput> chapters = new ArrayList<>();
-        int chapterNumber = 0;
-        for (JsonNode chapter : outline.path("chapters")) {
-            chapterNumber++;
-            List<LessonInput> lessonInputs = new ArrayList<>();
-            int lessonNumber = 0;
-            for (JsonNode lesson : chapter.path("lessons")) {
-                lessonNumber++;
-                String key = "c" + chapterNumber + "l" + lessonNumber;
-                JsonNode written = outputOf(job.id(), CourseGenerationRunner.LESSON, key);
-                lessonInputs.add(new LessonInput(lesson.path("title").asText(), "content",
-                    BigDecimal.valueOf(lesson.path("estimatedMinutes").asInt(10) * 60L), true, null,
-                    blocksOf(written)));
-            }
-            chapters.add(new ChapterInput(chapter.path("title").asText(), lessonInputs));
-        }
-        List<String> objectives = new ArrayList<>();
-        outline.path("objectives").forEach(objective -> objectives.add(objective.asText()));
-        DraftContent draft = new DraftContent(inputs.programmeId(), null, outline.path("title").asText(),
-            outline.path("summary").asText(), LEVELS.get(inputs.level()), "mandatory", null, null, null, objectives,
-            chapters, 0);
-
-        CourseDetail created = courses.create(new CreateCourse(job.ownerOrgId(), null, newCode(job.id()),
-            outline.path("title").asText(), draft));
-        jdbc.update("UPDATE learning_hub.course_revisions SET ai_generated = true WHERE revision_id = ?",
-            created.revision().id());
-        int accepted = writeAcceptedQuestions(job, inputs);
-        jobs.setDraft(job.id(), created.course().id());
-        jobs.insertStep(job.id(), "assemble", "");
-        jobs.stepByKey(job.id(), "assemble", "").ifPresent(step -> {
-            jdbc.update("UPDATE learning_hub.course_generation_steps SET status = 'done', finished_at = now(), "
-                + "output = ?::jsonb WHERE step_id = ?", write(json.createObjectNode()
-                .put("courseId", created.course().id()).put("revisionId", created.revision().id())
-                .put("acceptedQuestions", accepted)), step.id());
-        });
-        jobs.setProgress(job.id(), "assemble", 100);
-        jobs.setStatus(job.id(), CourseJobRepository.COMPLETED, null);
+        writeAcceptedQuestions(job, read(job.inputs(), Inputs.class));
 
         return owned.get(jobId);
     }
@@ -284,7 +230,9 @@ public class CourseDraftService {
             if (step.output() == null) {
                 continue;
             }
-            for (JsonNode question : parse(step.output()).path("questions")) {
+            ObjectNode output = (ObjectNode) parse(step.output());
+            boolean changed = false;
+            for (JsonNode question : output.path("questions")) {
                 if (!"accepted".equals(question.path("decision").asText())) {
                     continue;
                 }
@@ -295,35 +243,63 @@ public class CourseDraftService {
                     question.path("type").asText(), question.path("content").asText(),
                     question.path("explanation").asText(null), question.path("difficulty").asText("MEDIUM"),
                     BigDecimal.ONE, "ACTIVE", options, inputs.programmeId()));
+                ((ObjectNode) question).put("decision", "added");
+                changed = true;
                 accepted++;
+            }
+            if (changed) {
+                jobs.setOutput(step.id(), write(output));
             }
         }
 
         return accepted;
     }
 
-    private static List<BlockInput> blocksOf(JsonNode lesson) {
-        List<BlockInput> blocks = new ArrayList<>();
-        for (JsonNode block : lesson.path("blocks")) {
-            boolean process = "process".equals(block.path("type").asText());
-            List<StepInput> steps = new ArrayList<>();
-            if (process) {
-                block.path("steps").forEach(step -> steps.add(new StepInput(step.path("title").asText(),
-                    step.path("description").asText(null))));
-            }
-            blocks.add(new BlockInput(process ? "process" : "text", block.path("title").asText(),
-                process ? null : block.path("body").asText(), process ? null : "markdown", "manual", null, true,
-                List.of(), steps, null, null));
-        }
-
-        return blocks;
-    }
-
     // ---- helpers ---------------------------------------------------------------------------------------------------
 
-    private void refuseWhenDrafted(JobRow job) {
-        if (job.createdDraftId() != null) {
-            throw refuse(DRAFT_CREATED, "Bản nháp đã được tạo nên không chạy lại được nữa.");
+    /** The outline as the course has it now (the author may have edited it), keeping the model's objectives per lesson. */
+    private JsonNode outlineFromCourse(JobRow job, JsonNode previous) {
+        if (job.courseId() == null || job.revisionId() == null) {
+            return previous;
+        }
+        Map<String, JsonNode> objectives = new java.util.HashMap<>();
+        for (JsonNode chapter : previous.path("chapters")) {
+            for (JsonNode lesson : chapter.path("lessons")) {
+                objectives.put(lesson.path("title").asText(), lesson.path("objectives"));
+            }
+        }
+        ObjectNode outline = json.createObjectNode();
+        outline.put("title", previous.path("title").asText());
+        outline.put("summary", previous.path("summary").asText());
+        outline.set("objectives", previous.path("objectives"));
+        ArrayNode chapters = outline.putArray("chapters");
+        for (ChapterState chapter : course.structure(job.revisionId())) {
+            ObjectNode copy = chapters.addObject();
+            copy.put("title", chapter.title());
+            ArrayNode lessons = copy.putArray("lessons");
+            for (var lesson : chapter.lessons()) {
+                ObjectNode item = lessons.addObject();
+                item.put("title", lesson.title());
+                JsonNode had = objectives.get(lesson.title());
+                ArrayNode list = item.putArray("objectives");
+                if (had != null && had.isArray()) {
+                    list.addAll((ArrayNode) had);
+                }
+                item.put("estimatedMinutes", (int) Math.max(1, Math.min(240, lesson.estimatedSeconds() / 60)));
+            }
+        }
+        List<String> problems = GenerationSchemas.outline(outline);
+        if (!problems.isEmpty()) {
+            throw BusinessException.validation("outline", "INVALID_OUTLINE", "Dàn ý chưa hợp lệ: " + problems.get(0));
+        }
+
+        return outline;
+    }
+
+    private void writeIntoCourse(JobRow job, JsonNode outline) {
+        if (job.courseId() != null && job.revisionId() != null) {
+            course.writeOutline(job.courseId(), job.revisionId(), job.ownerUserId(), outline.path("summary").asText(),
+                CourseOutlineMapper.objectives(outline), CourseOutlineMapper.chapters(outline));
         }
     }
 
@@ -362,15 +338,6 @@ public class CourseDraftService {
 
     private static BusinessException refuse(String code, String message) {
         return BusinessException.validation("jobId", code, message);
-    }
-
-    private static String newCode(long jobId) {
-        StringBuilder code = new StringBuilder("AI").append(jobId).append('-');
-        for (int i = 0; i < 5; i++) {
-            code.append(CODE_ALPHABET.charAt(RANDOM.nextInt(CODE_ALPHABET.length())));
-        }
-
-        return code.toString();
     }
 
     private JsonNode parse(String text) {

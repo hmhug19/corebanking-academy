@@ -26,7 +26,6 @@ import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 @Component
 public class CourseGenerationWorker {
     static final String GENERIC_FAILURE = "Không tạo được khóa học. Vui lòng thử lại hoặc liên hệ quản trị.";
-    static final String REVIEW_STEP = "review";
     static final String NOT_SUPPORTED = "Bước này chưa được hỗ trợ.";
 
     private final CourseJobRepository jobs;
@@ -121,9 +120,9 @@ public class CourseGenerationWorker {
         if (result.jobStatus() != null) {
             jobs.setStatus(step.jobId(), result.jobStatus(), null);
         } else if (!jobs.hasOpenSteps(step.jobId())) {
-            // Everything that could be generated is: the author reviews it and asks for the draft (assemble).
-            jobs.setProgress(step.jobId(), REVIEW_STEP, result.progress());
-            jobs.setStatus(step.jobId(), CourseJobRepository.WAITING_APPROVAL, null);
+            // Everything that could be generated is, and it already sits in the draft course: the job is finished.
+            jobs.setProgress(step.jobId(), step.kind(), 100);
+            jobs.setStatus(step.jobId(), CourseJobRepository.COMPLETED, null);
         }
     }
 

@@ -90,6 +90,17 @@ public class CourseJobController {
         return BaseResponse.ok(jobs.cancel(jobId));
     }
 
+    @PostMapping("/{jobId}/stop")
+    @Operation(
+        summary = "Dừng job",
+        description = "Dừng job chưa kết thúc (status stopped). Các bài đã viết được giữ; bài đang viết và chưa viết "
+            + "để trống ở trạng thái pending cho người dùng tự điền. Job đã kết thúc trả lỗi validation JOB_FINISHED."
+    )
+    public BaseResponse<JobView> stop(@PathVariable @Positive Long jobId) {
+        gate.requireAccess();
+        return BaseResponse.ok(jobs.stop(jobId));
+    }
+
     @DeleteMapping("/{jobId}")
     @Operation(
         summary = "Xóa job",

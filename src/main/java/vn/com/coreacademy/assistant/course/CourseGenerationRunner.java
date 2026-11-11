@@ -28,6 +28,9 @@ import vn.com.coreacademy.assistant.course.SourceTextRepository.Piece;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
+import vn.com.coreacademy.learning.dto.LearningRequests.BlockInput;
+import vn.com.coreacademy.learning.dto.LearningRequests.StepInput;
+import vn.com.coreacademy.learning.service.LearningAiDraftService;
 
 /**
  * The model work of each generation step. Every output is parsed and checked against {@link GenerationSchemas}; an
@@ -60,6 +63,7 @@ public class CourseGenerationRunner implements GenerationStepRunner {
     private final SkillCatalog catalog;
     private final AssistantModels models;
     private final ObjectMapper json;
+    private final LearningAiDraftService drafts;
 
     @Override
     public Result run(StepRow step) {
@@ -131,11 +135,27 @@ public class CourseGenerationRunner implements GenerationStepRunner {
                 .append(section.path("summary").asText()).append('\n');
         }
         JsonNode outline = ask(OUTLINE, user.toString(), GenerationSchemas::outline);
+        if (job.courseId() != null && job.revisionId() != null) {
+            // The outline goes straight into the draft course, where the author edits it until they approve it.
+            drafts.writeOutline(job.courseId(), job.revisionId(), job.ownerUserId(), outline.path("summary").asText(),
+                CourseOutlineMapper.objectives(outline), CourseOutlineMapper.chapters(outline));
+        }
 
         return new Result(write(outline), digest(user.toString()), List.of(), OUTLINE_PROGRESS, WAITING_APPROVAL);
     }
 
     private Result lesson(StepRow step) {
+        JobRow job = jobs.job(step.jobId()).orElseThrow(() -> new GenerationException("Không tìm thấy công việc."));
+        int[] place = CourseOutlineMapper.position(step.itemKey());
+        boolean inCourse = job.courseId() != null && job.revisionId() != null && place != null;
+        if (inCourse && !drafts.startLesson(job.courseId(), job.revisionId(), place[0], place[1], job.ownerUserId())) {
+            // The author wrote this lesson themselves meanwhile: the job leaves it alone.
+            ObjectNode skipped = json.createObjectNode();
+            skipped.putArray("blocks");
+            skipped.putArray("sourceNotes");
+            skipped.put("skipped", "user_edited");
+            return new Result(write(skipped), digest("skipped"), List.of(), contentProgress(step.jobId()), null);
+        }
         JsonNode outline = output(step.jobId(), OUTLINE, "");
         JsonNode lesson = lessonOf(outline, step.itemKey());
         JsonNode chapter = chapterOf(outline, step.itemKey());
@@ -146,6 +166,11 @@ public class CourseGenerationRunner implements GenerationStepRunner {
         lesson.path("objectives").forEach(objective -> user.append("- ").append(objective.asText()).append('\n'));
         user.append("\nĐOẠN NGUỒN:\n").append(join(pieces));
         JsonNode content = ask(LESSON, user.toString(), GenerationSchemas::lesson);
+        if (inCourse && CourseJobRepository.RUNNING.equals(jobs.job(step.jobId()).map(JobRow::status).orElse(null))) {
+            // A job stopped or cancelled while the model was writing leaves the lesson empty.
+            drafts.writeLesson(job.courseId(), job.revisionId(), place[0], place[1], blocksOf(content),
+                job.ownerUserId());
+        }
 
         return new Result(write(content), digest(user.toString()), List.of(), contentProgress(step.jobId()), null);
     }
@@ -155,6 +180,11 @@ public class CourseGenerationRunner implements GenerationStepRunner {
             .filter(row -> "done".equals(row.status()) && row.output() != null)
             .orElseThrow(() -> new StepNotReadyException("The lesson is not written yet"));
         JsonNode lesson = parse(lessonStep.output());
+        if (lesson.has("skipped")) {
+            ObjectNode none = json.createObjectNode();
+            none.putArray("questions");
+            return new Result(write(none), digest("skipped"), List.of(), contentProgress(step.jobId()), null);
+        }
         JsonNode lessonOutline = lessonOf(output(step.jobId(), OUTLINE, ""), step.itemKey());
         StringBuilder user = new StringBuilder("DỮ LIỆU\nBài: ").append(lessonOutline.path("title").asText())
             .append("\n\nNội dung bài học:\n");
@@ -176,6 +206,23 @@ public class CourseGenerationRunner implements GenerationStepRunner {
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------------------
+
+    static List<BlockInput> blocksOf(JsonNode lesson) {
+        List<BlockInput> blocks = new ArrayList<>();
+        for (JsonNode block : lesson.path("blocks")) {
+            boolean process = "process".equals(block.path("type").asText());
+            List<StepInput> steps = new ArrayList<>();
+            if (process) {
+                block.path("steps").forEach(part -> steps.add(new StepInput(part.path("title").asText(),
+                    part.path("description").asText(null))));
+            }
+            blocks.add(new BlockInput(process ? "process" : "text", block.path("title").asText(),
+                process ? null : block.path("body").asText(), process ? null : "markdown", "manual", null, true,
+                List.of(), steps, null, null));
+        }
+
+        return blocks;
+    }
 
     /**
      * Asks the model for JSON constrained to the step's schema (structured output), up to {@link #ATTEMPTS} times, each
