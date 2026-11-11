@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -26,6 +27,7 @@ import vn.com.coreacademy.assistant.dto.AgentStreamEvent;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
+import vn.com.coreacademy.assistant.skill.Suggestions;
 import vn.com.coreacademy.assistant.tool.FinishedAnswer;
 import vn.com.coreacademy.assistant.tool.RetrievedChunks;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -105,12 +107,9 @@ public class QuizExplainService {
         try {
             List<ChatMessage> messages = List.of(ChatMessage.system(catalog.explainPrompt()),
                 ChatMessage.user(request(source, added)));
-            ChatTurn reply = ollama.chatWithTools(messages, List.of(), models.agentOptions(), delta -> {
-                if (!delta.isEmpty()) {
-                    emit(output, trace, AgentStreamEvent.delta(delta));
-                }
-            });
-            String text = reply.content().strip();
+            ChatTurn reply = ollama.chatWithTools(messages, List.of(), models.agentOptions(),
+                withoutSuggestions(delta -> emit(output, trace, AgentStreamEvent.delta(delta))));
+            String text = Suggestions.split(reply.content().strip()).answer().strip();
             FinishedAnswer finished = finish(chunks, text);
             emit(output, trace, AgentStreamEvent.done(finished.answer(), finished.citations()));
         } catch (UncheckedIOException exception) {
@@ -128,6 +127,21 @@ public class QuizExplainService {
         } finally {
             store(trace);
         }
+    }
+
+    /**
+     * Passes streamed text on until the suggestion marker shows. The explanation prompt does not ask for suggestions,
+     * but a model may print the block anyway, and it must never reach the learner.
+     */
+    static Consumer<String> withoutSuggestions(Consumer<String> shown) {
+        Suggestions.Filter filter = new Suggestions.Filter();
+
+        return delta -> {
+            String text = filter.accept(delta);
+            if (!text.isEmpty()) {
+                shown.accept(text);
+            }
+        };
     }
 
     /**
