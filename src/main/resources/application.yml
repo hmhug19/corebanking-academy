@@ -82,6 +82,12 @@ app:
       history-messages: 20
       action-ttl: ${ASSISTANT_ACTION_TTL:10m}
       max-concurrent-turns: ${ASSISTANT_MAX_CONCURRENT_TURNS:4}
+    budget:
+      num-ctx: ${ASSISTANT_BUDGET_NUM_CTX:8192}
+      system-and-tools: ${ASSISTANT_BUDGET_SYSTEM:1200}
+      history: ${ASSISTANT_BUDGET_HISTORY:2000}
+      retrieved: ${ASSISTANT_BUDGET_RETRIEVED:3500}
+      answer: ${ASSISTANT_BUDGET_ANSWER:1000}
     limits:
       questions-per-hour: ${ASSISTANT_QUESTIONS_PER_HOUR:60}
     history:

@@ -23,7 +23,9 @@ import vn.com.coreacademy.assistant.action.AssistantPendingAction;
 import vn.com.coreacademy.assistant.agent.LessonFocus;
 import vn.com.coreacademy.assistant.action.PendingActionRepository;
 import vn.com.coreacademy.assistant.action.PendingActionStore;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.knowledge.chunking.TokenEstimator;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ActionState;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationDetail;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationSummary;
@@ -59,22 +61,25 @@ public class ConversationService implements Conversations {
     private final ObjectMapper json;
     private final Clock clock;
     private final int historyTurns;
+    private final int historyTokens;
 
     @Autowired
     public ConversationService(ConversationRepository conversations, TurnRepository turns,
                                PendingActionRepository actions, FeedbackRepository feedback, ObjectMapper json,
-                               AssistantProperties properties) {
-        this(conversations, turns, actions, feedback, json, Clock.systemUTC(), properties);
+                               AssistantProperties properties, AssistantBudget budget) {
+        this(conversations, turns, actions, feedback, json, Clock.systemUTC(), properties, budget);
     }
 
     ConversationService(ConversationRepository conversations, TurnRepository turns, PendingActionRepository actions,
-                        FeedbackRepository feedback, ObjectMapper json, Clock clock, AssistantProperties properties) {
+                        FeedbackRepository feedback, ObjectMapper json, Clock clock, AssistantProperties properties,
+                        AssistantBudget budget) {
         this.conversations = conversations;
         this.turns = turns;
         this.actions = actions;
         this.feedback = feedback;
         this.json = json;
         this.clock = clock;
+        this.historyTokens = budget.history();
         this.historyTurns = Math.min(HISTORY_TURNS_READ, Math.max(1, properties.historyMessages() / 2));
     }
 
@@ -119,13 +124,13 @@ public class ConversationService implements Conversations {
         List<AssistantTurn> recent = turns.findByConversationIdAndStatusOrderByIdDesc(conversationId,
             TurnRecord.Status.DONE.name(), PageRequest.of(0, historyTurns));
         List<Exchange> kept = new ArrayList<>();
-        int budget = HISTORY_CHARS - questionChars;
+        int budget = historyTokens;
         for (AssistantTurn turn : recent) {
             if (turn.getAnswer() == null || turn.getAnswer().isBlank()) {
                 continue;
             }
             String answer = cut(turn.getAnswer(), MAX_ANSWER_CHARS);
-            int size = turn.getQuestion().length() + answer.length();
+            int size = TokenEstimator.estimate(turn.getQuestion()) + TokenEstimator.estimate(answer);
             if (size > budget) {
                 break;
             }

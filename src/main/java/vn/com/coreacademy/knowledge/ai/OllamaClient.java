@@ -62,10 +62,19 @@ public class OllamaClient {
         }
     }
 
-    public record Options(double temperature, int numCtx, String model) {
+    public record Options(double temperature, int numCtx, String model, int numPredict) {
         /** Same settings on the configured chat model. */
         public Options(double temperature, int numCtx) {
-            this(temperature, numCtx, null);
+            this(temperature, numCtx, null, 0);
+        }
+
+        public Options(double temperature, int numCtx, String model) {
+            this(temperature, numCtx, model, 0);
+        }
+
+        /** The same settings with room kept for the answer: Ollama stops after this many tokens (0 leaves it open). */
+        public Options withNumPredict(int tokens) {
+            return new Options(temperature, numCtx, model, tokens);
         }
 
         /** Low temperature and a context wide enough for the retrieved chunks. */
@@ -106,6 +115,12 @@ public class OllamaClient {
 
     /** Streams the answer; every non-empty {@code message.content} delta goes to {@code onDelta} as it arrives. */
     public void chatStream(List<Message> messages, Options options, Consumer<String> onDelta) {
+        chatStream(messages, options, onDelta, usage -> { });
+    }
+
+    /** As above; the token counts of the call go to {@code onUsage} when its last line arrives. */
+    public void chatStream(List<Message> messages, Options options, Consumer<String> onDelta,
+                           Consumer<Usage> onUsage) {
         long started = System.nanoTime();
         try {
             client.post().uri("/api/chat").contentType(MediaType.APPLICATION_JSON)
@@ -115,7 +130,7 @@ public class OllamaClient {
                         throw new OllamaException("Ollama answered HTTP " + response.getStatusCode().value());
                     }
                     readStream(new BufferedReader(new InputStreamReader(response.getBody(), StandardCharsets.UTF_8)),
-                        onDelta);
+                        onDelta, new ArrayList<>(), onUsage);
                     return null;
                 });
         } catch (ResourceAccessException exception) {
@@ -145,6 +160,7 @@ public class OllamaClient {
         body.put("tools", tools.stream().map(OllamaClient::toolBody).toList());
         StringBuilder content = new StringBuilder();
         List<ToolCall> toolCalls = new ArrayList<>();
+        Usage[] usage = {Usage.NONE};
         try {
             client.post().uri("/api/chat").contentType(MediaType.APPLICATION_JSON).body(body)
                 .exchange((request, response) -> {
@@ -157,7 +173,7 @@ public class OllamaClient {
                     readStream(reader, delta -> {
                         content.append(delta);
                         onDelta.accept(delta);
-                    }, toolCalls);
+                    }, toolCalls, reported -> usage[0] = reported);
                     return null;
                 });
         } catch (RuntimeException exception) {
@@ -174,7 +190,7 @@ public class OllamaClient {
         }
         log.info("Ollama chat tools model={} messages={} tools={} calls={} durationMs={}", config.chatModel(),
             messages.size(), tools.size(), loggedToolNames(toolCalls, tools), millisSince(started));
-        return new ChatTurn(content.toString(), List.copyOf(toolCalls));
+        return new ChatTurn(content.toString(), List.copyOf(toolCalls), usage[0]);
     }
 
     /** The model writes the call's name, so it may hold any text; only the names of offered tools are logged. */
@@ -184,11 +200,11 @@ public class OllamaClient {
     }
 
     private void readStream(BufferedReader reader, Consumer<String> onDelta) throws IOException {
-        readStream(reader, onDelta, new ArrayList<>());
+        readStream(reader, onDelta, new ArrayList<>(), usage -> { });
     }
 
-    private void readStream(BufferedReader reader, Consumer<String> onDelta, List<ToolCall> toolCalls)
-        throws IOException {
+    private void readStream(BufferedReader reader, Consumer<String> onDelta, List<ToolCall> toolCalls,
+                            Consumer<Usage> onUsage) throws IOException {
         String line;
         while ((line = reader.readLine()) != null) {
             if (line.isBlank()) {
@@ -207,6 +223,8 @@ public class OllamaClient {
                 toolCalls.add(ToolCall.of(function.path("name").asText(""), function.path("arguments")));
             }
             if (event.path("done").asBoolean(false)) {
+                onUsage.accept(new Usage(event.path("prompt_eval_count").asInt(0), event.path("eval_count").asInt(0),
+                    event.hasNonNull("done_reason") ? event.path("done_reason").asText() : null));
                 return;
             }
         }
@@ -258,7 +276,13 @@ public class OllamaClient {
         body.put("stream", stream);
         // qwen3 would otherwise spend the budget on a hidden reasoning pass.
         body.put("think", false);
-        body.put("options", Map.of("temperature", options.temperature(), "num_ctx", options.numCtx()));
+        Map<String, Object> modelOptions = new LinkedHashMap<>();
+        modelOptions.put("temperature", options.temperature());
+        modelOptions.put("num_ctx", options.numCtx());
+        if (options.numPredict() > 0) {
+            modelOptions.put("num_predict", options.numPredict());
+        }
+        body.put("options", modelOptions);
         body.put("keep_alive", keepAlive());
         return body;
     }

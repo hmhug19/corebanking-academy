@@ -5,6 +5,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import vn.com.coreacademy.assistant.config.AssistantBudget;
+import vn.com.coreacademy.knowledge.chunking.TokenEstimator;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 import vn.com.coreacademy.knowledge.service.CitationSelector;
 import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
@@ -21,18 +23,45 @@ public final class RetrievedChunks {
 
     private final List<ChunkHit> hits = new ArrayList<>();
     private final Set<String> seen = new HashSet<>();
+    private final int budgetTokens;
+    private int usedTokens;
+    private boolean dropped;
 
-    /** Adds the chunks not seen before in this turn and returns them with their new numbers. */
+    public RetrievedChunks() {
+        this(AssistantBudget.defaults().retrieved());
+    }
+
+    public RetrievedChunks(int budgetTokens) {
+        this.budgetTokens = budgetTokens;
+    }
+
+    /**
+     * Adds the chunks not seen before in this turn and returns them with their new numbers. A chunk that would take
+     * the turn past its retrieved-content budget is left out whole, and so are the lower-ranked ones after it.
+     */
     public List<Added> add(List<ChunkHit> found) {
         List<Added> added = new ArrayList<>();
         for (ChunkHit hit : found) {
-            if (seen.add(hit.key())) {
-                hits.add(hit);
-                added.add(new Added(hits.size(), hit));
+            if (seen.contains(hit.key())) {
+                continue;
             }
+            int size = TokenEstimator.estimate(hit.content());
+            if (usedTokens + size > budgetTokens) {
+                dropped = true;
+                break;
+            }
+            seen.add(hit.key());
+            usedTokens += size;
+            hits.add(hit);
+            added.add(new Added(hits.size(), hit));
         }
 
         return added;
+    }
+
+    /** True when a chunk was left out of the turn because it did not fit the budget. */
+    public boolean droppedForBudget() {
+        return dropped;
     }
 
     public boolean isEmpty() {

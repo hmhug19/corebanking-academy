@@ -21,6 +21,7 @@ import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.assistant.skill.Suggestions;
@@ -64,6 +65,7 @@ public class KnowledgeChatService {
     private final AssistantModels models;
     private final SkillCatalog catalog;
     private final KnowledgeAccess access;
+    private final AssistantBudget budget;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -83,7 +85,7 @@ public class KnowledgeChatService {
             KnowledgeProperties.Retrieval retrieval = properties.retrieval();
             List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR, visibility).stream()
                 .filter(hit -> hit.similarity() >= retrieval.minSimilarity()).toList();
-            hits = distinct(candidates, retrieval.topK());
+            hits = budget.fitRetrieved(distinct(candidates, retrieval.topK()));
         } catch (OllamaUnavailableException | OllamaException exception) {
             throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
         }
@@ -182,14 +184,15 @@ public class KnowledgeChatService {
         StringBuilder text = new StringBuilder();
         Suggestions.Filter filter = new Suggestions.Filter();
         try {
-            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), models.groundedOptions(),
+            OllamaClient.Options options = models.groundedOptions().withNumPredict(budget.answer());
+            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), options,
                 delta -> {
                     text.append(delta);
                     String shown = filter.accept(delta);
                     if (!shown.isEmpty()) {
                         emit(output, turnLog, ChatStreamEvent.delta(shown));
                     }
-                });
+                }, usage -> metrics.modelCall(AssistantMetrics.KNOWLEDGE, usage, options.numCtx()));
         } catch (UncheckedIOException exception) {
             turnLog.stopped();
             throw exception;

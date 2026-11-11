@@ -20,6 +20,7 @@ import vn.com.coreacademy.assessment.service.QuizAttemptService;
 import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.agent.AssistantAccess;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
@@ -66,6 +67,7 @@ public class QuizExplainService {
     private final SkillCatalog catalog;
     private final AssistantModels models;
     private final AssistantMetrics metrics;
+    private final AssistantBudget budget;
     private final ObjectMapper json;
 
     /**
@@ -102,13 +104,15 @@ public class QuizExplainService {
         write(output, AgentStreamEvent.conversation(opened.conversationId()));
         TurnTrace trace = new TurnTrace(opened.conversationId(), question);
         metrics.skill(SKILL);
-        RetrievedChunks chunks = new RetrievedChunks();
+        RetrievedChunks chunks = new RetrievedChunks(budget.retrieved());
         var added = chunks.add(lesson);
         try {
             List<ChatMessage> messages = List.of(ChatMessage.system(catalog.explainPrompt()),
                 ChatMessage.user(request(source, added)));
-            ChatTurn reply = ollama.chatWithTools(messages, List.of(), models.agentOptions(),
+            var options = models.agentOptions().withNumPredict(budget.answer());
+            ChatTurn reply = ollama.chatWithTools(messages, List.of(), options,
                 withoutSuggestions(delta -> emit(output, trace, AgentStreamEvent.delta(delta))));
+            metrics.modelCall(AssistantMetrics.AGENT, reply.usage(), options.numCtx());
             String text = Suggestions.split(reply.content().strip()).answer().strip();
             FinishedAnswer finished = finish(chunks, text);
             emit(output, trace, AgentStreamEvent.done(finished.answer(), finished.citations()));

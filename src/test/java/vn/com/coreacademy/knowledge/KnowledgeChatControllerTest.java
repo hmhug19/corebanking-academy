@@ -140,7 +140,7 @@ class KnowledgeChatControllerTest extends KnowledgeIntegrationTest {
             onDelta.accept("CIF là ");
             onDelta.accept("mã khách hàng [1].");
             return null;
-        }).when(ollama).chatStream(anyList(), any(), any());
+        }).when(ollama).chatStream(anyList(), any(), any(), any());
 
         MvcResult started = mvc.perform(post(CHAT + "/stream").with(as("000004"))
                 .accept(NDJSON, MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON)

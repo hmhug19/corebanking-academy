@@ -30,6 +30,7 @@ import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.skill.Skill;
@@ -112,7 +113,7 @@ class AgentServiceTest {
         when(provider.orderedStream()).thenAnswer(invocation -> tools.stream());
         return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, conversations, json,
             new AssistantMetrics(meters), new SkillSelector(ollama, skills, AssistantModels.defaults()), skills,
-            AssistantModels.defaults(), lessonAccess);
+            AssistantModels.defaults(), lessonAccess, AssistantBudget.defaults());
     }
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
@@ -230,6 +231,31 @@ class AgentServiceTest {
 
         assertThat(types(events)).isEmpty();
         assertThat(conversations.recorded.get(0).status()).isEqualTo(TurnRecord.Status.STOPPED);
+    }
+
+    @Test
+    void theTokenCountsOfEachModelCallAreRecordedAndACallNearNumCtxIsCounted() throws IOException {
+        doAnswer(invocation -> new ChatTurn("ok", List.of(), new vn.com.coreacademy.knowledge.ai.Usage(7500, 40, "stop")))
+            .when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
+
+        events(ask("Xin chào"));
+
+        assertThat(meters.get("assistant.model.prompt_tokens").tag("surface", "agent").summary().totalAmount())
+            .isEqualTo(7500);
+        assertThat(meters.get("assistant.model.answer_tokens").tag("surface", "agent").summary().totalAmount())
+            .isEqualTo(40);
+        assertThat(meters.get("assistant.model.near_context_limit").tag("surface", "agent").counter().count())
+            .isEqualTo(1);
+    }
+
+    @Test
+    void aCallFarFromNumCtxIsNotCountedAsNearTheLimit() throws IOException {
+        doAnswer(invocation -> new ChatTurn("ok", List.of(), new vn.com.coreacademy.knowledge.ai.Usage(3000, 40, "stop")))
+            .when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
+
+        events(ask("Xin chào"));
+
+        assertThat(meters.find("assistant.model.near_context_limit").counter()).isNull();
     }
 
     private static String conversationOf(List<JsonNode> all) {

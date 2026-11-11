@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.conversation.Conversations;
@@ -83,6 +84,7 @@ public class AgentService {
     private final SkillCatalog catalog;
     private final AssistantModels models;
     private final LessonAccess lessons;
+    private final AssistantBudget budget;
 
     /**
      * Validates the request, then streams the turn. The client sends only the new question and, for a follow-up, the
@@ -191,7 +193,7 @@ public class AgentService {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(catalog.systemPrompt(skill) + lessonNote(context) + attachmentNote(context)));
         messages.addAll(history);
-        TurnState turn = new TurnState();
+        TurnState turn = new TurnState(budget);
         List<ToolDefinition> offered = definitions;
         boolean readShared = false;
         Suggestions.Filter filter = new Suggestions.Filter();
@@ -199,13 +201,15 @@ public class AgentService {
         try {
             for (int step = 0; step < properties.maxSteps(); step++) {
                 turnLog.steps++;
-                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, models.agentOptions(),
+                OllamaClient.Options options = models.agentOptions().withNumPredict(budget.answer());
+                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, options,
                     delta -> {
                         String shown = filter.accept(delta);
                         if (!shown.isEmpty()) {
                             emit(output, turnLog, AgentStreamEvent.delta(shown));
                         }
                     }, cancellation);
+                metrics.modelCall(AssistantMetrics.AGENT, answer.usage(), options.numCtx());
                 if (answer.toolCalls().isEmpty()) {
                     finish(output, turnLog, turn, answer.content().strip());
                     return;

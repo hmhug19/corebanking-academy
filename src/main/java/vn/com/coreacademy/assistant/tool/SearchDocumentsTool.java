@@ -75,7 +75,7 @@ public class SearchDocumentsTool implements AgentTool {
             throw exception;
         }
 
-        RetrievedChunks chunks = turn.state(RetrievedChunks.class, RetrievedChunks::new);
+        RetrievedChunks chunks = turn.chunks();
         var added = chunks.add(retrieval.hits());
         turn.finishWith(chunks::finish);
         if (chunks.isEmpty()) {

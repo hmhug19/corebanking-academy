@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
+import vn.com.coreacademy.knowledge.ai.Usage;
 
 /**
  * The meters of both assistants. Every tag is one of a small fixed set (a surface, a status, a tool or skill the server
@@ -52,6 +53,24 @@ public class AssistantMetrics {
     public void generationStep(String kind, String outcome, long durationMs) {
         Timer.builder("assistant.generation.step.duration").description("Time one course generation step took")
             .tag("kind", kind).tag("outcome", outcome).register(registry).record(Duration.ofMillis(durationMs));
+    }
+
+    /**
+     * The token counts of one model call, by surface, and a count of the calls whose prompt filled more than 90% of
+     * {@code numCtx}, where Ollama starts cutting the prompt without saying so. Calls that reported nothing are skipped.
+     */
+    public void modelCall(String surface, Usage usage, int numCtx) {
+        if (usage == null || usage.promptTokens() <= 0) {
+            return;
+        }
+        DistributionSummary.builder("assistant.model.prompt_tokens").description("Prompt tokens of one model call")
+            .tag("surface", surface).register(registry).record(usage.promptTokens());
+        DistributionSummary.builder("assistant.model.answer_tokens").description("Answer tokens of one model call")
+            .tag("surface", surface).register(registry).record(usage.answerTokens());
+        if (usage.promptTokens() > numCtx * 0.9) {
+            count("assistant.model.near_context_limit", "Model calls whose prompt used over 90% of num_ctx", "surface",
+                surface);
+        }
     }
 
     public void toolCall(String tool) {

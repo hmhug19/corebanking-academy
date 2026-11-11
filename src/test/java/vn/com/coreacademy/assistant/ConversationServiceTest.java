@@ -14,6 +14,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import vn.com.coreacademy.assistant.action.AssistantPendingAction;
 import vn.com.coreacademy.assistant.action.PendingActionRepository;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.conversation.AssistantConversation;
 import vn.com.coreacademy.assistant.conversation.AssistantTurn;
@@ -64,10 +65,10 @@ class ConversationServiceTest {
                                           MutableClock clock) {
         try {
             var constructor = ConversationService.class.getDeclaredConstructor(ConversationRepository.class,
-                TurnRepository.class, PendingActionRepository.class, FeedbackRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class);
+                TurnRepository.class, PendingActionRepository.class, FeedbackRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class, AssistantBudget.class);
             constructor.setAccessible(true);
             return constructor.newInstance(conversations, turns, actions, feedback, new ObjectMapper().findAndRegisterModules(), clock,
-                new AssistantProperties(4, 20, Duration.ofMinutes(10), 4));
+                new AssistantProperties(4, 20, Duration.ofMinutes(10), 4), AssistantBudget.defaults());
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException(exception);
         }
@@ -154,17 +155,17 @@ class ConversationServiceTest {
     }
 
     @Test
-    void historyKeepsTheNewestWholeExchangesThatFitWithTheQuestionOldestFirst() {
+    void historyKeepsTheNewestWholeExchangesThatFitTheTokenBudgetOldestFirst() {
         when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
-        // Newest first, as the repository returns them: 4 exchanges of 6000 characters each.
+        // Newest first, as the repository returns them: 4 exchanges of about 800 tokens each.
         when(turns.findByConversationIdAndStatusOrderByIdDesc(any(), anyString(), any(Pageable.class)))
-            .thenReturn(List.of(done("q4", "x".repeat(3998)), done("q3", "x".repeat(3998)),
-                done("q2", "x".repeat(3998)), done("q1", "x".repeat(3998))));
+            .thenReturn(List.of(done("q4", "x".repeat(2397)), done("q3", "x".repeat(2397)),
+                done("q2", "x".repeat(2397)), done("q1", "x".repeat(2397))));
 
         Conversations.Opened opened = service.open(ME, 5L, "câu mới");
 
-        // 16 000 - 7 = 15 993 fits three exchanges of 4 000 characters, not four.
-        assertThat(opened.history()).extracting(Conversations.Exchange::question).containsExactly("q2", "q3", "q4");
+        // 2 000 tokens fit two exchanges of 800 tokens, not three.
+        assertThat(opened.history()).extracting(Conversations.Exchange::question).containsExactly("q3", "q4");
     }
 
     @Test

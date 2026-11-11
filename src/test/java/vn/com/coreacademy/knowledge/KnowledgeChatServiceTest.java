@@ -96,7 +96,8 @@ class KnowledgeChatServiceTest {
             clock);
         service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter,
             conversations, new AssistantMetrics(meters), vn.com.coreacademy.assistant.config.AssistantModels.defaults(),
-            new vn.com.coreacademy.assistant.skill.SkillCatalog(), access);
+            new vn.com.coreacademy.assistant.skill.SkillCatalog(), access,
+            vn.com.coreacademy.assistant.config.AssistantBudget.defaults());
         when(access.visibility(any())).thenReturn(new DocumentVisibility(USER, java.util.Set.of()));
         when(ollama.embed(anyList())).thenReturn(List.of(new float[1024]));
         signedInAs(USER);
@@ -123,7 +124,7 @@ class KnowledgeChatServiceTest {
 
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("\"messageCode\":\"ASSISTANT-BUSY\"")
             .doesNotContain("retrieved");
-        verify(ollama, never()).chatStream(anyList(), any(), any());
+        verify(ollama, never()).chatStream(anyList(), any(), any(), any());
         running.close();
     }
 
@@ -168,7 +169,7 @@ class KnowledgeChatServiceTest {
         assertThat(answer.answer()).isEqualTo("Không tìm thấy thông tin này trong tài liệu.");
         assertThat(answer.citations()).isEmpty();
         verify(ollama, never()).chat(anyList(), any());
-        verify(ollama, never()).chatStream(anyList(), any(), any());
+        verify(ollama, never()).chatStream(anyList(), any(), any(), any());
     }
 
     @Test
@@ -391,7 +392,7 @@ class KnowledgeChatServiceTest {
 
         assertThat(events.get(0).path("conversationId").asLong()).isEqualTo(id);
         ArgumentCaptor<List<OllamaClient.Message>> sent = ArgumentCaptor.captor();
-        verify(ollama).chatStream(sent.capture(), any(), any());
+        verify(ollama).chatStream(sent.capture(), any(), any(), any());
         assertThat(sent.getValue()).extracting(OllamaClient.Message::role)
             .containsExactly("system", "user", "assistant", "user");
         assertThat(sent.getValue().get(1).content()).isEqualTo("CIF là gì?");
@@ -435,7 +436,7 @@ class KnowledgeChatServiceTest {
         assertThat(events.get(2).path("found").asBoolean()).isFalse();
         assertThat(events.get(2).path("answer").asText()).isEqualTo(NotFoundAnswer.TEXT);
         assertThat(events.get(2).path("citations")).isEmpty();
-        verify(ollama, never()).chatStream(anyList(), any(), any());
+        verify(ollama, never()).chatStream(anyList(), any(), any(), any());
     }
 
     @Test
@@ -486,7 +487,7 @@ class KnowledgeChatServiceTest {
             Consumer<String> onDelta = invocation.getArgument(2);
             onDelta.accept("CIF là ");
             throw new OllamaException("stream broke");
-        }).when(ollama).chatStream(anyList(), any(), any());
+        }).when(ollama).chatStream(anyList(), any(), any(), any());
 
         List<JsonNode> events = run(service.stream("Hỏi"));
 
@@ -508,7 +509,7 @@ class KnowledgeChatServiceTest {
             Consumer<String> onDelta = invocation.getArgument(2);
             Arrays.stream(deltas).forEach(onDelta);
             return null;
-        }).when(ollama).chatStream(anyList(), any(), any());
+        }).when(ollama).chatStream(anyList(), any(), any(), any());
     }
 
     /** The events after the opening {@code conversation} line, which has its own tests. */

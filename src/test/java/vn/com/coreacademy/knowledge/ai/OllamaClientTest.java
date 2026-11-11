@@ -195,6 +195,18 @@ class OllamaClientTest {
     }
 
     @Test
+    void theTokenCountsOfTheLastLineAreReturnedAndNumPredictIsSent() {
+        handler = exchange -> new Reply(200, "{\"message\":{\"role\":\"assistant\",\"content\":\"a\"},\"done\":true,"
+            + "\"done_reason\":\"stop\",\"prompt_eval_count\":321,\"eval_count\":45}\n");
+
+        var turn = client().chatWithTools(List.of(ChatMessage.user("u")), List.of(),
+            OllamaClient.Options.AGENT.withNumPredict(1000), delta -> { });
+
+        assertThat(turn.usage()).isEqualTo(new Usage(321, 45, "stop"));
+        assertThat(requests.get(0).path("options").path("num_predict").asInt()).isEqualTo(1000);
+    }
+
+    @Test
     void chatWithToolsSerialisesToolCallsAndToolResultsOfEarlierSteps() {
         handler = exchange -> new Reply(200, "{\"message\":{\"content\":\"\"},\"done\":true}\n");
         ToolCall call = ToolCall.of("search_documents", json.createObjectNode().put("query", "CIF"));

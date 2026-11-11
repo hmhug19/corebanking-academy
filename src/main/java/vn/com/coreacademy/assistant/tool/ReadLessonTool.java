@@ -58,7 +58,7 @@ public class ReadLessonTool implements AgentTool {
             turn.finishWith(answer -> new FinishedAnswer(NO_TEXT, java.util.List.of()));
             return new ToolOutcome.Result(NO_TEXT);
         }
-        RetrievedChunks chunks = turn.state(RetrievedChunks.class, RetrievedChunks::new);
+        RetrievedChunks chunks = turn.chunks();
         var added = chunks.add(read.hits());
         turn.finishWith(chunks::finish);
         if (added.isEmpty()) {
@@ -67,7 +67,7 @@ public class ReadLessonTool implements AgentTool {
 
         String listing = added.stream().map(chunk -> ChatPromptBuilder.formatChunk(chunk.n(), chunk.hit()))
             .collect(Collectors.joining("\n\n"));
-        return new ToolOutcome.Result(SearchDocumentsTool.DATA_NOTE + (read.truncated() ? CUT_NOTE : "") + listing + "\n\n"
+        return new ToolOutcome.Result(SearchDocumentsTool.DATA_NOTE + (read.truncated() || chunks.droppedForBudget() ? CUT_NOTE : "") + listing + "\n\n"
             + SearchDocumentsTool.INSTRUCTION);
     }
 }
