@@ -20,7 +20,8 @@ import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.Yaml;
 
 /**
- * Loads the prompt files once: {@code assistant/base.md} and, per skill, {@code system.md}, {@code examples.md} and
+ * Loads the prompt files once: {@code assistant/style.md}, {@code suggestions.md}, {@code explain.md}, the generation step
+ * files and, per skill, {@code system.md}, {@code examples.md} and
  * {@code skill.yml}. {@link #version()} is a hash of every one of those files, stored on each turn so an answer can be
  * traced to the prompt that produced it.
  */
@@ -33,7 +34,8 @@ public class SkillCatalog {
     private static final List<String> GENERATION_STEPS = List.of("summarise_sections", "outline", "lesson",
         "questions");
 
-    private final String base;
+    private final String style;
+    private final String suggestions;
     private final String explain;
     private final Map<String, String> generationSteps = new LinkedHashMap<>();
     private final Map<String, Skill> skills = new LinkedHashMap<>();
@@ -42,7 +44,8 @@ public class SkillCatalog {
     public SkillCatalog() {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         MessageDigest digest = digest();
-        this.base = read(resolver.getResource("classpath:" + ROOT + "base.md"), digest);
+        this.style = read(resolver.getResource("classpath:" + ROOT + "style.md"), digest);
+        this.suggestions = read(resolver.getResource("classpath:" + ROOT + "suggestions.md"), digest);
         this.explain = read(resolver.getResource("classpath:" + ROOT + "explain.md"), digest);
         for (String step : GENERATION_STEPS) {
             generationSteps.put(step, read(resolver.getResource(
@@ -69,8 +72,9 @@ public class SkillCatalog {
     }
 
     /** A fixed catalog, for tests that need skills of their own. */
-    public SkillCatalog(String base, List<Skill> list, String version) {
-        this.base = base;
+    public SkillCatalog(String style, List<Skill> list, String version) {
+        this.style = style;
+        this.suggestions = "";
         this.explain = "";
         list.forEach(skill -> skills.put(skill.id(), skill));
         this.version = version;
@@ -125,9 +129,16 @@ public class SkillCatalog {
         return List.copyOf(skills.values());
     }
 
-    /** The system prompt of a turn: the shared style, then the skill's rules, output rule and examples. */
+    /**
+     * The system prompt of a chat turn: the shared style, the suggestion rule, then the skill's rules, output rule and
+     * examples.
+     */
     public String systemPrompt(Skill skill) {
-        StringBuilder text = new StringBuilder(base).append("\n\n").append(skill.system());
+        StringBuilder text = new StringBuilder(style);
+        if (!suggestions.isBlank()) {
+            text.append("\n\n").append(suggestions);
+        }
+        text.append("\n\n").append(skill.system());
         if (!skill.output().isBlank()) {
             text.append("\n\nĐịnh dạng đầu ra: ").append(skill.output());
         }
@@ -140,21 +151,29 @@ public class SkillCatalog {
 
     /** The system prompt that explains one reviewed quiz question: the shared style, then the explanation rules. */
     public String explainPrompt() {
-        return base + "\n\n" + explain;
+        return style + "\n\n" + explain;
     }
 
-    /** The system prompt of one course generation step: the shared style, then that step's rules and output shape. */
+    /**
+     * The system prompt of one course generation step: that step's file and one line fixing the language. Never the
+     * chat style or the suggestion rule, which contradict "return one JSON object".
+     */
     public String generationPrompt(String step) {
         String rules = generationSteps.get(step);
         if (rules == null) {
             throw new IllegalArgumentException("Unknown generation step " + step);
         }
 
-        return base + "\n\n" + rules;
+        return rules + "\n\nViết bằng tiếng Việt.";
     }
 
     /** The shared style alone, for the grounded document chat. */
-    public String base() {
-        return base;
+    public String style() {
+        return style;
+    }
+
+    /** The suggestion-marker rule, for the grounded document chat, which also offers follow-up questions. */
+    public String suggestions() {
+        return suggestions;
     }
 }

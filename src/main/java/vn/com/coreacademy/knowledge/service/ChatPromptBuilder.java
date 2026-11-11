@@ -17,7 +17,7 @@ public class ChatPromptBuilder {
 
     @Autowired
     public ChatPromptBuilder(SkillCatalog catalog) {
-        this.system = SYSTEM + "\n" + catalog.base();
+        this.system = SYSTEM + "\n" + catalog.style();
     }
 
     /** For callers without a Spring context; reads the same prompt files. */

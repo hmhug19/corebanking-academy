@@ -48,6 +48,44 @@ class SkillCatalogTest {
     }
 
     @Test
+    void generationPromptsCarryNeitherTheChatStyleNorTheSuggestionAndCitationRules() {
+        SkillCatalog catalog = new SkillCatalog();
+
+        for (String step : List.of("summarise_sections", "outline", "lesson", "questions")) {
+            assertThat(catalog.generationPrompt(step)).as(step).doesNotContain(Suggestions.MARKER)
+                .doesNotContain("[n]").doesNotContain("[1]").doesNotContain("200 từ").doesNotContain("Xưng \"mình\"")
+                .contains("DUY NHẤT một đối tượng JSON").endsWith("Viết bằng tiếng Việt.");
+        }
+    }
+
+    @Test
+    void theExplainPromptHasNoSuggestionMarkerRule() {
+        assertThat(new SkillCatalog().explainPrompt()).doesNotContain(Suggestions.MARKER).doesNotContain("Gợi ý câu hỏi")
+            .contains("mình");
+    }
+
+    @Test
+    void chatSkillPromptsKeepTheStyleTheSuggestionRuleAndTheirOwnCitationRule() {
+        SkillCatalog catalog = new SkillCatalog();
+
+        assertThat(catalog.systemPrompt(catalog.find("qa_tai_lieu").orElseThrow())).contains("mình")
+            .contains(Suggestions.MARKER).contains("số đoạn nguồn").contains("200 từ");
+        assertThat(catalog.systemPrompt(catalog.find("dieu_huong").orElseThrow())).contains(Suggestions.MARKER)
+            .doesNotContain("[n]");
+    }
+
+    @Test
+    void noSharedPromptFileNamesATool() {
+        SkillCatalog catalog = new SkillCatalog();
+        Set<String> toolNames = Stream.concat(catalog.all().stream().flatMap(skill -> skill.tools().stream()),
+            Stream.of("start_course_job", "open_course_form")).collect(java.util.stream.Collectors.toSet());
+
+        for (String shared : List.of(catalog.style(), catalog.suggestions(), catalog.explainPrompt())) {
+            assertThat(toolNames).noneMatch(shared::contains);
+        }
+    }
+
+    @Test
     void suggestionsKeepAtMostThreeShortLinesAndDropAnythingElse() {
         String text = "Trả lời.\n" + Suggestions.MARKER + "\n- Một\n* sai\n- " + "x".repeat(121) + "\n- Hai\n- Ba\n- Bốn";
 
