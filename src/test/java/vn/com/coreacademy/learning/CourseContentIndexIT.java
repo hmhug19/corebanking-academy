@@ -128,6 +128,22 @@ class CourseContentIndexIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void courseChunksCarryTheirPathStampsAndNeighboursOfAHitAreReadUnderTheSameRule() {
+        assertThat(jdbc.queryForList("""
+            SELECT section_path || '|' || chunker_version || '|' || embed_model || '|' || length(content_hash)
+              FROM learning_hub.course_content_chunks WHERE course_id = ? AND section_path <> ''
+            """, String.class, course.id())).isNotEmpty().allSatisfy(row -> assertThat(row)
+            .contains(" › ").endsWith("|2|bge-m3|64"));
+        long first = jdbc.queryForObject("SELECT min(chunk_id) FROM learning_hub.course_content_chunks "
+            + "WHERE course_id = ?", Long.class, course.id());
+
+        assertThat(as(LEARNER_2, () -> retrieval.neighbours(java.util.Map.of(first, 0.9)))
+            .values().stream().flatMap(List::stream)).isEmpty();
+        assertThat(as(LEARNER, () -> retrieval.neighbours(java.util.Map.of(first, 0.9))).getOrDefault(first, List.of()))
+            .allSatisfy(hit -> assertThat(hit.similarity()).isEqualTo(0.9));
+    }
+
+    @Test
     void revisionWithoutCompletedMarkerStaysPendingAndIsDoneAgain() {
         jdbc.update("DELETE FROM learning_hub.course_content_index WHERE course_id = ?", course.id());
         jdbc.update("DELETE FROM learning_hub.course_content_chunks WHERE course_id = ?", course.id());
@@ -149,7 +165,8 @@ class CourseContentIndexIT extends AssessmentIntegrationTest {
 
         List<ChunkHit> hits = as(LEARNER, () -> questions.hits("refund ceiling", pdfCourse.lessonId()));
         assertThat(hits).filteredOn(hit -> hit.content().contains("refund ceiling")).singleElement().satisfies(hit -> {
-            assertThat(hit.page()).isEqualTo(2);
+            // Chunker v2 keeps the two short pages in one chunk; its page is the page it starts on.
+            assertThat(hit.page()).isEqualTo(1);
             assertThat(hit.lesson().url()).isEqualTo("/lesson/" + pdfCourse.id() + "/" + pdfCourse.lessonId());
         });
     }

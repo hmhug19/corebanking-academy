@@ -31,9 +31,6 @@ import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 @Slf4j
 @Component
 public class OllamaClient {
-    /** bge-m3 output size; the {@code vector(1024)} column rejects anything else. */
-    public static final int EMBEDDING_DIMENSIONS = 1024;
-
     private static final int EMBED_BATCH_SIZE = 16;
     private static final Duration AVAILABILITY_TIMEOUT = Duration.ofSeconds(2);
 
@@ -273,11 +270,11 @@ public class OllamaClient {
 
         List<float[]> vectors = new ArrayList<>(batch.size());
         for (JsonNode embedding : embeddings) {
-            if (embedding.size() != EMBEDDING_DIMENSIONS) {
+            if (embedding.size() != config.embedDimensions()) {
                 throw new OllamaException("Embedding has " + embedding.size() + " dimensions, expected "
-                    + EMBEDDING_DIMENSIONS);
+                    + config.embedDimensions());
             }
-            float[] vector = new float[EMBEDDING_DIMENSIONS];
+            float[] vector = new float[config.embedDimensions()];
             for (int i = 0; i < vector.length; i++) {
                 vector[i] = (float) embedding.get(i).asDouble();
             }

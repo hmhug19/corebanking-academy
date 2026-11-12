@@ -72,16 +72,20 @@ app:
       max-duration: ${KNOWLEDGE_EXTRACTION_MAX_DURATION:60s}
       min-readable-word-share: ${KNOWLEDGE_EXTRACTION_MIN_READABLE_WORD_SHARE:0.5}
     chunk:
-      target-tokens: 600
-      max-tokens: 800
-      overlap-tokens: 80
+      # Chunker v2 (rag-quality ticket 04). Raise version after changing the chunker, then run the re-index.
+      version: 2
+      target-tokens: 400
+      max-tokens: 550
+      overlap-tokens: 60
     retrieval:
-      top-k: 5
+      top-k: 6
       min-similarity: 0.35
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat-model: ${OLLAMA_CHAT_MODEL:qwen3:8b}
       embed-model: ${OLLAMA_EMBED_MODEL:bge-m3}
+      # Output size of the embed model; must equal the vector(n) column or the backend refuses to start.
+      embed-dimensions: ${OLLAMA_EMBED_DIMENSIONS:1024}
       connect-timeout: 5s
       read-timeout: 180s
       keep-alive: 10m

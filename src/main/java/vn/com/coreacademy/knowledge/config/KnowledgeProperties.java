@@ -11,6 +11,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.util.unit.DataSize;
 import org.springframework.validation.annotation.Validated;
 
@@ -28,8 +29,21 @@ public record KnowledgeProperties(
     public record Worker(@NotNull Duration pollInterval, @Min(1) int concurrency, @Min(1) int maxAttempts) {
     }
 
-    /** Giới hạn tính theo token ước lượng (số ký tự / 3), không dùng tokenizer thật của bge-m3. */
-    public record Chunk(@Min(1) int targetTokens, @Min(1) int maxTokens, @Min(0) int overlapTokens) {
+    /**
+     * Giới hạn tính theo token ước lượng (số ký tự / 3), không dùng tokenizer thật của bge-m3. {@code version} là
+     * phiên bản bộ tách đoạn: đổi số này rồi chạy re-index để làm lại các đoạn cũ.
+     */
+    public record Chunk(@Min(1) int targetTokens, @Min(1) int maxTokens, @Min(0) int overlapTokens,
+                        @Min(1) int version) {
+        public static final int CURRENT_VERSION = 2;
+
+        @ConstructorBinding
+        public Chunk {
+        }
+
+        public Chunk(int targetTokens, int maxTokens, int overlapTokens) {
+            this(targetTokens, maxTokens, overlapTokens, CURRENT_VERSION);
+        }
     }
 
     public record Retrieval(@Min(1) int topK, @DecimalMin("0.0") @DecimalMax("1.0") double minSimilarity) {
@@ -41,6 +55,17 @@ public record KnowledgeProperties(
         @NotBlank String embedModel,
         @NotNull Duration connectTimeout,
         @NotNull Duration readTimeout,
-        @NotNull Duration keepAlive) {
+        @NotNull Duration keepAlive,
+        @Min(1) int embedDimensions) {
+        public static final int DEFAULT_DIMENSIONS = 1024;
+
+        @ConstructorBinding
+        public Ollama {
+        }
+
+        public Ollama(String baseUrl, String chatModel, String embedModel, Duration connectTimeout,
+                      Duration readTimeout, Duration keepAlive) {
+            this(baseUrl, chatModel, embedModel, connectTimeout, readTimeout, keepAlive, DEFAULT_DIMENSIONS);
+        }
     }
 }

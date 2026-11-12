@@ -64,6 +64,7 @@ FILES=(
   upgrade/2026-11-16-knowledge-document-course-source-scope.sql
   upgrade/2026-11-17-course-job-owns-course.sql
   upgrade/2026-11-18-course-index-coverage.sql
+  upgrade/2026-11-19-chunker-v2-columns.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

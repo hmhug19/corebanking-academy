@@ -1,13 +1,16 @@
 package vn.com.coreacademy.learning.index;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
@@ -28,6 +31,7 @@ public class CourseQuestionSearch {
     private final OllamaClient ollama;
     private final CourseContentRetrieval retrieval;
     private final KnowledgeProperties properties;
+    private final AssistantBudget budget;
 
     // A summary reads the lesson itself; this many chunks fit the model's context with the prompt.
     static final int LESSON_CHUNKS = 8;
@@ -61,11 +65,23 @@ public class CourseQuestionSearch {
             .filter(hit -> courseId == null || hit.courseId() == courseId)
             .filter(hit -> hit.similarity() >= limits.minSimilarity() && seen.add(hit.chunkId()))
             .limit(Math.max(0, limits.topK() - chosen.size())).forEach(chosen::add);
-        List<ChunkHit> hits = chosen.stream().map(CourseQuestionSearch::asChunkHit).toList();
+        List<ChunkHit> best = chosen.stream().map(CourseQuestionSearch::asChunkHit).toList();
+        List<ChunkHit> hits = addNeighbours(best);
         log.info("Course retrieval questionLength={} inLesson={} hits={}", question.length(), lessonId != null,
             hits.size());
 
         return hits;
+    }
+
+    /** The text around each hit, while the retrieved-content budget has room; neighbours stay in the lesson. */
+    private List<ChunkHit> addNeighbours(List<ChunkHit> best) {
+        Map<Long, Double> similarityOf = new LinkedHashMap<>();
+        best.forEach(hit -> similarityOf.put(hit.chunkId(), hit.similarity()));
+        Map<Long, List<ChunkHit>> neighbours = new LinkedHashMap<>();
+        retrieval.neighbours(similarityOf).forEach((parent, found) ->
+            neighbours.put(parent, found.stream().map(CourseQuestionSearch::asChunkHit).toList()));
+
+        return budget.addNeighbours(best, neighbours);
     }
 
     /** The first chunks of a lesson in reading order, for a summary; empty when the caller may not read it. */
@@ -78,6 +94,6 @@ public class CourseQuestionSearch {
             hit.chapterTitle(), hit.lessonId(), hit.lessonTitle(), hit.blockId(), hit.blockTitle(), hit.url());
 
         return new ChunkHit(hit.chunkId(), 0L, hit.courseTitle() + " › " + hit.lessonTitle(), hit.page(), 0, 0,
-            hit.content(), hit.similarity(), lesson);
+            hit.content(), hit.similarity(), lesson, hit.sectionPath());
     }
 }

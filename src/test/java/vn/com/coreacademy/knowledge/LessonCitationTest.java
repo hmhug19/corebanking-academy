@@ -55,4 +55,22 @@ class LessonCitationTest {
         assertThat(text).contains("Khóa học: Tín dụng cơ bản").contains("chương: Chương 1")
             .contains("bài: Lãi suất").contains("Lãi suất là chi phí vay.");
     }
+
+    @Test
+    void promptHeaderOfADocumentChunkCarriesTheSectionPath() {
+        ChunkHit hit = new ChunkHit(5, 3L, "quy-che.pdf", 2, 4, 9, "Bước 1: kiểm tra.", 0.8,
+            "Quy trình EOD › Chuẩn bị");
+
+        assertThat(ChatPromptBuilder.formatChunk(1, hit)).startsWith(
+            "[1] (quy-che.pdf › Quy trình EOD › Chuẩn bị, trang 2, dòng 4–9)\nBước 1: kiểm tra.");
+    }
+
+    @Test
+    void promptHeaderWithoutASectionPathIsUnchangedAndAChunkRunningOnToThePageAfterShowsOnlyItsFirstLine() {
+        ChunkHit plain = new ChunkHit(5, 3L, "quy-che.pdf", 2, 4, 9, "Nội dung.", 0.8);
+        ChunkHit overPages = new ChunkHit(6, 3L, "quy-che.pdf", 2, 40, 3, "Nội dung.", 0.8);
+
+        assertThat(ChatPromptBuilder.formatChunk(1, plain)).startsWith("[1] (quy-che.pdf, trang 2, dòng 4–9)");
+        assertThat(ChatPromptBuilder.formatChunk(2, overPages)).startsWith("[2] (quy-che.pdf, trang 2, từ dòng 40)");
+    }
 }

@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.chunking.Chunk;
+import vn.com.coreacademy.knowledge.chunking.ChunkText;
 import vn.com.coreacademy.knowledge.chunking.Chunker;
 import vn.com.coreacademy.knowledge.extraction.TextLine;
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.BlockAsset;
@@ -100,12 +101,20 @@ public class CourseContentIndexer {
     }
 
     private void indexRevision(PendingRevision revision) {
-        List<NewChunk> chunks = embed(chunk(index.blocks(revision.revisionId()),
-            index.blockAssets(revision.revisionId())));
+        List<NewChunk> chunks = embed(index.courseTitle(revision.revisionId()),
+            chunk(index.blocks(revision.revisionId()), index.blockAssets(revision.revisionId())));
         transaction.executeWithoutResult(status ->
             index.replaceRevision(revision.courseId(), revision.revisionId(), chunks));
         log.info("Course revision indexed courseId={} revisionId={} chunks={}", revision.courseId(),
             revision.revisionId(), chunks.size());
+    }
+
+    /**
+     * Cuts and embeds a revision again with the current chunker and embed model and swaps its chunks in one
+     * transaction: the old chunks answer until the commit. Throws on failure and leaves the old chunks as they were.
+     */
+    public void reindex(PendingRevision revision) {
+        indexRevision(revision);
     }
 
     /**
@@ -120,25 +129,39 @@ public class CourseContentIndexer {
                 : lines(text(block));
             for (Chunk chunk : chunker.chunk(lines)) {
                 chunks.add(new NewChunk(block, chunks.size(), chunk.content(), chunk.tokenEstimate(), null,
-                    chunk.page()));
+                    chunk.page(), sectionPath(block, chunk.sectionPath())));
             }
         }
 
         return chunks;
     }
 
-    /** The lesson title leads each embedded text, so a question naming the lesson finds its chunks. */
-    private List<NewChunk> embed(List<NewChunk> chunks) {
+    /** Chapter, lesson and block, then the headings inside the block; the course title is the head of the text. */
+    private static String sectionPath(SourceBlock block, List<String> inner) {
+        List<String> path = new ArrayList<>();
+        for (String part : List.of(block.chapterTitle(), block.lessonTitle(),
+            block.blockTitle() == null ? "" : block.blockTitle())) {
+            if (!part.isBlank()) {
+                path.add(part);
+            }
+        }
+        path.addAll(inner);
+
+        return ChunkText.join(path);
+    }
+
+    /** {@code course › chapter › lesson › block} leads each embedded text, so a question naming any of them finds it. */
+    private List<NewChunk> embed(String courseTitle, List<NewChunk> chunks) {
         if (chunks.isEmpty()) {
             return chunks;
         }
         List<float[]> vectors = ollama.embed(chunks.stream()
-            .map(chunk -> chunk.block().lessonTitle() + "\n" + chunk.content()).toList());
+            .map(chunk -> ChunkText.withContext(courseTitle, chunk.sectionPath(), chunk.content())).toList());
         List<NewChunk> embedded = new ArrayList<>(chunks.size());
         for (int i = 0; i < chunks.size(); i++) {
             NewChunk chunk = chunks.get(i);
             embedded.add(new NewChunk(chunk.block(), chunk.index(), chunk.content(), chunk.tokenEstimate(),
-                vectors.get(i), chunk.page()));
+                vectors.get(i), chunk.page(), chunk.sectionPath()));
         }
 
         return embedded;

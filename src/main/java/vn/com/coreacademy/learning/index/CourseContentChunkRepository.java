@@ -14,6 +14,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import vn.com.coreacademy.common.search.VectorLiteral;
+import vn.com.coreacademy.knowledge.chunking.ChunkText;
+import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 
 /**
  * Reads the text of published course revisions and keeps the chunk table in step with them. JPA has no mapping for
@@ -25,8 +27,9 @@ public class CourseContentChunkRepository {
     private static final String INSERT = """
         INSERT INTO learning_hub.course_content_chunks
             (course_id, revision_id, chapter_id, chapter_title, lesson_id, lesson_title, block_id, block_title,
-             chunk_index, content, token_estimate, embedding, page_number)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS vector), ?)
+             chunk_index, content, token_estimate, embedding, page_number, section_path, content_hash,
+             chunker_version, embed_model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS vector), ?, ?, ?, ?, ?)
         """;
 
     // Chapter, lesson and block in reading order; process steps are folded into one text per block.
@@ -56,6 +59,7 @@ public class CourseContentChunkRepository {
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
+    private final KnowledgeProperties properties;
 
     /** A published revision the index does not cover yet. */
     public record PendingRevision(long courseId, long revisionId) {
@@ -69,9 +73,14 @@ public class CourseContentChunkRepository {
 
     /** One chunk to store; {@code embedding} is the bge-m3 vector of the lesson title and the content. */
     public record NewChunk(SourceBlock block, int index, String content, int tokenEstimate, float[] embedding,
-                           Integer page) {
+                           Integer page, String sectionPath) {
+        public NewChunk(SourceBlock block, int index, String content, int tokenEstimate, float[] embedding,
+                        Integer page) {
+            this(block, index, content, tokenEstimate, embedding, page, "");
+        }
+
         public NewChunk(SourceBlock block, int index, String content, int tokenEstimate, float[] embedding) {
-            this(block, index, content, tokenEstimate, embedding, null);
+            this(block, index, content, tokenEstimate, embedding, null, "");
         }
     }
 
@@ -166,8 +175,12 @@ public class CourseContentChunkRepository {
             statement.setInt(9, chunk.index());
             statement.setString(10, chunk.content());
             statement.setInt(11, chunk.tokenEstimate());
-            statement.setString(12, VectorLiteral.encode(chunk.embedding()));
+            statement.setString(12, VectorLiteral.encode(chunk.embedding(), properties.ollama().embedDimensions()));
             statement.setObject(13, chunk.page());
+            statement.setString(14, chunk.sectionPath());
+            statement.setString(15, ChunkText.sha256(chunk.content()));
+            statement.setInt(16, properties.chunk().version());
+            statement.setString(17, properties.ollama().embedModel());
         });
         jdbc.update("""
             INSERT INTO learning_hub.course_content_index (revision_id, course_id, chunk_count)
@@ -209,6 +222,24 @@ public class CourseContentChunkRepository {
             """, (rs, rowNum) -> new FailedRevision(rs.getLong("course_id"), rs.getLong("revision_id"),
             rs.getString("status"), rs.getInt("attempts"), rs.getString("error_type"),
             rs.getTimestamp("indexed_time").toInstant()));
+    }
+
+    /** Indexed revisions with at least one chunk cut by another chunker version or embedded by another model. */
+    public List<PendingRevision> staleRevisions() {
+        return jdbc.query("""
+            SELECT i.course_id, i.revision_id FROM learning_hub.course_content_index i
+             WHERE i.status = 'done' AND EXISTS (
+                   SELECT 1 FROM learning_hub.course_content_chunks c
+                    WHERE c.revision_id = i.revision_id AND (c.chunker_version <> ? OR c.embed_model <> ?))
+             ORDER BY i.course_id, i.revision_id
+            """, (rs, rowNum) -> new PendingRevision(rs.getLong(1), rs.getLong(2)),
+            properties.chunk().version(), properties.ollama().embedModel());
+    }
+
+    /** The course title of a revision, the head of every embedded text of its chunks. */
+    public String courseTitle(long revisionId) {
+        return jdbc.queryForObject("SELECT title FROM learning_hub.course_revisions WHERE revision_id = ?",
+            String.class, revisionId);
     }
 
     /** Puts a failed revision back in the queue; false when it is not failing. */

@@ -44,6 +44,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5l | `upgrade/2026-11-16-knowledge-document-course-source-scope.sql` | Phạm vi tài liệu `course_source` cho tệp nguồn của job tạo khóa học; chạy trước backend mới |
 | 5m | `upgrade/2026-11-17-course-job-owns-course.sql` | Job tạo khóa học sở hữu khóa nháp (`course_id`, `revision_id`), trạng thái `stopped`, `course_lessons.ai_state`; chạy trước backend mới |
 | 5n | `upgrade/2026-11-18-course-index-coverage.sql` | Chỉ mục khóa học: trang PDF của đoạn, trạng thái `done/retry/failed` với số lần thử; chạy trước backend mới |
+| 5o | `upgrade/2026-11-19-chunker-v2-columns.sql` | Đoạn tài liệu và đoạn khóa học có `section_path`, `content_hash`, `chunker_version`, `embed_model` (lập chỉ mục lại sau khi đổi bộ tách đoạn hoặc mô hình nhúng); chạy trước backend mới |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |

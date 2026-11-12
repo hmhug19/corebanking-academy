@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
+import vn.com.coreacademy.knowledge.chunking.ChunkText;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 
 /** Builds the grounded prompt: the model sees the numbered chunks and the question, nothing else. */
@@ -67,15 +68,34 @@ public class ChatPromptBuilder {
         if (hit.lesson() != null) {
             return chunk.append('[').append(n).append("] (Khóa học: ").append(hit.lesson().courseTitle())
                 .append(", chương: ").append(hit.lesson().chapterTitle()).append(", bài: ")
-                .append(hit.lesson().lessonTitle()).append(")\n").append(hit.content()).toString();
+                .append(hit.lesson().lessonTitle()).append(sectionOf(hit)).append(")\n").append(hit.content())
+                .toString();
         }
         chunk.append('[').append(n).append("] (").append(hit.fileName());
+        if (!hit.sectionPath().isBlank()) {
+            chunk.append(ChunkText.SEPARATOR).append(hit.sectionPath());
+        }
         if (hit.page() != null) {
             chunk.append(", trang ").append(hit.page());
         }
-        chunk.append(", dòng ").append(hit.lineStart()).append('–').append(hit.lineEnd()).append(")\n")
-            .append(hit.content());
+        // A chunk that runs on into the next page ends on a line number of that page.
+        if (hit.lineEnd() < hit.lineStart()) {
+            chunk.append(", từ dòng ").append(hit.lineStart());
+        } else {
+            chunk.append(", dòng ").append(hit.lineStart()).append('–').append(hit.lineEnd());
+        }
+        chunk.append(")\n").append(hit.content());
 
         return chunk.toString();
+    }
+
+    /** The block and the headings inside it, when the path goes beyond course, chapter and lesson. */
+    private static String sectionOf(ChunkHit hit) {
+        String path = hit.sectionPath();
+        String lesson = hit.lesson().lessonTitle();
+        int at = path.indexOf(lesson);
+        int from = at + lesson.length() + ChunkText.SEPARATOR.length();
+
+        return at < 0 || path.length() <= from ? "" : ", mục: " + path.substring(from);
     }
 }

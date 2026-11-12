@@ -6,7 +6,9 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -85,7 +87,11 @@ public class KnowledgeChatService {
             KnowledgeProperties.Retrieval retrieval = properties.retrieval();
             List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR, visibility).stream()
                 .filter(hit -> hit.similarity() >= retrieval.minSimilarity()).toList();
-            hits = budget.fitRetrieved(distinct(candidates, retrieval.topK()));
+            List<ChunkHit> best = budget.fitRetrieved(distinct(candidates, retrieval.topK()));
+            Map<Long, Double> similarityOf = new LinkedHashMap<>();
+            best.forEach(hit -> similarityOf.put(hit.chunkId(), hit.similarity()));
+            // The text around each hit, while the retrieved-content budget has room.
+            hits = budget.addNeighbours(best, chunks.neighbours(similarityOf, visibility));
         } catch (OllamaUnavailableException | OllamaException exception) {
             throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
         }

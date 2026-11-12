@@ -201,6 +201,26 @@ mỗi lần) tối đa `max-attempts` lần rồi chuyển `failed`. Quản tr�
 và thử lại bằng `POST /api/v1/admin/learning/course-index/{revisionId}/retry`. SQL:
 `docs/sql/upgrade/2026-11-11-course-content-index.sql`, `docs/sql/upgrade/2026-11-18-course-index-coverage.sql`.
 
+**Bộ tách đoạn v2 và lập chỉ mục lại** (`app.knowledge.chunk.version` = 2). Một bộ tách đoạn dùng chung cho tài liệu, khóa
+học và tệp của khối: cắt theo mục (đề mục) trước, rồi theo kích thước (mục tiêu 400, tối đa 550 token ước lượng), giữ phần
+gối đầu qua ngắt trang, không cắt giữa bảng hoặc khối mã trừ khi riêng nó vượt mức tối đa (khi đó mỗi phần lặp lại dòng
+tiêu đề bảng). Văn bản nhúng và đưa cho mô hình là `tiêu đề tài liệu › đường dẫn mục` rồi nội dung; nội dung lưu trong DB
+vẫn là văn bản thuần. Đoạn khóa học dùng `khóa học › chương › bài › khối`. Hai bảng đoạn có thêm `section_path`,
+`content_hash` (SHA-256), `chunker_version`, `embed_model`; số chiều vector và tên mô hình lấy từ cấu hình
+(`app.knowledge.ollama.embed-dimensions`, `embed-model`) và backend không khởi động nếu số chiều khác cột `vector(n)`.
+Khi trả lời, đoạn kề (`chunk_index ± 1`, cùng tài liệu hoặc cùng bài, cùng quy tắc quyền đọc) của mỗi đoạn tìm được được
+thêm vào sau các đoạn chính khi ngân sách `app.assistant.budget.retrieved` còn chỗ; top-k mặc định 6.
+
+- `POST /api/v1/admin/knowledge/reindex`: chạy nền việc lập chỉ mục lại mọi tài liệu và revision khóa học có đoạn khác
+  `chunker_version` hoặc `embed_model` so với cấu hình; mỗi mục được thay trong một transaction nên đoạn cũ vẫn trả lời
+  đến khi đoạn mới có hiệu lực. Trả về trạng thái hiện tại; đang chạy thì không bắt đầu lượt mới.
+- `GET /api/v1/admin/knowledge/reindex/status`: `state` (`IDLE`, `RUNNING`, `FINISHED`, `ABORTED`), `total`, `done`,
+  `failed`, `startedTime`, `finishedTime`. Mục lỗi vẫn lỗi thời cho lượt sau; Ollama không kết nối được thì lượt `ABORTED`.
+
+Cả hai chỉ dành cho quản trị hệ thống (phạm vi GLOBAL). SQL: `docs/sql/upgrade/2026-11-19-chunker-v2-columns.sql`
+(chạy trước backend mới; rollback `.rollback.sql`). Tinh chỉnh kích thước, top-k, `min-similarity` bằng bộ eval truy hồi
+(cần Ollama) rồi ghi giá trị chọn kèm số đo vào ticket.
+
 ### `open_screen`
 
 Tham số `functionCode`, chỉ nhận mã trong danh sách màn hình của chính người dùng: các chức năng được cấp có

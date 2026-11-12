@@ -1,7 +1,10 @@
 package vn.com.coreacademy.assistant.config;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import jakarta.validation.constraints.Min;
 
@@ -42,5 +45,34 @@ public record AssistantBudget(
         }
 
         return kept;
+    }
+
+    /**
+     * {@code hits} followed by their neighbours (the chunks at {@code chunk_index} plus and minus one) while the
+     * retrieved-content budget allows, in rank order of the hit they sit next to. A neighbour already in the list is
+     * skipped; the first one that does not fit ends the list. {@code neighbours} is keyed by the chunk id of the hit.
+     */
+    public List<ChunkHit> addNeighbours(List<ChunkHit> hits, Map<Long, List<ChunkHit>> neighbours) {
+        List<ChunkHit> all = new ArrayList<>(hits);
+        Set<String> seen = new HashSet<>();
+        int used = 0;
+        for (ChunkHit hit : hits) {
+            seen.add(hit.key());
+            used += TokenEstimator.estimate(hit.content());
+        }
+        for (ChunkHit hit : hits) {
+            for (ChunkHit neighbour : neighbours.getOrDefault(hit.chunkId(), List.of())) {
+                if (!seen.add(neighbour.key())) {
+                    continue;
+                }
+                used += TokenEstimator.estimate(neighbour.content());
+                if (used > retrieved) {
+                    return all;
+                }
+                all.add(neighbour);
+            }
+        }
+
+        return all;
     }
 }

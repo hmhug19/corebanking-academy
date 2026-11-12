@@ -1,6 +1,8 @@
 package vn.com.coreacademy.assistant;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import vn.com.coreacademy.assistant.config.AssistantBudget;
@@ -47,5 +49,35 @@ class RetrievedChunksBudgetTest {
         assertThat(AssistantBudget.defaults()).isEqualTo(new AssistantBudget(8192, 1200, 2000, 3500, 1000));
         assertThat(new AssistantBudget(8192, 1200, 2000, 250, 1000).fitRetrieved(List.of(chunk(1), chunk(2), chunk(3))))
             .hasSize(2);
+    }
+
+    @Test
+    void neighboursFillTheBudgetLeftAfterTheHitsInRankOrderPreviousBeforeNext() {
+        List<ChunkHit> hits = List.of(chunk(10), chunk(20));
+        Map<Long, List<ChunkHit>> neighbours = new LinkedHashMap<>();
+        neighbours.put(10L, List.of(chunk(9), chunk(11)));
+        neighbours.put(20L, List.of(chunk(19), chunk(21)));
+
+        // 100 tokens each: two hits and three neighbours fit in 500.
+        List<ChunkHit> all = new AssistantBudget(8192, 1200, 2000, 500, 1000).addNeighbours(hits, neighbours);
+
+        assertThat(all).extracting(ChunkHit::chunkId).containsExactly(10L, 20L, 9L, 11L, 19L);
+    }
+
+    @Test
+    void aNeighbourAlreadyAmongTheHitsIsNotAddedTwice() {
+        List<ChunkHit> hits = List.of(chunk(10), chunk(11));
+        Map<Long, List<ChunkHit>> neighbours = Map.of(10L, List.of(chunk(9), chunk(11)), 11L, List.of(chunk(10)));
+
+        assertThat(AssistantBudget.defaults().addNeighbours(hits, neighbours)).extracting(ChunkHit::chunkId)
+            .containsExactly(10L, 11L, 9L);
+    }
+
+    @Test
+    void noNeighbourIsAddedWhenTheHitsUseTheWholeBudget() {
+        List<ChunkHit> hits = List.of(chunk(10), chunk(20));
+
+        assertThat(new AssistantBudget(8192, 1200, 2000, 200, 1000).addNeighbours(hits, Map.of(10L, List.of(chunk(9)))))
+            .isEqualTo(hits);
     }
 }

@@ -27,6 +27,7 @@ import vn.com.coreacademy.knowledge.entity.KnowledgeDocument;
 import vn.com.coreacademy.knowledge.repository.KnowledgeDocumentRepository;
 import vn.com.coreacademy.knowledge.service.DocumentIngestionWorker;
 import vn.com.coreacademy.knowledge.service.KnowledgeFileStore;
+import vn.com.coreacademy.knowledge.service.KnowledgeReindexService;
 import vn.com.coreacademy.knowledge.support.FakeEmbeddings;
 import vn.com.coreacademy.knowledge.support.KnowledgeIntegrationTest;
 
@@ -42,6 +43,9 @@ class DocumentIngestionIT extends KnowledgeIntegrationTest {
 
     @Autowired
     private DocumentIngestionWorker worker;
+
+    @Autowired
+    private KnowledgeReindexService reindex;
 
     @Autowired
     private KnowledgeDocumentRepository documents;
@@ -223,6 +227,64 @@ class DocumentIngestionIT extends KnowledgeIntegrationTest {
 
         await().atMost(Duration.ofSeconds(10))
             .untilAsserted(() -> assertThat(statusOf(id)).isEqualTo("ready"));
+    }
+
+    @Test
+    void chunksCarryTheirSectionPathAndStampsAndTheEmbeddedTextLeadsWithTitleAndPath() throws IOException {
+        long id = queue("quy-trinh.md", "text/markdown",
+            "# Quy trình EOD\n\nBước một.\n\n## Xử lý lỗi\n\nDừng job.\n");
+        worker.claimNext();
+
+        worker.process(id);
+
+        List<java.util.Map<String, Object>> rows = jdbc.queryForList("""
+            SELECT section_path, content, length(content_hash) AS hash_length, chunker_version, embed_model
+              FROM learning_hub.knowledge_document_chunks WHERE document_id = ? ORDER BY chunk_index
+            """, id);
+        assertThat(rows).extracting(row -> row.get("section_path")).containsExactly("Quy trình EOD",
+            "Quy trình EOD › Xử lý lỗi");
+        assertThat(rows).extracting(row -> row.get("content")).containsExactly("# Quy trình EOD\nBước một.",
+            "## Xử lý lỗi\nDừng job.");
+        assertThat(rows).allSatisfy(row -> {
+            assertThat(row.get("hash_length")).isEqualTo(64);
+            assertThat(row.get("chunker_version")).isEqualTo(2);
+            assertThat(row.get("embed_model")).isEqualTo("bge-m3");
+        });
+        org.mockito.ArgumentCaptor<List<String>> embedded = org.mockito.ArgumentCaptor.forClass(List.class);
+        org.mockito.Mockito.verify(ollama).embed(embedded.capture());
+        assertThat(embedded.getValue()).containsExactly("quy-trinh.md › Quy trình EOD\n# Quy trình EOD\nBước một.",
+            "quy-trinh.md › Quy trình EOD › Xử lý lỗi\n## Xử lý lỗi\nDừng job.");
+    }
+
+    @Test
+    void reindexAfterAVersionBumpReplacesTheChunksAndTheDocumentNeverHasNone() throws Exception {
+        long id = queue("quy-trinh.md", "text/markdown", "# Quy trình EOD\n\nBước một.\n");
+        worker.claimNext();
+        worker.process(id);
+        // As if cut by chunker version 1 and embedded by another model.
+        jdbc.update("""
+            UPDATE learning_hub.knowledge_document_chunks
+               SET chunker_version = 1, embed_model = 'old-model', section_path = '' WHERE document_id = ?
+            """, id);
+        java.util.concurrent.atomic.AtomicInteger visibleWhileEmbedding = new java.util.concurrent.atomic.AtomicInteger(-1);
+        when(ollama.embed(anyList())).thenAnswer(invocation -> {
+            visibleWhileEmbedding.set(chunkCount(id));
+            return FakeEmbeddings.everyInputOnAxisZero().answer(invocation);
+        });
+
+        reindex.start();
+
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+            assertThat(reindex.status().state()).isEqualTo(KnowledgeReindexService.State.FINISHED));
+        assertThat(visibleWhileEmbedding.get()).as("old chunks answer while the new ones are embedded").isEqualTo(1);
+        assertThat(reindex.status().done()).isGreaterThanOrEqualTo(1);
+        assertThat(statusOf(id)).isEqualTo("ready");
+        assertThat(jdbc.queryForList("""
+            SELECT chunker_version || '|' || embed_model || '|' || section_path
+              FROM learning_hub.knowledge_document_chunks WHERE document_id = ?
+            """, String.class, id)).containsExactly("2|bge-m3|Quy trình EOD");
+        // Nothing is stale any more: a second run has nothing to do.
+        assertThat(reindex.start().total()).isZero();
     }
 
     private long queue(String fileName, String mimeType, String content) throws IOException {
