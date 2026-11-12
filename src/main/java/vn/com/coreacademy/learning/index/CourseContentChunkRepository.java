@@ -1,7 +1,12 @@
 package vn.com.coreacademy.learning.index;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,8 +25,8 @@ public class CourseContentChunkRepository {
     private static final String INSERT = """
         INSERT INTO learning_hub.course_content_chunks
             (course_id, revision_id, chapter_id, chapter_title, lesson_id, lesson_title, block_id, block_title,
-             chunk_index, content, token_estimate, embedding)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS vector))
+             chunk_index, content, token_estimate, embedding, page_number)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS vector), ?)
         """;
 
     // Chapter, lesson and block in reading order; process steps are folded into one text per block.
@@ -35,6 +40,18 @@ public class CourseContentChunkRepository {
           JOIN learning_hub.lesson_blocks b ON b.lesson_id = l.lesson_id
          WHERE ch.revision_id = ?
          ORDER BY ch.sort_no, ch.chapter_id, l.sort_no, l.lesson_id, b.sort_no, b.block_id
+        """;
+
+    // x is the alias of the table that holds course_id and revision_id.
+    private static final String SUPERSEDED = """
+        NOT EXISTS (SELECT 1 FROM learning_hub.courses c
+                     WHERE c.course_id = x.course_id AND c.published_revision_id = x.revision_id)
+        AND NOT EXISTS (SELECT 1 FROM learning_hub.course_enrollments e
+                         WHERE e.revision_id = x.revision_id AND e.status <> 'withdrawn')
+        AND NOT EXISTS (SELECT 1 FROM learning_hub.courses c
+                         WHERE c.course_id = x.course_id AND c.published_revision_id IS NOT NULL
+                           AND NOT EXISTS (SELECT 1 FROM learning_hub.course_content_index i
+                                            WHERE i.revision_id = c.published_revision_id AND i.status = 'done'))
         """;
 
     private final JdbcTemplate jdbc;
@@ -51,20 +68,66 @@ public class CourseContentChunkRepository {
     }
 
     /** One chunk to store; {@code embedding} is the bge-m3 vector of the lesson title and the content. */
-    public record NewChunk(SourceBlock block, int index, String content, int tokenEstimate, float[] embedding) {
+    public record NewChunk(SourceBlock block, int index, String content, int tokenEstimate, float[] embedding,
+                           Integer page) {
+        public NewChunk(SourceBlock block, int index, String content, int tokenEstimate, float[] embedding) {
+            this(block, index, content, tokenEstimate, embedding, null);
+        }
     }
 
-    /** Published revisions with no completed index entry, oldest course first. */
+    /** A file attached to a pdf or attachment block, as stored in the object storage. */
+    public record BlockAsset(long assetId, String storageKey, String originalName, String mimeType, long sizeBytes) {
+    }
+
+    /** A revision whose last indexing attempts failed, for the admin list. */
+    public record FailedRevision(long courseId, long revisionId, String status, int attempts, String errorType,
+                                 Instant lastAttempt) {
+    }
+
+    /**
+     * Revisions to index, oldest course first: the published revision of a course, and any published revision a
+     * learner still has an active enrolment on (it may have been superseded before it was ever indexed), that have no
+     * index entry yet or whose retry time has come. A revision marked failed waits for an admin.
+     */
     public List<PendingRevision> pending(int limit) {
         return jdbc.query("""
-            SELECT c.course_id, c.published_revision_id
-              FROM learning_hub.courses c
-              JOIN learning_hub.course_revisions r ON r.revision_id = c.published_revision_id AND r.state = 'published'
-             WHERE NOT EXISTS (SELECT 1 FROM learning_hub.course_content_index i
-                                WHERE i.revision_id = c.published_revision_id)
-             ORDER BY c.course_id
+            SELECT r.course_id, r.revision_id
+              FROM learning_hub.course_revisions r
+              JOIN learning_hub.courses c ON c.course_id = r.course_id
+             WHERE r.state = 'published'
+               AND (r.revision_id = c.published_revision_id OR EXISTS (
+                        SELECT 1 FROM learning_hub.course_enrollments e
+                         WHERE e.revision_id = r.revision_id AND e.status <> 'withdrawn'))
+               AND NOT EXISTS (SELECT 1 FROM learning_hub.course_content_index i
+                                WHERE i.revision_id = r.revision_id
+                                  AND (i.status IN ('done', 'failed')
+                                       OR (i.status = 'retry' AND i.next_attempt_time > now())))
+             ORDER BY r.course_id, r.revision_id
              LIMIT ?
             """, (rs, rowNum) -> new PendingRevision(rs.getLong(1), rs.getLong(2)), limit);
+    }
+
+    /** Files attached to the pdf and attachment blocks of a revision, by block, in the order they were attached. */
+    public Map<Long, List<BlockAsset>> blockAssets(long revisionId) {
+        Map<Long, List<BlockAsset>> byBlock = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT ba.block_id, a.asset_id, a.storage_key, a.original_name, a.mime_type, a.size_bytes
+              FROM learning_hub.course_chapters ch
+              JOIN learning_hub.course_lessons l ON l.chapter_id = ch.chapter_id
+              JOIN learning_hub.lesson_blocks b ON b.lesson_id = l.lesson_id
+              JOIN learning_hub.block_assets ba ON ba.block_id = b.block_id
+              JOIN learning_hub.assets a ON a.asset_id = ba.asset_id
+             WHERE ch.revision_id = ? AND b.block_type IN ('pdf', 'attachment')
+               AND ba.usage IN ('primary', 'attachment') AND a.storage_type = 's3' AND a.storage_key IS NOT NULL
+               AND a.status = 'ready' AND a.is_deleted = false
+             ORDER BY ba.block_id, ba.sort_no, ba.block_asset_id
+            """, rs -> {
+                byBlock.computeIfAbsent(rs.getLong("block_id"), id -> new ArrayList<>())
+                    .add(new BlockAsset(rs.getLong("asset_id"), rs.getString("storage_key"),
+                        rs.getString("original_name"), rs.getString("mime_type"), rs.getLong("size_bytes")));
+            }, revisionId);
+
+        return byBlock;
     }
 
     public List<SourceBlock> blocks(long revisionId) {
@@ -104,26 +167,64 @@ public class CourseContentChunkRepository {
             statement.setString(10, chunk.content());
             statement.setInt(11, chunk.tokenEstimate());
             statement.setString(12, VectorLiteral.encode(chunk.embedding()));
+            statement.setObject(13, chunk.page());
         });
         jdbc.update("""
             INSERT INTO learning_hub.course_content_index (revision_id, course_id, chunk_count)
             VALUES (?, ?, ?)
-            ON CONFLICT (revision_id) DO UPDATE SET chunk_count = EXCLUDED.chunk_count, indexed_time = now()
+            ON CONFLICT (revision_id) DO UPDATE SET chunk_count = EXCLUDED.chunk_count, indexed_time = now(),
+                status = 'done', attempts = 0, next_attempt_time = NULL, error_type = NULL
             """, revisionId, courseId, chunks.size());
     }
 
-    /** Removes chunks and markers of revisions that are no longer the published one of their course. */
-    public int dropSuperseded() {
-        int chunks = jdbc.update("""
-            DELETE FROM learning_hub.course_content_chunks ch
-             WHERE NOT EXISTS (SELECT 1 FROM learning_hub.courses c
-                                WHERE c.course_id = ch.course_id AND c.published_revision_id = ch.revision_id)
-            """);
+    /**
+     * Records a failed attempt. The revision is retried after {@code retryDelay} (doubling each time) until
+     * {@code maxAttempts} attempts have failed, then it is marked failed and left for an admin. {@code errorType} is
+     * a class name, never course text.
+     */
+    public void recordFailure(long courseId, long revisionId, String errorType, int maxAttempts,
+                              Duration retryDelay) {
+        double seconds = retryDelay.toSeconds();
         jdbc.update("""
-            DELETE FROM learning_hub.course_content_index i
-             WHERE NOT EXISTS (SELECT 1 FROM learning_hub.courses c
-                                WHERE c.course_id = i.course_id AND c.published_revision_id = i.revision_id)
-            """);
+            INSERT INTO learning_hub.course_content_index AS i
+                (revision_id, course_id, chunk_count, status, attempts, next_attempt_time, error_type)
+            VALUES (?, ?, 0, CASE WHEN 1 >= ? THEN 'failed' ELSE 'retry' END, 1,
+                    CASE WHEN 1 >= ? THEN NULL ELSE now() + make_interval(secs => ?) END, ?)
+            ON CONFLICT (revision_id) DO UPDATE SET
+                attempts = i.attempts + 1, indexed_time = now(), error_type = EXCLUDED.error_type,
+                status = CASE WHEN i.attempts + 1 >= ? THEN 'failed' ELSE 'retry' END,
+                next_attempt_time = CASE WHEN i.attempts + 1 >= ? THEN NULL
+                    ELSE now() + make_interval(secs => ? * power(2, i.attempts)) END
+             WHERE i.status <> 'done'
+            """, revisionId, courseId, maxAttempts, maxAttempts, seconds, errorType, maxAttempts, maxAttempts,
+            seconds);
+    }
+
+    /** Revisions the worker is retrying or has given up on, newest first. */
+    public List<FailedRevision> failed() {
+        return jdbc.query("""
+            SELECT course_id, revision_id, status, attempts, error_type, indexed_time
+              FROM learning_hub.course_content_index WHERE status <> 'done'
+             ORDER BY indexed_time DESC, revision_id DESC
+            """, (rs, rowNum) -> new FailedRevision(rs.getLong("course_id"), rs.getLong("revision_id"),
+            rs.getString("status"), rs.getInt("attempts"), rs.getString("error_type"),
+            rs.getTimestamp("indexed_time").toInstant()));
+    }
+
+    /** Puts a failed revision back in the queue; false when it is not failing. */
+    public boolean retry(long revisionId) {
+        return jdbc.update("DELETE FROM learning_hub.course_content_index WHERE revision_id = ? AND status <> 'done'",
+            revisionId) > 0;
+    }
+
+    /**
+     * Removes chunks and markers of revisions that are neither the published one of their course nor the revision of
+     * an active enrolment. Nothing is removed from a course whose published revision is not indexed yet, so the
+     * previous revision keeps answering until the new one is in.
+     */
+    public int dropSuperseded() {
+        int chunks = jdbc.update("DELETE FROM learning_hub.course_content_chunks x WHERE " + SUPERSEDED);
+        jdbc.update("DELETE FROM learning_hub.course_content_index x WHERE " + SUPERSEDED);
 
         return chunks;
     }

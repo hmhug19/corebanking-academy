@@ -77,7 +77,7 @@ public class CourseQuestionSearch {
         LessonSource lesson = new LessonSource(hit.courseId(), hit.courseTitle(), hit.revisionId(), hit.chapterId(),
             hit.chapterTitle(), hit.lessonId(), hit.lessonTitle(), hit.blockId(), hit.blockTitle(), hit.url());
 
-        return new ChunkHit(hit.chunkId(), 0L, hit.courseTitle() + " › " + hit.lessonTitle(), null, 0, 0,
+        return new ChunkHit(hit.chunkId(), 0L, hit.courseTitle() + " › " + hit.lessonTitle(), hit.page(), 0, 0,
             hit.content(), hit.similarity(), lesson);
     }
 }

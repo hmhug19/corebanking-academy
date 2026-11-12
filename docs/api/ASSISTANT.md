@@ -183,15 +183,23 @@ Ollama không phản hồi khi nhúng câu hỏi: sự kiện `error` `ASSISTANT
 
 ### `search_courses`
 
-Tham số `query` (1–300 ký tự). Tìm trong chỉ mục nội dung bài học (`learning_hub.course_content_chunks`), chỉ revision
-đang xuất bản của khóa. Người dùng chỉ thấy khóa mình quản lý (cùng phạm vi `LearningAccessPolicy.searchScope`) hoặc khóa
-có ghi danh còn hiệu lực trên đúng revision đó; lọc nằm trong cùng câu SQL với ORDER BY/LIMIT nên đoạn không đọc được
+Tham số `query` (1–300 ký tự). Tìm trong chỉ mục nội dung bài học (`learning_hub.course_content_chunks`). Người quản lý
+(cùng phạm vi `LearningAccessPolicy.searchScope`) chỉ thấy revision đang xuất bản; trong lúc revision mới chưa lập chỉ mục
+xong thì revision đã lập chỉ mục mới nhất vẫn trả lời. Người học thấy đúng revision của ghi danh còn hiệu lực (không bao giờ
+thấy chữ của revision mới hơn), kể cả khi khóa đã xuất bản bản mới; lọc nằm trong cùng câu SQL với ORDER BY/LIMIT nên đoạn không đọc được
 không chiếm chỗ top-k. Số `[n]` dùng chung với `search_documents` trong lượt; kết thúc lượt theo cùng quy tắc.
 
 Chỉ mục do worker `CourseContentIndexer` dựng (thăm dò mỗi `app.learning.course-index.poll-interval`, mặc định 30s,
 chỉ chạy khi Ollama sẵn sàng): mỗi revision đã xuất bản được ghi cùng lúc đoạn và dấu hoàn tất trong một transaction
-nên chạy lại hay khởi động lại giữa chừng không nhân đôi; revision cũ bị xóa khi có bản xuất bản mới. SQL:
-`docs/sql/upgrade/2026-11-11-course-content-index.sql`.
+nên chạy lại hay khởi động lại giữa chừng không nhân đôi. Chỉ mục giữ revision đang xuất bản và mọi revision còn ghi danh
+(`status <> 'withdrawn'`); lập chỉ mục revision mới xong mới xóa revision cũ không còn ai học, và không xóa gì khi revision
+đang xuất bản chưa lập chỉ mục được. Khối `pdf` và `attachment` (PDF, DOCX, MD) được đọc bằng extractor của kho tri thức,
+giới hạn và kiểm tra chất lượng giống tài liệu tải lên; đoạn giữ số trang (`page_number`) và trích dẫn ghi trang. Tệp scan,
+phông chữ lỗi, quá giới hạn hoặc định dạng khác (ảnh, PPTX, XLSX) không được lập chỉ mục nhưng không làm hỏng revision.
+Revision lỗi (Ollama chạy nhưng nhúng hoặc đọc kho tệp lỗi) được thử lại sau `app.learning.course-index.retry-delay` (gấp đôi
+mỗi lần) tối đa `max-attempts` lần rồi chuyển `failed`. Quản trị hệ thống xem `GET /api/v1/admin/learning/course-index/failures`
+và thử lại bằng `POST /api/v1/admin/learning/course-index/{revisionId}/retry`. SQL:
+`docs/sql/upgrade/2026-11-11-course-content-index.sql`, `docs/sql/upgrade/2026-11-18-course-index-coverage.sql`.
 
 ### `open_screen`
 

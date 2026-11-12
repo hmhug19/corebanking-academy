@@ -51,6 +51,10 @@ app:
     course-index:
       # How often the worker looks for published course revisions that are not indexed yet.
       poll-interval: ${COURSE_INDEX_POLL:30s}
+      # A revision that fails to index is tried again after retry-delay (doubling each time) until max-attempts
+      # attempts have failed; then it shows as failed and waits for an admin.
+      max-attempts: ${COURSE_INDEX_MAX_ATTEMPTS:5}
+      retry-delay: ${COURSE_INDEX_RETRY_DELAY:2m}
     points:
       # Weights of the learning leaderboard; override with APP_LEARNING_POINTS_LESSON and so on.
       lesson: 5
