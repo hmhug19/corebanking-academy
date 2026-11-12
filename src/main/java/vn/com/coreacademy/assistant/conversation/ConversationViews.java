@@ -50,7 +50,10 @@ public final class ConversationViews {
         ActionState action,
         @Schema(description = "Đánh giá của người dùng cho lượt; null nếu chưa đánh giá.") FeedbackView feedback,
         @Schema(description = "done, error hoặc stopped.") String status,
-        Instant createTime) {
+        Instant createTime,
+        @Schema(description = "false khi câu trả lời dùng tài liệu nhưng không ghi nguồn [n] nào (hiện nhãn "
+            + "\"Chưa có nguồn\"); không có trường nghĩa là bình thường.")
+        @JsonInclude(JsonInclude.Include.NON_NULL) Boolean grounded) {
     }
 
     @Schema(description = "Thay đổi dữ liệu mà một lượt đã đề xuất, với trạng thái hiện tại.")

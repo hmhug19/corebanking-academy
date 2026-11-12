@@ -38,6 +38,8 @@ import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.PageQuery;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.service.CitationRule;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 /**
  * The one store behind both assistants. Every read and write is scoped to the owner; an id that is not the caller's
@@ -47,6 +49,8 @@ import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 @Service
 public class ConversationService implements Conversations {
     private static final TypeReference<List<CitationView>> CITATIONS = new TypeReference<>() {
+    };
+    private static final TypeReference<List<TurnRecord.Search>> SEARCHES = new TypeReference<>() {
     };
     private static final TypeReference<List<String>> NAMES = new TypeReference<>() {
     };
@@ -129,7 +133,7 @@ public class ConversationService implements Conversations {
             if (turn.getAnswer() == null || turn.getAnswer().isBlank()) {
                 continue;
             }
-            String answer = cut(turn.getAnswer(), MAX_ANSWER_CHARS);
+            String answer = cut(CitationRule.withoutMarkers(turn.getAnswer()), MAX_ANSWER_CHARS);
             int size = TokenEstimator.estimate(turn.getQuestion()) + TokenEstimator.estimate(answer);
             if (size > budget) {
                 break;
@@ -286,7 +290,24 @@ public class ConversationService implements Conversations {
                 : read(turn.getNavigation(), new TypeReference<TurnRecord.Navigation>() {
                 }, null),
             turn.getActionId(), action == null ? null : state(action, now), rating,
-            turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime());
+            turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime(),
+            ungrounded(turn) ? Boolean.FALSE : null);
+    }
+
+    /**
+     * An answer that used retrieved chunks but cites none, read back from the stored turn: it has an answer, no
+     * citations, a search that gave chunks, and is not the fixed "not found" sentence. A quiz explanation stands on
+     * the author's text and never claims sources, so its own search does not count.
+     */
+    private boolean ungrounded(AssistantTurn turn) {
+        if (!TurnRecord.Status.DONE.name().equals(turn.getStatus()) || turn.getAnswer() == null
+            || turn.getAnswer().isBlank() || NotFoundAnswer.isNotFound(turn.getAnswer())
+            || !read(turn.getCitations(), CITATIONS, List.<CitationView>of()).isEmpty()) {
+            return false;
+        }
+
+        return read(turn.getRetrievalTrace(), SEARCHES, List.<TurnRecord.Search>of()).stream()
+            .anyMatch(search -> !"explain".equals(search.tool()) && !search.gaveNothing());
     }
 
     /** The card as it stands now: a proposal nobody answered in time reads as expired, not as still waiting. */

@@ -30,15 +30,19 @@ public sealed interface AgentStreamEvent {
     record ActionRequired(String type, PendingActionView action) implements AgentStreamEvent {
     }
 
-    /** Last line on success; {@code answer} replaces what the deltas added up to. */
+    /**
+     * Last line on success; {@code answer} replaces what the deltas added up to. {@code grounded} is present, as
+     * false, only for an answer that used retrieved content and marked none of it; absent means true.
+     */
     record Done(String type, String answer, List<CitationView> citations,
                 @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId,
                 @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions,
-                @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean suggestionsReadOnly)
+                @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean suggestionsReadOnly,
+                @JsonInclude(JsonInclude.Include.NON_NULL) Boolean grounded)
         implements AgentStreamEvent {
         /** The same line naming the stored turn, so the client can send feedback on it. */
         public Done withTurnId(long id) {
-            return new Done(type, answer, citations, id, suggestions, suggestionsReadOnly);
+            return new Done(type, answer, citations, id, suggestions, suggestionsReadOnly, grounded);
         }
 
         /**
@@ -46,7 +50,7 @@ public sealed interface AgentStreamEvent {
          * the Q&A skill, which has no acting tool. Absent from the line when false, so older clients see no change.
          */
         public Done withSuggestionsReadOnly() {
-            return new Done(type, answer, citations, turnId, suggestions, true);
+            return new Done(type, answer, citations, turnId, suggestions, true, grounded);
         }
     }
 
@@ -75,11 +79,16 @@ public sealed interface AgentStreamEvent {
     }
 
     static Done done(String answer, List<CitationView> citations) {
-        return new Done("done", answer, citations, null, List.of(), false);
+        return new Done("done", answer, citations, null, List.of(), false, null);
     }
 
     static Done done(String answer, List<CitationView> citations, List<String> suggestions) {
-        return new Done("done", answer, citations, null, suggestions, false);
+        return new Done("done", answer, citations, null, suggestions, false, null);
+    }
+
+    /** {@code grounded} false is sent as {@code "grounded": false}; true leaves the field out, as before. */
+    static Done done(String answer, List<CitationView> citations, List<String> suggestions, boolean grounded) {
+        return new Done("done", answer, citations, null, suggestions, false, grounded ? null : Boolean.FALSE);
     }
 
     static Error error(String messageCode, String message) {

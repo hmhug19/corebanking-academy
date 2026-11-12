@@ -346,7 +346,7 @@ public class AgentService {
             finished = new FinishedAnswer(EMPTY_ANSWER, List.of());
         }
         AgentStreamEvent.Done done = AgentStreamEvent.done(finished.answer(), finished.citations(),
-            split.suggestions());
+            split.suggestions(), finished.grounded());
         emit(output, turnLog, readShared && !split.suggestions().isEmpty() ? done.withSuggestionsReadOnly() : done);
     }
 

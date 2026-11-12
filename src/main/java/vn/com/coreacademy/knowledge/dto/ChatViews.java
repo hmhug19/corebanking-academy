@@ -31,7 +31,11 @@ public final class ChatViews {
                                  long lessonId, String lessonTitle, long blockId, String url) {
     }
 
-    @Schema(description = "Câu trả lời; citations là các đoạn được ghi [n] trong answer; found=false thì rỗng.")
-    public record ChatAnswerView(String answer, boolean found, List<CitationView> citations) {
+    @Schema(description = "Câu trả lời; citations là các đoạn được ghi [n] trong answer; found=false thì rỗng. "
+        + "grounded=false: câu trả lời dùng tài liệu nhưng không ghi [n] nào, nên không có nguồn.")
+    public record ChatAnswerView(String answer, boolean found, List<CitationView> citations, boolean grounded) {
+        public ChatAnswerView(String answer, boolean found, List<CitationView> citations) {
+            this(answer, found, citations, true);
+        }
     }
 }

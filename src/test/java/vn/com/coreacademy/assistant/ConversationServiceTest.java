@@ -29,6 +29,7 @@ import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.conversation.TurnRepository;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -203,6 +204,45 @@ class ConversationServiceTest {
         assertThat(logs.lines()).isNotEmpty();
         assertThat(logs.lines()).allSatisfy(line -> assertThat(line)
             .doesNotContain("bí mật").doesNotContain("12345").doesNotContain("67890"));
+    }
+
+    @Test
+    void earlierAnswersLoseTheirSourceMarkersBeforeTheyReachTheModel() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        when(turns.findByConversationIdAndStatusOrderByIdDesc(any(), anyString(), any(Pageable.class)))
+            .thenReturn(List.of(done("q1", "CIF là mã khách hàng [1]. Còn GL [2][3] và [1, 2] nữa [4].")));
+
+        Conversations.Opened opened = service.open(ME, 5L, "tiếp");
+
+        assertThat(opened.history().get(0).answer()).isEqualTo("CIF là mã khách hàng. Còn GL và nữa.")
+            .doesNotContain("[");
+    }
+
+    @Test
+    void aStoredAnswerThatUsedChunksButCitedNothingReadsAsNotGroundedAfterReopening() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        AssistantTurn ungrounded = done("Hỏi", "CIF là mã khách hàng.");
+        ungrounded.setId(1L);
+        ungrounded.setRetrievalTrace("[{\"tool\":\"search_documents\",\"candidates\":1,\"given\":"
+            + "[{\"kind\":\"document\",\"chunkId\":9,\"rank\":1,\"similarity\":0.8}]}]");
+        AssistantTurn cited = done("Hỏi", "CIF là mã khách hàng [1].");
+        cited.setId(2L);
+        cited.setCitations("[{\"n\":1,\"documentId\":3,\"fileName\":\"a.pdf\",\"snippet\":\"s\"}]");
+        cited.setRetrievalTrace(ungrounded.getRetrievalTrace());
+        AssistantTurn noSearch = done("Chào", "Xin chào!");
+        noSearch.setId(3L);
+        AssistantTurn notFound = done("Hỏi", NotFoundAnswer.TEXT);
+        notFound.setId(4L);
+        notFound.setRetrievalTrace(ungrounded.getRetrievalTrace());
+        AssistantTurn explained = done("Giải thích", "Đáp án đúng vì…");
+        explained.setId(5L);
+        explained.setRetrievalTrace(ungrounded.getRetrievalTrace().replace("search_documents", "explain"));
+        when(turns.findByConversationIdOrderByIdAsc(5L))
+            .thenReturn(List.of(ungrounded, cited, noSearch, notFound, explained));
+
+        var views = service.get(ME, 5L).turns();
+
+        assertThat(views).extracting(view -> view.grounded()).containsExactly(false, null, null, null, null);
     }
 
     @Test

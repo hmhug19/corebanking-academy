@@ -604,6 +604,30 @@ class AgentServiceTest {
     }
 
     @Test
+    void anUngroundedAnswerEndsWithGroundedFalseAndAGroundedOneLeavesTheFieldOut() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> {
+            turn.finishWith(answer -> new FinishedAnswer(answer, List.of(), false));
+            return new ToolOutcome.Result("[1] tài liệu");
+        });
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("CIF là mã.", List.of()));
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        JsonNode done = events.get(events.size() - 1);
+        assertThat(done.path("grounded").asBoolean(true)).isFalse();
+        assertThat(done.path("citations").size()).isZero();
+    }
+
+    @Test
+    void aGroundedDoneLineHasNoGroundedField() throws IOException {
+        modelAnswers(List.of("Xin chào"), List.of());
+
+        List<JsonNode> events = events(ask("Chào"));
+
+        assertThat(events.get(events.size() - 1).has("grounded")).isFalse();
+    }
+
+    @Test
     void aBlankAnswerAfterASearchWithSourcesIsTheFallbackWithNoCitations() throws IOException {
         tool("search_documents", true, true, false, (arguments, turn) -> {
             turn.finishWith(answer -> new FinishedAnswer(answer, List.of(

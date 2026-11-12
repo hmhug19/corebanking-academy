@@ -9,8 +9,7 @@ import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.knowledge.chunking.TokenEstimator;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
-import vn.com.coreacademy.knowledge.service.CitationSelector;
-import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
+import vn.com.coreacademy.knowledge.service.CitationRule;
 
 /**
  * The chunks retrieved in one turn, numbered [1]…[n] in the order they were first seen. The numbers are the ones the
@@ -85,21 +84,10 @@ public final class RetrievedChunks {
         return hits.isEmpty();
     }
 
-    /**
-     * Nothing retrieved in the whole turn, or the model saying so, is the fixed sentence with no sources whatever else
-     * the model wrote; so is an answer with no [n] marker that says it in its own words. Otherwise the sources are only
-     * the chunks the answer marks, from their metadata: unlike kb-chat, an answer with no usable marker cites nothing.
-     */
+    /** The turn's answer under the shared {@link CitationRule}: sources are only the chunks the answer marks. */
     public FinishedAnswer finish(String answer) {
-        Set<Integer> cited = CitationSelector.citedNumbers(answer, hits.size());
-        if (hits.isEmpty() || NotFoundAnswer.isNotFound(answer)
-            || cited.isEmpty() && NotFoundAnswer.saysNothingWasFound(answer)) {
-            return new FinishedAnswer(NotFoundAnswer.TEXT, List.of());
-        }
-        if (cited.isEmpty()) {
-            return new FinishedAnswer(answer, List.of());
-        }
+        CitationRule.Outcome outcome = CitationRule.apply(answer, hits);
 
-        return new FinishedAnswer(answer, CitationSelector.select(answer, hits));
+        return new FinishedAnswer(outcome.answer(), outcome.citations(), outcome.grounded());
     }
 }

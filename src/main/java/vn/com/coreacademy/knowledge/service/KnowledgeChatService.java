@@ -208,7 +208,7 @@ public class KnowledgeChatService {
         Suggestions.Split split = Suggestions.split(text.toString().strip());
         ChatAnswerView answer = conclude(split.answer(), retrieval.hits());
         emit(output, turnLog, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations(),
-            answer.found() ? split.suggestions() : List.of()));
+            answer.found() ? split.suggestions() : List.of(), answer.grounded()));
     }
 
     private static List<TurnRecord.Given> rankedGiven(List<ChunkHit> hits) {
@@ -310,11 +310,9 @@ public class KnowledgeChatService {
     }
 
     private ChatAnswerView conclude(String text, List<ChunkHit> hits) {
-        if (NotFoundAnswer.isNotFound(text)) {
-            return notFound();
-        }
+        CitationRule.Outcome outcome = CitationRule.apply(text, hits);
 
-        return new ChatAnswerView(text, true, CitationSelector.select(text, hits));
+        return new ChatAnswerView(outcome.answer(), outcome.found(), outcome.citations(), outcome.grounded());
     }
 
     /** The best {@code limit} hits whose text differs, best first; a copy of a file already seen adds nothing. */

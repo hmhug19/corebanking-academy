@@ -228,11 +228,43 @@ class KnowledgeChatServiceTest {
     }
 
     @Test
-    void withoutAUsableMarkerEveryRetrievedChunkIsASource() {
+    void withoutAUsableMarkerTheAnswerIsKeptWithNoSourcesAndIsNotGrounded() {
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn, chỉ [9] và [12345678901].");
 
-        assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
+        ChatAnswerView answer = service.answer("Hỏi");
+
+        assertThat(answer.found()).isTrue();
+        assertThat(answer.grounded()).isFalse();
+        assertThat(answer.answer()).isEqualTo("Không có dấu nguồn, chỉ [9] và [12345678901].");
+        assertThat(answer.citations()).isEmpty();
+    }
+
+    @Test
+    void aMarkedAnswerIsGrounded() {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
+        when(ollama.chat(anyList(), any())).thenReturn("CIF [1].");
+
+        assertThat(service.answer("Hỏi").grounded()).isTrue();
+    }
+
+    @Test
+    void streamDoneCarriesGroundedFalseOnlyWhenTheAnswerHasNoMarker() throws IOException {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
+        streamDeltas("CIF là mã khách hàng.");
+
+        List<JsonNode> first = run(service.stream("Hỏi"));
+        JsonNode ungrounded = first.get(first.size() - 1);
+
+        assertThat(ungrounded.path("type").asText()).isEqualTo("done");
+        assertThat(ungrounded.path("found").asBoolean()).isTrue();
+        assertThat(ungrounded.path("grounded").asBoolean(true)).isFalse();
+        assertThat(ungrounded.path("citations")).isEmpty();
+
+        streamDeltas("CIF là mã khách hàng [1].");
+        List<JsonNode> second = run(service.stream("Hỏi"));
+        JsonNode grounded = second.get(second.size() - 1);
+        assertThat(grounded.has("grounded")).isFalse();
     }
 
     @Test
@@ -267,7 +299,7 @@ class KnowledgeChatServiceTest {
             .mapToObj(i -> new ChunkHit(10 + i, 50 + i, "f" + i + ".md", null, 1, 1, "Đoạn " + i, 0.9 - i * 0.01))
             .toList();
         when(chunks.search(any(), anyInt(), any())).thenReturn(many);
-        when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn.");
+        when(ollama.chat(anyList(), any())).thenReturn("Đoạn [1][2][3][4][5][6].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2, 3, 4, 5);
     }
@@ -319,7 +351,7 @@ class KnowledgeChatServiceTest {
         String content = ("từ ").repeat(200);
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(
             new ChunkHit(1, 1, "a.md", null, 1, 2, content, 0.9)));
-        when(ollama.chat(anyList(), any())).thenReturn("ok");
+        when(ollama.chat(anyList(), any())).thenReturn("ok [1]");
 
         String snippet = service.answer("Hỏi").citations().get(0).snippet();
 
