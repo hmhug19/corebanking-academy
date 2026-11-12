@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant.dto;
 
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -21,7 +22,8 @@ public sealed interface AgentStreamEvent {
     }
 
     /** The app navigates to {@code path}, a route the server took from the user's own screens. */
-    record Navigate(String type, String path, String title) implements AgentStreamEvent {
+    record Navigate(String type, String path, String title,
+                    @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, Object> prefill) implements AgentStreamEvent {
     }
 
     /** A data change waits for the user's confirmation. */
@@ -54,8 +56,8 @@ public sealed interface AgentStreamEvent {
         return new Delta("delta", text);
     }
 
-    static Navigate navigate(String path, String title) {
-        return new Navigate("navigate", path, title);
+    static Navigate navigate(String path, String title, Map<String, Object> prefill) {
+        return new Navigate("navigate", path, title, prefill);
     }
 
     static ActionRequired actionRequired(PendingActionView action) {

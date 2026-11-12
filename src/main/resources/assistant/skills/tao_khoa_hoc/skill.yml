@@ -1,8 +1,8 @@
-description: tạo khóa học nháp từ một tài liệu nguồn (chỉ giảng viên và quản trị)
+description: mở form Khóa học mới điền sẵn từ tin nhắn để tạo khóa học bằng AI (chỉ giảng viên và quản trị)
 tools:
-  - start_course_job
+  - open_course_form
 roles:
   - INSTRUCTOR
   - ADMIN
   - SUPER_ADMIN
-output: Báo đã bắt đầu tạo khóa học và đưa liên kết tới màn hình rà soát. Bắt buộc gọi công cụ tạo khóa học trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
+output: Báo đã mở form Khóa học mới và nhắc bấm "Tạo bằng AI" sau khi chọn chương trình và năng lực. Bắt buộc gọi công cụ mở form trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.

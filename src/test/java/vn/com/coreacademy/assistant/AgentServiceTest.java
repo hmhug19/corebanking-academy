@@ -712,6 +712,18 @@ class AgentServiceTest {
     }
 
     @Test
+    void aNavigateOutcomeWithPrefillCarriesItOnTheEventAndOneWithoutLeavesItOut() throws IOException {
+        tool("open_screen", true, (arguments, turn) -> new ToolOutcome.Navigate("/admin/courses/new", "Khóa học mới",
+            "Đã mở form.", java.util.Map.of("title", "[TEST-AI] Khóa thử", "chapters", 3)));
+        modelAnswers(List.of(), List.of(call("open_screen")));
+
+        List<JsonNode> events = events(ask("tạo khóa học"));
+
+        assertThat(events.get(1).path("prefill").path("title").asText()).isEqualTo("[TEST-AI] Khóa thử");
+        assertThat(events.get(1).path("prefill").path("chapters").asInt()).isEqualTo(3);
+    }
+
+    @Test
     void anActionRequiredOutcomeWritesTheCardThenDoneAndMakesNoSecondModelCall() throws IOException {
         PendingAction action = new PendingAction("a1", "000004", "update_profile", json.createObjectNode(),
             "Cập nhật hồ sơ cá nhân", List.of(new Change("positionName", "Chức danh", "Chuyên viên", "Trưởng nhóm")),

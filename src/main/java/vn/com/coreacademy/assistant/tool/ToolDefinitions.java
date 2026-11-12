@@ -16,7 +16,7 @@ public final class ToolDefinitions {
     public static final String SEARCH_COMMUNITY = "search_community";
     public static final String OPEN_SCREEN = "open_screen";
     public static final String UPDATE_PROFILE = "update_profile";
-    public static final String START_COURSE_JOB = "start_course_job";
+    public static final String OPEN_COURSE_FORM = "open_course_form";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -104,27 +104,25 @@ public final class ToolDefinitions {
                 + "Thay đổi chỉ có hiệu lực sau khi người dùng bấm xác nhận.", parameters);
     }
 
-    public static ToolDefinition startCourseJob() {
+    public static ToolDefinition openCourseForm() {
         ObjectNode parameters = object();
         parameters.put("additionalProperties", false);
         ObjectNode properties = parameters.putObject("properties");
+        properties.putObject("title").put("type", "string").put("maxLength", 200)
+            .put("description", "Tên khóa học nếu người dùng đã nói. Không tự đặt.");
         properties.putObject("targetLearners").put("type", "string").put("maxLength", 500)
-            .put("description", "Đối tượng học viên của khóa, ví dụ: giao dịch viên mới vào làm.");
+            .put("description", "Đối tượng học viên nếu người dùng đã nói, ví dụ: giao dịch viên mới vào làm.");
         properties.putObject("level").put("type", "string")
             .set("enum", JSON.createArrayNode().add("BEGINNER").add("INTERMEDIATE").add("ADVANCED"));
         properties.putObject("chapters").put("type", "integer").put("minimum", 1).put("maximum", 20)
-            .put("description", "Số chương mong muốn. Cần số chương hoặc thời lượng.");
+            .put("description", "Số chương nếu người dùng đã nói.");
         properties.putObject("durationMinutes").put("type", "integer").put("minimum", 15).put("maximum", 1200)
-            .put("description", "Tổng thời lượng mong muốn, phút.");
-        properties.putObject("programmeName").put("type", "string")
-            .put("description", "Tên chương trình đào tạo do người dùng nói. Không tự đoán.");
-        properties.putObject("competencyName").put("type", "string")
-            .put("description", "Tên năng lực gán cho câu hỏi do người dùng nói. Không tự đoán.");
+            .put("description", "Tổng thời lượng mong muốn, phút, nếu người dùng đã nói.");
 
-        return new ToolDefinition(START_COURSE_JOB,
-            "Bắt đầu tạo khóa học nháp từ tệp tài liệu người dùng đã đính kèm. Chỉ gọi khi người dùng muốn tạo khóa học; "
-                + "hỏi người dùng những thông tin còn thiếu thay vì tự đặt. Công cụ chỉ đề xuất, người dùng xác nhận "
-                + "bằng thẻ bên dưới.", parameters);
+        return new ToolDefinition(OPEN_COURSE_FORM,
+            "Mở form Khóa học mới để tạo khóa học bằng AI, điền sẵn những gì người dùng đã nói trong tin nhắn. "
+                + "Gọi ngay khi người dùng muốn tạo khóa học; không hỏi thêm, không tra chương trình hay năng lực, "
+                + "chỉ gửi trường người dùng đã nói.", parameters);
     }
 
     private static ObjectNode object() {

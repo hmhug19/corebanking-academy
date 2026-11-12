@@ -317,7 +317,7 @@ public class AgentService {
 
     private boolean end(OutputStream output, TurnLog turnLog, ToolOutcome outcome) {
         if (outcome instanceof ToolOutcome.Navigate navigate) {
-            emit(output, turnLog, AgentStreamEvent.navigate(navigate.path(), navigate.title()));
+            emit(output, turnLog, AgentStreamEvent.navigate(navigate.path(), navigate.title(), navigate.prefill()));
             emit(output, turnLog, AgentStreamEvent.done(navigate.text(), List.of()));
             return true;
         }

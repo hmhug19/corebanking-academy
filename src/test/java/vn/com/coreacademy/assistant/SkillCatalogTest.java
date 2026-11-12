@@ -33,7 +33,7 @@ class SkillCatalogTest {
     void anExampleReplyNeverShowsAToolCallAsText() {
         SkillCatalog catalog = new SkillCatalog();
         Set<String> toolNames = Stream.concat(catalog.all().stream().flatMap(skill -> skill.tools().stream()),
-            Stream.of("start_course_job", "open_course_form")).collect(java.util.stream.Collectors.toSet());
+            Stream.of("open_course_form")).collect(java.util.stream.Collectors.toSet());
 
         for (Skill skill : catalog.all()) {
             skill.examples().lines().filter(line -> line.startsWith("Trợ lý:")).forEach(reply ->
@@ -78,7 +78,7 @@ class SkillCatalogTest {
     void noSharedPromptFileNamesATool() {
         SkillCatalog catalog = new SkillCatalog();
         Set<String> toolNames = Stream.concat(catalog.all().stream().flatMap(skill -> skill.tools().stream()),
-            Stream.of("start_course_job", "open_course_form")).collect(java.util.stream.Collectors.toSet());
+            Stream.of("open_course_form")).collect(java.util.stream.Collectors.toSet());
 
         for (String shared : List.of(catalog.style(), catalog.suggestions(), catalog.explainPrompt())) {
             assertThat(toolNames).noneMatch(shared::contains);
