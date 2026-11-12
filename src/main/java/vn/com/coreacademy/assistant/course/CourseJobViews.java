@@ -53,7 +53,9 @@ public final class CourseJobViews {
     }
 
     public record JobSummary(long jobId, String status, String step, int progress, String error, String sourceFileName,
-                             Long createdDraftId, OffsetDateTime createTime) {
+                             Long createdDraftId, OffsetDateTime createTime,
+                             @Schema(description = "Khóa học nháp job ghi nội dung vào; để form khóa học tìm job của mình.")
+                             Long courseId) {
     }
 
     public record LessonView(String key, String title, String status, String error,

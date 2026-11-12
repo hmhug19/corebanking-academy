@@ -143,7 +143,7 @@ public class CourseJobService {
             .filter(java.util.Objects::nonNull).toList());
 
         return rows.stream().map(row -> new JobSummary(row.id(), row.status(), row.step(), row.progress(),
-            row.errorMessage(), name(sources, row), row.createdDraftId(), row.createTime())).toList();
+            row.errorMessage(), name(sources, row), row.createdDraftId(), row.createTime(), row.courseId())).toList();
     }
 
     /** Stops a job that has not finished; what was generated so far stays visible, nothing more is generated. */
