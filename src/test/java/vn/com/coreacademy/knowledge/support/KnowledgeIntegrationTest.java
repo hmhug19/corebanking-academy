@@ -50,7 +50,7 @@ public abstract class KnowledgeIntegrationTest {
                     "/docker-entrypoint-initdb.d/04c-assistant-feedback.sql")
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-knowledge-document-scope.sql"),
-                    "/docker-entrypoint-initdb.d/04z-knowledge-document-scope.sql")
+                    "/docker-entrypoint-initdb.d/04x-knowledge-document-scope.sql")
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-course-content-index.sql"),
                     "/docker-entrypoint-initdb.d/04y-course-content-index.sql")

@@ -46,7 +46,7 @@ public class KnowledgeDocument extends CreatedEntity {
     @Convert(converter = DocumentStatusConverter.class)
     private DocumentStatus status = DocumentStatus.QUEUED;
 
-    @Column(name = "scope", length = 10, nullable = false)
+    @Column(name = "scope", length = 20, nullable = false)
     @Convert(converter = DocumentScopeConverter.class)
     private DocumentScope scope = DocumentScope.PERSONAL;
 

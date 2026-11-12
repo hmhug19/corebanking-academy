@@ -7,6 +7,8 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
+-- 'course_source' is 13 characters; the column was varchar(10).
+ALTER TABLE learning_hub.knowledge_documents ALTER COLUMN scope TYPE varchar(20);
 ALTER TABLE learning_hub.knowledge_documents DROP CONSTRAINT IF EXISTS ck_knowledge_documents_scope;
 ALTER TABLE learning_hub.knowledge_documents ADD CONSTRAINT ck_knowledge_documents_scope CHECK (
     scope IN ('personal', 'unit', 'global', 'course_source') AND (scope = 'unit') = (scope_org_id IS NOT NULL));
