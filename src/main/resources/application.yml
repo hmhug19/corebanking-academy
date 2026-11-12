@@ -96,6 +96,7 @@ app:
       jobs-per-day: ${ASSISTANT_GENERATION_JOBS_PER_DAY:3}
       poll-interval: ${ASSISTANT_GENERATION_POLL:3s}
       source-retention: ${ASSISTANT_GENERATION_SOURCE_RETENTION:30d}
+      model-call-timeout: ${ASSISTANT_GENERATION_CALL_TIMEOUT:90s}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 30

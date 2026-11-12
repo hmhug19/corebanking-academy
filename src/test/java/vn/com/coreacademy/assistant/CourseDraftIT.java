@@ -81,7 +81,7 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         badAnswers.set(0);
         badLessons = false;
         when(ollama.isAvailable()).thenReturn(true);
-        when(ollama.chat(any(), any(), any())).thenAnswer(invocation -> {
+        when(ollama.chat(any(), any(), any(), any())).thenAnswer(invocation -> {
             List<Message> messages = invocation.getArgument(0);
             if (messages == null) {
                 return null;

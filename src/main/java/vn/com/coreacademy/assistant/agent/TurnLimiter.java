@@ -101,6 +101,11 @@ public class TurnLimiter {
         return true;
     }
 
+    /** True while any chat turn is running: background work such as course generation starts nothing meanwhile. */
+    public boolean chatRunning() {
+        return !running.isEmpty();
+    }
+
     /** Null when the question was counted; otherwise how long until the user may ask again. */
     private Duration recordQuestion(String userId) {
         Instant now = clock.instant();

@@ -9,6 +9,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.StepRow;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
@@ -33,15 +34,17 @@ public class CourseGenerationWorker {
     private final OllamaClient ollama;
     private final TransactionTemplate transaction;
     private final AssistantMetrics metrics;
+    private final TurnLimiter chat;
 
     public CourseGenerationWorker(CourseJobRepository jobs, ObjectProvider<GenerationStepRunner> runner,
                                   OllamaClient ollama, TransactionTemplate transaction,
-                                  AssistantMetrics metrics) {
+                                  AssistantMetrics metrics, TurnLimiter chat) {
         this.jobs = jobs;
         this.runner = runner;
         this.ollama = ollama;
         this.transaction = transaction;
         this.metrics = metrics;
+        this.chat = chat;
     }
 
     /** A previous run that stopped mid-step leaves it running; it goes back to pending and the job resumes there. */
@@ -65,9 +68,12 @@ public class CourseGenerationWorker {
         }
     }
 
-    /** Runs the next step if one may run now; false when there is nothing to do or the model is unreachable. */
+    /**
+     * Runs the next step if one may run now; false when there is nothing to do, the model is unreachable or a chat turn
+     * is running (chat keeps priority: the step waits for the next poll and no step is claimed meanwhile).
+     */
     public boolean runOnce() {
-        if (!ollama.isAvailable()) {
+        if (chat.chatRunning() || !ollama.isAvailable()) {
             return false;
         }
         Optional<StepRow> claimed = transaction.execute(status -> jobs.claimNext());

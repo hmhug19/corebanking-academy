@@ -123,12 +123,18 @@ public class OllamaClient {
      * parses and has the schema's fields, so the answer is the JSON itself. {@code format} null leaves it free.
      */
     public String chat(List<Message> messages, Options options, JsonNode format) {
+        return chat(messages, options, format, null);
+    }
+
+    /** As above with its own read timeout for this call; null keeps the configured one. */
+    public String chat(List<Message> messages, Options options, JsonNode format, Duration readTimeout) {
         long started = System.nanoTime();
         Map<String, Object> body = chatBody(messages, options, false);
         if (format != null) {
             body.put("format", format);
         }
-        JsonNode response = post("/api/chat", body, JsonNode.class);
+        JsonNode response = post(readTimeout == null ? client : restClient(config.connectTimeout(), readTimeout),
+            "/api/chat", body, JsonNode.class);
         log.info("Ollama chat model={} messages={} durationMs={}", config.chatModel(), messages.size(),
             millisSince(started));
         return response.path("message").path("content").asText("");
@@ -309,8 +315,12 @@ public class OllamaClient {
     }
 
     private <T> T post(String path, Object body, Class<T> type) {
+        return post(client, path, body, type);
+    }
+
+    private <T> T post(RestClient http, String path, Object body, Class<T> type) {
         try {
-            return client.post().uri(path).contentType(MediaType.APPLICATION_JSON).body(body).retrieve()
+            return http.post().uri(path).contentType(MediaType.APPLICATION_JSON).body(body).retrieve()
                 .body(type);
         } catch (ResourceAccessException exception) {
             throw new OllamaUnavailableException("Ollama is not reachable", exception);
