@@ -26,6 +26,12 @@ public interface Conversations {
     void requireOwned(String ownerId, Long conversationId);
 
     /**
+     * The question of the owner's latest finished turn in {@code conversationId}, or null when none was named or it has
+     * none yet. Read-only: the document chat uses it to search a follow-up in context before the turn is admitted.
+     */
+    String previousQuestion(String ownerId, Long conversationId);
+
+    /**
      * Starts a new conversation titled from {@code question} when {@code conversationId} is null; otherwise loads the
      * owner's conversation. The history is the done turns that fit {@link #HISTORY_CHARS} within the history token budget ({@code app.assistant.budget.history}).
      */

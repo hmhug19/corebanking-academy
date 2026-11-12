@@ -436,7 +436,7 @@ class KnowledgeChatServiceTest {
     }
 
     @Test
-    void aFollowUpGivesTheModelTheEarlierTurnsButRetrievesWithTheNewQuestionAlone() throws IOException {
+    void aFollowUpGivesTheModelTheEarlierTurnsAndSearchesWithThePreviousQuestionAndTheNewOne() throws IOException {
         long id = conversations.seed(USER, "CIF là gì?", "CIF là mã khách hàng [1].");
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         streamDeltas("Có [1].");
@@ -451,7 +451,33 @@ class KnowledgeChatServiceTest {
         assertThat(sent.getValue().get(1).content()).isEqualTo("CIF là gì?");
         assertThat(sent.getValue().get(2).content()).isEqualTo("CIF là mã khách hàng [1].");
         assertThat(sent.getValue().get(3).content()).contains("NGỮ CẢNH:").endsWith("CÂU HỎI: Còn ngoại lệ?");
-        verify(ollama).embed(List.of("Còn ngoại lệ?"));
+        verify(ollama).embed(List.of("CIF là gì?\nCòn ngoại lệ?"));
+        // The model is still asked the new question alone; only the search looked back.
+        assertThat(sent.getValue().get(3).content()).doesNotContain("CIF là gì?\nCòn");
+        assertThat(conversations.lastRecord().question()).isEqualTo("Còn ngoại lệ?");
+    }
+
+    @Test
+    void theFirstQuestionOfAConversationIsSearchedAloneAsBefore() throws IOException {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
+        streamDeltas("Có [1].");
+
+        run(service.stream("CIF là gì?", null));
+
+        verify(ollama).embed(List.of("CIF là gì?"));
+    }
+
+    @Test
+    void aLongPreviousQuestionIsCutSoTheSearchTextStaysBounded() throws IOException {
+        long id = conversations.seed(USER, "x".repeat(900), "Đáp [1].");
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
+        streamDeltas("Có [1].");
+
+        run(service.stream("Còn ngoại lệ?", id));
+
+        ArgumentCaptor<List<String>> embedded = ArgumentCaptor.captor();
+        verify(ollama).embed(embedded.capture());
+        assertThat(embedded.getValue().get(0)).isEqualTo("x".repeat(300) + "\nCòn ngoại lệ?");
     }
 
     @Test

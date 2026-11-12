@@ -156,6 +156,18 @@ class ConversationServiceTest {
     }
 
     @Test
+    void previousQuestionIsTheLastDoneTurnOfTheOwnersConversationAndNullOtherwise() {
+        when(conversations.existsByIdAndOwnerId(5L, ME)).thenReturn(true);
+        when(turns.findByConversationIdAndStatusOrderByIdDesc(any(), anyString(), any(Pageable.class)))
+            .thenReturn(List.of(done("q2", "a2")), List.of());
+
+        assertThat(service.previousQuestion(ME, 5L)).isEqualTo("q2");
+        assertThat(service.previousQuestion(ME, 5L)).isNull();
+        assertThat(service.previousQuestion(ME, null)).isNull();
+        assertThatThrownBy(() -> service.previousQuestion(THEM, 5L)).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
     void historyKeepsTheNewestWholeExchangesThatFitTheTokenBudgetOldestFirst() {
         when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
         // Newest first, as the repository returns them: 4 exchanges of about 800 tokens each.

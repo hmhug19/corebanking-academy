@@ -75,6 +75,15 @@ public class KnowledgeChatService {
 
     /** Validate, embed, search, filter. Refusals are thrown so a caller can still answer with an envelope. */
     public Retrieval retrieve(String rawQuestion) {
+        return retrieve(rawQuestion, null);
+    }
+
+    /**
+     * As {@link #retrieve(String)}; inside a conversation the search text is the previous question and the new one,
+     * so "còn trường hợp ngoại lệ?" is searched in context. No extra model call; the model still gets the new
+     * question alone.
+     */
+    public Retrieval retrieve(String rawQuestion, String previousQuestion) {
         String question = rawQuestion == null ? "" : rawQuestion.strip();
         if (question.isEmpty() || question.length() > MAX_QUESTION_LENGTH) {
             throw BusinessException.validation("question", "OUT_OF_RANGE", "Câu hỏi phải từ 1 đến 300 ký tự.");
@@ -83,7 +92,7 @@ public class KnowledgeChatService {
         DocumentVisibility visibility = access.visibility(SecurityContextUtils.getUserId());
         List<ChunkHit> hits;
         try {
-            float[] vector = ollama.embed(List.of(question)).get(0);
+            float[] vector = ollama.embed(List.of(searchText(question, previousQuestion))).get(0);
             KnowledgeProperties.Retrieval retrieval = properties.retrieval();
             List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR, visibility).stream()
                 .filter(hit -> hit.similarity() >= retrieval.minSimilarity()).toList();
@@ -98,6 +107,16 @@ public class KnowledgeChatService {
         log.info("Knowledge retrieval questionLength={} hits={}", question.length(), hits.size());
 
         return new Retrieval(question, hits);
+    }
+
+    private static String searchText(String question, String previousQuestion) {
+        if (previousQuestion == null || previousQuestion.isBlank()) {
+            return question;
+        }
+        String previous = previousQuestion.strip();
+
+        return (previous.length() > MAX_QUESTION_LENGTH ? previous.substring(0, MAX_QUESTION_LENGTH) : previous)
+            + "\n" + question;
     }
 
     /** One complete answer, the contract of record for tests and tooling. */
@@ -142,12 +161,12 @@ public class KnowledgeChatService {
     /**
      * Retrieval runs now, on the request thread, so refusals are still ordinary envelopes. Generation runs inside the
      * returned body: one JSON line per event, flushed at once. The first line names the conversation; the earlier
-     * turns of that conversation go to the model as plain history, retrieval still uses the new question alone.
+     * turns of that conversation go to the model as plain history, and the search text adds the previous question.
      */
     public StreamingResponseBody stream(String rawQuestion, Long conversationId) {
         String userId = SecurityContextUtils.getUserId();
         conversations.requireOwned(userId, conversationId);
-        Retrieval retrieval = retrieve(rawQuestion);
+        Retrieval retrieval = retrieve(rawQuestion, conversations.previousQuestion(userId, conversationId));
         return output -> {
             TurnLimiter.Admission admission = limiter.admit(userId);
             if (!(admission instanceof TurnLimiter.Admission.Started started)) {

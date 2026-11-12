@@ -43,6 +43,18 @@ public class InMemoryConversations implements Conversations {
     }
 
     @Override
+    public String previousQuestion(String ownerId, Long conversationId) {
+        requireOwned(ownerId, conversationId);
+        if (conversationId == null) {
+            return null;
+        }
+
+        return turns.get(conversationId).stream()
+            .filter(turn -> turn.status() == TurnRecord.Status.DONE && turn.answer() != null)
+            .reduce((first, second) -> second).map(TurnRecord::question).orElse(null);
+    }
+
+    @Override
     public Opened open(String ownerId, Long conversationId, String question) {
         requireOwned(ownerId, conversationId);
         if (conversationId == null) {

@@ -96,6 +96,18 @@ public class ConversationService implements Conversations {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public String previousQuestion(String ownerId, Long conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        requireOwned(ownerId, conversationId);
+
+        return turns.findByConversationIdAndStatusOrderByIdDesc(conversationId, TurnRecord.Status.DONE.name(),
+            PageRequest.of(0, 1)).stream().map(AssistantTurn::getQuestion).findFirst().orElse(null);
+    }
+
+    @Override
     @Transactional
     public Opened open(String ownerId, Long conversationId, String question) {
         return open(ownerId, conversationId, question, null);
