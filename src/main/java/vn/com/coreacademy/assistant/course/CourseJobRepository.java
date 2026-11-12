@@ -229,17 +229,6 @@ public class CourseJobRepository {
             + "WHERE job_id = ?", jobId);
     }
 
-    /** A document the user uploaded for themselves that no job uses yet. */
-    public boolean isFreePersonalDocument(long documentId, String userId) {
-        Integer n = jdbc.queryForObject("""
-            SELECT count(*) FROM learning_hub.knowledge_documents d
-             WHERE d.document_id = ? AND d.uploaded_by = ? AND d.scope = 'personal'
-               AND NOT EXISTS (SELECT 1 FROM learning_hub.course_generation_jobs j WHERE j.source_document_id = d.document_id)
-            """, Integer.class, documentId, userId);
-
-        return n != null && n > 0;
-    }
-
     public Optional<DocumentInfo> document(long documentId) {
         return Optional.ofNullable(documents(List.of(documentId)).get(documentId));
     }

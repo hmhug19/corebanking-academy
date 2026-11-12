@@ -84,19 +84,6 @@ public class CourseJobService {
         }
     }
 
-    /**
-     * The same job, for a file the caller already uploaded as their own personal document (the chat composer does that
-     * first). The document must be theirs and not used by another job; the same checks and limits apply.
-     */
-    public JobView createFromDocument(long documentId, Inputs requested) {
-        Prepared prepared = prepare(requested);
-        if (!jobs.isFreePersonalDocument(documentId, prepared.userId())) {
-            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
-        }
-
-        return queue(prepared, documentId);
-    }
-
     private record Prepared(String userId, long ownerOrgId, Inputs inputs) {
     }
 

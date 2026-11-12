@@ -200,15 +200,6 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void theDraftWaitsForTheQuestionsOfEveryLesson() throws Exception {
-        long job = approved().path("jobId").asLong();
-        jdbc.update("UPDATE learning_hub.course_generation_steps SET status = 'pending' "
-            + "WHERE job_id = ? AND kind = 'questions' AND item_key = 'c1l1'", job);
-
-        api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")), "CORE-VALIDATION_FAILED");
-    }
-
-    @Test
     void aLessonCannotBeRegeneratedWithoutEnd() throws Exception {
         long job = approved().path("jobId").asLong();
         jdbc.update("UPDATE learning_hub.course_generation_steps SET attempts = ? "
@@ -220,7 +211,7 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void nobodyButTheOwnerCanChangeOrDraftAJob() throws Exception {
+    void nobodyButTheOwnerCanChangeAJob() throws Exception {
         long job = approved().path("jobId").asLong();
         String other = "CORE-RESOURCE_NOT_FOUND";
 
@@ -229,7 +220,6 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         api.error(ADMIN, api.post(Map.of(), path(job, "/lessons/c1l1/regenerate")), other);
         api.error(ADMIN, api.put(Map.of("decision", "accepted"), path(job, "/questions/c1l1/0")), other);
         api.error(ADMIN, api.post(Map.of(), path(job, "/retry")), other);
-        api.error(ADMIN, api.post(Map.of(), path(job, "/draft")), other);
         api.error(ADMIN, api.post(Map.of(), path(job, "/cancel")), other);
         api.error(ADMIN, ApiClient.delete(JOBS + "/{id}", job), other);
 
@@ -281,31 +271,6 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void theDraftIsUnpublishedAiGeneratedAndOnlyAcceptedQuestionsReachTheBank() throws Exception {
-        long job = approved().path("jobId").asLong();
-        int questionsBefore = jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class);
-
-        api.ok(INSTRUCTOR, api.put(Map.of("decision", "accepted"), path(job, "/questions/c1l1/0")));
-        api.ok(INSTRUCTOR, api.put(Map.of("decision", "rejected"), path(job, "/questions/c1l1/1")));
-
-        JsonNode done = api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")));
-        long courseId = done.path("createdDraftId").asLong();
-        assertThat(done.path("status").asText()).isEqualTo("completed");
-        assertThat(jdbc.queryForMap("SELECT state, ai_generated FROM learning_hub.course_revisions "
-            + "WHERE course_id = ?", courseId)).containsEntry("state", "draft").containsEntry("ai_generated", true);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class))
-            .isEqualTo(questionsBefore + 1);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions WHERE content = 'Câu 2?'",
-            Integer.class)).isZero();
-
-        // asking again returns the same draft and writes nothing more
-        assertThat(api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft"))).path("createdDraftId").asLong())
-            .isEqualTo(courseId);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class))
-            .isEqualTo(questionsBefore + 1);
-    }
-
-    @Test
     void acceptingAProposalBanksItAtOnceAndBothDecisionsSurviveAReload() throws Exception {
         long job = approved().path("jobId").asLong();
         int before = jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class);
@@ -322,17 +287,6 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         assertThat(proposals.get(1).path("decision").asText()).isEqualTo("rejected");
         api.error(INSTRUCTOR, api.put(Map.of("decision", "rejected"), path(job, "/questions/c1l1/0")),
             "CORE-VALIDATION_FAILED");
-    }
-
-    @Test
-    void askingForQuestionsToBeBankedBeforeAnyWereProposedWritesNothing() throws Exception {
-        long job = startJob();
-        runAll();
-        int before = jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class);
-
-        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/draft")));
-
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class)).isEqualTo(before);
     }
 
     // ---- ticket 01: the job owns a draft course ---------------------------------------------------------------

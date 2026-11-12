@@ -20,7 +20,6 @@ import vn.com.coreacademy.assistant.course.CourseJobRepository.JobRow;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.StepRow;
 import vn.com.coreacademy.assistant.course.CourseJobViews.ContentView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.Inputs;
-import vn.com.coreacademy.assistant.course.CourseJobViews.JobView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.LessonView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.QuestionsView;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -31,9 +30,9 @@ import vn.com.coreacademy.learning.service.LearningAiOwnership;
 
 /**
  * What the author does with a generation job after the model has written something: edit and approve the outline,
- * regenerate a lesson, accept or reject proposed questions, and ask for the draft. The draft and the accepted
- * questions are written by the existing course and question services, as the author, so their access rules decide
- * again; nothing here publishes anything.
+ * regenerate a lesson, and accept or reject proposed questions. The course itself is written into its draft as the
+ * job goes, and an accepted question is banked at once, both by the existing course and question services, as the
+ * author, so their access rules decide again; nothing here publishes anything.
  */
 @Service
 @RequiredArgsConstructor
@@ -222,49 +221,6 @@ public class CourseDraftService {
         jobs.setOutput(step.id(), write(output));
 
         return content(jobId);
-    }
-
-    // ---- the questions ---------------------------------------------------------------------------------------------
-
-    /**
-     * Writes the accepted proposed questions to the question bank, with the programme and competency the author chose,
-     * once each (a written question is marked {@code added}), and returns the job. The course itself already exists:
-     * the job wrote it into the draft as it went, and nothing here publishes anything.
-     */
-    @Transactional
-    public JobView createDraft(long jobId) {
-        JobRow job = lock(jobId);
-        if (jobs.stepsOfKind(job.id(), CourseGenerationRunner.QUESTIONS).stream()
-            .anyMatch(step -> "pending".equals(step.status()) || "running".equals(step.status()))) {
-            throw refuse("QUESTIONS_NOT_READY", "Cần soạn xong câu hỏi cho mọi bài học trước khi thêm vào ngân hàng.");
-        }
-        writeAcceptedQuestions(job, read(job.inputs(), Inputs.class));
-
-        return owned.get(jobId);
-    }
-
-    private int writeAcceptedQuestions(JobRow job, Inputs inputs) {
-        int accepted = 0;
-        for (StepRow step : jobs.stepsOfKind(job.id(), CourseGenerationRunner.QUESTIONS)) {
-            if (step.output() == null) {
-                continue;
-            }
-            ObjectNode output = (ObjectNode) parse(step.output());
-            boolean changed = false;
-            for (JsonNode question : output.path("questions")) {
-                if (!"accepted".equals(question.path("decision").asText())) {
-                    continue;
-                }
-                bank((ObjectNode) question, inputs);
-                changed = true;
-                accepted++;
-            }
-            if (changed) {
-                jobs.setOutput(step.id(), write(output));
-            }
-        }
-
-        return accepted;
     }
 
     /** Writes one proposed question to the bank with the programme and competency the author chose; marks it added. */
