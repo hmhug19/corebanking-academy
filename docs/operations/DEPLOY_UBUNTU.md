@@ -10,6 +10,10 @@ Tính năng mới dùng hai bảng riêng và connector player riêng; cập nh�
 2. Đặt biến môi trường, ví dụ `SCORM_LMS_ORIGIN=https://academy.example.com` và
    `SCORM_PLAYER_ORIGIN=https://scorm.academy.example.com`. Hai origin bắt buộc khác nhau, không có path/trailing slash.
    Dùng hostname player riêng có HTTPS; không đưa bearer JWT vào URL hoặc cấu hình trình phát.
+   Hai file Compose Ubuntu/CI bắt buộc khai báo hai origin này; mặc định localhost chỉ dành cho Java chạy local.
+   API `POST /api/v1/scorm/packages/{id}/launch` tạo `launchUrl` từ `SCORM_PLAYER_ORIGIN`, FE không đổi host.
+   Nếu API vẫn trả `http://localhost:8020`, kiểm tra environment **trong container BE đang chạy**, không chỉ `.env` host.
+   Compose `--env-file` không tự truyền mọi biến vào container: cần cả mapping `environment` và recreate BE.
 3. Backend mở thêm connector nội bộ `8020`. `compose.ubuntu.yaml` expose port này trong Docker network `edge`;
    không publish ra Internet. Reverse proxy của hostname player trỏ vào `backend:8020` trong cùng network.
    Proxy hostname LMS vẫn trỏ vào `backend:8019`; không chuyển nội dung SCORM qua origin LMS.
@@ -29,6 +33,7 @@ Tính năng mới dùng hai bảng riêng và connector player riêng; cập nh�
    vào loopback rồi trỏ upstream tương ứng, không mở công khai cả backend connector.
    Không áp `X-Frame-Options: DENY/SAMEORIGIN` từ cấu hình proxy chung lên player: backend đặt CSP
    `frame-ancestors` cho đúng LMS origin. Giữ CSP/referrer-policy/nosniff của backend.
+   Tắt access log trong location player (`access_log off;`) vì URL chứa capability tạm thời.
 5. Build/chạy lại backend và frontend. Không chạy nhiều instance dùng cùng host port 8020.
    Local mặc định LMS `http://localhost:4200`, player `http://localhost:8020`; nếu dùng 127.0.0.1 thì
    đặt cả hai biến origin đúng theo địa chỉ browser. Player không dùng cookie bên thứ ba.
@@ -43,6 +48,42 @@ Gói mới là ID mới; không ghi đè nội dung có kết quả. Chưa có t
 
 Rollback ứng dụng: có thể quay về image FE/BE trước; giữ nguyên hai bảng SCORM để bảo toàn kết quả và S3.
 Không DROP bảng/xóa object để rollback. Module không tự đánh dấu hoàn thành các khóa học/chứng nhận cũ.
+
+### Cùng hostname, cổng HTTPS 8020
+
+Với LMS `https://chanacademy.io.vn`, có thể dùng player `https://chanacademy.io.vn:8020`;
+khác cổng nên vẫn là hai origin. Đặt trong `.env.ubuntu`:
+
+```dotenv
+SCORM_LMS_ORIGIN=https://chanacademy.io.vn
+SCORM_PLAYER_ORIGIN=https://chanacademy.io.vn:8020
+```
+
+Trong Nginx container web, thêm server TLS riêng; không publish port 8020 của BE lên host cùng lúc:
+
+```nginx
+server {
+    listen 8020 ssl;
+    server_name chanacademy.io.vn;
+    ssl_certificate /etc/letsencrypt/live/chanacademy.io.vn/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/chanacademy.io.vn/privkey.pem;
+    client_max_body_size 128k;
+    location /scorm-player/ {
+        access_log off;
+        proxy_pass http://backend:8020;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location / { return 404; }
+}
+```
+
+Compose của web cần publish `8020:8020`; Compose của BE chỉ `expose: ['8020']` và giữ health trên 8019.
+Nginx dùng HTTPS công khai 8020, upstream Java vẫn HTTP nội bộ 8020. Trang LMS HTTPS không nhúng player HTTP.
+Sau khi sửa, chạy `nginx -t`, chỉ reload khi hợp lệ; recreate web nếu vừa thêm port mapping.
+FE mở trên `localhost:4200` là origin khác domain công khai; để thử local, BE local cần cấu hình
+`SCORM_LMS_ORIGIN=http://localhost:4200` và `SCORM_PLAYER_ORIGIN=http://localhost:8020`.
 
 Deployment này chạy backend Java 21 LTS / Spring Boot 3.5.16 GA bằng Docker, kết nối PostgreSQL hiện có. Không cần cài Java/Maven trên host. File `compose.yaml` cũ chỉ phục vụ PostgreSQL local; triển khai backend dùng **`compose.ubuntu.yaml`**.
 

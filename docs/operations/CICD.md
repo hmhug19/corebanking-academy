@@ -13,6 +13,19 @@ Dockerfile hiện tại build/test bằng Java 21; image được push private l
 
 DB/JWT/runtime config lấy từ `/opt/core-academy/backend/.env.ubuntu` hiện có. PostgreSQL, Redis và dữ liệu không được recreate theo pipeline. Không chạy migration tự động; Flyway hiện tắt trong ứng dụng.
 
+SCORM cần thêm `SCORM_LMS_ORIGIN` và `SCORM_PLAYER_ORIGIN` vào file environment trên host, đồng thời
+cập nhật `/etc/core-academy-ci/compose.yaml` từ `deploy/ci/compose.ci.yaml`. Hai origin là bắt buộc với
+Compose deploy; thiếu sẽ dừng trước khi thay container. Chỉ cập nhật image không cập nhật file Compose
+root-owned trên server. Dùng player `https://chanacademy.io.vn:8020`, LMS `https://chanacademy.io.vn`;
+Nginx dùng HTTPS 8020 công khai, upstream player HTTP 8020 nội bộ. Cấu hình Nginx và port mapping xem
+[Triển khai SCORM](DEPLOY_UBUNTU.md#scorm-12). Sau thay environment phải recreate BE; `restart` không nạp biến mới.
+
+Kiểm tra riêng ba biến không chứa secret, không dump toàn bộ environment:
+
+```bash
+sudo docker exec core-academy-backend-1 sh -c 'printf "SCORM_PLAYER_PORT=%s\nSCORM_PLAYER_ORIGIN=%s\nSCORM_LMS_ORIGIN=%s\n" "$SCORM_PLAYER_PORT" "$SCORM_PLAYER_ORIGIN" "$SCORM_LMS_ORIGIN"'
+```
+
 ## Deploy và rollback
 
 CI chạy Maven verify trong Docker build trước khi publish; repository hiện chưa có test source nên bước này mới xác minh build. Server pull image trước khi cập nhật container, đợi health tối đa 180 giây và reload Nginx. Nếu startup/health thất bại, server khôi phục image trước (có sẵn local). Lần đầu không có image trước thì không thể rollback.
