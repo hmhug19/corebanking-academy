@@ -81,6 +81,9 @@ server {
 
 Compose của web cần publish `8020:8020`; Compose của BE chỉ `expose: ['8020']` và giữ health trên 8019.
 Nginx dùng HTTPS công khai 8020, upstream Java vẫn HTTP nội bộ 8020. Trang LMS HTTPS không nhúng player HTTP.
+Player có CORS riêng chỉ cho `SCORM_PLAYER_ORIGIN`: request POST lưu tiến độ từ runtime gửi Origin của player,
+không phải Origin của LMS. Bản BE thiếu cấu hình CORS riêng có thể trả `403 Invalid CORS request` sau proxy TLS;
+cần deploy bản BE đã sửa. `/runtime` là endpoint POST JSON; mở URL trực tiếp bằng GET trả 405.
 Sau khi sửa, chạy `nginx -t`, chỉ reload khi hợp lệ; recreate web nếu vừa thêm port mapping.
 FE mở trên `localhost:4200` là origin khác domain công khai; để thử local, BE local cần cấu hình
 `SCORM_LMS_ORIGIN=http://localhost:4200` và `SCORM_PLAYER_ORIGIN=http://localhost:8020`.

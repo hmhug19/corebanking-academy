@@ -113,16 +113,35 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
                 .jwt(jwt -> jwt.subject(LEARNER).claim("av", av)));
         var launched = json.readTree(mvc.perform(launchRequest).andReturn().getResponse().getContentAsString());
         assertThat(launched.path("status").asText()).as(launched.toPrettyString()).isEqualTo("SUCCESS");
-        String token = java.net.URI.create(launched.path("data").path("launchUrl").asText()).getPath().split("/")[2];
+        var playerUri = java.net.URI.create(launched.path("data").path("launchUrl").asText());
+        String playerOrigin = playerUri.getScheme() + "://" + playerUri.getRawAuthority();
+        String token = playerUri.getPath().split("/")[2];
         String runtime = "/scorm-player/" + token + "/runtime";
+        // Nginx terminates HTTPS; the connector still sees HTTP with the public player Origin header.
+        var preflight = mvc.perform(MockMvcRequestBuilders.options(runtime)
+            .header("Origin", playerOrigin)
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "content-type")
+            .with(request -> { request.setLocalPort(8020); return request; })).andReturn().getResponse();
+        assertThat(preflight.getStatus()).isEqualTo(200);
+        assertThat(preflight.getHeader("Access-Control-Allow-Origin")).isEqualTo(playerOrigin);
+        assertThat(preflight.getHeader("Access-Control-Allow-Credentials")).isNull();
+        var foreignOrigin = mvc.perform(MockMvcRequestBuilders.options(runtime)
+            .header("Origin", "https://untrusted.example.test")
+            .header("Access-Control-Request-Method", "POST")
+            .with(request -> { request.setLocalPort(8020); return request; })).andReturn().getResponse();
+        assertThat(foreignOrigin.getStatus()).isEqualTo(403);
+        assertThat(foreignOrigin.getHeader("Access-Control-Allow-Origin")).isNull();
         var values = Map.of("cmi.core.lesson_status", "passed", "cmi.core.score.raw", "80",
             "cmi.core.score.max", "100", "cmi.core.lesson_location", "page-4",
             "cmi.suspend_data", "{\"page\":4}", "cmi.core.exit", "suspend", "cmi.core.session_time", "0000:01:12.50");
         var save = Map.of("sequence", 1, "values", values, "finished", false);
         for (int retry = 0; retry < 2; retry++) {
-            var response = mvc.perform(api.post(save, runtime).with(request -> { request.setLocalPort(8020); return request; }))
+            var response = mvc.perform(api.post(save, runtime).header("Origin", playerOrigin)
+                .with(request -> { request.setLocalPort(8020); return request; }))
                 .andReturn().getResponse();
             assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo(playerOrigin);
             var receipt = json.readTree(response.getContentAsString());
             assertThat(receipt.path("status").asText()).as(receipt.toPrettyString()).isEqualTo("SUCCESS");
             assertThat(receipt.path("data").path("progress").path("scoreRaw").asInt()).isEqualTo(80);
