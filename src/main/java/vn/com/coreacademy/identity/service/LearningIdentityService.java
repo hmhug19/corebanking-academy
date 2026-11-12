@@ -53,6 +53,11 @@ public class LearningIdentityService {
 
     /** Kiểm tra lại phiên phòng học từ danh tính tin cậy đã gắn với vé WebSocket, không nhận ID từ packet. */
     public void requireChatRoomSession(String userId, long authorizationVersion) {
+        requireSession(userId, authorizationVersion);
+    }
+
+    /** Scoped long-lived channels must stop when logout, password or permission changes revoke the session. */
+    public void requireSession(String userId, long authorizationVersion) {
         var user = policy.current(userId);
         if (user.getAuthorizationVersion() != authorizationVersion) {
             throw new BusinessException(ResponseCode.UNAUTHORIZED);

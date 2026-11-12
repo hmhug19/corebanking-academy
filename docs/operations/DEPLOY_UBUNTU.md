@@ -1,5 +1,49 @@
 # Build và chạy CORE Academy trên Ubuntu
 
+<a id="scorm-12"></a>
+## Triển khai thư viện SCORM 1.2
+
+Tính năng mới dùng hai bảng riêng và connector player riêng; cập nhật đồng thời backend và frontend.
+
+1. Review/chạy [`2026-11-12-scorm12.sql`](../sql/upgrade/2026-11-12-scorm12.sql) trên database đang dùng.
+   Không bật ddl-auto=update hoặc tự chạy migration khi startup. Script không thay bảng/tiến độ khóa học cũ.
+2. Đặt biến môi trường, ví dụ `SCORM_LMS_ORIGIN=https://academy.example.com` và
+   `SCORM_PLAYER_ORIGIN=https://scorm.academy.example.com`. Hai origin bắt buộc khác nhau, không có path/trailing slash.
+   Dùng hostname player riêng có HTTPS; không đưa bearer JWT vào URL hoặc cấu hình trình phát.
+3. Backend mở thêm connector nội bộ `8020`. `compose.ubuntu.yaml` expose port này trong Docker network `edge`;
+   không publish ra Internet. Reverse proxy của hostname player trỏ vào `backend:8020` trong cùng network.
+   Proxy hostname LMS vẫn trỏ vào `backend:8019`; không chuyển nội dung SCORM qua origin LMS.
+4. Trong virtual host HTTPS riêng của player, chỉ proxy đường SCORM:
+
+   ```nginx
+   location /scorm-player/ {
+       proxy_pass http://backend:8020;
+       proxy_http_version 1.1;
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+   location / { return 404; }
+   ```
+
+   Dùng tên upstream thực tế trong Docker network. Nếu proxy chạy ngoài Docker, chỉ publish connector
+   vào loopback rồi trỏ upstream tương ứng, không mở công khai cả backend connector.
+   Không áp `X-Frame-Options: DENY/SAMEORIGIN` từ cấu hình proxy chung lên player: backend đặt CSP
+   `frame-ancestors` cho đúng LMS origin. Giữ CSP/referrer-policy/nosniff của backend.
+5. Build/chạy lại backend và frontend. Không chạy nhiều instance dùng cùng host port 8020.
+   Local mặc định LMS `http://localhost:4200`, player `http://localhost:8020`; nếu dùng 127.0.0.1 thì
+   đặt cả hai biến origin đúng theo địa chỉ browser. Player không dùng cookie bên thứ ba.
+6. Vào `/admin/lessons`, nhập ZIP, xem thử, xuất bản. Đăng nhập học viên trong phạm vi đơn vị,
+   mở **Học tập → Công cụ học nhanh → Bài giảng SCORM** (route `/scorm`), làm quiz và xem điểm/trạng thái.
+   Thoát giữa bài, mở lại để kiểm bookmark của chính học viên; chờ trạng thái lưu thành công trước khi đóng.
+
+Giới hạn mặc định: ZIP 100 MiB, giải nén 500 MiB, 2.000 entry và tỷ lệ nén không quá 200 lần (cho phép
+tối thiểu 1 MiB). Tệp tạm đặt dưới `UPLOAD_TEMP_DIR/scorm`, dùng volume upload có dung lượng trống phù hợp;
+không tăng giới hạn mà bỏ kiểm tra ZIP hoặc dùng `/tmp` nhỏ. Mỗi file được lưu riêng vào S3 private.
+Gói mới là ID mới; không ghi đè nội dung có kết quả. Chưa có tác vụ tự xóa phiên bản cũ.
+
+Rollback ứng dụng: có thể quay về image FE/BE trước; giữ nguyên hai bảng SCORM để bảo toàn kết quả và S3.
+Không DROP bảng/xóa object để rollback. Module không tự đánh dấu hoàn thành các khóa học/chứng nhận cũ.
+
 Deployment này chạy backend Java 21 LTS / Spring Boot 3.5.16 GA bằng Docker, kết nối PostgreSQL hiện có. Không cần cài Java/Maven trên host. File `compose.yaml` cũ chỉ phục vụ PostgreSQL local; triển khai backend dùng **`compose.ubuntu.yaml`**.
 
 ## 1. Cài Docker Engine và Compose plugin

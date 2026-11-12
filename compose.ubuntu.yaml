@@ -10,6 +10,9 @@ services:
     init: true
     environment:
       SERVER_PORT: "8019"
+      SCORM_PLAYER_PORT: "8020"
+      SCORM_PLAYER_ORIGIN: ${SCORM_PLAYER_ORIGIN:-http://localhost:8020}
+      SCORM_LMS_ORIGIN: ${SCORM_LMS_ORIGIN:-http://localhost:4200}
       DB_URL: ${DB_URL:?Set DB_URL in .env.ubuntu}
       DB_USER: ${DB_USER:?Set DB_USER in .env.ubuntu}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.ubuntu}
@@ -42,6 +45,8 @@ services:
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=65.0 -XX:+ExitOnOutOfMemoryError}
     ports:
       - "${BIND_IP:-127.0.0.1}:${HOST_PORT:-8019}:8019"
+    expose:
+      - "8020"
     mem_limit: ${APP_MEMORY_LIMIT:-768m}
     volumes:
       - backend_logs:/app/logs

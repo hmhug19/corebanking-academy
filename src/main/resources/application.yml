@@ -48,6 +48,7 @@ app:
       read-timeout-seconds: ${S3_READ_TIMEOUT_SECONDS:60}
       call-timeout-seconds: ${S3_CALL_TIMEOUT_SECONDS:600}
   learning:
+    # SCORM packages execute on a separate origin/connector, never on the LMS origin.
     course-index:
       # How often the worker looks for published course revisions that are not indexed yet.
       poll-interval: ${COURSE_INDEX_POLL:30s}
@@ -120,6 +121,11 @@ app:
     send-timeout: ${CHAT_ROOM_SEND_TIMEOUT:2s}
   cors:
     origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+  scorm:
+    temp-dir: ${UPLOAD_TEMP_DIR:./data/uploads-tmp}/scorm
+    player-port: ${SCORM_PLAYER_PORT:8020}
+    player-origin: ${SCORM_PLAYER_ORIGIN:http://localhost:8020}
+    lms-origin: ${SCORM_LMS_ORIGIN:http://localhost:4200}
   bootstrap:
     admin-id: ${APP_BOOTSTRAP_ADMIN_ID:}
     admin-user: ${APP_BOOTSTRAP_ADMIN_USER:}

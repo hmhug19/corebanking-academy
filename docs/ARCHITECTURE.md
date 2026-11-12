@@ -33,6 +33,7 @@ vn.com.coreacademy
 ├── assistant                       # Trợ lý nhanh: vòng lặp agent có công cụ (Ollama), yêu cầu chờ xác nhận
 ├── chatroom                        # Phòng học 3D/2D: vé WebSocket, hiện diện, hướng nhìn/va chạm và chat trực tiếp
 ├── assessment                      # Quiz Engine P0: câu hỏi, cấu hình đề, lượt thi, chấm và job tự nộp
+├── scorm                           # Thư viện bài giảng Single SCO 1.2, runtime/điểm/bookmark và player origin riêng
 └── reporting / ...                 # Phạm vi nghiệp vụ chưa triển khai
 ```
 
