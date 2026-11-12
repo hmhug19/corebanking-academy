@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 
 import org.apache.poi.xwpf.model.XWPFHeaderFooterPolicy;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
@@ -12,6 +13,7 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import vn.com.coreacademy.knowledge.config.ExtractionLimits;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -87,6 +89,49 @@ class DocxTextExtractorTest {
         Files.writeString(file, "plain text");
 
         assertThatThrownBy(() -> extractor.extract(file)).isInstanceOf(ExtractionException.class);
+    }
+
+    @Test
+    void moreThanTheConfiguredCharactersIsRefused() throws IOException {
+        Path file = directory.resolve("long.docx");
+        try (XWPFDocument document = new XWPFDocument()) {
+            for (int i = 0; i < 5; i++) {
+                document.createParagraph().createRun().setText("Một đoạn văn bản bình thường.");
+            }
+            save(document, file);
+        }
+        DocxTextExtractor small = new DocxTextExtractor(
+            new ExtractionLimits(300, 40, Duration.ofSeconds(60), 0.5));
+
+        assertThatThrownBy(() -> small.extract(file)).isInstanceOf(ExtractionException.class)
+            .hasMessage("Nội dung tài liệu vượt giới hạn 40 ký tự. Hãy tách thành các tệp nhỏ hơn.");
+    }
+
+    @Test
+    void anExtractionThatRunsTooLongIsStopped() throws IOException {
+        Path file = directory.resolve("slow.docx");
+        try (XWPFDocument document = new XWPFDocument()) {
+            document.createParagraph().createRun().setText("Một đoạn văn bản bình thường.");
+            save(document, file);
+        }
+        DocxTextExtractor impatient = new DocxTextExtractor(
+            new ExtractionLimits(300, 1_500_000, Duration.ofNanos(1), 0.5));
+
+        assertThatThrownBy(() -> impatient.extract(file)).isInstanceOf(ExtractionException.class)
+            .hasMessageStartingWith("Đọc tài liệu mất hơn ");
+    }
+
+    @Test
+    void textInALegacyVietnameseFontIsRefusedAsUnreadable() throws IOException {
+        Path file = directory.resolve("tcvn3.docx");
+        try (XWPFDocument document = new XWPFDocument()) {
+            document.createParagraph().createRun().setText("Quy tr×nh ®ãng sæ cuèi ngµy");
+            document.createParagraph().createRun().setText("Hä thèng qu¶n lý tµi kho¶n kh¸ch hµng");
+            save(document, file);
+        }
+
+        assertThatThrownBy(() -> extractor.extract(file)).isInstanceOf(ExtractionException.class)
+            .hasMessage("Tệp có phông chữ hoặc bảng mã không đọc được");
     }
 
     private static void save(XWPFDocument document, Path file) throws IOException {

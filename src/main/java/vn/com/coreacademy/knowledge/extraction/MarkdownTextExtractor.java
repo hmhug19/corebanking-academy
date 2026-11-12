@@ -10,15 +10,31 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import vn.com.coreacademy.knowledge.config.ExtractionLimits;
 
 /** Markdown lines are the file's own lines: 1-based, blank ones counted, no page. */
 @Component
 public class MarkdownTextExtractor {
     private static final String BOM = "﻿";
 
+    private final ExtractionLimits limits;
+
+    public MarkdownTextExtractor() {
+        this(ExtractionLimits.DEFAULTS);
+    }
+
+    @Autowired
+    public MarkdownTextExtractor(ExtractionLimits limits) {
+        this.limits = limits;
+    }
+
+    /** Markdown is strict UTF-8, so it can have no legacy-font garbage: only the size limit applies. */
     public ExtractedText extract(Path file) {
+        ExtractionGuard guard = new ExtractionGuard(limits);
         String text = decode(file);
+        guard.add(text);
         if (text.startsWith(BOM)) {
             text = text.substring(1);
         }

@@ -62,6 +62,11 @@ app:
       poll-interval: ${KNOWLEDGE_WORKER_POLL:2s}
       concurrency: ${KNOWLEDGE_WORKER_CONCURRENCY:1}
       max-attempts: 3
+    extraction:
+      max-pages: ${KNOWLEDGE_EXTRACTION_MAX_PAGES:300}
+      max-characters: ${KNOWLEDGE_EXTRACTION_MAX_CHARACTERS:1500000}
+      max-duration: ${KNOWLEDGE_EXTRACTION_MAX_DURATION:60s}
+      min-readable-word-share: ${KNOWLEDGE_EXTRACTION_MIN_READABLE_WORD_SHARE:0.5}
     chunk:
       target-tokens: 600
       max-tokens: 800

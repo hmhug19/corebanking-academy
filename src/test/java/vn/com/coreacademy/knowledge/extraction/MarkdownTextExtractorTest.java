@@ -4,9 +4,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import vn.com.coreacademy.knowledge.config.ExtractionLimits;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -59,6 +61,16 @@ class MarkdownTextExtractorTest {
         Files.write(file, new byte[] {'a', (byte) 0xC3, (byte) 0x28});
 
         assertThatThrownBy(() -> extractor.extract(file)).isInstanceOf(ExtractionException.class);
+    }
+
+    @Test
+    void moreThanTheConfiguredCharactersIsRefused() throws IOException {
+        Path file = write("Một dòng văn bản bình thường.\n".repeat(10));
+        MarkdownTextExtractor small = new MarkdownTextExtractor(
+            new ExtractionLimits(300, 100, Duration.ofSeconds(60), 0.5));
+
+        assertThatThrownBy(() -> small.extract(file)).isInstanceOf(ExtractionException.class)
+            .hasMessage("Nội dung tài liệu vượt giới hạn 100 ký tự. Hãy tách thành các tệp nhỏ hơn.");
     }
 
     private Path write(String content) throws IOException {

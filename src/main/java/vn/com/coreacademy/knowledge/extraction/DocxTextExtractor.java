@@ -14,7 +14,9 @@ import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFSDT;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import vn.com.coreacademy.knowledge.config.ExtractionLimits;
 
 /**
  * DOCX has no pages: each paragraph and each table row of the body is one "line" (shown as "đoạn"). Headers, footers
@@ -22,12 +24,25 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class DocxTextExtractor {
+    private final ExtractionLimits limits;
+
+    public DocxTextExtractor() {
+        this(ExtractionLimits.DEFAULTS);
+    }
+
+    @Autowired
+    public DocxTextExtractor(ExtractionLimits limits) {
+        this.limits = limits;
+    }
+
     public ExtractedText extract(Path file) {
+        ExtractionGuard guard = new ExtractionGuard(limits);
         try (InputStream input = Files.newInputStream(file); XWPFDocument document = new XWPFDocument(input)) {
             List<TextLine> lines = new ArrayList<>();
             boolean hasText = false;
             for (IBodyElement element : document.getBodyElements()) {
                 for (String row : rowsOf(element)) {
+                    guard.add(row);
                     hasText |= !row.isBlank();
                     lines.add(new TextLine(null, lines.size() + 1, row));
                 }
@@ -35,6 +50,8 @@ public class DocxTextExtractor {
             if (!hasText) {
                 throw ExtractionException.noText();
             }
+
+            guard.checkQuality(lines);
 
             return new ExtractedText(lines, null);
         } catch (ExtractionException exception) {

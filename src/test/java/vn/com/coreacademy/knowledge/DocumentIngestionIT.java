@@ -97,6 +97,39 @@ class DocumentIngestionIT extends KnowledgeIntegrationTest {
     }
 
     @Test
+    void aPdfWithALegacyFontTextLayerFailsWithTheReasonAndNoChunks() throws IOException {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (org.apache.pdfbox.pdmodel.PDDocument pdf = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            org.apache.pdfbox.pdmodel.PDPage page = new org.apache.pdfbox.pdmodel.PDPage();
+            pdf.addPage(page);
+            try (org.apache.pdfbox.pdmodel.PDPageContentStream content =
+                     new org.apache.pdfbox.pdmodel.PDPageContentStream(pdf, page)) {
+                content.beginText();
+                content.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                    org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 12);
+                content.setLeading(16);
+                content.newLineAtOffset(50, 700);
+                for (String row : List.of("Quy tr×nh ®ãng sæ cuèi ngµy", "Hä thèng qu¶n lý tµi kho¶n kh¸ch hµng",
+                    "B­íc 1: kiÓm tra c¸c giao dÞch ch­a h¹ch to¸n")) {
+                    content.showText(row);
+                    content.newLine();
+                }
+                content.endText();
+            }
+            pdf.save(bytes);
+        }
+        long id = queue("tcvn3.pdf", "application/pdf", bytes.toByteArray());
+        worker.claimNext();
+
+        worker.process(id);
+
+        KnowledgeDocument failed = documents.findById(id).orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(DocumentStatus.FAILED);
+        assertThat(failed.getErrorMessage()).isEqualTo("Tệp có phông chữ hoặc bảng mã không đọc được");
+        assertThat(chunkCount(id)).isZero();
+    }
+
+    @Test
     void anUnexpectedErrorFailsWithAGenericMessageAndKeepsNoChunks() throws IOException {
         long id = queue("loi.md", "text/markdown", "nội dung\n");
         when(ollama.embed(anyList())).thenThrow(new IllegalStateException("secret document text"));
@@ -193,15 +226,19 @@ class DocumentIngestionIT extends KnowledgeIntegrationTest {
     }
 
     private long queue(String fileName, String mimeType, String content) throws IOException {
+        return queue(fileName, mimeType, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private long queue(String fileName, String mimeType, byte[] content) throws IOException {
         String key = UUID.randomUUID().toString();
         Files.createDirectories(store.resolve(key).getParent());
-        Files.writeString(store.resolve(key), content, StandardCharsets.UTF_8);
+        Files.write(store.resolve(key), content);
 
         KnowledgeDocument document = new KnowledgeDocument();
         document.setUploadedBy("000005");
         document.setFileName(fileName);
         document.setMimeType(mimeType);
-        document.setSizeBytes(content.length());
+        document.setSizeBytes(content.length);
         document.setStorageKey(key);
         return documents.saveAndFlush(document).getId();
     }
