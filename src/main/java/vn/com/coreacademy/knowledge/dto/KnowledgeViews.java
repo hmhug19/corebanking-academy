@@ -28,4 +28,26 @@ public final class KnowledgeViews {
         Instant createdAt,
         @Schema(description = "Thời điểm xử lý xong (ready hoặc failed); null khi chưa xong.") Instant processedAt) {
     }
+
+    @Schema(description = "Văn bản đã trích của một đoạn được trích dẫn và các đoạn kề, theo thứ tự đọc. Không có tệp gốc.")
+    public record DocumentTextView(
+        long documentId,
+        String fileName,
+        @Schema(description = "Đoạn được trích dẫn (đoạn đầu tiên của tài liệu khi không truyền around).")
+        long aroundChunkId,
+        java.util.List<TextChunkView> chunks,
+        @Schema(description = "Còn đoạn trước đoạn đầu của danh sách.") boolean hasMoreBefore,
+        @Schema(description = "Còn đoạn sau đoạn cuối của danh sách.") boolean hasMoreAfter) {
+    }
+
+    public record TextChunkView(
+        long chunkId,
+        int chunkIndex,
+        @Schema(description = "Đường dẫn mục (các tiêu đề nối bằng ›); rỗng nếu đoạn nằm trước tiêu đề đầu.")
+        String sectionPath,
+        @Schema(description = "Số trang bắt đầu từ 1; null với .md và .docx.") Integer page,
+        int lineStart,
+        int lineEnd,
+        String text) {
+    }
 }

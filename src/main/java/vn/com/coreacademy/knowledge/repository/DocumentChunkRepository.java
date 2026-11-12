@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -50,6 +51,16 @@ public class DocumentChunkRepository {
                 OR (d.scope = 'personal' AND d.uploaded_by = :userId)
                 OR (d.scope = 'unit' AND d.scope_org_id IN (:orgIds)))
          ORDER BY c.chunk_id, n.chunk_index
+        """;
+
+    // The document, when it is one SEARCH could return: the same scope rule, so a hidden document reads as missing.
+    private static final String SEARCHABLE_DOCUMENT = """
+        SELECT d.file_name
+          FROM learning_hub.knowledge_documents d
+         WHERE d.document_id = :documentId
+           AND (d.scope = 'global'
+                OR (d.scope = 'personal' AND d.uploaded_by = :userId)
+                OR (d.scope = 'unit' AND d.scope_org_id IN (:orgIds)))
         """;
 
     private final JdbcTemplate jdbc;
@@ -144,6 +155,62 @@ public class DocumentChunkRepository {
         });
 
         return byParent;
+    }
+
+    /** One chunk of a document's text with where it sits; {@code text} is the plain extracted content. */
+    public record TextChunk(long chunkId, int chunkIndex, String sectionPath, Integer page, int lineStart, int lineEnd,
+                            String text) {
+    }
+
+    /** The chunks of one document around a cited chunk; see {@link #window}. */
+    public record TextWindow(long documentId, String fileName, long aroundChunkId, List<TextChunk> chunks,
+                             boolean hasMoreBefore, boolean hasMoreAfter) {
+    }
+
+    /**
+     * The chunk {@code aroundChunkId} (the first chunk of the document when null) and {@code span} chunks on each side,
+     * in reading order. Empty when the document is not one {@code visibility} may search, does not exist, has no
+     * chunks, or does not contain that chunk: the four cases cannot be told apart.
+     */
+    public Optional<TextWindow> window(long documentId, Long aroundChunkId, int span, DocumentVisibility visibility) {
+        MapSqlParameterSource scope = new MapSqlParameterSource().addValue("documentId", documentId)
+            .addValue("userId", visibility.userId()).addValue("orgIds", visibility.orgIdsOrPlaceholder());
+        List<String> names = named.queryForList(SEARCHABLE_DOCUMENT, scope, String.class);
+        if (names.isEmpty()) {
+            return Optional.empty();
+        }
+        MapSqlParameterSource position = new MapSqlParameterSource().addValue("documentId", documentId)
+            .addValue("chunkId", aroundChunkId);
+        List<long[]> centre = named.query("""
+            SELECT chunk_id, chunk_index FROM learning_hub.knowledge_document_chunks
+             WHERE document_id = :documentId AND (CAST(:chunkId AS bigint) IS NULL OR chunk_id = CAST(:chunkId AS bigint))
+             ORDER BY chunk_index LIMIT 1
+            """, position, (rs, rowNum) -> new long[] {rs.getLong("chunk_id"), rs.getLong("chunk_index")});
+        if (centre.isEmpty()) {
+            return Optional.empty();
+        }
+        long centreIndex = centre.get(0)[1];
+        MapSqlParameterSource range = new MapSqlParameterSource().addValue("documentId", documentId)
+            .addValue("from", centreIndex - span).addValue("to", centreIndex + span);
+        List<TextChunk> window = named.query("""
+            SELECT chunk_id, chunk_index, section_path, page_number, line_start, line_end, content
+              FROM learning_hub.knowledge_document_chunks
+             WHERE document_id = :documentId AND chunk_index BETWEEN :from AND :to
+             ORDER BY chunk_index
+            """, range, (rs, rowNum) -> new TextChunk(rs.getLong("chunk_id"), rs.getInt("chunk_index"),
+            rs.getString("section_path") == null ? "" : rs.getString("section_path"),
+            rs.getObject("page_number", Integer.class), rs.getInt("line_start"), rs.getInt("line_end"),
+            rs.getString("content")));
+        boolean before = Boolean.TRUE.equals(named.queryForObject("""
+            SELECT EXISTS (SELECT 1 FROM learning_hub.knowledge_document_chunks
+                            WHERE document_id = :documentId AND chunk_index < :from)
+            """, range, Boolean.class));
+        boolean after = Boolean.TRUE.equals(named.queryForObject("""
+            SELECT EXISTS (SELECT 1 FROM learning_hub.knowledge_document_chunks
+                            WHERE document_id = :documentId AND chunk_index > :to)
+            """, range, Boolean.class));
+
+        return Optional.of(new TextWindow(documentId, names.get(0), centre.get(0)[0], window, before, after));
     }
 
     /** Ready documents with at least one chunk cut by another chunker version or embedded by another model. */

@@ -83,7 +83,7 @@ public final class CitationSelector {
 
         return new CitationView(n, hit.documentId(), hit.fileName(), hit.page(), hit.lineStart(), hit.lineEnd(),
             citingWords.isEmpty() ? snippet(hit.content()) : CitationSupport.snippet(hit.content(), citingWords), cited,
-            hit.sectionPath());
+            hit.sectionPath(), lesson == null ? hit.chunkId() : null);
     }
 
     /** The first 280 characters, cut back to a word boundary. */

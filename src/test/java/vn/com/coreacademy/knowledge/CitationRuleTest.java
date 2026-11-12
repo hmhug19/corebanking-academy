@@ -38,6 +38,16 @@ class CitationRuleTest {
     }
 
     @Test
+    void aDocumentCitationCarriesTheChunkIdTheSourceViewerOpens() {
+        CitationRule.Outcome outcome = CitationRule.apply("CIF là mã khách hàng [1].", List.of(CIF, GL));
+
+        assertThat(outcome.citations()).singleElement().satisfies(citation -> {
+            assertThat(citation.chunkId()).isEqualTo(1L);
+            assertThat(citation.documentId()).isEqualTo(42L);
+        });
+    }
+
+    @Test
     void noValidMarkerIsUngroundedWithNoSourcesAndTheAnswerKept() {
         CitationRule.Outcome outcome = CitationRule.apply("CIF là mã khách hàng.", List.of(CIF, GL));
 

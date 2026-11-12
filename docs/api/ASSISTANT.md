@@ -71,7 +71,7 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 | `error`           | `messageCode`, `message`        | Dòng cuối khi lỗi giữa chừng                                                             |
 
 `citations` có dạng `CitationView` của chat tài liệu (`n`, `documentId`, `fileName`, `page`, `lineStart`, `lineEnd`,
-`snippet`) và rỗng trừ khi `search_documents` hoặc `search_courses` đã chạy trong lượt. Nguồn là bài học thì thêm
+`snippet`, `sectionPath`, `chunkId` của đoạn tài liệu) và rỗng trừ khi `search_documents` hoặc `search_courses` đã chạy trong lượt. Nguồn là bài học thì thêm
 `lesson` (`courseId`, `courseTitle`, `revisionId`, `chapterTitle`, `lessonId`, `lessonTitle`, `blockId`, `url`) và
 `documentId` = 0; `url` là `/lesson/{courseId}/{lessonId}`. Citation của tài liệu không có trường `lesson`.
 

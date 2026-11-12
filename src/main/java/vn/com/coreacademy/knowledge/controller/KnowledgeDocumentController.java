@@ -2,6 +2,8 @@ package vn.com.coreacademy.knowledge.controller;
 
 import java.util.List;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -26,9 +28,11 @@ import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.knowledge.dto.KnowledgeViews.DocumentTextView;
 import vn.com.coreacademy.knowledge.dto.KnowledgeViews.KnowledgeDocumentView;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
+import vn.com.coreacademy.knowledge.service.KnowledgeDocumentTextService;
 
 @RestController
 @RequestMapping("/api/v1/knowledge")
@@ -37,8 +41,11 @@ import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
 @Validated
 @RequiredArgsConstructor
 public class KnowledgeDocumentController {
+    private static final int MAX_SPAN = 20;
+
     private final AssistantGate gate;
     private final KnowledgeDocumentService documents;
+    private final KnowledgeDocumentTextService texts;
 
     @PostMapping(value = "/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
         produces = MediaType.APPLICATION_JSON_VALUE)
@@ -87,6 +94,23 @@ public class KnowledgeDocumentController {
     public BaseResponse<KnowledgeDocumentView> get(@PathVariable @Positive Long documentId) {
         gate.requireAccess();
         return BaseResponse.ok(documents.get(documentId));
+    }
+
+    @GetMapping(value = "/documents/{documentId}/text", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+        summary = "Đọc văn bản quanh đoạn được trích dẫn",
+        description = """
+            Trả văn bản đã trích của đoạn around và span đoạn kề mỗi bên, kèm đường dẫn mục, trang và dòng, để người dùng đọc ngữ cảnh của nguồn.
+            - Cùng quy tắc nhìn thấy như tìm kiếm: tài liệu người gọi không tìm được (kể cả nguồn của khóa học) trả not found.
+            - around bỏ trống thì bắt đầu từ đoạn đầu tiên; đoạn không thuộc tài liệu trả not found.
+            - Không có endpoint nào trả tệp gốc.
+            """
+    )
+    public BaseResponse<DocumentTextView> text(@PathVariable @Positive Long documentId,
+                                               @RequestParam(required = false) @Positive Long around,
+                                               @RequestParam(defaultValue = "2") @Min(0) @Max(MAX_SPAN) int span) {
+        gate.requireAccess();
+        return BaseResponse.ok(texts.text(documentId, around, span));
     }
 
     @DeleteMapping(value = "/documents/{documentId}", produces = MediaType.APPLICATION_JSON_VALUE)

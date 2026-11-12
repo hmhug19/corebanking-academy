@@ -22,9 +22,17 @@ public final class ChatViews {
         @Schema(description = "Chỉ có khi nguồn là bài học của khóa đã xuất bản; khi đó documentId là 0.")
         @JsonInclude(JsonInclude.Include.NON_NULL) LessonCitation lesson,
         @Schema(description = "Đường dẫn mục của đoạn (các tiêu đề nối bằng ›); rỗng nếu đoạn nằm trước tiêu đề đầu.")
-        String sectionPath) {
+        String sectionPath,
+        @Schema(description = "Id của đoạn tài liệu được trích dẫn, dùng cho GET /documents/{id}/text?around=; "
+            + "null với bài học và với lượt hội thoại lưu trước khi có trường này.")
+        @JsonInclude(JsonInclude.Include.NON_NULL) Long chunkId) {
         public CitationView {
             sectionPath = sectionPath == null ? "" : sectionPath;
+        }
+
+        public CitationView(int n, long documentId, String fileName, Integer page, int lineStart, int lineEnd,
+                            String snippet, LessonCitation lesson, String sectionPath) {
+            this(n, documentId, fileName, page, lineStart, lineEnd, snippet, lesson, sectionPath, null);
         }
 
         public CitationView(int n, long documentId, String fileName, Integer page, int lineStart, int lineEnd,

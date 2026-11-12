@@ -50,6 +50,15 @@ tài liệu của người gọi), `status` (lặp lại được: `?status=queu
 
 Một tài liệu; không có hoặc người gọi không được đọc thì `CORE-RESOURCE_NOT_FOUND`.
 
+### `GET /api/v1/knowledge/documents/{documentId}/text`
+
+Văn bản đã trích quanh một đoạn được trích dẫn, cho màn xem nguồn. Tham số: `around` (id đoạn; bỏ trống thì bắt đầu từ
+đoạn đầu tiên), `span` (0..20, mặc định 2: số đoạn kề mỗi bên). Trả `DocumentTextView`: `documentId`, `fileName`,
+`aroundChunkId`, `chunks` (theo thứ tự đọc; mỗi đoạn có `chunkId`, `chunkIndex`, `sectionPath`, `page`, `lineStart`,
+`lineEnd`, `text`), `hasMoreBefore`, `hasMoreAfter` (còn đoạn ngoài danh sách; tăng `span` để đọc thêm). Cùng quy tắc nhìn
+thấy như tìm kiếm: tài liệu người gọi không tìm được (của người khác, hoặc nguồn khóa học `course_source`), tài liệu đã
+xóa, hoặc `around` không thuộc tài liệu đều trả `CORE-RESOURCE_NOT_FOUND`. Không có endpoint trả tệp gốc.
+
 ### `DELETE /api/v1/knowledge/documents/{documentId}`
 
 Xóa tệp, các đoạn và bản ghi, nên câu hỏi sau không còn trích dẫn tài liệu. Người tải lên luôn xóa được; ADMIN/SUPER_ADMIN
@@ -122,14 +131,16 @@ Cần Bearer token (mọi vai trò). Trả `BaseResponse<ChatAnswerView>`.
         "page": 3,
         "lineStart": 13,
         "lineEnd": 27,
-        "snippet": "CIF (Customer Information File) là mã khách hàng duy nhất…"
+        "snippet": "CIF (Customer Information File) là mã khách hàng duy nhất…",
+        "sectionPath": "Khách hàng › CIF",
+        "chunkId": 905
       }
     ]
   }
 }
 ```
 
-`page` là null với `.md` và `.docx`. `snippet` tối đa 280 ký tự, cắt ở ranh giới từ và thêm "…".
+`chunkId` là đoạn tài liệu được trích dẫn (bỏ với bài học và với lượt lưu từ trước khi có trường này), dùng cho `GET /documents/{id}/text?around=`. `page` là null với `.md` và `.docx`. `snippet` tối đa 280 ký tự, cắt ở ranh giới từ và thêm "…".
 `citations` chỉ gồm các đoạn mà `answer` ghi `[n]` (dạng `[1]`, `[2][3]`, `[1, 2]`), theo thứ tự xếp hạng, mỗi đoạn một
 lần, `n` giữ đúng số trong prompt (có thể không liên tiếp). `[n]` ngoài khoảng bị bỏ qua; nếu không có `[n]` hợp lệ nào thì
 trả mọi đoạn đã đưa vào prompt. Mọi trường của nguồn lấy từ metadata của đoạn, không lấy từ văn bản model. Trước khi đưa

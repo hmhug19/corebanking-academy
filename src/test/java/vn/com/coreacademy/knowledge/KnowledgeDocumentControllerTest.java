@@ -276,6 +276,114 @@ class KnowledgeDocumentControllerTest extends KnowledgeIntegrationTest {
         assertThat(documentCount(id)).isEqualTo(1);
     }
 
+    @Test
+    void textReturnsTheCitedChunkAndItsNeighboursWithSectionPageAndLines() throws Exception {
+        long id = uploadScoped("000005", "quy-trinh.md", "unit");
+        long[] ids = chunksOf(id, 6);
+
+        mvc.perform(get(DOCUMENTS + "/" + id + "/text").param("around", String.valueOf(ids[3])).param("span", "1")
+                .with(as("000004")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("SUCCESS"))
+            .andExpect(jsonPath("$.data.documentId").value(id))
+            .andExpect(jsonPath("$.data.fileName").value("quy-trinh.md"))
+            .andExpect(jsonPath("$.data.aroundChunkId").value(ids[3]))
+            .andExpect(jsonPath("$.data.chunks.length()").value(3))
+            .andExpect(jsonPath("$.data.chunks[0].chunkId").value(ids[2]))
+            .andExpect(jsonPath("$.data.chunks[1].chunkId").value(ids[3]))
+            .andExpect(jsonPath("$.data.chunks[1].text").value("noi dung 3"))
+            .andExpect(jsonPath("$.data.chunks[1].sectionPath").value("Muc 3"))
+            .andExpect(jsonPath("$.data.chunks[1].page").value(4))
+            .andExpect(jsonPath("$.data.chunks[1].lineStart").value(30))
+            .andExpect(jsonPath("$.data.chunks[1].lineEnd").value(39))
+            .andExpect(jsonPath("$.data.chunks[2].chunkId").value(ids[4]))
+            .andExpect(jsonPath("$.data.hasMoreBefore").value(true))
+            .andExpect(jsonPath("$.data.hasMoreAfter").value(true))
+            .andExpect(jsonPath("$.data.storageKey").doesNotExist());
+    }
+
+    @Test
+    void textClipsAtTheEdgesAndReportsNothingMoreToLoad() throws Exception {
+        long id = uploadScoped("000003", "ngan.md", "global");
+        long[] ids = chunksOf(id, 3);
+
+        mvc.perform(get(DOCUMENTS + "/" + id + "/text").param("around", String.valueOf(ids[0])).param("span", "5")
+                .with(as("000004")))
+            .andExpect(jsonPath("$.data.chunks.length()").value(3))
+            .andExpect(jsonPath("$.data.hasMoreBefore").value(false))
+            .andExpect(jsonPath("$.data.hasMoreAfter").value(false));
+    }
+
+    @Test
+    void textWithoutAChunkStartsAtTheBeginningOfTheDocument() throws Exception {
+        long id = uploadScoped("000003", "dau.md", "global");
+        long[] ids = chunksOf(id, 6);
+
+        mvc.perform(get(DOCUMENTS + "/" + id + "/text").param("span", "1").with(as("000004")))
+            .andExpect(jsonPath("$.data.aroundChunkId").value(ids[0]))
+            .andExpect(jsonPath("$.data.chunks.length()").value(2))
+            .andExpect(jsonPath("$.data.hasMoreBefore").value(false))
+            .andExpect(jsonPath("$.data.hasMoreAfter").value(true));
+    }
+
+    @Test
+    void textOfADocumentTheCallerCannotSearchIsNotFound() throws Exception {
+        long personal = uploadScoped("000005", "rieng.md", "personal");
+        long[] hidden = chunksOf(personal, 2);
+        long course = uploadScoped("000005", "nguon-khoa.md", "personal");
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET scope = 'course_source' WHERE document_id = ?", course);
+        long[] courseChunks = chunksOf(course, 2);
+
+        mvc.perform(get(DOCUMENTS + "/" + personal + "/text").param("around", String.valueOf(hidden[0]))
+                .with(as("000004")))
+            .andExpect(jsonPath("$.status").value("ERROR"))
+            .andExpect(jsonPath("$.messageCode").value("CORE-RESOURCE_NOT_FOUND"));
+        // A course source is not searchable by anyone, its owner included.
+        for (String user : List.of("000004", "000005")) {
+            mvc.perform(get(DOCUMENTS + "/" + course + "/text").param("around", String.valueOf(courseChunks[0]))
+                    .with(as(user)))
+                .andExpect(jsonPath("$.messageCode").value("CORE-RESOURCE_NOT_FOUND"));
+        }
+        mvc.perform(get(DOCUMENTS + "/" + personal + "/text").param("around", String.valueOf(hidden[0]))
+                .with(as("000005")))
+            .andExpect(jsonPath("$.status").value("SUCCESS"));
+    }
+
+    @Test
+    void textOfAMissingDocumentOrAChunkOfAnotherDocumentIsNotFound() throws Exception {
+        long first = uploadScoped("000003", "a.md", "global");
+        long second = uploadScoped("000003", "b.md", "global");
+        long[] other = chunksOf(second, 2);
+
+        mvc.perform(get(DOCUMENTS + "/999999/text").with(as("000004")))
+            .andExpect(jsonPath("$.messageCode").value("CORE-RESOURCE_NOT_FOUND"));
+        mvc.perform(get(DOCUMENTS + "/" + first + "/text").param("around", String.valueOf(other[0]))
+                .with(as("000004")))
+            .andExpect(jsonPath("$.messageCode").value("CORE-RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void textRefusesAnOutOfRangeSpanAndNeedsTheAssistantFunction() throws Exception {
+        long id = uploadScoped("000003", "c.md", "global");
+        chunksOf(id, 1);
+
+        mvc.perform(get(DOCUMENTS + "/" + id + "/text").param("span", "-1").with(as("000004")))
+            .andExpect(jsonPath("$.messageCode").value("CORE-VALIDATION_FAILED"));
+        mvc.perform(get(DOCUMENTS + "/" + id + "/text").param("span", "999").with(as("000004")))
+            .andExpect(jsonPath("$.messageCode").value("CORE-VALIDATION_FAILED"));
+        mvc.perform(get(DOCUMENTS + "/" + id + "/text")).andExpect(status().isUnauthorized());
+    }
+
+    private long[] chunksOf(long documentId, int count) {
+        chunks.insertAll(documentId, java.util.stream.IntStream.range(0, count)
+            .mapToObj(i -> new NewChunk(i, "noi dung " + i, i + 1, i * 10, i * 10 + 9, 5, new float[1024],
+                "Muc " + i))
+            .toList());
+        return jdbc.queryForList("""
+            SELECT chunk_id FROM learning_hub.knowledge_document_chunks WHERE document_id = ? ORDER BY chunk_index
+            """, Long.class, documentId).stream().mapToLong(Long::longValue).toArray();
+    }
+
     private long uploadScoped(String userId, String name, String scope) throws Exception {
         String body = mvc.perform(multipart(DOCUMENTS).file(markdown(name, "nội dung " + name)).param("scope", scope)
                 .with(as(userId)))
