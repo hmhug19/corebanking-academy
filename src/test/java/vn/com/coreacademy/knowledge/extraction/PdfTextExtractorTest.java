@@ -18,6 +18,9 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageFitDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import vn.com.coreacademy.assistant.eval.RetrievalFixtures;
@@ -25,6 +28,7 @@ import vn.com.coreacademy.knowledge.config.ExtractionLimits;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class PdfTextExtractorTest {
@@ -48,6 +52,97 @@ class PdfTextExtractorTest {
             new TextLine(1, 3, "Run the interest batch"),
             new TextLine(2, 1, "Second page starts here"),
             new TextLine(2, 2, "and has two lines"));
+    }
+
+    @Test
+    void aLineRepeatedAtTheTopOrBottomOfMostPagesIsDropped() throws IOException {
+        Path file = pdf(List.of(
+            page("Opening the day", "Page 1 of 4"), page("Closing the day", "Page 2 of 4"),
+            page("Month end", "Page 3 of 4"), page("Audit trail", "Page 4 of 4")));
+
+        List<TextLine> lines = extractor.extract(file).lines();
+
+        assertThat(lines).hasSize(4 * 6);
+        assertThat(lines).extracting(TextLine::text).noneMatch(text -> text.startsWith("Core Academy")
+            || text.startsWith("Page "));
+        assertThat(lines).extracting(TextLine::text).contains("Opening the day", "Audit trail");
+        // Citations keep pointing at the line the reader sees on the page: the header was line 1.
+        assertThat(lines.get(0).line()).isEqualTo(2);
+        assertThat(lines.get(5).line()).isEqualTo(7);
+    }
+
+    private static List<String> page(String title, String footer) {
+        List<String> rows = new ArrayList<>(List.of("Core Academy - Internal", title));
+        for (String detail : List.of("First", "Second", "Third", "Fourth", "Fifth")) {
+            rows.add(detail + " detail of " + title);
+        }
+        rows.add(footer);
+
+        return rows;
+    }
+
+    @Test
+    void aWordHyphenatedAtTheEndOfALineIsJoined() throws IOException {
+        Path file = pdf(List.of(List.of("The interna-", "tional rate applies today", "A well-known case")));
+
+        List<TextLine> lines = extractor.extract(file).lines();
+
+        assertThat(lines).extracting(TextLine::text).containsExactly("The international",
+            "rate applies today", "A well-known case");
+    }
+
+    @Test
+    void theOutlineGivesTheSectionPathOfEveryLine() throws IOException {
+        Path file = directory.resolve("outline.pdf");
+        try (PDDocument document = new PDDocument()) {
+            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            List<PDPage> pages = new ArrayList<>();
+            for (List<String> rows : List.of(
+                List.of("Chapter One", "Intro text", "Setup", "Install it"),
+                List.of("More setup text", "Operations", "1. Start the batch"))) {
+                PDPage page = new PDPage();
+                document.addPage(page);
+                pages.add(page);
+                try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                    content.beginText();
+                    content.setFont(font, 12);
+                    content.setLeading(16);
+                    content.newLineAtOffset(50, 700);
+                    for (String row : rows) {
+                        content.showText(row);
+                        content.newLine();
+                    }
+                    content.endText();
+                }
+            }
+            PDDocumentOutline outline = new PDDocumentOutline();
+            document.getDocumentCatalog().setDocumentOutline(outline);
+            PDOutlineItem chapter = outlineItem("Chapter One", pages.get(0));
+            outline.addLast(chapter);
+            chapter.addLast(outlineItem("Setup", pages.get(0)));
+            chapter.addLast(outlineItem("Operations", pages.get(1)));
+            document.save(file.toFile());
+        }
+
+        List<TextLine> lines = extractor.extract(file).lines();
+
+        assertThat(lines).extracting(TextLine::text, TextLine::sectionPath, TextLine::kind).containsExactly(
+            tuple("Chapter One", List.of("Chapter One"), LineKind.HEADING),
+            tuple("Intro text", List.of("Chapter One"), LineKind.PARAGRAPH),
+            tuple("Setup", List.of("Chapter One", "Setup"), LineKind.HEADING),
+            tuple("Install it", List.of("Chapter One", "Setup"), LineKind.PARAGRAPH),
+            tuple("More setup text", List.of("Chapter One", "Setup"), LineKind.PARAGRAPH),
+            tuple("Operations", List.of("Chapter One", "Operations"), LineKind.HEADING),
+            tuple("1. Start the batch", List.of("Chapter One", "Operations"), LineKind.LIST_ITEM));
+    }
+
+    private static PDOutlineItem outlineItem(String title, PDPage page) {
+        PDOutlineItem item = new PDOutlineItem();
+        item.setTitle(title);
+        PDPageFitDestination destination = new PDPageFitDestination();
+        destination.setPage(page);
+        item.setDestination(destination);
+        return item;
     }
 
     @Test
