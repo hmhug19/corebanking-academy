@@ -306,6 +306,25 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void acceptingAProposalBanksItAtOnceAndBothDecisionsSurviveAReload() throws Exception {
+        long job = approved().path("jobId").asLong();
+        int before = jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class);
+
+        api.ok(INSTRUCTOR, api.put(Map.of("decision", "accepted"), path(job, "/questions/c1l1/0")));
+        api.ok(INSTRUCTOR, api.put(Map.of("decision", "accepted"), path(job, "/questions/c1l1/0")));
+        api.ok(INSTRUCTOR, api.put(Map.of("decision", "rejected"), path(job, "/questions/c1l1/1")));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class))
+            .isEqualTo(before + 1);
+        JsonNode proposals = api.ok(INSTRUCTOR, get(path(job, "/content"))).path("questions").get(0)
+            .path("questions");
+        assertThat(proposals.get(0).path("decision").asText()).isEqualTo("added");
+        assertThat(proposals.get(1).path("decision").asText()).isEqualTo("rejected");
+        api.error(INSTRUCTOR, api.put(Map.of("decision", "rejected"), path(job, "/questions/c1l1/0")),
+            "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
     void askingForQuestionsToBeBankedBeforeAnyWereProposedWritesNothing() throws Exception {
         long job = startJob();
         runAll();

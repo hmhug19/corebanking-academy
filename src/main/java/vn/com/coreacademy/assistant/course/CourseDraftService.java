@@ -41,6 +41,9 @@ public class CourseDraftService {
     /** Runs one step may have in total, regenerations and retries included, so a job cannot loop on the model. */
     public static final int MAX_STEP_ATTEMPTS = 6;
 
+    /** The decision of a proposed question that is now in the bank. */
+    private static final String ADDED = "added";
+
     private final CourseJobRepository jobs;
     private final CourseJobService owned;
     private final LearningAiDraftService course;
@@ -184,7 +187,11 @@ public class CourseDraftService {
         return content(jobId);
     }
 
-    /** Accepts or rejects one proposed question; undecided ones never reach the question bank. */
+    /**
+     * Accepts or rejects one proposed question. Accepting writes it to the question bank at once (marked {@code added},
+     * so it is written once however often it is accepted); a rejected one stays out. A question already in the bank
+     * cannot be rejected here, it is removed where the bank is managed.
+     */
     @Transactional
     public ContentView decide(long jobId, String lessonKey, int index, String decision) {
         if (!List.of("accepted", "rejected", "pending").contains(decision)) {
@@ -199,7 +206,19 @@ public class CourseDraftService {
         if (index < 0 || index >= list.size()) {
             throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
         }
-        ((ObjectNode) list.get(index)).put("decision", decision);
+        ObjectNode question = (ObjectNode) list.get(index);
+        if (ADDED.equals(question.path("decision").asText())) {
+            if ("accepted".equals(decision)) {
+                return content(jobId);
+            }
+            throw refuse("QUESTION_ALREADY_ADDED",
+                "Câu hỏi này đã được thêm vào ngân hàng câu hỏi nên không loại được ở đây.");
+        }
+        if ("accepted".equals(decision)) {
+            bank(question, read(job.inputs(), Inputs.class));
+        } else {
+            question.put("decision", decision);
+        }
         jobs.setOutput(step.id(), write(output));
 
         return content(jobId);
@@ -236,14 +255,7 @@ public class CourseDraftService {
                 if (!"accepted".equals(question.path("decision").asText())) {
                     continue;
                 }
-                List<OptionInput> options = new ArrayList<>();
-                question.path("options").forEach(option -> options.add(new OptionInput(null,
-                    option.path("content").asText(), option.path("correct").asBoolean())));
-                questions.create(new QuestionRequest(null, null, inputs.competencyId(), null,
-                    question.path("type").asText(), question.path("content").asText(),
-                    question.path("explanation").asText(null), question.path("difficulty").asText("MEDIUM"),
-                    BigDecimal.ONE, "ACTIVE", options, inputs.programmeId()));
-                ((ObjectNode) question).put("decision", "added");
+                bank((ObjectNode) question, inputs);
                 changed = true;
                 accepted++;
             }
@@ -253,6 +265,18 @@ public class CourseDraftService {
         }
 
         return accepted;
+    }
+
+    /** Writes one proposed question to the bank with the programme and competency the author chose; marks it added. */
+    private void bank(ObjectNode question, Inputs inputs) {
+        List<OptionInput> options = new ArrayList<>();
+        question.path("options").forEach(option -> options.add(new OptionInput(null,
+            option.path("content").asText(), option.path("correct").asBoolean())));
+        questions.create(new QuestionRequest(null, null, inputs.competencyId(), null,
+            question.path("type").asText(), question.path("content").asText(),
+            question.path("explanation").asText(null), question.path("difficulty").asText("MEDIUM"),
+            BigDecimal.ONE, "ACTIVE", options, inputs.programmeId()));
+        question.put("decision", ADDED);
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------------------

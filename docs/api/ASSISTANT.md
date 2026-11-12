@@ -327,11 +327,11 @@ Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể
 
 | Method | Path | Ý nghĩa |
 |---|---|---|
-| GET | `.../content` | Dàn ý, `outlineLocked`, các bài (khối nội dung, ghi chú nguồn) và câu hỏi đề xuất (`decision`: `pending|accepted|rejected`). |
+| GET | `.../content` | Dàn ý, `outlineLocked`, các bài (khối nội dung, ghi chú nguồn) và câu hỏi đề xuất (`decision`: `pending|accepted|rejected|added`). |
 | PUT | `.../outline` | Sửa dàn ý (JSON đúng schema); chỉ trước khi duyệt, sau đó `OUTLINE_LOCKED`. |
 | POST | `.../outline/approve` | Khóa dàn ý, tạo các bước bài rồi câu hỏi, job → `running`. |
 | POST | `.../lessons/{key}/regenerate` | Viết lại đúng một bài; bài khác và câu hỏi giữ nguyên. |
-| PUT | `.../questions/{key}/{index}` | Body `{"decision":"accepted|rejected|pending"}`. |
+| PUT | `.../questions/{key}/{index}` | Body `{"decision":"accepted|rejected|pending"}`. `accepted` ghi câu hỏi vào ngân hàng ngay (`decision` thành `added`, gọi lại không ghi thêm); `rejected` giữ câu hỏi ngoài ngân hàng. Câu đã `added` không loại được (`QUESTION_ALREADY_ADDED`). |
 | POST | `.../retry` | Chạy lại các bước lỗi; bước đã xong giữ nguyên. |
 | POST | `.../draft` | Tạo khóa học nháp. Cần dàn ý đã duyệt, mọi bài xong và câu hỏi đã soạn xong. Gọi lại trả cùng bản nháp. |
 
