@@ -139,7 +139,7 @@ class QuizLessonCompletionIT extends AssessmentIntegrationTest {
         Setup s = finalOnly();
         JsonNode progress = completeContentThroughApi(s).path("enrollment");
         assertThat(progress.path("status").asText()).isEqualTo("in_progress");
-        assertThat(progress.path("progressPercent").decimalValue()).isEqualByComparingTo("50");
+        assertThat(progress.path("progressPercent").decimalValue()).isEqualByComparingTo("100"); // the final exam is not in the denominator (docs/api/LEARNING.md)
         assertThat(enrollment(s).get("completed_at")).isNull();
         assertThat(attempt(s, false).path("passed").asBoolean()).isFalse();
         assertThat(enrollment(s).get("status")).isNotEqualTo("completed");
