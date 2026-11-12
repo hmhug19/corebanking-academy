@@ -9,7 +9,6 @@ import vn.com.coreacademy.knowledge.ai.OllamaClient.Options;
  */
 @ConfigurationProperties("app.assistant.models")
 public record AssistantModels(Use agent, Use grounded, Use classifier, Use generation) {
-    private static final Options CLASSIFIER = new Options(0.0, 2048);
     private static final Options GENERATION = new Options(0.4, 8192);
 
     public record Use(String chatModel, Double temperature, Integer numCtx) {
@@ -32,8 +31,15 @@ public record AssistantModels(Use agent, Use grounded, Use classifier, Use gener
         return grounded == null ? Options.GROUNDED : grounded.over(Options.GROUNDED);
     }
 
+    /**
+     * Unless set, the classifier runs with the agent's model and context size: Ollama reloads a model when the
+     * context size changes between two calls, and the classifier runs right before the answer.
+     */
     public Options classifierOptions() {
-        return classifier == null ? CLASSIFIER : classifier.over(CLASSIFIER);
+        Options agentOptions = agentOptions();
+        Options base = new Options(0.0, agentOptions.numCtx(), agentOptions.model());
+
+        return classifier == null ? base : classifier.over(base);
     }
 
     public Options generationOptions() {

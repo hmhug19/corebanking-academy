@@ -3,7 +3,11 @@ package vn.com.coreacademy.knowledge.service;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.io.InputStream;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.UUID;
 
 import org.springframework.stereotype.Component;
@@ -42,6 +46,22 @@ public class KnowledgeFileStore {
         }
 
         return root.resolve(key);
+    }
+
+    /** SHA-256 (hex) of the stored file, read in blocks so a large file is never held in memory. */
+    public String sha256(String key) {
+        try (InputStream in = Files.newInputStream(resolve(key))) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] block = new byte[8192];
+            for (int read = in.read(block); read >= 0; read = in.read(block)) {
+                digest.update(block, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Cannot read knowledge file", exception);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is always available", exception);
+        }
     }
 
     public void discard(String key) {

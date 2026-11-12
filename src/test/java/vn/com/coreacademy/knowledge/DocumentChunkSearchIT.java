@@ -7,6 +7,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import vn.com.coreacademy.knowledge.config.EmbeddingDimensionCheck;
+import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.entity.KnowledgeDocument;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
@@ -28,6 +30,9 @@ class DocumentChunkSearchIT extends KnowledgeIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private KnowledgeProperties properties;
 
     private long unit;
     private long child;
@@ -61,6 +66,16 @@ class DocumentChunkSearchIT extends KnowledgeIntegrationTest {
             ChunkHit::documentId).containsExactly("quy-trinh.pdf", 3, 5, 9, first);
         assertThat(hits.get(2).page()).isNull();
         assertThat(hits.get(2).fileName()).isEqualTo("checklist.md");
+    }
+
+    @Test
+    void aCitationCarriesTheTitleNotTheFileName() {
+        long id = document("quy-trinh.pdf");
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET title = 'Quy trình đóng sổ' WHERE document_id = ?", id);
+        chunks.insertAll(id, List.of(new NewChunk(0, "along x", 3, 5, 9, 10, axis(0))));
+
+        assertThat(chunks.search(axis(0), 3, anyone())).extracting(ChunkHit::fileName)
+            .containsExactly("Quy trình đóng sổ");
     }
 
     @Test
@@ -122,6 +137,42 @@ class DocumentChunkSearchIT extends KnowledgeIntegrationTest {
 
         assertThat(chunks.deleteByDocument(id)).isEqualTo(1);
         assertThat(chunks.search(axis(0), 5, anyone())).isEmpty();
+    }
+
+    @Test
+    void neighboursAreTheChunksBeforeAndAfterInTheSameDocumentAndOnlyOfVisibleDocuments() {
+        long mine = scoped("rieng.md", "000005", DocumentScope.PERSONAL, null);
+        chunks.insertAll(mine, List.of(
+            new NewChunk(0, "zero", null, 1, 1, 1, axis(0)), new NewChunk(1, "one", null, 2, 2, 1, axis(1)),
+            new NewChunk(2, "two", null, 3, 3, 1, axis(2)), new NewChunk(3, "three", null, 4, 4, 1, axis(3))));
+        long middle = jdbc.queryForObject(
+            "SELECT chunk_id FROM learning_hub.knowledge_document_chunks WHERE document_id = ? AND chunk_index = 1",
+            Long.class, mine);
+        long first = jdbc.queryForObject(
+            "SELECT chunk_id FROM learning_hub.knowledge_document_chunks WHERE document_id = ? AND chunk_index = 0",
+            Long.class, mine);
+
+        var owner = chunks.neighbours(java.util.Map.of(middle, 0.9, first, 0.8), new DocumentVisibility("000005", Set.of()));
+        var stranger = chunks.neighbours(java.util.Map.of(middle, 0.9), new DocumentVisibility("000004", Set.of()));
+
+        assertThat(owner.get(middle)).extracting(ChunkHit::content).containsExactly("zero", "two");
+        assertThat(owner.get(middle)).allSatisfy(hit -> assertThat(hit.similarity()).isEqualTo(0.9));
+        assertThat(owner.get(first)).extracting(ChunkHit::content).containsExactly("one");
+        assertThat(stranger).isEmpty();
+    }
+
+    @Test
+    void startUpFailsWhenTheConfiguredModelsSizeDiffersFromTheColumn() {
+        var configured = properties.ollama();
+        var other = new KnowledgeProperties(properties.storageDir(), properties.maxFileSize(), properties.worker(),
+            properties.chunk(), properties.retrieval(), new KnowledgeProperties.Ollama(configured.baseUrl(),
+            configured.chatModel(), "other-embed-model", configured.connectTimeout(), configured.readTimeout(),
+            configured.keepAlive(), 768));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new EmbeddingDimensionCheck(jdbc, other).afterPropertiesSet())
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("other-embed-model")
+            .hasMessageContaining("768").hasMessageContaining("vector(1024)");
+        new EmbeddingDimensionCheck(jdbc, properties).afterPropertiesSet();
     }
 
     private long org(String code, Long parent) {

@@ -29,7 +29,8 @@ class SearchCommunityToolTest {
     private final TurnState turn = new TurnState();
 
     private static Source source(long id, String title) {
-        return new Source(id, id + 100, title, "/community/contents/" + id + "?revisionId=" + (id + 100));
+        return new Source(id, id + 100, title, "/community/contents/" + id + "?revisionId=" + (id + 100),
+            "Tóm tắt của bài " + id);
     }
 
     private void finds(Source... sources) {
@@ -102,7 +103,7 @@ class SearchCommunityToolTest {
 
         var answer = searchThenFinish("không có", "Bạn xem các bài sau").answer();
 
-        assertThat(answer).isEqualTo("Chưa tìm thấy nguồn Community phù hợp.");
+        assertThat(answer).isEqualTo("Chưa tìm thấy bài phù hợp trong cộng đồng.").doesNotContain("](");
     }
 
     @Test
@@ -124,6 +125,28 @@ class SearchCommunityToolTest {
 
         assertThat(searchThenFinish("eod", "Có một bài.").answer())
             .isEqualTo("Nguồn hoặc quyền truy cập đã thay đổi. Vui lòng tìm lại.");
+    }
+
+    @Test
+    void theToolResultListsTheTitlesAndSnippetsFoundSoTheSummaryIsAboutThosePosts() {
+        finds(source(1, "Đối soát cuối ngày"), source(3, "Lỗi EOD thường gặp"));
+
+        var result = ((ToolOutcome.Result) tool.run(JSON.createObjectNode().put("query", "eod"), CONTEXT, turn)).text();
+
+        assertThat(result).contains("Đối soát cuối ngày").contains("Tóm tắt của bài 1")
+            .contains("Lỗi EOD thường gặp").contains("Tóm tắt của bài 3").doesNotContain("/community/");
+    }
+
+    @Test
+    void withNoHitsTheToolResultSaysSoAndTheReplyIsTheFixedSentenceWhateverTheModelWrites() {
+        when(community.search(anyString(), anyString())).thenReturn(List.of());
+
+        var result = ((ToolOutcome.Result) tool.run(JSON.createObjectNode().put("query", "zzz"), CONTEXT, turn)).text();
+        var answer = turn.finisher().orElseThrow().finish("Không tìm thấy… nhưng bạn xem thử các bài sau.");
+
+        assertThat(result).contains("Không có bài nào");
+        assertThat(answer.answer()).isEqualTo("Chưa tìm thấy bài phù hợp trong cộng đồng.");
+        assertThat(answer.answer()).doesNotContain("](");
     }
 
     @Test

@@ -6,7 +6,9 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -21,6 +23,7 @@ import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.assistant.skill.Suggestions;
@@ -64,6 +67,7 @@ public class KnowledgeChatService {
     private final AssistantModels models;
     private final SkillCatalog catalog;
     private final KnowledgeAccess access;
+    private final AssistantBudget budget;
 
     /** The validated question and the chunks that passed the similarity threshold, best first. */
     public record Retrieval(String question, List<ChunkHit> hits) {
@@ -71,6 +75,15 @@ public class KnowledgeChatService {
 
     /** Validate, embed, search, filter. Refusals are thrown so a caller can still answer with an envelope. */
     public Retrieval retrieve(String rawQuestion) {
+        return retrieve(rawQuestion, null);
+    }
+
+    /**
+     * As {@link #retrieve(String)}; inside a conversation the search text is the previous question and the new one,
+     * so "còn trường hợp ngoại lệ?" is searched in context. No extra model call; the model still gets the new
+     * question alone.
+     */
+    public Retrieval retrieve(String rawQuestion, String previousQuestion) {
         String question = rawQuestion == null ? "" : rawQuestion.strip();
         if (question.isEmpty() || question.length() > MAX_QUESTION_LENGTH) {
             throw BusinessException.validation("question", "OUT_OF_RANGE", "Câu hỏi phải từ 1 đến 300 ký tự.");
@@ -79,17 +92,31 @@ public class KnowledgeChatService {
         DocumentVisibility visibility = access.visibility(SecurityContextUtils.getUserId());
         List<ChunkHit> hits;
         try {
-            float[] vector = ollama.embed(List.of(question)).get(0);
+            float[] vector = ollama.embed(List.of(searchText(question, previousQuestion))).get(0);
             KnowledgeProperties.Retrieval retrieval = properties.retrieval();
             List<ChunkHit> candidates = chunks.search(vector, retrieval.topK() * CANDIDATE_FACTOR, visibility).stream()
                 .filter(hit -> hit.similarity() >= retrieval.minSimilarity()).toList();
-            hits = distinct(candidates, retrieval.topK());
+            List<ChunkHit> best = budget.fitRetrieved(distinct(candidates, retrieval.topK()));
+            Map<Long, Double> similarityOf = new LinkedHashMap<>();
+            best.forEach(hit -> similarityOf.put(hit.chunkId(), hit.similarity()));
+            // The text around each hit, while the retrieved-content budget has room.
+            hits = budget.addNeighbours(best, chunks.neighbours(similarityOf, visibility));
         } catch (OllamaUnavailableException | OllamaException exception) {
             throw new BusinessException(KnowledgeResponseCode.AI_UNAVAILABLE);
         }
         log.info("Knowledge retrieval questionLength={} hits={}", question.length(), hits.size());
 
         return new Retrieval(question, hits);
+    }
+
+    private static String searchText(String question, String previousQuestion) {
+        if (previousQuestion == null || previousQuestion.isBlank()) {
+            return question;
+        }
+        String previous = previousQuestion.strip();
+
+        return (previous.length() > MAX_QUESTION_LENGTH ? previous.substring(0, MAX_QUESTION_LENGTH) : previous)
+            + "\n" + question;
     }
 
     /** One complete answer, the contract of record for tests and tooling. */
@@ -134,12 +161,12 @@ public class KnowledgeChatService {
     /**
      * Retrieval runs now, on the request thread, so refusals are still ordinary envelopes. Generation runs inside the
      * returned body: one JSON line per event, flushed at once. The first line names the conversation; the earlier
-     * turns of that conversation go to the model as plain history, retrieval still uses the new question alone.
+     * turns of that conversation go to the model as plain history, and the search text adds the previous question.
      */
     public StreamingResponseBody stream(String rawQuestion, Long conversationId) {
         String userId = SecurityContextUtils.getUserId();
         conversations.requireOwned(userId, conversationId);
-        Retrieval retrieval = retrieve(rawQuestion);
+        Retrieval retrieval = retrieve(rawQuestion, conversations.previousQuestion(userId, conversationId));
         return output -> {
             TurnLimiter.Admission admission = limiter.admit(userId);
             if (!(admission instanceof TurnLimiter.Admission.Started started)) {
@@ -172,6 +199,9 @@ public class KnowledgeChatService {
 
     private void streamAnswer(OutputStream output, Retrieval retrieval, List<Conversations.Exchange> history,
                               TurnLog turnLog) {
+        turnLog.retrieval = List.of(new TurnRecord.Search("search_documents", retrieval.hits().size(),
+            rankedGiven(retrieval.hits())));
+        metrics.search(AssistantMetrics.KNOWLEDGE, turnLog.retrieval.get(0));
         emit(output, turnLog, ChatStreamEvent.retrieved(retrieval.hits().size()));
         if (retrieval.hits().isEmpty()) {
             emit(output, turnLog, ChatStreamEvent.delta(NotFoundAnswer.TEXT));
@@ -182,14 +212,15 @@ public class KnowledgeChatService {
         StringBuilder text = new StringBuilder();
         Suggestions.Filter filter = new Suggestions.Filter();
         try {
-            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), models.groundedOptions(),
+            OllamaClient.Options options = models.groundedOptions().withNumPredict(budget.answer());
+            ollama.chatStream(prompts.build(retrieval.question(), retrieval.hits(), history), options,
                 delta -> {
                     text.append(delta);
                     String shown = filter.accept(delta);
                     if (!shown.isEmpty()) {
                         emit(output, turnLog, ChatStreamEvent.delta(shown));
                     }
-                });
+                }, usage -> metrics.modelCall(AssistantMetrics.KNOWLEDGE, usage, options.numCtx()));
         } catch (UncheckedIOException exception) {
             turnLog.stopped();
             throw exception;
@@ -202,7 +233,16 @@ public class KnowledgeChatService {
         Suggestions.Split split = Suggestions.split(text.toString().strip());
         ChatAnswerView answer = conclude(split.answer(), retrieval.hits());
         emit(output, turnLog, ChatStreamEvent.done(answer.found(), answer.answer(), answer.citations(),
-            answer.found() ? split.suggestions() : List.of()));
+            answer.found() ? split.suggestions() : List.of(), answer.grounded()));
+    }
+
+    private static List<TurnRecord.Given> rankedGiven(List<ChunkHit> hits) {
+        List<TurnRecord.Given> given = new java.util.ArrayList<>();
+        for (int i = 0; i < hits.size(); i++) {
+            given.add(new TurnRecord.Given("document", hits.get(i).chunkId(), i + 1, hits.get(i).similarity()));
+        }
+
+        return given;
     }
 
     private void emit(OutputStream output, TurnLog turnLog, ChatStreamEvent event) {
@@ -212,7 +252,8 @@ public class KnowledgeChatService {
         }
         if (event instanceof ChatStreamEvent.Done done) {
             if (!done.found()) {
-                metrics.notFound(AssistantMetrics.KNOWLEDGE);
+                metrics.notFound(AssistantMetrics.KNOWLEDGE, turnLog.retrieval.stream().allMatch(
+                    TurnRecord.Search::gaveNothing) ? AssistantMetrics.EMPTY_RETRIEVAL : AssistantMetrics.MODEL_SAID_SO);
             }
             // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
             Long turnId = store(turnLog);
@@ -254,6 +295,7 @@ public class KnowledgeChatService {
         private Long storedId;
         private final long started = System.nanoTime();
         private TurnRecord.Status status = TurnRecord.Status.STOPPED;
+        private List<TurnRecord.Search> retrieval = List.of();
         private String answer;
         private List<ChatViews.CitationView> citations = List.of();
         private Integer firstTokenMs;
@@ -288,16 +330,15 @@ public class KnowledgeChatService {
 
         TurnRecord record() {
             return new TurnRecord(TurnRecord.KNOWLEDGE, question, answer, citations, List.of(), null, null, status,
-                firstTokenMs, millisSince(), SkillCatalog.DEFAULT, promptVersion);
+                firstTokenMs, millisSince(), SkillCatalog.DEFAULT, promptVersion, retrieval);
         }
     }
 
     private ChatAnswerView conclude(String text, List<ChunkHit> hits) {
-        if (NotFoundAnswer.isNotFound(text)) {
-            return notFound();
-        }
+        CitationRule.Outcome outcome = CitationRule.apply(text, hits);
+        metrics.citations(AssistantMetrics.KNOWLEDGE, outcome.checkedMarkers(), outcome.removedMarkers());
 
-        return new ChatAnswerView(text, true, CitationSelector.select(text, hits));
+        return new ChatAnswerView(outcome.answer(), outcome.found(), outcome.citations(), outcome.grounded());
     }
 
     /** The best {@code limit} hits whose text differs, best first; a copy of a file already seen adds nothing. */

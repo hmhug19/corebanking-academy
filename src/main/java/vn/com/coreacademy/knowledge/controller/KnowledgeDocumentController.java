@@ -2,6 +2,8 @@ package vn.com.coreacademy.knowledge.controller;
 
 import java.util.List;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -9,12 +11,16 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -26,9 +32,12 @@ import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.StandardApiErrors;
+import vn.com.coreacademy.knowledge.dto.KnowledgeViews.DocumentTextView;
+import vn.com.coreacademy.knowledge.dto.KnowledgeViews.DuplicateGroupView;
 import vn.com.coreacademy.knowledge.dto.KnowledgeViews.KnowledgeDocumentView;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
+import vn.com.coreacademy.knowledge.service.KnowledgeDocumentTextService;
 
 @RestController
 @RequestMapping("/api/v1/knowledge")
@@ -37,12 +46,14 @@ import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
 @Validated
 @RequiredArgsConstructor
 public class KnowledgeDocumentController {
+    private static final int MAX_SPAN = 20;
+
     private final AssistantGate gate;
     private final KnowledgeDocumentService documents;
+    private final KnowledgeDocumentTextService texts;
 
     @PostMapping(value = "/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
         produces = MediaType.APPLICATION_JSON_VALUE)
-    @ResponseStatus(HttpStatus.CREATED)
     @Operation(
         summary = "Tải tài liệu lên kho tri thức",
         description = """
@@ -51,12 +62,65 @@ public class KnowledgeDocumentController {
             - scope: personal (chỉ mình tôi), unit (đơn vị của tôi và đơn vị con, mặc định) hoặc global (mọi người, chỉ ADMIN/SUPER_ADMIN; vai trò khác nhận 403).
             - Loại tệp được xác định từ phần mở rộng và nội dung thật, không tin MIME do trình duyệt khai báo.
             - Xử lý nền (trích xuất, chia đoạn, nhúng vector); theo dõi bằng GET /documents/{documentId}.
+            - title (tùy chọn) là tên hiển thị; bỏ trống thì dùng tên tệp.
+            - Tệp trùng nội dung với tài liệu đã có của chính người gọi trong cùng phạm vi: trả 200 với tài liệu đã có và duplicate=true, không tạo gì mới. Tệp giống của người khác không phải trùng.
             """
     )
-    public BaseResponse<KnowledgeDocumentView> upload(@RequestPart MultipartFile file,
-                                                      @RequestParam(required = false) String scope) {
+    public ResponseEntity<BaseResponse<KnowledgeDocumentView>> upload(@RequestPart MultipartFile file,
+                                                                      @RequestParam(required = false) String scope,
+                                                                      @RequestParam(required = false) String title) {
         gate.requireAccess();
-        return BaseResponse.ok(documents.upload(file, parseScope(scope)));
+        KnowledgeDocumentView view = documents.upload(file, parseScope(scope), title);
+        return ResponseEntity.status(view.duplicate() ? HttpStatus.OK : HttpStatus.CREATED)
+            .body(BaseResponse.ok(view));
+    }
+
+    @GetMapping(value = "/documents/duplicates", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+        summary = "Tài liệu trùng của tôi",
+        description = """
+            Các nhóm tài liệu do người gọi tải lên có cùng checksum trong cùng phạm vi, mới nhất trước trong mỗi nhóm.
+            Không xóa gì tự động; người dùng xóa từng bản bằng DELETE /documents/{documentId}.
+            """
+    )
+    public BaseResponse<List<DuplicateGroupView>> duplicates() {
+        gate.requireAccess();
+        return BaseResponse.ok(documents.duplicates());
+    }
+
+    public record RenameRequest(String title) {
+    }
+
+    @PatchMapping(value = "/documents/{documentId}", consumes = MediaType.APPLICATION_JSON_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+        summary = "Đổi tên tài liệu",
+        description = """
+            Đổi title (tên hiển thị và tên trong trích dẫn mới), không đổi tên tệp gốc.
+            - Người tải lên, hoặc ADMIN/SUPER_ADMIN trong phạm vi; người khác nhận 403; tài liệu không đọc được trả not found.
+            """
+    )
+    public BaseResponse<KnowledgeDocumentView> rename(@PathVariable @Positive Long documentId,
+                                                      @RequestBody RenameRequest request) {
+        gate.requireAccess();
+        return BaseResponse.ok(documents.rename(documentId, request.title()));
+    }
+
+    @PutMapping(value = "/documents/{documentId}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+        produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+        summary = "Thay bản mới của tài liệu",
+        description = """
+            Giữ nguyên id; tệp mới được xử lý nền và các đoạn được đổi trong một transaction khi xong. Trong lúc chờ, bản cũ vẫn trả lời; nếu tệp mới lỗi, bản cũ được giữ và replacement.status = failed kèm lý do.
+            - Chỉ tài liệu ready, của người tải lên hoặc ADMIN/SUPER_ADMIN trong phạm vi.
+            - Đã có bản thay thế đang chờ hoặc chạy: lỗi validation REPLACING; tài liệu chưa ready: NOT_READY.
+            - Tệp giống hệt tệp hiện tại: không đổi gì, duplicate=true.
+            """
+    )
+    public BaseResponse<KnowledgeDocumentView> replace(@PathVariable @Positive Long documentId,
+                                                       @RequestPart MultipartFile file) {
+        gate.requireAccess();
+        return BaseResponse.ok(documents.replace(documentId, file));
     }
 
     @GetMapping(value = "/documents", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -89,6 +153,23 @@ public class KnowledgeDocumentController {
         return BaseResponse.ok(documents.get(documentId));
     }
 
+    @GetMapping(value = "/documents/{documentId}/text", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+        summary = "Đọc văn bản quanh đoạn được trích dẫn",
+        description = """
+            Trả văn bản đã trích của đoạn around và span đoạn kề mỗi bên, kèm đường dẫn mục, trang và dòng, để người dùng đọc ngữ cảnh của nguồn.
+            - Cùng quy tắc nhìn thấy như tìm kiếm: tài liệu người gọi không tìm được (kể cả nguồn của khóa học) trả not found.
+            - around bỏ trống thì bắt đầu từ đoạn đầu tiên; đoạn không thuộc tài liệu trả not found.
+            - Không có endpoint nào trả tệp gốc.
+            """
+    )
+    public BaseResponse<DocumentTextView> text(@PathVariable @Positive Long documentId,
+                                               @RequestParam(required = false) @Positive Long around,
+                                               @RequestParam(defaultValue = "2") @Min(0) @Max(MAX_SPAN) int span) {
+        gate.requireAccess();
+        return BaseResponse.ok(texts.text(documentId, around, span));
+    }
+
     @DeleteMapping(value = "/documents/{documentId}", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(
         summary = "Xóa tài liệu",
@@ -109,7 +190,7 @@ public class KnowledgeDocumentController {
             return null;
         }
         try {
-            return DocumentScope.fromValue(value);
+            return DocumentScope.fromRequest(value);
         } catch (IllegalArgumentException exception) {
             throw BusinessException.validation("scope", "INVALID_VALUE", "Phạm vi phải là personal, unit hoặc global.");
         }

@@ -196,6 +196,8 @@ class SearchDocumentsToolTest {
         search("quy trình");
 
         assertThat(finish("Có hai tài liệu.").citations()).isEmpty();
+        assertThat(finish("Có hai tài liệu.").grounded()).isFalse();
+        assertThat(finish("CIF [1].").grounded()).isTrue();
         assertThat(finish("Xem [9] và [0].").citations()).isEmpty();
         assertThat(finish("CIF [1] và [7].").citations()).extracting(CitationView::n).containsExactly(1);
     }

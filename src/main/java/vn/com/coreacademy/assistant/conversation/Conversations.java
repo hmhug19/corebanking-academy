@@ -10,8 +10,6 @@ import vn.com.coreacademy.assistant.agent.LessonFocus;
  * database.
  */
 public interface Conversations {
-    /** About 4k tokens, so the prompt, the tool definitions and the results still fit num_ctx 8192. */
-    int HISTORY_CHARS = 16_000;
     /** An earlier answer longer than this is cut, since it is the server's own text. */
     int MAX_ANSWER_CHARS = 4000;
     int TITLE_CHARS = 80;
@@ -28,8 +26,14 @@ public interface Conversations {
     void requireOwned(String ownerId, Long conversationId);
 
     /**
+     * The question of the owner's latest finished turn in {@code conversationId}, or null when none was named or it has
+     * none yet. Read-only: the document chat uses it to search a follow-up in context before the turn is admitted.
+     */
+    String previousQuestion(String ownerId, Long conversationId);
+
+    /**
      * Starts a new conversation titled from {@code question} when {@code conversationId} is null; otherwise loads the
-     * owner's conversation. The history is the done turns that fit {@link #HISTORY_CHARS} together with the question.
+     * owner's conversation. The history is the done turns that fit {@link #HISTORY_CHARS} within the history token budget ({@code app.assistant.budget.history}).
      */
     Opened open(String ownerId, Long conversationId, String question);
 

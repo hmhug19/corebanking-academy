@@ -71,7 +71,7 @@ Một lượt hội thoại. Trả `application/x-ndjson`, mỗi dòng một s�
 | `error`           | `messageCode`, `message`        | Dòng cuối khi lỗi giữa chừng                                                             |
 
 `citations` có dạng `CitationView` của chat tài liệu (`n`, `documentId`, `fileName`, `page`, `lineStart`, `lineEnd`,
-`snippet`) và rỗng trừ khi `search_documents` hoặc `search_courses` đã chạy trong lượt. Nguồn là bài học thì thêm
+`snippet`, `sectionPath`, `chunkId` của đoạn tài liệu) và rỗng trừ khi `search_documents` hoặc `search_courses` đã chạy trong lượt. Nguồn là bài học thì thêm
 `lesson` (`courseId`, `courseTitle`, `revisionId`, `chapterTitle`, `lessonId`, `lessonTitle`, `blockId`, `url`) và
 `documentId` = 0; `url` là `/lesson/{courseId}/{lessonId}`. Citation của tài liệu không có trường `lesson`.
 
@@ -183,15 +183,43 @@ Ollama không phản hồi khi nhúng câu hỏi: sự kiện `error` `ASSISTANT
 
 ### `search_courses`
 
-Tham số `query` (1–300 ký tự). Tìm trong chỉ mục nội dung bài học (`learning_hub.course_content_chunks`), chỉ revision
-đang xuất bản của khóa. Người dùng chỉ thấy khóa mình quản lý (cùng phạm vi `LearningAccessPolicy.searchScope`) hoặc khóa
-có ghi danh còn hiệu lực trên đúng revision đó; lọc nằm trong cùng câu SQL với ORDER BY/LIMIT nên đoạn không đọc được
+Tham số `query` (1–300 ký tự). Tìm trong chỉ mục nội dung bài học (`learning_hub.course_content_chunks`). Người quản lý
+(cùng phạm vi `LearningAccessPolicy.searchScope`) chỉ thấy revision đang xuất bản; trong lúc revision mới chưa lập chỉ mục
+xong thì revision đã lập chỉ mục mới nhất vẫn trả lời. Người học thấy đúng revision của ghi danh còn hiệu lực (không bao giờ
+thấy chữ của revision mới hơn), kể cả khi khóa đã xuất bản bản mới; lọc nằm trong cùng câu SQL với ORDER BY/LIMIT nên đoạn không đọc được
 không chiếm chỗ top-k. Số `[n]` dùng chung với `search_documents` trong lượt; kết thúc lượt theo cùng quy tắc.
 
 Chỉ mục do worker `CourseContentIndexer` dựng (thăm dò mỗi `app.learning.course-index.poll-interval`, mặc định 30s,
 chỉ chạy khi Ollama sẵn sàng): mỗi revision đã xuất bản được ghi cùng lúc đoạn và dấu hoàn tất trong một transaction
-nên chạy lại hay khởi động lại giữa chừng không nhân đôi; revision cũ bị xóa khi có bản xuất bản mới. SQL:
-`docs/sql/upgrade/2026-11-11-course-content-index.sql`.
+nên chạy lại hay khởi động lại giữa chừng không nhân đôi. Chỉ mục giữ revision đang xuất bản và mọi revision còn ghi danh
+(`status <> 'withdrawn'`); lập chỉ mục revision mới xong mới xóa revision cũ không còn ai học, và không xóa gì khi revision
+đang xuất bản chưa lập chỉ mục được. Khối `pdf` và `attachment` (PDF, DOCX, MD) được đọc bằng extractor của kho tri thức,
+giới hạn và kiểm tra chất lượng giống tài liệu tải lên; đoạn giữ số trang (`page_number`) và trích dẫn ghi trang. Tệp scan,
+phông chữ lỗi, quá giới hạn hoặc định dạng khác (ảnh, PPTX, XLSX) không được lập chỉ mục nhưng không làm hỏng revision.
+Revision lỗi (Ollama chạy nhưng nhúng hoặc đọc kho tệp lỗi) được thử lại sau `app.learning.course-index.retry-delay` (gấp đôi
+mỗi lần) tối đa `max-attempts` lần rồi chuyển `failed`. Quản trị hệ thống xem `GET /api/v1/admin/learning/course-index/failures`
+và thử lại bằng `POST /api/v1/admin/learning/course-index/{revisionId}/retry`. SQL:
+`docs/sql/upgrade/2026-11-11-course-content-index.sql`, `docs/sql/upgrade/2026-11-18-course-index-coverage.sql`.
+
+**Bộ tách đoạn v2 và lập chỉ mục lại** (`app.knowledge.chunk.version` = 2). Một bộ tách đoạn dùng chung cho tài liệu, khóa
+học và tệp của khối: cắt theo mục (đề mục) trước, rồi theo kích thước (mục tiêu 400, tối đa 550 token ước lượng), giữ phần
+gối đầu qua ngắt trang, không cắt giữa bảng hoặc khối mã trừ khi riêng nó vượt mức tối đa (khi đó mỗi phần lặp lại dòng
+tiêu đề bảng). Văn bản nhúng và đưa cho mô hình là `tiêu đề tài liệu › đường dẫn mục` rồi nội dung; nội dung lưu trong DB
+vẫn là văn bản thuần. Đoạn khóa học dùng `khóa học › chương › bài › khối`. Hai bảng đoạn có thêm `section_path`,
+`content_hash` (SHA-256), `chunker_version`, `embed_model`; số chiều vector và tên mô hình lấy từ cấu hình
+(`app.knowledge.ollama.embed-dimensions`, `embed-model`) và backend không khởi động nếu số chiều khác cột `vector(n)`.
+Khi trả lời, đoạn kề (`chunk_index ± 1`, cùng tài liệu hoặc cùng bài, cùng quy tắc quyền đọc) của mỗi đoạn tìm được được
+thêm vào sau các đoạn chính khi ngân sách `app.assistant.budget.retrieved` còn chỗ; top-k mặc định 6.
+
+- `POST /api/v1/admin/knowledge/reindex`: chạy nền việc lập chỉ mục lại mọi tài liệu và revision khóa học có đoạn khác
+  `chunker_version` hoặc `embed_model` so với cấu hình; mỗi mục được thay trong một transaction nên đoạn cũ vẫn trả lời
+  đến khi đoạn mới có hiệu lực. Trả về trạng thái hiện tại; đang chạy thì không bắt đầu lượt mới.
+- `GET /api/v1/admin/knowledge/reindex/status`: `state` (`IDLE`, `RUNNING`, `FINISHED`, `ABORTED`), `total`, `done`,
+  `failed`, `startedTime`, `finishedTime`. Mục lỗi vẫn lỗi thời cho lượt sau; Ollama không kết nối được thì lượt `ABORTED`.
+
+Cả hai chỉ dành cho quản trị hệ thống (phạm vi GLOBAL). SQL: `docs/sql/upgrade/2026-11-19-chunker-v2-columns.sql`
+(chạy trước backend mới; rollback `.rollback.sql`). Tinh chỉnh kích thước, top-k, `min-similarity` bằng bộ eval truy hồi
+(cần Ollama) rồi ghi giá trị chọn kèm số đo vào ticket.
 
 ### `open_screen`
 
@@ -322,21 +350,19 @@ riêng việc dùng còn cần vai trò quản lý khóa học (INSTRUCTOR, ADMI
 ### Nội dung, duyệt và bản nháp (`/api/v1/assistant/course-jobs/{jobId}/...`)
 
 Đường ống: `summarise_sections` → `outline` (job chuyển `waiting_approval`) → **tác giả duyệt dàn ý** → các bài `lesson` (`c{chương}l{bài}`)
-→ `questions` của từng bài → job `waiting_approval` ở bước `review` → tác giả tạo bản nháp. Không bước nào sau `outline` chạy trước khi duyệt.
+→ `questions` của từng bài → job `completed`. Khóa học nháp đã được tạo cùng job và các bước ghi thẳng vào đó; không còn bước "tạo bản nháp" riêng. Không bước nào sau `outline` chạy trước khi duyệt.
 Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể cả ghi chú nguồn (`sourceNotes`) trong nội dung từng bài.
 
 | Method | Path | Ý nghĩa |
 |---|---|---|
-| GET | `.../content` | Dàn ý, `outlineLocked`, các bài (khối nội dung, ghi chú nguồn) và câu hỏi đề xuất (`decision`: `pending|accepted|rejected`). |
+| GET | `.../content` | Dàn ý, `outlineLocked`, các bài (khối nội dung, ghi chú nguồn) và câu hỏi đề xuất (`decision`: `pending|accepted|rejected|added`). |
 | PUT | `.../outline` | Sửa dàn ý (JSON đúng schema); chỉ trước khi duyệt, sau đó `OUTLINE_LOCKED`. |
 | POST | `.../outline/approve` | Khóa dàn ý, tạo các bước bài rồi câu hỏi, job → `running`. |
 | POST | `.../lessons/{key}/regenerate` | Viết lại đúng một bài; bài khác và câu hỏi giữ nguyên. |
-| PUT | `.../questions/{key}/{index}` | Body `{"decision":"accepted|rejected|pending"}`. |
+| PUT | `.../questions/{key}/{index}` | Body `{"decision":"accepted|rejected|pending"}`. `accepted` ghi câu hỏi vào ngân hàng ngay (`decision` thành `added`, gọi lại không ghi thêm); `rejected` giữ câu hỏi ngoài ngân hàng. Câu đã `added` không loại được (`QUESTION_ALREADY_ADDED`). |
 | POST | `.../retry` | Chạy lại các bước lỗi; bước đã xong giữ nguyên. |
-| POST | `.../draft` | Tạo khóa học nháp. Cần dàn ý đã duyệt, mọi bài xong và câu hỏi đã soạn xong. Gọi lại trả cùng bản nháp. |
 
-- Mỗi bước chạy tối đa 6 lần kể cả tạo lại và thử lại (`REGENERATION_LIMIT`); dàn ý tối đa 60 bài; sau khi tạo bản nháp
-  không tạo lại hay thử lại được nữa (`DRAFT_CREATED`).
+- Mỗi bước chạy tối đa 6 lần kể cả tạo lại và thử lại (`REGENERATION_LIMIT`); dàn ý tối đa 60 bài.
 - Đầu ra của model được kiểm theo schema (`GenerationSchemas`): không hợp lệ thì hỏi lại đúng một lần kèm danh sách lỗi, rồi bước `failed` với
   thông báo đọc được. Giới hạn: ≤ 20 chương, ≤ 10 bài/chương, ≤ 6 khối/bài, thân khối ≤ 6000 ký tự.
 - Bản nháp được tạo bằng `LearningContentService.create` với quyền của tác giả, luôn ở trạng thái `draft` (không bao giờ tự xuất bản) và
@@ -344,15 +370,11 @@ Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể
 - Chỉ câu hỏi `accepted` được ghi vào ngân hàng câu hỏi (qua `QuestionService`, kèm chương trình và năng lực do người dùng chọn, chưa gắn khóa/bài).
 - Thời lượng mỗi bước ghi vào meter `assistant.generation.step.duration` (tag `kind`, `outcome`).
 
-### Bắt đầu tạo khóa học từ chatbot (kỹ năng `tao_khoa_hoc`, công cụ `start_course_job`)
+### Mở form tạo khóa học từ chatbot (kỹ năng `tao_khoa_hoc`, công cụ `open_course_form`)
 
-- Ô soạn tin tải tệp lên như tài liệu `personal` (`POST /api/v1/knowledge/documents?scope=personal`) rồi gửi lượt với `skill: "tao_khoa_hoc"` và
-  `attachmentDocumentId`. Id này chỉ là yêu cầu của client: công cụ chỉ dùng khi tài liệu là `personal` của chính người gọi và chưa gắn với job nào.
-  Model không bao giờ thấy hay đặt id tài liệu.
-- Kỹ năng và công cụ chỉ dành cho INSTRUCTOR, ADMIN, SUPER_ADMIN. Học viên không được cấp kỹ năng; `base.md` bảo trợ lý trả lời ngắn rằng tính năng
+- Công cụ không tạo gì và không đọc tệp: nó trả sự kiện `navigate` tới `/admin/courses/new` kèm `prefill` (`title`, `targetLearners`, `level`,
+  `chapters`, `durationMinutes`, chỉ những trường người dùng đã nói và nằm trong giới hạn của form). Không hỏi thêm, không tra chương trình hay năng lực.
+- Tệp đính kèm ở lại trình duyệt (`CourseFormPrefillStore`); chỉ khi bấm "Tạo bằng AI" trên form tệp mới được tải lên (scope `COURSE_SOURCE`) và job mới tạo.
+- Kỹ năng và công cụ chỉ dành cho INSTRUCTOR, ADMIN, SUPER_ADMIN. Học viên không được cấp kỹ năng; `style.md` bảo trợ lý trả lời ngắn rằng tính năng
   dành cho giảng viên.
-- Công cụ chỉ **đề xuất**: thiếu thông tin thì trả danh sách còn thiếu để trợ lý hỏi lại; chương trình và năng lực được tra theo tên người dùng nói,
-  tên mơ hồ được trả lại để người dùng chọn. Đủ thông tin thì tạo thẻ chờ xác nhận (`action_required`, tool `start_course_job`).
-- `POST /api/v1/assistant/agent/actions/{id}/confirm` tạo job như form (`CourseJobService.createFromDocument`, cùng kiểm vai trò, đơn vị và giới hạn
-  ngày) và trả `data: { jobId, path: "/admin/courses/ai-drafts/{jobId}" }`.
-- Quản trị viên cần chọn đơn vị sở hữu nên được hướng tới nút "Tạo bằng AI" ở Khóa học mới; giảng viên luôn dùng đơn vị của mình.
+

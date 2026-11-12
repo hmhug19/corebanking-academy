@@ -52,6 +52,10 @@ app:
     course-index:
       # How often the worker looks for published course revisions that are not indexed yet.
       poll-interval: ${COURSE_INDEX_POLL:30s}
+      # A revision that fails to index is tried again after retry-delay (doubling each time) until max-attempts
+      # attempts have failed; then it shows as failed and waits for an admin.
+      max-attempts: ${COURSE_INDEX_MAX_ATTEMPTS:5}
+      retry-delay: ${COURSE_INDEX_RETRY_DELAY:2m}
     points:
       # Weights of the learning leaderboard; override with APP_LEARNING_POINTS_LESSON and so on.
       lesson: 5
@@ -63,17 +67,26 @@ app:
       poll-interval: ${KNOWLEDGE_WORKER_POLL:2s}
       concurrency: ${KNOWLEDGE_WORKER_CONCURRENCY:1}
       max-attempts: 3
+    extraction:
+      max-pages: ${KNOWLEDGE_EXTRACTION_MAX_PAGES:300}
+      max-characters: ${KNOWLEDGE_EXTRACTION_MAX_CHARACTERS:1500000}
+      max-duration: ${KNOWLEDGE_EXTRACTION_MAX_DURATION:60s}
+      min-readable-word-share: ${KNOWLEDGE_EXTRACTION_MIN_READABLE_WORD_SHARE:0.5}
     chunk:
-      target-tokens: 600
-      max-tokens: 800
-      overlap-tokens: 80
+      # Chunker v2 (rag-quality ticket 04). Raise version after changing the chunker, then run the re-index.
+      version: 2
+      target-tokens: 400
+      max-tokens: 550
+      overlap-tokens: 60
     retrieval:
-      top-k: 5
+      top-k: 6
       min-similarity: 0.35
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat-model: ${OLLAMA_CHAT_MODEL:qwen3:8b}
       embed-model: ${OLLAMA_EMBED_MODEL:bge-m3}
+      # Output size of the embed model; must equal the vector(n) column or the backend refuses to start.
+      embed-dimensions: ${OLLAMA_EMBED_DIMENSIONS:1024}
       connect-timeout: 5s
       read-timeout: 180s
       keep-alive: 10m
@@ -83,6 +96,12 @@ app:
       history-messages: 20
       action-ttl: ${ASSISTANT_ACTION_TTL:10m}
       max-concurrent-turns: ${ASSISTANT_MAX_CONCURRENT_TURNS:4}
+    budget:
+      num-ctx: ${ASSISTANT_BUDGET_NUM_CTX:8192}
+      system-and-tools: ${ASSISTANT_BUDGET_SYSTEM:1200}
+      history: ${ASSISTANT_BUDGET_HISTORY:2000}
+      retrieved: ${ASSISTANT_BUDGET_RETRIEVED:3500}
+      answer: ${ASSISTANT_BUDGET_ANSWER:1000}
     limits:
       questions-per-hour: ${ASSISTANT_QUESTIONS_PER_HOUR:60}
     history:
@@ -90,6 +109,8 @@ app:
     generation:
       jobs-per-day: ${ASSISTANT_GENERATION_JOBS_PER_DAY:3}
       poll-interval: ${ASSISTANT_GENERATION_POLL:3s}
+      source-retention: ${ASSISTANT_GENERATION_SOURCE_RETENTION:30d}
+      model-call-timeout: ${ASSISTANT_GENERATION_CALL_TIMEOUT:90s}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 60

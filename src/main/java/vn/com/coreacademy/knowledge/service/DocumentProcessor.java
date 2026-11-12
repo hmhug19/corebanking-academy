@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.chunking.Chunk;
+import vn.com.coreacademy.knowledge.chunking.ChunkText;
 import vn.com.coreacademy.knowledge.chunking.Chunker;
 import vn.com.coreacademy.knowledge.entity.KnowledgeDocument;
 import vn.com.coreacademy.knowledge.extraction.DocxTextExtractor;
@@ -45,12 +46,14 @@ public class DocumentProcessor {
             throw ExtractionException.noText();
         }
 
-        List<float[]> vectors = ollama.embed(chunks.stream().map(Chunk::content).toList());
+        // The title and section lead the embedded text; the stored content stays the plain text.
+        List<float[]> vectors = ollama.embed(chunks.stream().map(chunk -> ChunkText.withContext(
+            document.getFileName(), ChunkText.join(chunk.sectionPath()), chunk.content())).toList());
         List<NewChunk> stored = new ArrayList<>(chunks.size());
         for (int i = 0; i < chunks.size(); i++) {
             Chunk chunk = chunks.get(i);
             stored.add(new NewChunk(i, chunk.content(), chunk.page(), chunk.lineStart(), chunk.lineEnd(),
-                chunk.tokenEstimate(), vectors.get(i)));
+                chunk.tokenEstimate(), vectors.get(i), ChunkText.join(chunk.sectionPath())));
         }
 
         return new Processed(stored, text.pageCount());

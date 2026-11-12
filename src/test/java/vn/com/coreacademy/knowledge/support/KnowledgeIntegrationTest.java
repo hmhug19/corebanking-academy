@@ -50,7 +50,7 @@ public abstract class KnowledgeIntegrationTest {
                     "/docker-entrypoint-initdb.d/04c-assistant-feedback.sql")
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-knowledge-document-scope.sql"),
-                    "/docker-entrypoint-initdb.d/04z-knowledge-document-scope.sql")
+                    "/docker-entrypoint-initdb.d/04x-knowledge-document-scope.sql")
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-11-course-content-index.sql"),
                     "/docker-entrypoint-initdb.d/04y-course-content-index.sql")
@@ -69,6 +69,30 @@ public abstract class KnowledgeIntegrationTest {
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-15-course-job-soft-delete.sql"),
                     "/docker-entrypoint-initdb.d/04ze-course-job-soft-delete.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-16-assistant-retrieval-trace.sql"),
+                    "/docker-entrypoint-initdb.d/04zf-assistant-retrieval-trace.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-16-knowledge-document-course-source-scope.sql"),
+                    "/docker-entrypoint-initdb.d/04zg-knowledge-document-course-source-scope.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-17-course-job-owns-course.sql"),
+                    "/docker-entrypoint-initdb.d/04zh-course-job-owns-course.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-18-course-index-coverage.sql"),
+                    "/docker-entrypoint-initdb.d/04zi-course-index-coverage.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-19-chunker-v2-columns.sql"),
+                    "/docker-entrypoint-initdb.d/04zj-chunker-v2-columns.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-20-document-title-checksum-replace.sql"),
+                    "/docker-entrypoint-initdb.d/04zk-document-title-checksum-replace.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-21-assistant-feedback-review.sql"),
+                    "/docker-entrypoint-initdb.d/04zl-assistant-feedback-review.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-22-system-audit-route.sql"),
+                    "/docker-entrypoint-initdb.d/04zm-system-audit-route.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_community.sql"),
                     "/docker-entrypoint-initdb.d/05-community.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_assessment.sql"),

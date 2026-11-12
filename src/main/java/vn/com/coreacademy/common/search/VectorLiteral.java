@@ -5,8 +5,13 @@ import java.util.StringJoiner;
 /** Codec pgvector dùng chung; từ chối NaN/Infinity hoặc dimension sai trước khi tạo parameter. */
 public final class VectorLiteral {
     public static String encode(float[] vector) {
-        if (vector == null || vector.length != 1024) {
-            throw new IllegalArgumentException("Embedding dimension must be 1024");
+        return encode(vector, 1024);
+    }
+
+    /** As {@link #encode(float[])} for a column whose dimension comes from configuration. */
+    public static String encode(float[] vector, int dimension) {
+        if (vector == null || vector.length != dimension) {
+            throw new IllegalArgumentException("Embedding dimension must be " + dimension);
         }
         StringJoiner result = new StringJoiner(",", "[", "]");
         boolean nonzero = false;

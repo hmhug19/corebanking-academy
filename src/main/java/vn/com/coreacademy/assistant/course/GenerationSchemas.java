@@ -2,10 +2,14 @@ package vn.com.coreacademy.assistant.course;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * The shape every model output must have before it is stored. Each check returns the problems it found, empty when the
@@ -25,7 +29,74 @@ public final class GenerationSchemas {
     /** Links, images and HTML in model text: the skill forbids them, and a source document must not smuggle them in. */
     private static final Pattern LINK = Pattern.compile("(?i)(https?:|ftp:|javascript:)|www\\.|\\]\\(|<\\s*[a-z/!]");
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private GenerationSchemas() {
+    }
+
+    /**
+     * The JSON schema Ollama is given as {@code format} for a step, so the model cannot answer in another shape. It
+     * states the same limits as the checks below; the checks stay as the last word, since a schema cannot say
+     * "no links" or "exactly one correct option".
+     */
+    public static JsonNode format(String stepKind) {
+        return switch (stepKind) {
+            case "summarise_sections" -> object(Map.of("title", string(MAX_TITLE), "summary", string(4000),
+                "keyPoints", array(string(1000), 0, 8)), "title", "summary", "keyPoints");
+            case "outline" -> object(Map.of("title", string(MAX_TITLE), "summary", string(4000),
+                "objectives", array(string(2000), 0, 20),
+                "chapters", array(object(Map.of("title", string(MAX_TITLE), "lessons", array(object(Map.of(
+                    "title", string(MAX_TITLE), "objectives", array(string(2000), 0, 10),
+                    "estimatedMinutes", integer(1, 240)), "title", "objectives", "estimatedMinutes"), 1,
+                    MAX_LESSONS_PER_CHAPTER)), "title", "lessons"), 1, MAX_CHAPTERS)),
+                "title", "summary", "objectives", "chapters");
+            case "lesson" -> object(Map.of("blocks", array(object(Map.of("type", enumOf("text", "process"),
+                "title", string(MAX_TITLE), "body", string(MAX_BODY), "steps", array(object(Map.of(
+                    "title", string(MAX_TITLE), "description", string(2000)), "title"), 1, MAX_STEPS)),
+                "type", "title"), 1, MAX_BLOCKS),
+                "sourceNotes", array(object(Map.of("note", string(1000)), "note"), 0, 30)), "blocks", "sourceNotes");
+            case "questions" -> object(Map.of("questions", array(object(Map.of("type", enumOf("SINGLE", "MULTIPLE"),
+                "content", string(2000), "explanation", string(2000),
+                "difficulty", enumOf("EASY", "MEDIUM", "HARD"),
+                "options", array(object(Map.of("content", string(1000), "correct", MAPPER.createObjectNode()
+                    .put("type", "boolean")), "content", "correct"), 2, 6)),
+                "type", "content", "difficulty", "options"), 1, 8)), "questions");
+            default -> throw new IllegalArgumentException("No schema for step " + stepKind);
+        };
+    }
+
+    private static ObjectNode object(Map<String, JsonNode> properties, String... required) {
+        ObjectNode schema = MAPPER.createObjectNode().put("type", "object");
+        ObjectNode props = schema.putObject("properties");
+        properties.forEach(props::set);
+        ArrayNode names = schema.putArray("required");
+        for (String name : required) {
+            names.add(name);
+        }
+        return schema;
+    }
+
+    private static ObjectNode array(JsonNode items, int min, int max) {
+        ObjectNode schema = MAPPER.createObjectNode().put("type", "array").put("minItems", min).put("maxItems", max);
+        schema.set("items", items);
+        return schema;
+    }
+
+    private static ObjectNode string(int max) {
+        return MAPPER.createObjectNode().put("type", "string").put("minLength", 1).put("maxLength", max);
+    }
+
+    private static ObjectNode integer(int min, int max) {
+        return MAPPER.createObjectNode().put("type", "integer").put("minimum", min).put("maximum", max);
+    }
+
+    private static ObjectNode enumOf(String... values) {
+        ObjectNode schema = MAPPER.createObjectNode().put("type", "string");
+        ArrayNode names = schema.putArray("enum");
+        for (String value : values) {
+            names.add(value);
+        }
+        return schema;
     }
 
     public static List<String> summary(JsonNode node) {

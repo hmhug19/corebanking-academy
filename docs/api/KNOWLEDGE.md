@@ -41,6 +41,30 @@ Tham số tùy chọn `scope` quyết định ai tìm thấy tài liệu: `perso
 và các đơn vị con; **mặc định**) hoặc `global` (mọi người; chỉ ADMIN/SUPER_ADMIN, vai trò khác nhận HTTP 403). Giá trị
 khác trả lỗi validation trên field `scope`. Tài liệu có sẵn trước khi có phạm vi được chuyển thành `global`.
 
+Tham số tùy chọn `title` là tên hiển thị (mặc định là tên tệp). **Chặn trùng:** nếu người gọi đã có một tài liệu (không `failed`)
+cùng checksum SHA-256 trong cùng phạm vi (cùng `scope`, và cùng đơn vị với `unit`), không lưu gì và trả HTTP **200** với tài
+liệu đã có và `duplicate: true`. Tệp giống hệt của người khác, hoặc của chính mình ở phạm vi khác, không phải trùng.
+Tài liệu cũ chưa có checksum được backend tính bù từ tệp lưu một lần sau khi khởi động.
+
+### `PATCH /api/v1/knowledge/documents/{documentId}` (JSON `{"title": "..."}`)
+
+Đổi tên hiển thị (và tên trong trích dẫn mới); tên tệp gốc không đổi. Người tải lên, hoặc ADMIN/SUPER_ADMIN trong phạm vi
+(cùng quy tắc với xóa); người khác nhận HTTP 403, tài liệu không đọc được trả not found. Tên rỗng hoặc dài quá 255 ký tự:
+validation `INVALID_TITLE` trên `title`.
+
+### `PUT /api/v1/knowledge/documents/{documentId}/file` (multipart, part `file`)
+
+Thay bản mới, giữ nguyên id. Tệp được kiểm tra như khi tải lên và xếp hàng ở `replacement.status = "queued"`; worker nhúng
+tệp mới rồi, trong một transaction, đổi tệp và các đoạn. Trong lúc chờ bản cũ vẫn trả lời. Nếu tệp mới lỗi, bản cũ được
+giữ và `replacement` ở `failed` kèm `errorMessage`; có thể thay lại. Quyền như `PATCH`. Chỉ tài liệu `ready` (`NOT_READY`
+nếu không); đã có bản thay thế `queued`/`processing` thì `REPLACING`. Tệp giống hệt tệp hiện tại: không đổi gì,
+`duplicate: true`. Xóa tài liệu cũng xóa tệp thay thế đang chờ.
+
+### `GET /api/v1/knowledge/documents/duplicates`
+
+Các nhóm tài liệu của người gọi có cùng checksum trong cùng phạm vi: `[{ "checksum": "...", "documents": [KnowledgeDocumentView] }]`,
+mới nhất trước trong mỗi nhóm. Không xóa gì tự động; người dùng xóa từng bản bằng `DELETE`.
+
 ### `GET /api/v1/knowledge/documents`
 
 Các tài liệu người gọi được đọc (của mình, của đơn vị mình và đơn vị cha, và `global`), mới nhất trước. Tham số: `page` (từ 0), `size` (1..100, mặc định 20), `mine=true` (chỉ
@@ -49,6 +73,15 @@ tài liệu của người gọi), `status` (lặp lại được: `?status=queu
 ### `GET /api/v1/knowledge/documents/{documentId}`
 
 Một tài liệu; không có hoặc người gọi không được đọc thì `CORE-RESOURCE_NOT_FOUND`.
+
+### `GET /api/v1/knowledge/documents/{documentId}/text`
+
+Văn bản đã trích quanh một đoạn được trích dẫn, cho màn xem nguồn. Tham số: `around` (id đoạn; bỏ trống thì bắt đầu từ
+đoạn đầu tiên), `span` (0..20, mặc định 2: số đoạn kề mỗi bên). Trả `DocumentTextView`: `documentId`, `fileName`,
+`aroundChunkId`, `chunks` (theo thứ tự đọc; mỗi đoạn có `chunkId`, `chunkIndex`, `sectionPath`, `page`, `lineStart`,
+`lineEnd`, `text`), `hasMoreBefore`, `hasMoreAfter` (còn đoạn ngoài danh sách; tăng `span` để đọc thêm). Cùng quy tắc nhìn
+thấy như tìm kiếm: tài liệu người gọi không tìm được (của người khác, hoặc nguồn khóa học `course_source`), tài liệu đã
+xóa, hoặc `around` không thuộc tài liệu đều trả `CORE-RESOURCE_NOT_FOUND`. Không có endpoint trả tệp gốc.
 
 ### `DELETE /api/v1/knowledge/documents/{documentId}`
 
@@ -63,6 +96,7 @@ sở hữu xóa. Không đủ quyền: HTTP 403. Tài liệu không đọc đư�
 {
   "id": 42,
   "fileName": "Quy-trinh-EOD.pdf",
+  "title": "Quy trình EOD",
   "mimeType": "application/pdf",
   "sizeBytes": 812345,
   "scope": "unit",
@@ -73,9 +107,14 @@ sở hữu xóa. Không đủ quyền: HTTP 403. Tài liệu không đọc đư�
   "chunkCount": 0,
   "uploadedBy": { "userId": "000005", "fullName": "Giảng viên Demo" },
   "createdAt": "2026-10-22T08:00:00Z",
-  "processedAt": null
+  "processedAt": null,
+  "duplicate": false,
+  "replacement": null
 }
 ```
+
+`replacement` là `{ "status": "queued|processing|failed", "fileName": "...", "errorMessage": null }` khi có tệp thay thế.
+Trích dẫn của chat và `fileName` của `DocumentTextView` mang `title`.
 
 `status`: `queued` (chờ) → `processing` (đang xử lý) → `ready` (tìm kiếm được) hoặc `failed` (kèm `errorMessage`
 tiếng Việt). `pageCount` chỉ có với PDF đã xử lý. Không trả `storageKey` hay đường dẫn tệp.
@@ -88,7 +127,7 @@ tiếng Việt). `pageCount` chỉ có với PDF đã xử lý. Không trả `st
 | `KNOWLEDGE-FILE_INVALID`          | Tệp rỗng, MIME mâu thuẫn, hoặc nội dung không khớp loại tệp |
 | `KNOWLEDGE-FILE_TOO_LARGE`        | Vượt `max-file-size`                                       |
 | `KNOWLEDGE-AI_UNAVAILABLE`        | Ollama không phản hồi (dùng cho chat)                      |
-| `CORE-VALIDATION_FAILED`          | `page`/`size`/`status` không hợp lệ                        |
+| `CORE-VALIDATION_FAILED`          | `page`/`size`/`status` không hợp lệ; `INVALID_TITLE`, `NOT_READY`, `REPLACING`, `PROCESSING` trên `title`/`documentId` |
 | `CORE-RESOURCE_NOT_FOUND`         | Không có tài liệu                                          |
 
 ## Hỏi đáp (chat)
@@ -122,14 +161,16 @@ Cần Bearer token (mọi vai trò). Trả `BaseResponse<ChatAnswerView>`.
         "page": 3,
         "lineStart": 13,
         "lineEnd": 27,
-        "snippet": "CIF (Customer Information File) là mã khách hàng duy nhất…"
+        "snippet": "CIF (Customer Information File) là mã khách hàng duy nhất…",
+        "sectionPath": "Khách hàng › CIF",
+        "chunkId": 905
       }
     ]
   }
 }
 ```
 
-`page` là null với `.md` và `.docx`. `snippet` tối đa 280 ký tự, cắt ở ranh giới từ và thêm "…".
+`chunkId` là đoạn tài liệu được trích dẫn (bỏ với bài học và với lượt lưu từ trước khi có trường này), dùng cho `GET /documents/{id}/text?around=`. `page` là null với `.md` và `.docx`. `snippet` tối đa 280 ký tự, cắt ở ranh giới từ và thêm "…".
 `citations` chỉ gồm các đoạn mà `answer` ghi `[n]` (dạng `[1]`, `[2][3]`, `[1, 2]`), theo thứ tự xếp hạng, mỗi đoạn một
 lần, `n` giữ đúng số trong prompt (có thể không liên tiếp). `[n]` ngoài khoảng bị bỏ qua; nếu không có `[n]` hợp lệ nào thì
 trả mọi đoạn đã đưa vào prompt. Mọi trường của nguồn lấy từ metadata của đoạn, không lấy từ văn bản model. Trước khi đưa

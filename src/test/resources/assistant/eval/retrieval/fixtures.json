@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "note": "Tài liệu mẫu do đội phát triển soạn (quy trình ngân hàng giả định); thay bằng tài liệu thật khi nghiệp vụ cung cấp. Mỗi mục có một cụm marker xuất hiện đúng trong mục đó: ca truy hồi dùng marker để biết đoạn tìm được có thuộc mục cần tìm không.",
+  "users": [
+    {"id": "000004", "unit": "U1"},
+    {"id": "000005", "unit": "U2"},
+    {"id": "000009", "unit": "U3"}
+  ],
+  "documents": [
+    {
+      "id": "mo-tai-khoan",
+      "file": "quy-trinh-mo-tai-khoan.pdf",
+      "format": "pdf1",
+      "scope": "GLOBAL",
+      "owner": "000005",
+      "sections": [
+        {"title": "Điều kiện mở tài khoản", "marker": "đủ 18 tuổi", "paragraphs": [
+          "Khách hàng cá nhân phải đủ 18 tuổi, có năng lực hành vi dân sự đầy đủ và có căn cước công dân còn hiệu lực.",
+          "Khách hàng nước ngoài xuất trình hộ chiếu và thị thực còn thời hạn tối thiểu 30 ngày."]},
+        {"title": "Hồ sơ mở tài khoản", "marker": "mẫu đăng ký chữ ký", "paragraphs": [
+          "Hồ sơ gồm căn cước công dân bản gốc, mẫu đăng ký chữ ký có hai chữ ký mẫu và giấy đề nghị mở tài khoản.",
+          "Giao dịch viên đối chiếu ảnh trên căn cước công dân với khách hàng trước khi nhận hồ sơ."]},
+        {"title": "Số dư tối thiểu", "marker": "50.000 đồng", "paragraphs": [
+          "Số dư tối thiểu khi mở tài khoản thanh toán là 50.000 đồng.",
+          "Tài khoản có số dư dưới mức này trong sáu tháng liên tiếp sẽ bị chuyển sang trạng thái không hoạt động."]},
+        {"title": "Thời hạn xử lý hồ sơ", "marker": "30 phút làm việc", "paragraphs": [
+          "Hồ sơ đầy đủ được xử lý trong vòng 30 phút làm việc tại quầy giao dịch.",
+          "Hồ sơ gửi qua kênh trực tuyến được phản hồi trong ngày làm việc kế tiếp."]}
+      ]
+    },
+    {
+      "id": "bieu-phi",
+      "file": "bieu-phi-dich-vu.pdf",
+      "format": "pdf2",
+      "scope": "GLOBAL",
+      "owner": "000005",
+      "sections": [
+        {"title": "Phí chuyển tiền liên ngân hàng", "marker": "0,02% giá trị giao dịch", "paragraphs": [
+          "Phí chuyển tiền liên ngân hàng qua kênh số là 0,02% giá trị giao dịch, tối thiểu 7.700 đồng và tối đa 77.000 đồng."],
+          "table": [["Kênh", "Mức phí", "Tối thiểu"], ["Internet Banking", "0,02% giá trị giao dịch", "7.700 đồng"], ["Quầy giao dịch", "0,05% giá trị giao dịch", "20.000 đồng"]]},
+        {"title": "Phí thường niên thẻ ghi nợ", "marker": "thẻ ghi nợ nội địa là 100.000 đồng", "paragraphs": [
+          "Phí thường niên thẻ ghi nợ nội địa là 100.000 đồng mỗi năm, thu một lần vào tháng phát hành thẻ."]},
+        {"title": "Phí rút tiền ATM", "marker": "ATM của ngân hàng khác là 3.300 đồng", "paragraphs": [
+          "Rút tiền tại ATM của ngân hàng khác là 3.300 đồng mỗi giao dịch; rút tại ATM của chính ngân hàng được miễn phí."]},
+        {"title": "Phí cấp lại mã PIN", "marker": "cấp lại mã PIN là 30.000 đồng", "paragraphs": [
+          "Phí cấp lại mã PIN là 30.000 đồng, khách hàng nhận mã mới qua tin nhắn đăng ký trong vòng 15 phút."]}
+      ]
+    },
+    {
+      "id": "huong-dan-gl",
+      "file": "huong-dan-chuc-nang-gl.docx",
+      "format": "docx",
+      "scope": "GLOBAL",
+      "owner": "000005",
+      "sections": [
+        {"title": "GL-101 Hạch toán thủ công", "marker": "chức năng GL-101", "paragraphs": [
+          "Dùng chức năng GL-101 để ghi một bút toán thủ công khi nghiệp vụ không được hệ thống tự hạch toán."],
+          "steps": ["Mở chức năng GL-101 từ menu Sổ cái.", "Nhập mã đơn vị và ngày hạch toán.", "Nhập các dòng nợ và có; tổng nợ phải bằng tổng có.", "Nhấn Lưu để chuyển bút toán sang kiểm soát viên duyệt."]},
+        {"title": "GL-205 Đảo bút toán", "marker": "chức năng GL-205", "paragraphs": [
+          "Chức năng GL-205 đảo một bút toán đã được duyệt; bút toán đảo mang cùng ngày hạch toán với bút toán gốc."],
+          "steps": ["Mở GL-205 và nhập số bút toán gốc.", "Chọn lý do đảo trong danh sách.", "Kiểm soát viên duyệt bút toán đảo."]},
+        {"title": "GL-310 Đối chiếu số dư", "marker": "chức năng GL-310", "paragraphs": [
+          "Chức năng GL-310 so sánh số dư sổ cái với số dư phân hệ tiền gửi cuối ngày và in báo cáo chênh lệch."]},
+        {"title": "Mã loại bút toán", "marker": "ADJ là bút toán điều chỉnh", "paragraphs": [
+          "Mỗi bút toán thủ công phải chọn một mã loại."],
+          "table": [["Mã loại", "Ý nghĩa"], ["ADJ", "ADJ là bút toán điều chỉnh cuối kỳ"], ["REV", "REV là bút toán đảo"], ["ACC", "ACC là bút toán dự thu, dự chi"]]}
+      ]
+    },
+    {
+      "id": "chinh-sach-tin-dung",
+      "file": "chinh-sach-tin-dung.md",
+      "format": "md",
+      "scope": "GLOBAL",
+      "owner": "000005",
+      "sections": [
+        {"title": "Điều 5. Hạn mức cho vay", "marker": "hạn mức cho vay tối đa là 5 tỷ đồng", "paragraphs": [
+          "Đối với khách hàng cá nhân, hạn mức cho vay tối đa là 5 tỷ đồng cho mỗi khách hàng, trừ khi Giám đốc khối phê duyệt ngoại lệ."]},
+        {"title": "Điều 12. Tài sản bảo đảm", "marker": "không vượt quá 70% giá trị định giá", "paragraphs": [
+          "Với bất động sản làm tài sản bảo đảm, tỷ lệ cho vay trên giá trị tài sản (LTV) không vượt quá 70% giá trị định giá.",
+          "Định giá do đơn vị thẩm định độc lập thực hiện và có hiệu lực trong 12 tháng."]},
+        {"title": "Điều 18. Xử lý nợ quá hạn", "marker": "nợ nhóm 2 trở lên", "paragraphs": [
+          "Khoản vay chuyển sang nợ nhóm 2 trở lên phải được lập kế hoạch thu hồi trong vòng 10 ngày làm việc.",
+          "Cán bộ tín dụng tra cứu thông tin CIC của khách hàng trước khi đề xuất cơ cấu lại nợ."]},
+        {"title": "Điều 21. Thẩm quyền phê duyệt", "marker": "phó giám đốc chi nhánh phê duyệt khoản vay đến 2 tỷ đồng", "paragraphs": [
+          "Phó giám đốc chi nhánh phê duyệt khoản vay đến 2 tỷ đồng; khoản vay lớn hơn trình Giám đốc chi nhánh."]}
+      ]
+    },
+    {
+      "id": "ghi-chu-ca-nhan",
+      "file": "ghi-chu-ca-nhan.md",
+      "format": "md",
+      "scope": "PERSONAL",
+      "owner": "000005",
+      "sections": [
+        {"title": "Lịch trực cuối năm", "marker": "trực ngày 28 tháng 12", "paragraphs": [
+          "Tôi trực ngày 28 tháng 12 cùng chị Lan, ca sáng bắt đầu lúc 7 giờ 30."]},
+        {"title": "Việc cần nhớ", "marker": "nộp báo cáo kiểm kê quỹ", "paragraphs": [
+          "Nhớ nộp báo cáo kiểm kê quỹ cho trưởng phòng trước thứ Sáu."]}
+      ]
+    },
+    {
+      "id": "quy-che-u1",
+      "file": "quy-che-phong-giao-dich-u1.md",
+      "format": "md",
+      "scope": "UNIT",
+      "owner": "000005",
+      "unit": "U1",
+      "sections": [
+        {"title": "Giờ làm việc", "marker": "giờ giao dịch của phòng U1", "paragraphs": [
+          "Giờ giao dịch của phòng U1 từ 8 giờ đến 16 giờ 30, nghỉ trưa từ 12 giờ đến 13 giờ."]},
+        {"title": "Quy định két sắt", "marker": "chìa két sắt do hai người giữ", "paragraphs": [
+          "Chìa két sắt do hai người giữ riêng; mở két phải có mặt cả hai và ghi sổ theo dõi."]}
+      ]
+    }
+  ]
+}

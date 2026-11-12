@@ -14,6 +14,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import vn.com.coreacademy.assistant.action.AssistantPendingAction;
 import vn.com.coreacademy.assistant.action.PendingActionRepository;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.conversation.AssistantConversation;
 import vn.com.coreacademy.assistant.conversation.AssistantTurn;
@@ -28,6 +29,7 @@ import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.conversation.TurnRepository;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,10 +66,10 @@ class ConversationServiceTest {
                                           MutableClock clock) {
         try {
             var constructor = ConversationService.class.getDeclaredConstructor(ConversationRepository.class,
-                TurnRepository.class, PendingActionRepository.class, FeedbackRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class);
+                TurnRepository.class, PendingActionRepository.class, FeedbackRepository.class, ObjectMapper.class, java.time.Clock.class, AssistantProperties.class, AssistantBudget.class);
             constructor.setAccessible(true);
             return constructor.newInstance(conversations, turns, actions, feedback, new ObjectMapper().findAndRegisterModules(), clock,
-                new AssistantProperties(4, 20, Duration.ofMinutes(10), 4));
+                new AssistantProperties(4, 20, Duration.ofMinutes(10), 4), AssistantBudget.defaults());
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException(exception);
         }
@@ -154,17 +156,29 @@ class ConversationServiceTest {
     }
 
     @Test
-    void historyKeepsTheNewestWholeExchangesThatFitWithTheQuestionOldestFirst() {
-        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
-        // Newest first, as the repository returns them: 4 exchanges of 6000 characters each.
+    void previousQuestionIsTheLastDoneTurnOfTheOwnersConversationAndNullOtherwise() {
+        when(conversations.existsByIdAndOwnerId(5L, ME)).thenReturn(true);
         when(turns.findByConversationIdAndStatusOrderByIdDesc(any(), anyString(), any(Pageable.class)))
-            .thenReturn(List.of(done("q4", "x".repeat(3998)), done("q3", "x".repeat(3998)),
-                done("q2", "x".repeat(3998)), done("q1", "x".repeat(3998))));
+            .thenReturn(List.of(done("q2", "a2")), List.of());
+
+        assertThat(service.previousQuestion(ME, 5L)).isEqualTo("q2");
+        assertThat(service.previousQuestion(ME, 5L)).isNull();
+        assertThat(service.previousQuestion(ME, null)).isNull();
+        assertThatThrownBy(() -> service.previousQuestion(THEM, 5L)).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void historyKeepsTheNewestWholeExchangesThatFitTheTokenBudgetOldestFirst() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        // Newest first, as the repository returns them: 4 exchanges of about 800 tokens each.
+        when(turns.findByConversationIdAndStatusOrderByIdDesc(any(), anyString(), any(Pageable.class)))
+            .thenReturn(List.of(done("q4", "x".repeat(2397)), done("q3", "x".repeat(2397)),
+                done("q2", "x".repeat(2397)), done("q1", "x".repeat(2397))));
 
         Conversations.Opened opened = service.open(ME, 5L, "câu mới");
 
-        // 16 000 - 7 = 15 993 fits three exchanges of 4 000 characters, not four.
-        assertThat(opened.history()).extracting(Conversations.Exchange::question).containsExactly("q2", "q3", "q4");
+        // 2 000 tokens fit two exchanges of 800 tokens, not three.
+        assertThat(opened.history()).extracting(Conversations.Exchange::question).containsExactly("q3", "q4");
     }
 
     @Test
@@ -202,6 +216,45 @@ class ConversationServiceTest {
         assertThat(logs.lines()).isNotEmpty();
         assertThat(logs.lines()).allSatisfy(line -> assertThat(line)
             .doesNotContain("bí mật").doesNotContain("12345").doesNotContain("67890"));
+    }
+
+    @Test
+    void earlierAnswersLoseTheirSourceMarkersBeforeTheyReachTheModel() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        when(turns.findByConversationIdAndStatusOrderByIdDesc(any(), anyString(), any(Pageable.class)))
+            .thenReturn(List.of(done("q1", "CIF là mã khách hàng [1]. Còn GL [2][3] và [1, 2] nữa [4].")));
+
+        Conversations.Opened opened = service.open(ME, 5L, "tiếp");
+
+        assertThat(opened.history().get(0).answer()).isEqualTo("CIF là mã khách hàng. Còn GL và nữa.")
+            .doesNotContain("[");
+    }
+
+    @Test
+    void aStoredAnswerThatUsedChunksButCitedNothingReadsAsNotGroundedAfterReopening() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        AssistantTurn ungrounded = done("Hỏi", "CIF là mã khách hàng.");
+        ungrounded.setId(1L);
+        ungrounded.setRetrievalTrace("[{\"tool\":\"search_documents\",\"candidates\":1,\"given\":"
+            + "[{\"kind\":\"document\",\"chunkId\":9,\"rank\":1,\"similarity\":0.8}]}]");
+        AssistantTurn cited = done("Hỏi", "CIF là mã khách hàng [1].");
+        cited.setId(2L);
+        cited.setCitations("[{\"n\":1,\"documentId\":3,\"fileName\":\"a.pdf\",\"snippet\":\"s\"}]");
+        cited.setRetrievalTrace(ungrounded.getRetrievalTrace());
+        AssistantTurn noSearch = done("Chào", "Xin chào!");
+        noSearch.setId(3L);
+        AssistantTurn notFound = done("Hỏi", NotFoundAnswer.TEXT);
+        notFound.setId(4L);
+        notFound.setRetrievalTrace(ungrounded.getRetrievalTrace());
+        AssistantTurn explained = done("Giải thích", "Đáp án đúng vì…");
+        explained.setId(5L);
+        explained.setRetrievalTrace(ungrounded.getRetrievalTrace().replace("search_documents", "explain"));
+        when(turns.findByConversationIdOrderByIdAsc(5L))
+            .thenReturn(List.of(ungrounded, cited, noSearch, notFound, explained));
+
+        var views = service.get(ME, 5L).turns();
+
+        assertThat(views).extracting(view -> view.grounded()).containsExactly(false, null, null, null, null);
     }
 
     @Test
@@ -266,6 +319,30 @@ class ConversationServiceTest {
         assertThat(views.get(1).action().message()).isEqualTo("Đã cập nhật.");
         assertThat(views.get(3).action().message()).isEqualTo("Không thực hiện được.");
         assertThat(views.get(0).action().changes().get(0).to()).isEqualTo("Mới");
+        assertThat(views.get(2).action().message()).isEqualTo("Đã huỷ thay đổi");
+        assertThat(views.get(4).action().message()).isEqualTo("Đề xuất đã hết hạn");
+        assertThat(views.get(0).action().message()).isNull();
+    }
+
+    @Test
+    void theLatestConversationOfALessonIsTheCallersOwnMostRecentOneOrNothing() {
+        AssistantConversation mine = owned(7L, ME);
+        mine.setContextCourseId(26L);
+        mine.setContextRevisionId(3L);
+        mine.setContextLessonId(88L);
+        mine.setContextLabel("Bài 1");
+        when(conversations.findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(ME, 88L))
+            .thenReturn(Optional.of(mine));
+        when(conversations.findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(ME, 71L))
+            .thenReturn(Optional.empty());
+
+        var found = service.latestForLesson(ME, 88L);
+
+        assertThat(found).isNotNull();
+        assertThat(found.id()).isEqualTo(7L);
+        assertThat(found.context().lessonId()).isEqualTo(88L);
+        assertThat(service.latestForLesson(ME, 71L)).isNull();
+        verify(conversations, never()).findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(THEM, 88L);
     }
 
     @Test

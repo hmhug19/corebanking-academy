@@ -59,6 +59,10 @@ public class AssistantTurn extends CreatedEntity {
     @Column(name = "prompt_version", length = 40)
     private String promptVersion;
 
+    @Column(name = "retrieval_trace", nullable = false)
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String retrievalTrace = "[]";
+
     @Column(name = "status", length = 20, nullable = false)
     private String status;
 

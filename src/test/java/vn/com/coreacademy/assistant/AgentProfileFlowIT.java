@@ -78,7 +78,7 @@ class AgentProfileFlowIT extends KnowledgeIntegrationTest {
         doReturn(true).when(ollama).isAvailable();
         doAnswer(invocation -> new ChatTurn("", List.of(ToolCall.of("update_profile",
             JSON.createObjectNode().put("positionName", NEW_POSITION))))).when(ollama)
-            .chatWithTools(anyList(), anyList(), any(), any());
+            .chatWithTools(anyList(), anyList(), any(), any(), any());
 
         MvcResult started = mvc.perform(post(AGENT + "/stream").with(as(LEARNER)).accept(NDJSON, MediaType.APPLICATION_JSON)
                 .contentType(MediaType.APPLICATION_JSON)

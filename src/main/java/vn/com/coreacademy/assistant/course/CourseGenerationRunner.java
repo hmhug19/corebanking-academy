@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.Function;
@@ -20,7 +21,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
+import vn.com.coreacademy.assistant.config.GenerationProperties;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.JobRow;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.StepRow;
 import vn.com.coreacademy.assistant.course.CourseJobViews.Inputs;
@@ -28,6 +31,10 @@ import vn.com.coreacademy.assistant.course.SourceTextRepository.Piece;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
+import vn.com.coreacademy.knowledge.chunking.TokenEstimator;
+import vn.com.coreacademy.learning.dto.LearningRequests.BlockInput;
+import vn.com.coreacademy.learning.dto.LearningRequests.StepInput;
+import vn.com.coreacademy.learning.service.LearningAiDraftService;
 
 /**
  * The model work of each generation step. Every output is parsed and checked against {@link GenerationSchemas}; an
@@ -43,10 +50,14 @@ public class CourseGenerationRunner implements GenerationStepRunner {
     static final String QUESTIONS = "questions";
     static final String WAITING_APPROVAL = "waiting_approval";
 
+    /** Tries per step: the first ask and two retries (Q24, Q41). */
+    public static final int ATTEMPTS = 3;
     private static final Pattern KEY = Pattern.compile("c(\\d+)l(\\d+)");
-    private static final int SECTION_CHARS = 4000;
-    private static final int MAX_SECTIONS = 12;
+    /** Tokens kept free in a call for the step's own wording and the retry note. */
+    private static final int CALL_MARGIN = 300;
     private static final int LESSON_SOURCE_CHARS = 6000;
+    /** The outline call's own wording: the course data and the instructions around the summaries. */
+    private static final int OUTLINE_OVERHEAD_TOKENS = 400;
     private static final int FIRST_PROGRESS = 15;
     private static final int OUTLINE_PROGRESS = 30;
     private static final int CONTENT_FROM = 35;
@@ -58,6 +69,9 @@ public class CourseGenerationRunner implements GenerationStepRunner {
     private final SkillCatalog catalog;
     private final AssistantModels models;
     private final ObjectMapper json;
+    private final LearningAiDraftService drafts;
+    private final AssistantBudget budget;
+    private final GenerationProperties generation;
 
     @Override
     public Result run(StepRow step) {
@@ -91,7 +105,7 @@ public class CourseGenerationRunner implements GenerationStepRunner {
 
         ArrayNode sections = json.createArrayNode();
         StringBuilder hash = new StringBuilder();
-        List<List<Piece>> groups = group(pieces);
+        List<List<Piece>> groups = group(pieces, sourceTokens());
         int number = 0;
         for (List<Piece> group : groups) {
             number++;
@@ -106,6 +120,11 @@ public class CourseGenerationRunner implements GenerationStepRunner {
         }
         ObjectNode output = json.createObjectNode();
         output.set("sections", sections);
+        ArrayNode condensed = condense(sections);
+        if (condensed != null) {
+            // The section summaries do not fit one outline call: the outline reads these group summaries instead.
+            output.set("groups", condensed);
+        }
 
         return new Result(write(output), digest(hash.toString() + pieces.size()),
             List.of(new NextStep(OUTLINE, "")), FIRST_PROGRESS, null);
@@ -113,7 +132,9 @@ public class CourseGenerationRunner implements GenerationStepRunner {
 
     private Result outline(StepRow step) {
         JobRow job = jobs.job(step.jobId()).orElseThrow(() -> new GenerationException("Không tìm thấy công việc."));
-        JsonNode sections = output(step.jobId(), SUMMARISE, "").path("sections");
+        JsonNode summaries = output(step.jobId(), SUMMARISE, "");
+        JsonNode sections = summaries.path("groups").isArray() && !summaries.path("groups").isEmpty()
+            ? summaries.path("groups") : summaries.path("sections");
         Inputs inputs = read(job.inputs(), Inputs.class);
         StringBuilder user = new StringBuilder("DỮ LIỆU\nĐối tượng học viên: ").append(inputs.targetLearners())
             .append("\nTrình độ: ").append(inputs.level());
@@ -129,11 +150,29 @@ public class CourseGenerationRunner implements GenerationStepRunner {
                 .append(section.path("summary").asText()).append('\n');
         }
         JsonNode outline = ask(OUTLINE, user.toString(), GenerationSchemas::outline);
+        if (job.courseId() != null && job.revisionId() != null) {
+            // The outline goes straight into the draft course, where the author edits it until they approve it.
+            // The status is checked inside the write transaction: a stop landing after the model call writes nothing.
+            drafts.writeOutline(job.courseId(), job.revisionId(), job.ownerUserId(), outline.path("summary").asText(),
+                CourseOutlineMapper.objectives(outline), CourseOutlineMapper.chapters(outline),
+                running(step.jobId()));
+        }
 
         return new Result(write(outline), digest(user.toString()), List.of(), OUTLINE_PROGRESS, WAITING_APPROVAL);
     }
 
     private Result lesson(StepRow step) {
+        JobRow job = jobs.job(step.jobId()).orElseThrow(() -> new GenerationException("Không tìm thấy công việc."));
+        int[] place = CourseOutlineMapper.position(step.itemKey());
+        boolean inCourse = job.courseId() != null && job.revisionId() != null && place != null;
+        if (inCourse && !drafts.startLesson(job.courseId(), job.revisionId(), place[0], place[1], job.ownerUserId())) {
+            // The author wrote this lesson themselves meanwhile: the job leaves it alone.
+            ObjectNode skipped = json.createObjectNode();
+            skipped.putArray("blocks");
+            skipped.putArray("sourceNotes");
+            skipped.put("skipped", "user_edited");
+            return new Result(write(skipped), digest("skipped"), List.of(), contentProgress(step.jobId()), null);
+        }
         JsonNode outline = output(step.jobId(), OUTLINE, "");
         JsonNode lesson = lessonOf(outline, step.itemKey());
         JsonNode chapter = chapterOf(outline, step.itemKey());
@@ -143,9 +182,19 @@ public class CourseGenerationRunner implements GenerationStepRunner {
             .append("\nBài: ").append(lesson.path("title").asText()).append("\nMục tiêu của bài:\n");
         lesson.path("objectives").forEach(objective -> user.append("- ").append(objective.asText()).append('\n'));
         user.append("\nĐOẠN NGUỒN:\n").append(join(pieces));
-        JsonNode content = ask(LESSON, user.toString(), GenerationSchemas::lesson);
+        JsonNode content = withSourceNotesInside(ask(LESSON, user.toString(), GenerationSchemas::lesson), pieces);
+        if (inCourse) {
+            // A job stopped or cancelled while the model was writing leaves the lesson empty: the status is checked
+            // inside the write transaction, after the course is locked, so a stop cannot land between check and write.
+            drafts.writeLesson(job.courseId(), job.revisionId(), place[0], place[1], blocksOf(content),
+                job.ownerUserId(), running(step.jobId()));
+        }
 
         return new Result(write(content), digest(user.toString()), List.of(), contentProgress(step.jobId()), null);
+    }
+
+    private BooleanSupplier running(long jobId) {
+        return () -> CourseJobRepository.RUNNING.equals(jobs.job(jobId).map(JobRow::status).orElse(null));
     }
 
     private Result questions(StepRow step) {
@@ -153,6 +202,11 @@ public class CourseGenerationRunner implements GenerationStepRunner {
             .filter(row -> "done".equals(row.status()) && row.output() != null)
             .orElseThrow(() -> new StepNotReadyException("The lesson is not written yet"));
         JsonNode lesson = parse(lessonStep.output());
+        if (lesson.has("skipped")) {
+            ObjectNode none = json.createObjectNode();
+            none.putArray("questions");
+            return new Result(write(none), digest("skipped"), List.of(), contentProgress(step.jobId()), null);
+        }
         JsonNode lessonOutline = lessonOf(output(step.jobId(), OUTLINE, ""), step.itemKey());
         StringBuilder user = new StringBuilder("DỮ LIỆU\nBài: ").append(lessonOutline.path("title").asText())
             .append("\n\nNội dung bài học:\n");
@@ -175,15 +229,36 @@ public class CourseGenerationRunner implements GenerationStepRunner {
 
     // ---- helpers ---------------------------------------------------------------------------------------------------
 
-    /** Asks the model for JSON, once more with the problems named when the first answer does not fit. */
+    static List<BlockInput> blocksOf(JsonNode lesson) {
+        List<BlockInput> blocks = new ArrayList<>();
+        for (JsonNode block : lesson.path("blocks")) {
+            boolean process = "process".equals(block.path("type").asText());
+            List<StepInput> steps = new ArrayList<>();
+            if (process) {
+                block.path("steps").forEach(part -> steps.add(new StepInput(part.path("title").asText(),
+                    part.path("description").asText(null))));
+            }
+            blocks.add(new BlockInput(process ? "process" : "text", block.path("title").asText(),
+                process ? null : block.path("body").asText(), process ? null : "markdown", "manual", null, true,
+                List.of(), steps, null, null));
+        }
+
+        return blocks;
+    }
+
+    /**
+     * Asks the model for JSON constrained to the step's schema (structured output), up to {@link #ATTEMPTS} times, each
+     * retry naming the problems of the last answer; the checks of {@link GenerationSchemas} stay as the last word.
+     */
     private JsonNode ask(String stepKind, String user, Function<JsonNode, List<String>> check) {
         String system = catalog.generationPrompt(stepKind);
+        JsonNode format = GenerationSchemas.format(stepKind);
         List<String> problems = List.of();
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
             String message = attempt == 0 ? user : user + "\n\nKết quả trước không hợp lệ ("
                 + String.join("; ", problems.stream().limit(5).toList()) + "). Hãy trả lại đúng một đối tượng JSON.";
             String reply = ollama.chat(List.of(Message.system(system), Message.user(message)),
-                models.generationOptions());
+                models.generationOptions(), format, generation.modelCallTimeout());
             JsonNode node = extract(reply);
             problems = node == null ? List.of("không phải JSON hợp lệ") : check.apply(node);
             if (problems.isEmpty()) {
@@ -211,26 +286,125 @@ public class CourseGenerationRunner implements GenerationStepRunner {
         }
     }
 
-    private static List<List<Piece>> group(List<Piece> pieces) {
-        int total = pieces.stream().mapToInt(piece -> piece.content().length()).sum();
-        int size = Math.max(SECTION_CHARS, (total + MAX_SECTIONS - 1) / MAX_SECTIONS);
+    /** Tokens of source one summarise call may carry, so that the call as a whole stays inside the context. */
+    private int sourceTokens() {
+        int context = Math.min(budget.numCtx(), models.generationOptions().numCtx());
+
+        return Math.max(1, context - budget.systemAndTools() - budget.answer() - CALL_MARGIN);
+    }
+
+    /** Sections are sized by the token budget; a long source gives more sections, never larger ones. */
+    static List<List<Piece>> group(List<Piece> pieces, int sectionTokens) {
         List<List<Piece>> groups = new ArrayList<>();
         List<Piece> current = new ArrayList<>();
-        int length = 0;
+        int tokens = 0;
         for (Piece piece : pieces) {
-            if (!current.isEmpty() && length + piece.content().length() > size) {
+            int cost = TokenEstimator.estimate(piece.labelled()) + 1;
+            if (!current.isEmpty() && tokens + cost > sectionTokens) {
                 groups.add(current);
                 current = new ArrayList<>();
-                length = 0;
+                tokens = 0;
             }
             current.add(piece);
-            length += piece.content().length();
+            tokens += cost;
         }
         if (!current.isEmpty()) {
             groups.add(current);
         }
 
         return groups;
+    }
+
+    private static String summaryLine(JsonNode summary) {
+        return "- " + summary.path("title").asText() + ": " + summary.path("summary").asText() + "\n";
+    }
+
+    /**
+     * Null when the section summaries fit one outline call. Otherwise a second level: groups of section summaries are
+     * summarised again, level after level until the summaries fit.
+     */
+    private ArrayNode condense(ArrayNode sections) {
+        int room = Math.max(1, sourceTokens() - OUTLINE_OVERHEAD_TOKENS);
+        if (tokens(sections) <= room) {
+            return null;
+        }
+        ArrayNode level = sections;
+        while (tokens(level) > room) {
+            ArrayNode next = json.createArrayNode();
+            List<JsonNode> batch = new ArrayList<>();
+            int used = 0;
+            for (JsonNode summary : level) {
+                int cost = TokenEstimator.estimate(summaryLine(summary));
+                if (batch.size() >= 2 && used + cost > sourceTokens()) {
+                    next.add(summariseGroup(batch));
+                    batch = new ArrayList<>();
+                    used = 0;
+                }
+                batch.add(summary);
+                used += cost;
+            }
+            if (!batch.isEmpty()) {
+                next.add(batch.size() == 1 ? batch.get(0) : summariseGroup(batch));
+            }
+            if (next.size() >= level.size()) {
+                throw new GenerationException("Tài liệu nguồn quá dài để tóm tắt. Hãy thử tệp ngắn hơn.");
+            }
+            level = next;
+        }
+
+        return level;
+    }
+
+    private JsonNode summariseGroup(List<JsonNode> summaries) {
+        StringBuilder user = new StringBuilder("NGUỒN:\n");
+        summaries.forEach(summary -> user.append(summaryLine(summary)));
+        return ask(SUMMARISE, user.toString(), GenerationSchemas::summary);
+    }
+
+    private static int tokens(JsonNode summaries) {
+        int total = 0;
+        for (JsonNode summary : summaries) {
+            total += TokenEstimator.estimate(summaryLine(summary));
+        }
+
+        return total;
+    }
+
+    /** The lesson with only the source notes that point inside the pages and lines of the pieces the model was given. */
+    JsonNode withSourceNotesInside(JsonNode lesson, List<Piece> given) {
+        ObjectNode copy = ((ObjectNode) lesson).deepCopy();
+        ArrayNode kept = copy.putArray("sourceNotes");
+        for (JsonNode note : lesson.path("sourceNotes")) {
+            if (inside(note, given)) {
+                kept.add(note);
+            }
+        }
+
+        return copy;
+    }
+
+    /** A note that names no page or line claims nothing to check; one that names them must match a given piece. */
+    private static boolean inside(JsonNode note, List<Piece> given) {
+        boolean named = note.has("page") || note.has("lineStart") || note.has("lineEnd");
+        if (!named) {
+            return true;
+        }
+        boolean hasPage = note.path("page").isInt();
+        boolean hasLines = note.path("lineStart").isInt() && note.path("lineEnd").isInt();
+        if ((note.has("page") && !hasPage) || ((note.has("lineStart") || note.has("lineEnd")) && !hasLines)) {
+            return false;
+        }
+        for (Piece piece : given) {
+            boolean pageOk = !hasPage || (piece.page() != null && piece.page() == note.path("page").asInt());
+            boolean linesOk = !hasLines || (note.path("lineStart").asInt() >= piece.lineStart()
+                && note.path("lineEnd").asInt() <= piece.lineEnd()
+                && note.path("lineStart").asInt() <= note.path("lineEnd").asInt());
+            if (pageOk && linesOk) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static String join(List<Piece> pieces) {

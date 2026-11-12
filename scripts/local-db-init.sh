@@ -60,6 +60,14 @@ FILES=(
   upgrade/2026-11-13-course-revision-ai-generated.sql
   upgrade/2026-11-14-course-revision-review-confirmed.sql
   upgrade/2026-11-15-course-job-soft-delete.sql
+  upgrade/2026-11-16-assistant-retrieval-trace.sql
+  upgrade/2026-11-16-knowledge-document-course-source-scope.sql
+  upgrade/2026-11-17-course-job-owns-course.sql
+  upgrade/2026-11-18-course-index-coverage.sql
+  upgrade/2026-11-19-chunker-v2-columns.sql
+  upgrade/2026-11-20-document-title-checksum-replace.sql
+  upgrade/2026-11-21-assistant-feedback-review.sql
+  upgrade/2026-11-22-system-audit-route.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

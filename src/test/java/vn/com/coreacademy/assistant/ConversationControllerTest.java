@@ -74,7 +74,7 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
 
     private void modelAnswers(String text) throws Exception {
         doReturn(true).when(ollama).isAvailable();
-        doReturn(new ChatTurn(text, List.of())).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+        doReturn(new ChatTurn(text, List.of())).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
     }
 
     /** Runs one agent turn and returns the id its first line named. */
@@ -173,7 +173,7 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
 
         assertThat(again).isEqualTo(id);
         ArgumentCaptor<List<ChatMessage>> sent = ArgumentCaptor.captor();
-        verify(ollama, org.mockito.Mockito.times(2)).chatWithTools(sent.capture(), anyList(), any(), any());
+        verify(ollama, org.mockito.Mockito.times(2)).chatWithTools(sent.capture(), anyList(), any(), any(), any());
         List<ChatMessage> second = sent.getAllValues().get(1);
         assertThat(second).extracting(ChatMessage::role).containsExactly("system", "user", "assistant", "user");
         assertThat(second.get(1).content()).isEqualTo("CIF là gì?");

@@ -277,9 +277,10 @@ INSERT INTO learning_hub.functions(code, name, route_pattern, sort_no) VALUES
     ('ROLE_MANAGEMENT'        , 'Quản lý vai trò và phân quyền', '/admin/roles'      , 110),
     ('COURSE_ASSIGNMENT'      , 'Giao khóa học'                , '/admin/assignments', 120),
     ('REPORTING'              , 'Báo cáo đào tạo'              , '/reports'          , 130),
-    ('SYSTEM_AUDIT'           , 'Nhật ký hệ thống'             , '/admin/system'     , 140),
+    ('SYSTEM_AUDIT'           , 'Nhật ký hệ thống'             , '/admin/gamification', 140),
     ('KNOWLEDGE_HUB'          , 'Kho tri thức'                 , '/knowledge'        , 150),
     ('AI_ASSISTANT'           , 'Trợ lý AI'                    , '/assistant'        , 155),
+    ('AI_FEEDBACK_REVIEW'     , 'Xem phản hồi 👎 được chia sẻ' , NULL               , 156),
     ('ISSUE_HUB'              , 'Tra cứu sự cố'                , '/issues'           , 160);
 
 -- 12. Dữ liệu nền: vai trò - chức năng

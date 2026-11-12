@@ -23,7 +23,9 @@ import vn.com.coreacademy.assistant.action.AssistantPendingAction;
 import vn.com.coreacademy.assistant.agent.LessonFocus;
 import vn.com.coreacademy.assistant.action.PendingActionRepository;
 import vn.com.coreacademy.assistant.action.PendingActionStore;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.knowledge.chunking.TokenEstimator;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ActionState;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationDetail;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationSummary;
@@ -36,6 +38,8 @@ import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.web.PageQuery;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.service.CitationRule;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 /**
  * The one store behind both assistants. Every read and write is scoped to the owner; an id that is not the caller's
@@ -45,6 +49,8 @@ import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 @Service
 public class ConversationService implements Conversations {
     private static final TypeReference<List<CitationView>> CITATIONS = new TypeReference<>() {
+    };
+    private static final TypeReference<List<TurnRecord.Search>> SEARCHES = new TypeReference<>() {
     };
     private static final TypeReference<List<String>> NAMES = new TypeReference<>() {
     };
@@ -59,22 +65,25 @@ public class ConversationService implements Conversations {
     private final ObjectMapper json;
     private final Clock clock;
     private final int historyTurns;
+    private final int historyTokens;
 
     @Autowired
     public ConversationService(ConversationRepository conversations, TurnRepository turns,
                                PendingActionRepository actions, FeedbackRepository feedback, ObjectMapper json,
-                               AssistantProperties properties) {
-        this(conversations, turns, actions, feedback, json, Clock.systemUTC(), properties);
+                               AssistantProperties properties, AssistantBudget budget) {
+        this(conversations, turns, actions, feedback, json, Clock.systemUTC(), properties, budget);
     }
 
     ConversationService(ConversationRepository conversations, TurnRepository turns, PendingActionRepository actions,
-                        FeedbackRepository feedback, ObjectMapper json, Clock clock, AssistantProperties properties) {
+                        FeedbackRepository feedback, ObjectMapper json, Clock clock, AssistantProperties properties,
+                        AssistantBudget budget) {
         this.conversations = conversations;
         this.turns = turns;
         this.actions = actions;
         this.feedback = feedback;
         this.json = json;
         this.clock = clock;
+        this.historyTokens = budget.history();
         this.historyTurns = Math.min(HISTORY_TURNS_READ, Math.max(1, properties.historyMessages() / 2));
     }
 
@@ -84,6 +93,18 @@ public class ConversationService implements Conversations {
         if (conversationId != null && !conversations.existsByIdAndOwnerId(conversationId, ownerId)) {
             throw notFound();
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public String previousQuestion(String ownerId, Long conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        requireOwned(ownerId, conversationId);
+
+        return turns.findByConversationIdAndStatusOrderByIdDesc(conversationId, TurnRecord.Status.DONE.name(),
+            PageRequest.of(0, 1)).stream().map(AssistantTurn::getQuestion).findFirst().orElse(null);
     }
 
     @Override
@@ -119,13 +140,13 @@ public class ConversationService implements Conversations {
         List<AssistantTurn> recent = turns.findByConversationIdAndStatusOrderByIdDesc(conversationId,
             TurnRecord.Status.DONE.name(), PageRequest.of(0, historyTurns));
         List<Exchange> kept = new ArrayList<>();
-        int budget = HISTORY_CHARS - questionChars;
+        int budget = historyTokens;
         for (AssistantTurn turn : recent) {
             if (turn.getAnswer() == null || turn.getAnswer().isBlank()) {
                 continue;
             }
-            String answer = cut(turn.getAnswer(), MAX_ANSWER_CHARS);
-            int size = turn.getQuestion().length() + answer.length();
+            String answer = cut(CitationRule.withoutMarkers(turn.getAnswer()), MAX_ANSWER_CHARS);
+            int size = TokenEstimator.estimate(turn.getQuestion()) + TokenEstimator.estimate(answer);
             if (size > budget) {
                 break;
             }
@@ -152,6 +173,7 @@ public class ConversationService implements Conversations {
         row.setStatus(turn.status().name());
         row.setFirstTokenMs(turn.firstTokenMs());
         row.setDurationMs(turn.durationMs());
+        row.setRetrievalTrace(write(turn.retrieval() == null ? List.of() : turn.retrieval()));
         row.setSkill(turn.skill());
         row.setPromptVersion(turn.promptVersion());
         long id = turns.save(row).getId();
@@ -177,6 +199,13 @@ public class ConversationService implements Conversations {
         return PageResponse.from(result.map(ConversationService::summary));
     }
 
+    /** The caller's latest conversation about this lesson, or null: "Hỏi về bài này" continues it. */
+    @Transactional(readOnly = true)
+    public ConversationSummary latestForLesson(String ownerId, long lessonId) {
+        return conversations.findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(ownerId, lessonId)
+            .map(ConversationService::summary).orElse(null);
+    }
+
     @Transactional(readOnly = true)
     public ConversationDetail get(String ownerId, long conversationId) {
         AssistantConversation conversation = conversations.findByIdAndOwnerId(conversationId, ownerId)
@@ -187,7 +216,7 @@ public class ConversationService implements Conversations {
             .toList()).forEach(action -> proposed.put(action.getId(), action));
         Map<Long, FeedbackView> rated = new HashMap<>();
         feedback.findByTurnIdIn(stored.stream().map(AssistantTurn::getId).toList()).forEach(row -> rated.put(
-            row.getTurnId(), new FeedbackView(row.isHelpful(), row.getReasonCode(), row.getNote())));
+            row.getTurnId(), new FeedbackView(row.isHelpful(), row.getReasonCode(), row.getNote(), row.isShared())));
         Instant now = clock.instant();
         List<TurnView> views = stored.stream()
             .map(turn -> view(turn, turn.getActionId() == null ? null : proposed.get(turn.getActionId()),
@@ -273,7 +302,24 @@ public class ConversationService implements Conversations {
                 : read(turn.getNavigation(), new TypeReference<TurnRecord.Navigation>() {
                 }, null),
             turn.getActionId(), action == null ? null : state(action, now), rating,
-            turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime());
+            turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime(),
+            ungrounded(turn) ? Boolean.FALSE : null);
+    }
+
+    /**
+     * An answer that used retrieved chunks but cites none, read back from the stored turn: it has an answer, no
+     * citations, a search that gave chunks, and is not the fixed "not found" sentence. A quiz explanation stands on
+     * the author's text and never claims sources, so its own search does not count.
+     */
+    private boolean ungrounded(AssistantTurn turn) {
+        if (!TurnRecord.Status.DONE.name().equals(turn.getStatus()) || turn.getAnswer() == null
+            || turn.getAnswer().isBlank() || NotFoundAnswer.isNotFound(turn.getAnswer())
+            || !read(turn.getCitations(), CITATIONS, List.<CitationView>of()).isEmpty()) {
+            return false;
+        }
+
+        return read(turn.getRetrievalTrace(), SEARCHES, List.<TurnRecord.Search>of()).stream()
+            .anyMatch(search -> !"explain".equals(search.tool()) && !search.gaveNothing());
     }
 
     /** The card as it stands now: a proposal nobody answered in time reads as expired, not as still waiting. */
@@ -281,9 +327,18 @@ public class ConversationService implements Conversations {
         String status = PendingActionStore.PENDING.equals(action.getStatus()) && !action.getExpiresAt().isAfter(now)
             ? "expired" : action.getStatus().toLowerCase(java.util.Locale.ROOT);
 
+        String message = action.getResultMessage();
+        if (message == null || message.isBlank()) {
+            // Cancelled and expired cards had no text before; give them the one a new row stores.
+            message = switch (status) {
+                case "cancelled" -> PendingActionStore.CANCELLED_MESSAGE;
+                case "expired" -> PendingActionStore.EXPIRED_MESSAGE;
+                default -> message;
+            };
+        }
+
         return new ActionState(action.getId(), action.getTool(), action.getTitle(),
-            read(action.getChanges(), CHANGES, List.of()), status, action.getExpiresAt(),
-            action.getResultMessage());
+            read(action.getChanges(), CHANGES, List.of()), status, action.getExpiresAt(), message);
     }
 
     private <T> T read(String text, TypeReference<T> type, T fallback) {

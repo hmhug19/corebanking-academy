@@ -96,7 +96,8 @@ class KnowledgeChatServiceTest {
             clock);
         service = new KnowledgeChatService(ollama, chunks, new ChatPromptBuilder(), properties, json, limiter,
             conversations, new AssistantMetrics(meters), vn.com.coreacademy.assistant.config.AssistantModels.defaults(),
-            new vn.com.coreacademy.assistant.skill.SkillCatalog(), access);
+            new vn.com.coreacademy.assistant.skill.SkillCatalog(), access,
+            vn.com.coreacademy.assistant.config.AssistantBudget.defaults());
         when(access.visibility(any())).thenReturn(new DocumentVisibility(USER, java.util.Set.of()));
         when(ollama.embed(anyList())).thenReturn(List.of(new float[1024]));
         signedInAs(USER);
@@ -123,7 +124,7 @@ class KnowledgeChatServiceTest {
 
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("\"messageCode\":\"ASSISTANT-BUSY\"")
             .doesNotContain("retrieved");
-        verify(ollama, never()).chatStream(anyList(), any(), any());
+        verify(ollama, never()).chatStream(anyList(), any(), any(), any());
         running.close();
     }
 
@@ -168,7 +169,7 @@ class KnowledgeChatServiceTest {
         assertThat(answer.answer()).isEqualTo("Không tìm thấy thông tin này trong tài liệu.");
         assertThat(answer.citations()).isEmpty();
         verify(ollama, never()).chat(anyList(), any());
-        verify(ollama, never()).chatStream(anyList(), any(), any());
+        verify(ollama, never()).chatStream(anyList(), any(), any(), any());
     }
 
     @Test
@@ -221,17 +222,49 @@ class KnowledgeChatServiceTest {
     @Test
     void everyMarkerFormNamesItsChunksAndEachChunkIsCitedOnce() {
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
-        when(ollama.chat(anyList(), any())).thenReturn("Ý một [2][1]. Ý hai [1, 2]. Lại [2].");
+        when(ollama.chat(anyList(), any())).thenReturn("CIF GL [2][1]. CIF GL [1, 2]. GL CIF [2].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
     }
 
     @Test
-    void withoutAUsableMarkerEveryRetrievedChunkIsASource() {
+    void withoutAUsableMarkerTheAnswerIsKeptWithNoSourcesAndIsNotGrounded() {
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn, chỉ [9] và [12345678901].");
 
-        assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
+        ChatAnswerView answer = service.answer("Hỏi");
+
+        assertThat(answer.found()).isTrue();
+        assertThat(answer.grounded()).isFalse();
+        assertThat(answer.answer()).isEqualTo("Không có dấu nguồn, chỉ [9] và [12345678901].");
+        assertThat(answer.citations()).isEmpty();
+    }
+
+    @Test
+    void aMarkedAnswerIsGrounded() {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
+        when(ollama.chat(anyList(), any())).thenReturn("CIF [1].");
+
+        assertThat(service.answer("Hỏi").grounded()).isTrue();
+    }
+
+    @Test
+    void streamDoneCarriesGroundedFalseOnlyWhenTheAnswerHasNoMarker() throws IOException {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
+        streamDeltas("CIF là mã khách hàng.");
+
+        List<JsonNode> first = run(service.stream("Hỏi"));
+        JsonNode ungrounded = first.get(first.size() - 1);
+
+        assertThat(ungrounded.path("type").asText()).isEqualTo("done");
+        assertThat(ungrounded.path("found").asBoolean()).isTrue();
+        assertThat(ungrounded.path("grounded").asBoolean(true)).isFalse();
+        assertThat(ungrounded.path("citations")).isEmpty();
+
+        streamDeltas("CIF là mã khách hàng [1].");
+        List<JsonNode> second = run(service.stream("Hỏi"));
+        JsonNode grounded = second.get(second.size() - 1);
+        assertThat(grounded.has("grounded")).isFalse();
     }
 
     @Test
@@ -266,7 +299,7 @@ class KnowledgeChatServiceTest {
             .mapToObj(i -> new ChunkHit(10 + i, 50 + i, "f" + i + ".md", null, 1, 1, "Đoạn " + i, 0.9 - i * 0.01))
             .toList();
         when(chunks.search(any(), anyInt(), any())).thenReturn(many);
-        when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn.");
+        when(ollama.chat(anyList(), any())).thenReturn("Đoạn [1][2][3][4][5][6].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2, 3, 4, 5);
     }
@@ -315,15 +348,36 @@ class KnowledgeChatServiceTest {
 
     @Test
     void aLongChunkBecomesA280CharacterSnippetCutAtAWordBoundary() {
-        String content = ("từ ").repeat(200);
+        String content = ("khóa ").repeat(100);
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(
             new ChunkHit(1, 1, "a.md", null, 1, 2, content, 0.9)));
-        when(ollama.chat(anyList(), any())).thenReturn("ok");
+        when(ollama.chat(anyList(), any())).thenReturn("khóa [1]");
 
         String snippet = service.answer("Hỏi").citations().get(0).snippet();
 
-        assertThat(snippet).endsWith("từ…").hasSizeLessThanOrEqualTo(281);
+        assertThat(snippet).endsWith("khóa…").hasSizeLessThanOrEqualTo(281);
         assertThat(content).startsWith(snippet.substring(0, snippet.length() - 1));
+    }
+
+    @Test
+    void aStreamedTurnStoresItsRetrievalTraceAndNotFoundWithNoChunksIsBlamedOnTheRetrieval() throws IOException {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
+        streamDeltas("CIF là mã [1].");
+
+        run(service.stream("CIF là gì?"));
+
+        var trace = conversations.lastRecord().retrieval();
+        assertThat(trace).hasSize(1);
+        assertThat(trace.get(0).given()).extracting(vn.com.coreacademy.assistant.conversation.TurnRecord.Given::rank)
+            .containsExactly(1, 2);
+        assertThat(trace.get(0).given().get(0).kind()).isEqualTo("document");
+
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of());
+        run(service.stream("Điều không có"));
+
+        assertThat(meters.get("assistant.answers.not_found").tag("cause", "empty_retrieval").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.get("assistant.retrieval.empty").counter().count()).isEqualTo(1);
     }
 
     @Test
@@ -382,7 +436,7 @@ class KnowledgeChatServiceTest {
     }
 
     @Test
-    void aFollowUpGivesTheModelTheEarlierTurnsButRetrievesWithTheNewQuestionAlone() throws IOException {
+    void aFollowUpGivesTheModelTheEarlierTurnsAndSearchesWithThePreviousQuestionAndTheNewOne() throws IOException {
         long id = conversations.seed(USER, "CIF là gì?", "CIF là mã khách hàng [1].");
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
         streamDeltas("Có [1].");
@@ -391,13 +445,39 @@ class KnowledgeChatServiceTest {
 
         assertThat(events.get(0).path("conversationId").asLong()).isEqualTo(id);
         ArgumentCaptor<List<OllamaClient.Message>> sent = ArgumentCaptor.captor();
-        verify(ollama).chatStream(sent.capture(), any(), any());
+        verify(ollama).chatStream(sent.capture(), any(), any(), any());
         assertThat(sent.getValue()).extracting(OllamaClient.Message::role)
             .containsExactly("system", "user", "assistant", "user");
         assertThat(sent.getValue().get(1).content()).isEqualTo("CIF là gì?");
         assertThat(sent.getValue().get(2).content()).isEqualTo("CIF là mã khách hàng [1].");
         assertThat(sent.getValue().get(3).content()).contains("NGỮ CẢNH:").endsWith("CÂU HỎI: Còn ngoại lệ?");
-        verify(ollama).embed(List.of("Còn ngoại lệ?"));
+        verify(ollama).embed(List.of("CIF là gì?\nCòn ngoại lệ?"));
+        // The model is still asked the new question alone; only the search looked back.
+        assertThat(sent.getValue().get(3).content()).doesNotContain("CIF là gì?\nCòn");
+        assertThat(conversations.lastRecord().question()).isEqualTo("Còn ngoại lệ?");
+    }
+
+    @Test
+    void theFirstQuestionOfAConversationIsSearchedAloneAsBefore() throws IOException {
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
+        streamDeltas("Có [1].");
+
+        run(service.stream("CIF là gì?", null));
+
+        verify(ollama).embed(List.of("CIF là gì?"));
+    }
+
+    @Test
+    void aLongPreviousQuestionIsCutSoTheSearchTextStaysBounded() throws IOException {
+        long id = conversations.seed(USER, "x".repeat(900), "Đáp [1].");
+        when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF));
+        streamDeltas("Có [1].");
+
+        run(service.stream("Còn ngoại lệ?", id));
+
+        ArgumentCaptor<List<String>> embedded = ArgumentCaptor.captor();
+        verify(ollama).embed(embedded.capture());
+        assertThat(embedded.getValue().get(0)).isEqualTo("x".repeat(300) + "\nCòn ngoại lệ?");
     }
 
     @Test
@@ -435,7 +515,7 @@ class KnowledgeChatServiceTest {
         assertThat(events.get(2).path("found").asBoolean()).isFalse();
         assertThat(events.get(2).path("answer").asText()).isEqualTo(NotFoundAnswer.TEXT);
         assertThat(events.get(2).path("citations")).isEmpty();
-        verify(ollama, never()).chatStream(anyList(), any(), any());
+        verify(ollama, never()).chatStream(anyList(), any(), any(), any());
     }
 
     @Test
@@ -486,7 +566,7 @@ class KnowledgeChatServiceTest {
             Consumer<String> onDelta = invocation.getArgument(2);
             onDelta.accept("CIF là ");
             throw new OllamaException("stream broke");
-        }).when(ollama).chatStream(anyList(), any(), any());
+        }).when(ollama).chatStream(anyList(), any(), any(), any());
 
         List<JsonNode> events = run(service.stream("Hỏi"));
 
@@ -508,7 +588,7 @@ class KnowledgeChatServiceTest {
             Consumer<String> onDelta = invocation.getArgument(2);
             Arrays.stream(deltas).forEach(onDelta);
             return null;
-        }).when(ollama).chatStream(anyList(), any(), any());
+        }).when(ollama).chatStream(anyList(), any(), any(), any());
     }
 
     /** The events after the opening {@code conversation} line, which has its own tests. */

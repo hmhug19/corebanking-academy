@@ -17,7 +17,8 @@ import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.LessonSou
  * the model, so the evals measure the answer, its sources, the not-found rule, injection resistance and tool choice.
  */
 public record GoldenSet(String version, String note, Approval approval, List<Passage> passages, List<Answer> answers,
-                        List<NotFound> notFound, List<Injection> injection, List<ToolCase> toolChoice) {
+                        List<NotFound> notFound, List<Injection> injection, List<ToolCase> toolChoice,
+                        List<FollowUp> followUps) {
     static final String RESOURCE = "/assistant/eval/golden-set.json";
 
     public record Approval(String approvedBy, String approvedAt) {
@@ -46,6 +47,14 @@ public record GoldenSet(String version, String note, Approval approval, List<Pas
 
     public record ToolCase(String id, String prompt, boolean lesson, String requestedSkill, String expectedSkill,
                            String expectedTool) {
+    }
+
+    /**
+     * A question that only makes sense after the previous exchange ("còn trường hợp kia?"): the classifier is given
+     * that exchange and must still pick the skill of the earlier topic.
+     */
+    public record FollowUp(String id, String previousQuestion, String previousAnswer, String prompt,
+                           String expectedSkill) {
     }
 
     public static GoldenSet load() {

@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS learning_hub.course_generation_steps (
 );
 COMMENT ON TABLE learning_hub.course_generation_steps IS
     'Một bước làm việc của job tạo khóa học; output được lưu để tạo lại từng bài và để khởi động lại không mất việc.';
-COMMENT ON COLUMN learning_hub.course_generation_steps.kind IS 'summarise_sections | outline | lesson | questions | assemble.';
+COMMENT ON COLUMN learning_hub.course_generation_steps.kind IS 'summarise_sections | outline | lesson | questions.';
 COMMENT ON COLUMN learning_hub.course_generation_steps.item_key IS 'Khóa chương/bài của bước; rỗng với bước chung.';
 COMMENT ON COLUMN learning_hub.course_generation_steps.input_hash IS 'Băm đầu vào, để biết bước nào cần chạy lại khi đầu vào đổi.';
 

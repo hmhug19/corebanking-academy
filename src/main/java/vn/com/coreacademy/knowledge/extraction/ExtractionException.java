@@ -26,4 +26,8 @@ public class ExtractionException extends RuntimeException {
     public static ExtractionException noText() {
         return new ExtractionException("Tài liệu không có nội dung văn bản.");
     }
+
+    public static ExtractionException unreadableEncoding() {
+        return new ExtractionException("Tệp có phông chữ hoặc bảng mã không đọc được");
+    }
 }

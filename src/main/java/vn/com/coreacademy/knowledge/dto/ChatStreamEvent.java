@@ -23,13 +23,15 @@ public sealed interface ChatStreamEvent {
     /**
      * Last line on success. {@code answer} is the final text: what the deltas added up to, or the fixed sentence when
      * the model said nothing was found (a client replaces what it streamed). Citations are empty in that case.
+     * {@code grounded} is present, as false, only for an answer that used chunks and marked none; absent means true.
      */
     record Done(String type, boolean found, String answer, List<CitationView> citations,
                 @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId,
-                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions) implements ChatStreamEvent {
+                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions,
+                @JsonInclude(JsonInclude.Include.NON_NULL) Boolean grounded) implements ChatStreamEvent {
         /** The same line naming the stored turn, so the client can send feedback on it. */
         public Done withTurnId(long id) {
-            return new Done(type, found, answer, citations, id, suggestions);
+            return new Done(type, found, answer, citations, id, suggestions, grounded);
         }
     }
 
@@ -50,11 +52,16 @@ public sealed interface ChatStreamEvent {
     }
 
     static Done done(boolean found, String answer, List<CitationView> citations) {
-        return new Done("done", found, answer, citations, null, List.of());
+        return new Done("done", found, answer, citations, null, List.of(), null);
     }
 
     static Done done(boolean found, String answer, List<CitationView> citations, List<String> suggestions) {
-        return new Done("done", found, answer, citations, null, suggestions);
+        return new Done("done", found, answer, citations, null, suggestions, null);
+    }
+
+    static Done done(boolean found, String answer, List<CitationView> citations, List<String> suggestions,
+                     boolean grounded) {
+        return new Done("done", found, answer, citations, null, suggestions, grounded ? null : Boolean.FALSE);
     }
 
     static Error error(String messageCode, String message) {

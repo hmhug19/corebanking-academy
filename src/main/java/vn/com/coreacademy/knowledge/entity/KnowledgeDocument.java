@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 
 import lombok.Getter;
@@ -33,6 +34,10 @@ public class KnowledgeDocument extends CreatedEntity {
     @Column(name = "file_name", length = 255, nullable = false)
     private String fileName;
 
+    /** What people see and what citations show; the owner may change it. Defaults to the file name. */
+    @Column(name = "title", length = 255, nullable = false)
+    private String title;
+
     @Column(name = "mime_type", length = 100, nullable = false)
     private String mimeType;
 
@@ -46,7 +51,7 @@ public class KnowledgeDocument extends CreatedEntity {
     @Convert(converter = DocumentStatusConverter.class)
     private DocumentStatus status = DocumentStatus.QUEUED;
 
-    @Column(name = "scope", length = 10, nullable = false)
+    @Column(name = "scope", length = 20, nullable = false)
     @Convert(converter = DocumentScopeConverter.class)
     private DocumentScope scope = DocumentScope.PERSONAL;
 
@@ -70,4 +75,38 @@ public class KnowledgeDocument extends CreatedEntity {
 
     @Column(name = "processed_at")
     private Instant processedAt;
+
+    /** SHA-256 (hex) of the current file; null for documents older than the column until the start-up fill. */
+    @Column(name = "checksum_sha256", length = 64)
+    private String checksumSha256;
+
+    /** A replacement file waits on the same row; the current file and chunks answer until the swap. */
+    @Column(name = "replacement_status", length = 20)
+    @Convert(converter = DocumentStatusConverter.class)
+    private DocumentStatus replacementStatus;
+
+    @Column(name = "replacement_error", length = 500)
+    private String replacementError;
+
+    @Column(name = "replacement_storage_key", length = 100)
+    private String replacementStorageKey;
+
+    @Column(name = "replacement_file_name", length = 255)
+    private String replacementFileName;
+
+    @Column(name = "replacement_mime_type", length = 100)
+    private String replacementMimeType;
+
+    @Column(name = "replacement_size_bytes")
+    private Long replacementSizeBytes;
+
+    @Column(name = "replacement_checksum", length = 64)
+    private String replacementChecksum;
+
+    @PrePersist
+    void defaultTitle() {
+        if (title == null || title.isBlank()) {
+            title = fileName;
+        }
+    }
 }

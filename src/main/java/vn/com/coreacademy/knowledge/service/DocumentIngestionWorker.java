@@ -34,6 +34,7 @@ public class DocumentIngestionWorker {
     private final KnowledgeDocumentRepository documents;
     private final DocumentChunkRepository chunks;
     private final DocumentProcessor processor;
+    private final KnowledgeFileStore store;
     private final OllamaClient ollama;
     private final TransactionTemplate transaction;
     private final ThreadPoolTaskExecutor executor;
@@ -41,13 +42,15 @@ public class DocumentIngestionWorker {
     private final Semaphore freeSlots;
 
     public DocumentIngestionWorker(DocumentQueueRepository queue, KnowledgeDocumentRepository documents,
-                                   DocumentChunkRepository chunks, DocumentProcessor processor, OllamaClient ollama,
+                                   DocumentChunkRepository chunks, DocumentProcessor processor, KnowledgeFileStore store,
+                                   OllamaClient ollama,
                                    TransactionTemplate transaction, ThreadPoolTaskExecutor knowledgeWorkerExecutor,
                                    KnowledgeProperties properties) {
         this.queue = queue;
         this.documents = documents;
         this.chunks = chunks;
         this.processor = processor;
+        this.store = store;
         this.ollama = ollama;
         this.transaction = transaction;
         this.executor = knowledgeWorkerExecutor;
@@ -76,14 +79,24 @@ public class DocumentIngestionWorker {
         }
         while (freeSlots.tryAcquire()) {
             Optional<Long> claimed = claimNext();
+            boolean replacement = false;
+            if (claimed.isEmpty()) {
+                claimed = claimNextReplacement();
+                replacement = true;
+            }
             if (claimed.isEmpty()) {
                 freeSlots.release();
                 return;
             }
             long documentId = claimed.get();
+            boolean isReplacement = replacement;
             executor.execute(() -> {
                 try {
-                    process(documentId);
+                    if (isReplacement) {
+                        processReplacement(documentId);
+                    } else {
+                        process(documentId);
+                    }
                 } finally {
                     freeSlots.release();
                 }
@@ -94,6 +107,72 @@ public class DocumentIngestionWorker {
     /** Claims in its own short transaction, so the row lock is released before the long work starts. */
     public Optional<Long> claimNext() {
         return transaction.execute(status -> queue.claimNext());
+    }
+
+    /** Claims the oldest queued replacement file of a ready document, in its own short transaction. */
+    public Optional<Long> claimNextReplacement() {
+        return transaction.execute(status -> queue.claimNextReplacement());
+    }
+
+    /**
+     * Cuts and embeds the replacement file outside any transaction, then in one transaction makes it the document's
+     * file and swaps the chunks. Until that commit the old version answers; a failure leaves it in place and records
+     * why, and discards the new file. The old file is removed only after the commit.
+     */
+    public void processReplacement(long documentId) {
+        Optional<KnowledgeDocument> loaded = documents.findById(documentId);
+        if (loaded.isEmpty() || loaded.get().getReplacementStorageKey() == null) {
+            log.warn("Claimed replacement is gone documentId={}", documentId);
+            return;
+        }
+        KnowledgeDocument document = loaded.get();
+        String oldKey = document.getStorageKey();
+        String newKey = document.getReplacementStorageKey();
+
+        KnowledgeDocument incoming = new KnowledgeDocument();
+        incoming.setFileName(document.getReplacementFileName());
+        incoming.setMimeType(document.getReplacementMimeType());
+        incoming.setStorageKey(newKey);
+        try {
+            DocumentProcessor.Processed result = processor.process(incoming);
+            Boolean swapped = transaction.execute(status -> {
+                if (!queue.completeReplacement(documentId, result.pageCount(), result.chunks().size())) {
+                    return false;
+                }
+                chunks.deleteByDocument(documentId);
+                chunks.insertAll(documentId, result.chunks());
+                return true;
+            });
+            if (Boolean.TRUE.equals(swapped)) {
+                store.discard(oldKey);
+                log.info("Knowledge document replaced documentId={} chunks={}", documentId, result.chunks().size());
+            } else {
+                store.discard(newKey);
+                log.info("Knowledge document replacement dropped documentId={}", documentId);
+            }
+        } catch (OllamaUnavailableException exception) {
+            if (document.getAttempts() >= maxAttempts) {
+                failReplacement(document, "Không kết nối được dịch vụ AI sau " + maxAttempts
+                    + " lần thử. Vui lòng thay bản mới lại sau.");
+            } else {
+                queue.releaseReplacement(documentId);
+                log.warn("Knowledge document replacement requeued documentId={} reason=ollama-unavailable attempts={}",
+                    documentId, document.getAttempts());
+            }
+        } catch (ExtractionException exception) {
+            failReplacement(document, exception.getMessage());
+        } catch (RuntimeException exception) {
+            failReplacement(document, GENERIC_FAILURE);
+            // The message could quote document text; log the type and the stack only.
+            log.error("Knowledge document replacement failed documentId={} type={} stack={}", documentId,
+                exception.getClass().getName(), Arrays.toString(exception.getStackTrace()));
+        }
+    }
+
+    private void failReplacement(KnowledgeDocument document, String reason) {
+        queue.failReplacement(document.getId(), reason);
+        store.discard(document.getReplacementStorageKey());
+        log.info("Knowledge document replacement failed documentId={}", document.getId());
     }
 
     /** Runs one claimed document to ready, failed, or back to the queue. */
