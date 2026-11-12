@@ -27,7 +27,7 @@ public class DocumentChunkRepository {
 
     // Cosine distance with the HNSW index; 1 - distance is the similarity. Only ready documents have chunks.
     private static final String SEARCH = """
-        SELECT c.chunk_id, c.document_id, d.file_name, c.page_number, c.line_start, c.line_end, c.content,
+        SELECT c.chunk_id, c.document_id, d.title AS file_name, c.page_number, c.line_start, c.line_end, c.content,
                c.section_path, 1 - (c.embedding <=> CAST(:vector AS vector)) AS similarity
           FROM learning_hub.knowledge_document_chunks c
           JOIN learning_hub.knowledge_documents d ON d.document_id = c.document_id
@@ -40,7 +40,7 @@ public class DocumentChunkRepository {
 
     // The chunks next to the given ones in the same document, under the same visibility rule as SEARCH.
     private static final String NEIGHBOURS = """
-        SELECT c.chunk_id AS parent_id, n.chunk_id, n.document_id, d.file_name, n.page_number, n.line_start,
+        SELECT c.chunk_id AS parent_id, n.chunk_id, n.document_id, d.title AS file_name, n.page_number, n.line_start,
                n.line_end, n.content, n.section_path
           FROM learning_hub.knowledge_document_chunks c
           JOIN learning_hub.knowledge_document_chunks n
@@ -55,7 +55,7 @@ public class DocumentChunkRepository {
 
     // The document, when it is one SEARCH could return: the same scope rule, so a hidden document reads as missing.
     private static final String SEARCHABLE_DOCUMENT = """
-        SELECT d.file_name
+        SELECT d.title
           FROM learning_hub.knowledge_documents d
          WHERE d.document_id = :documentId
            AND (d.scope = 'global'
@@ -77,7 +77,10 @@ public class DocumentChunkRepository {
         }
     }
 
-    /** A chunk found by {@link #search}, with the metadata a citation needs. */
+    /**
+     * A chunk found by {@link #search}, with the metadata a citation needs. {@code fileName} is the document's title
+     * (what people see and cite; the file name until the owner renames it).
+     */
     public record ChunkHit(long chunkId, long documentId, String fileName, Integer page, int lineStart, int lineEnd,
                            String content, double similarity, LessonSource lesson, String sectionPath) {
         public ChunkHit {
@@ -231,9 +234,19 @@ public class DocumentChunkRepository {
      * The document row is locked in share mode, so a delete waits for the swap instead of leaving orphan chunks.
      */
     public boolean replaceIfReady(long documentId, List<NewChunk> chunks) {
+        return replaceIfReady(documentId, null, chunks);
+    }
+
+    /**
+     * As {@link #replaceIfReady(long, List)}, and only while the document still has the file the chunks were cut
+     * from ({@code expectedStorageKey}; null skips the check), so a re-index that read the old file cannot overwrite
+     * chunks of a file that replaced it meanwhile.
+     */
+    public boolean replaceIfReady(long documentId, String expectedStorageKey, List<NewChunk> chunks) {
         boolean ready = !jdbc.queryForList("""
-            SELECT 1 FROM learning_hub.knowledge_documents WHERE document_id = ? AND status = 'ready' FOR SHARE
-            """, Integer.class, documentId).isEmpty();
+            SELECT 1 FROM learning_hub.knowledge_documents
+             WHERE document_id = ? AND status = 'ready' AND (CAST(? AS varchar) IS NULL OR storage_key = ?) FOR SHARE
+            """, Integer.class, documentId, expectedStorageKey, expectedStorageKey).isEmpty();
         if (!ready) {
             return false;
         }

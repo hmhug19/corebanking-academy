@@ -15,6 +15,8 @@ public final class KnowledgeViews {
     public record KnowledgeDocumentView(
         Long id,
         String fileName,
+        @Schema(description = "Tên hiển thị và tên trong trích dẫn; mặc định là tên tệp, người tải lên đổi được.")
+        String title,
         String mimeType,
         long sizeBytes,
         @Schema(description = "personal (chỉ người tải lên), unit (đơn vị và đơn vị con) hoặc global (mọi người).")
@@ -26,13 +28,26 @@ public final class KnowledgeViews {
         int chunkCount,
         UploaderView uploadedBy,
         Instant createdAt,
-        @Schema(description = "Thời điểm xử lý xong (ready hoặc failed); null khi chưa xong.") Instant processedAt) {
+        @Schema(description = "Thời điểm xử lý xong (ready hoặc failed); null khi chưa xong.") Instant processedAt,
+        @Schema(description = "true khi tệp vừa tải trùng với tài liệu đã có của chính người gọi: không tạo gì mới, đây là tài liệu đã có.")
+        boolean duplicate,
+        @Schema(description = "Tệp thay thế đang chờ hoặc vừa lỗi; null khi không có. Bản cũ vẫn trả lời trong lúc này.")
+        ReplacementView replacement) {
+    }
+
+    @Schema(description = "Tệp thay thế của một tài liệu: queued, processing hoặc failed (kèm lý do).")
+    public record ReplacementView(String status, String fileName,
+                                  @Schema(description = "Lý do tiếng Việt khi status = failed.") String errorMessage) {
+    }
+
+    @Schema(description = "Các tài liệu của người gọi có cùng checksum trong cùng phạm vi; không có gì bị xóa tự động.")
+    public record DuplicateGroupView(String checksum, java.util.List<KnowledgeDocumentView> documents) {
     }
 
     @Schema(description = "Văn bản đã trích của một đoạn được trích dẫn và các đoạn kề, theo thứ tự đọc. Không có tệp gốc.")
     public record DocumentTextView(
         long documentId,
-        String fileName,
+        @Schema(description = "Tên hiển thị (title) của tài liệu.") String fileName,
         @Schema(description = "Đoạn được trích dẫn (đoạn đầu tiên của tài liệu khi không truyền around).")
         long aroundChunkId,
         java.util.List<TextChunkView> chunks,

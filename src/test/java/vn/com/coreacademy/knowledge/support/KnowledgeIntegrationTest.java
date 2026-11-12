@@ -84,6 +84,9 @@ public abstract class KnowledgeIntegrationTest {
                 .withCopyFileToContainer(
                     MountableFile.forHostPath("docs/sql/upgrade/2026-11-19-chunker-v2-columns.sql"),
                     "/docker-entrypoint-initdb.d/04zj-chunker-v2-columns.sql")
+                .withCopyFileToContainer(
+                    MountableFile.forHostPath("docs/sql/upgrade/2026-11-20-document-title-checksum-replace.sql"),
+                    "/docker-entrypoint-initdb.d/04zk-document-title-checksum-replace.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_community.sql"),
                     "/docker-entrypoint-initdb.d/05-community.sql")
                 .withCopyFileToContainer(MountableFile.forHostPath("docs/sql/learning_hub_assessment.sql"),

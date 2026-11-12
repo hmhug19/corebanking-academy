@@ -15,6 +15,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.NewChunk;
@@ -25,6 +27,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -374,6 +377,155 @@ class KnowledgeDocumentControllerTest extends KnowledgeIntegrationTest {
         mvc.perform(get(DOCUMENTS + "/" + id + "/text")).andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void uploadingTheSameFileTwiceKeepsOneDocumentAndAnswersWithTheDuplicateNotice() throws Exception {
+        long first = uploadScoped("000005", "quy-trinh.md", "unit");
+
+        mvc.perform(multipart(DOCUMENTS).file(markdown("ten-khac.md", "nội dung quy-trinh.md")).param("scope", "unit")
+                .with(as("000005")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.id").value(first))
+            .andExpect(jsonPath("$.data.duplicate").value(true))
+            .andExpect(jsonPath("$.data.title").value("quy-trinh.md"));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents", Integer.class))
+            .isEqualTo(1);
+        assertThat(storedFiles()).isEqualTo(1);
+    }
+
+    @Test
+    void aFreshUploadIsNotMarkedDuplicateAndAnotherUsersIdenticalFileIsNotOne() throws Exception {
+        mvc.perform(multipart(DOCUMENTS).file(markdown("a.md", "cùng nội dung")).with(as("000005")))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.duplicate").value(false));
+        mvc.perform(multipart(DOCUMENTS).file(markdown("a.md", "cùng nội dung")).with(as("000004")))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.duplicate").value(false));
+        // The same caller in another scope is a different place to look: not a duplicate either.
+        mvc.perform(multipart(DOCUMENTS).file(markdown("a.md", "cùng nội dung")).param("scope", "personal")
+                .with(as("000005")))
+            .andExpect(status().isCreated());
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents", Integer.class))
+            .isEqualTo(3);
+    }
+
+    @Test
+    void theTitleDefaultsToTheFileNameAndCanBeGivenOnUpload() throws Exception {
+        mvc.perform(multipart(DOCUMENTS).file(markdown("mac-dinh.md", "x")).with(as("000005")))
+            .andExpect(jsonPath("$.data.title").value("mac-dinh.md"));
+        mvc.perform(multipart(DOCUMENTS).file(markdown("co-ten.md", "y")).param("title", "  Quy trình EOD  ")
+                .with(as("000005")))
+            .andExpect(jsonPath("$.data.title").value("Quy trình EOD"))
+            .andExpect(jsonPath("$.data.fileName").value("co-ten.md"));
+    }
+
+    @Test
+    void theOwnerAndAnAdminInScopeRenameButAnotherLearnerCannot() throws Exception {
+        long id = uploadScoped("000005", "cu.md", "unit");
+
+        mvc.perform(rename(id, "Tên mới").with(as("000005")))
+            .andExpect(jsonPath("$.status").value("SUCCESS"))
+            .andExpect(jsonPath("$.data.title").value("Tên mới"))
+            .andExpect(jsonPath("$.data.fileName").value("cu.md"));
+        mvc.perform(rename(id, "Của học viên").with(as("000004"))).andExpect(status().isForbidden());
+        mvc.perform(rename(id, "Quản trị đổi").with(as("000003")))
+            .andExpect(jsonPath("$.data.title").value("Quản trị đổi"));
+        mvc.perform(get(DOCUMENTS + "/" + id).with(as("000004")))
+            .andExpect(jsonPath("$.data.title").value("Quản trị đổi"));
+    }
+
+    @Test
+    void renameRefusesABlankTitleAndAnInvisibleDocument() throws Exception {
+        long id = uploadScoped("000005", "rieng.md", "personal");
+
+        mvc.perform(rename(id, "   ").with(as("000005"))).andExpect(jsonPath("$.status").value("ERROR"));
+        mvc.perform(rename(id, "x").with(as("000004")))
+            .andExpect(jsonPath("$.messageCode").value("CORE-RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void replacingAReadyDocumentQueuesTheNewFileAndTheOldVersionStaysUntilTheSwap() throws Exception {
+        long id = uploadScoped("000005", "ban-cu.md", "unit");
+        chunksOf(id, 2);
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET status = 'ready', chunk_count = 2 WHERE document_id = ?",
+            id);
+
+        mvc.perform(replace(id, markdown("ban-moi.md", "nội dung mới")).with(as("000005")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.id").value(id))
+            .andExpect(jsonPath("$.data.status").value("ready"))
+            .andExpect(jsonPath("$.data.fileName").value("ban-cu.md"))
+            .andExpect(jsonPath("$.data.replacement.status").value("queued"))
+            .andExpect(jsonPath("$.data.replacement.fileName").value("ban-moi.md"));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_document_chunks", Integer.class))
+            .isEqualTo(2);
+        assertThat(storedFiles()).isEqualTo(2);
+    }
+
+    @Test
+    void replaceIsRefusedForAnotherLearnerADocumentNotReadyAndAReplacementAlreadyQueued() throws Exception {
+        long id = uploadScoped("000005", "ban-cu.md", "unit");
+
+        // Still queued: there is nothing to keep answering, so a replacement is refused.
+        mvc.perform(replace(id, markdown("moi.md", "mới")).with(as("000005")))
+            .andExpect(jsonPath("$.errors[0].code").value("NOT_READY"));
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET status = 'ready' WHERE document_id = ?", id);
+        mvc.perform(replace(id, markdown("moi.md", "mới")).with(as("000004"))).andExpect(status().isForbidden());
+        mvc.perform(replace(id, markdown("moi.md", "mới")).with(as("000005")))
+            .andExpect(jsonPath("$.data.replacement.status").value("queued"));
+        mvc.perform(replace(id, markdown("nua.md", "nữa")).with(as("000005")))
+            .andExpect(jsonPath("$.errors[0].code").value("REPLACING"));
+
+        assertThat(storedFiles()).isEqualTo(2);
+    }
+
+    @Test
+    void replacingWithTheSameFileChangesNothing() throws Exception {
+        long id = uploadScoped("000005", "ban-cu.md", "unit");
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET status = 'ready' WHERE document_id = ?", id);
+
+        mvc.perform(replace(id, markdown("ban-cu.md", "nội dung ban-cu.md")).with(as("000005")))
+            .andExpect(jsonPath("$.data.duplicate").value(true))
+            .andExpect(jsonPath("$.data.replacement").doesNotExist());
+
+        assertThat(storedFiles()).isEqualTo(1);
+    }
+
+    @Test
+    void deletingADocumentAlsoRemovesItsPendingReplacementFile() throws Exception {
+        long id = uploadScoped("000005", "xoa.md", "unit");
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET status = 'ready' WHERE document_id = ?", id);
+        mvc.perform(replace(id, markdown("moi.md", "mới")).with(as("000005"))).andExpect(status().isOk());
+
+        mvc.perform(delete(DOCUMENTS + "/" + id).with(as("000005"))).andExpect(jsonPath("$.status").value("SUCCESS"));
+
+        assertThat(storedFiles()).isZero();
+    }
+
+    @Test
+    void duplicatesListsTheCallersDocumentsSharingAChecksumAndNothingElse() throws Exception {
+        long a = uploadScoped("000005", "a.md", "unit");
+        long b = uploadScoped("000005", "b.md", "unit");
+        uploadScoped("000005", "c.md", "unit");
+        long other = uploadScoped("000004", "d.md", "unit");
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET checksum_sha256 = repeat('a', 64) "
+            + "WHERE document_id IN (?, ?, ?)", a, b, other);
+
+        mvc.perform(get(DOCUMENTS + "/duplicates").with(as("000005")))
+            .andExpect(jsonPath("$.data.length()").value(1))
+            .andExpect(jsonPath("$.data[0].checksum").value("a".repeat(64)))
+            .andExpect(jsonPath("$.data[0].documents.length()").value(2))
+            .andExpect(jsonPath("$.data[0].documents[0].id").value(b))
+            .andExpect(jsonPath("$.data[0].documents[1].id").value(a));
+        mvc.perform(get(DOCUMENTS + "/duplicates").with(as("000004")))
+            .andExpect(jsonPath("$.data.length()").value(0));
+        // Nothing is deleted by listing.
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents", Integer.class))
+            .isEqualTo(4);
+    }
+
     private long[] chunksOf(long documentId, int count) {
         chunks.insertAll(documentId, java.util.stream.IntStream.range(0, count)
             .mapToObj(i -> new NewChunk(i, "noi dung " + i, i + 1, i * 10, i * 10 + 9, 5, new float[1024],
@@ -429,5 +581,20 @@ class KnowledgeDocumentControllerTest extends KnowledgeIntegrationTest {
 
     private static RequestPostProcessor as(String userId) {
         return jwt().jwt(token -> token.subject(userId));
+    }
+
+    private static MockHttpServletRequestBuilder rename(long id, String title) {
+        return patch(DOCUMENTS + "/" + id).contentType("application/json")
+            .content("{\"title\":\"" + title + "\"}");
+    }
+
+    private static MockMultipartHttpServletRequestBuilder replace(long id, MockMultipartFile file) {
+        MockMultipartHttpServletRequestBuilder builder = multipart(DOCUMENTS + "/" + id + "/file");
+        builder.with(request -> {
+            request.setMethod("PUT");
+            return request;
+        });
+        builder.file(file);
+        return builder;
     }
 }

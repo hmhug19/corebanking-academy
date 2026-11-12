@@ -75,7 +75,7 @@ public class CourseJobService {
      */
     public JobView create(MultipartFile file, Inputs requested) {
         Prepared prepared = prepare(requested);
-        long documentId = documents.upload(file, DocumentScope.COURSE_SOURCE).id();
+        long documentId = documents.upload(file, DocumentScope.COURSE_SOURCE, null).id();
         try {
             return queue(prepared, documentId);
         } catch (RuntimeException exception) {

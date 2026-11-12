@@ -33,7 +33,8 @@ public class DocumentReindexSource implements ReindexSource {
     private void reindex(long documentId) {
         documents.findById(documentId).ifPresent(document -> {
             DocumentProcessor.Processed result = processor.process(document);
-            transaction.executeWithoutResult(status -> chunks.replaceIfReady(documentId, result.chunks()));
+            transaction.executeWithoutResult(status ->
+                chunks.replaceIfReady(documentId, document.getStorageKey(), result.chunks()));
         });
     }
 }

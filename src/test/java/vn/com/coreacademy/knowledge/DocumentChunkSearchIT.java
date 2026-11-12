@@ -69,6 +69,16 @@ class DocumentChunkSearchIT extends KnowledgeIntegrationTest {
     }
 
     @Test
+    void aCitationCarriesTheTitleNotTheFileName() {
+        long id = document("quy-trinh.pdf");
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET title = 'Quy trình đóng sổ' WHERE document_id = ?", id);
+        chunks.insertAll(id, List.of(new NewChunk(0, "along x", 3, 5, 9, 10, axis(0))));
+
+        assertThat(chunks.search(axis(0), 3, anyone())).extracting(ChunkHit::fileName)
+            .containsExactly("Quy trình đóng sổ");
+    }
+
+    @Test
     void respectsTheLimit() {
         long id = document("a.md");
         chunks.insertAll(id, List.of(
