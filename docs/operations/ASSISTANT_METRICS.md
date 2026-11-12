@@ -46,6 +46,7 @@ curl -s "http://127.0.0.1:8020/actuator/metrics/assistant.turn.duration?tag=surf
 | `assistant.tool.calls` | Counter | `tool` (tên công cụ; `unknown` cho tên mô hình bịa) | Công cụ nào được gọi |
 | `assistant.skill.turns` | Counter | `skill` | Lượt theo skill (`qa_tai_lieu`, `dieu_huong`, `ho_so`, `tro_chuyen`) |
 | `assistant.answers.not_found` | Counter | `surface`, `cause` (`empty_retrieval` = tìm không ra đoạn nào, `model_said_so` = mô hình tự nói không có) | Câu trả lời "không tìm thấy trong tài liệu". Tỉ lệ so với số lượt cho biết kho tài liệu có thiếu |
+| `assistant.citations.checked` / `assistant.citations.removed` | Counter | `surface` | Số dấu [n] được đối chiếu với đoạn trích dẫn và số dấu bị gỡ vì đoạn không nâng đỡ câu. Độ chính xác trích dẫn = 1 - removed / checked |
 | `assistant.errors` | Counter | `surface`, `code` | Lượt kết thúc bằng lỗi, theo mã (`ASSISTANT-AI_UNAVAILABLE`, `CORE-INTERNAL_ERROR`…) |
 | `assistant.refusals` | Counter | `surface`, `reason` (`rate_limited`/`busy`) | Câu hỏi bị từ chối trước khi chạy |
 | `assistant.feedback` | Counter | `surface`, `helpful` (`true`/`false`), `reason` (mã lý do hoặc `none`) | 👍/👎 và lý do. Mỗi lần người dùng gửi hoặc sửa đánh giá đếm một lần |

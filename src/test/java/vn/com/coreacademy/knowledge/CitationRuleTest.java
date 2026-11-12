@@ -8,6 +8,7 @@ import vn.com.coreacademy.assistant.tool.RetrievedChunks;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 import vn.com.coreacademy.knowledge.service.CitationRule;
+import vn.com.coreacademy.knowledge.service.CitationSupport;
 import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,5 +69,80 @@ class CitationRuleTest {
     void markersAreStrippedFromHistoryText() {
         assertThat(CitationRule.withoutMarkers("A [1]. B [2][3] và C [1, 2].")).isEqualTo("A. B và C.");
         assertThat(CitationRule.withoutMarkers("Không có marker")).isEqualTo("Không có marker");
+    }
+
+    private static final ChunkHit FEES = new ChunkHit(3, 44, "Bieu-phi.pdf", 2, 10, 30,
+        "Biểu phí áp dụng từ 01/2025. Phí chuyển khoản liên ngân hàng là 10.000 đồng mỗi giao dịch. "
+            + "Giao dịch trên 500 triệu đồng được miễn phí. Phí rút tiền mặt tại quầy là 0,05%.",
+        0.9, "Biểu phí › Chuyển khoản");
+
+    @Test
+    void aMarkerOnASentenceTheChunkDoesNotSupportIsRemovedAndCounted() {
+        CitationRule.Outcome outcome = CitationRule.apply("Phí chuyển khoản liên ngân hàng là 10.000 đồng [1].",
+            List.of(CIF, GL));
+
+        assertThat(outcome.answer()).isEqualTo("Phí chuyển khoản liên ngân hàng là 10.000 đồng.");
+        assertThat(outcome.removedMarkers()).isEqualTo(1);
+        assertThat(outcome.checkedMarkers()).isEqualTo(1);
+        assertThat(outcome.found()).isTrue();
+        assertThat(outcome.grounded()).isFalse();
+        assertThat(outcome.citations()).isEmpty();
+    }
+
+    @Test
+    void onlyTheUnsupportedMarkersGoAndTheOtherSourcesStay() {
+        CitationRule.Outcome outcome = CitationRule.apply(
+            "CIF là mã khách hàng [1]. Phí chuyển khoản là 10.000 đồng [2]. Đối chiếu GL [1, 2].", List.of(CIF, GL));
+
+        assertThat(outcome.answer()).isEqualTo(
+            "CIF là mã khách hàng [1]. Phí chuyển khoản là 10.000 đồng. Đối chiếu GL [2].");
+        assertThat(outcome.removedMarkers()).isEqualTo(2);
+        assertThat(outcome.checkedMarkers()).isEqualTo(4);
+        assertThat(outcome.grounded()).isTrue();
+        assertThat(outcome.citations()).extracting(CitationView::n).containsExactly(1, 2);
+    }
+
+    @Test
+    void aMarkerAfterTheFullStopStillBelongsToItsSentence() {
+        CitationRule.Outcome outcome = CitationRule.apply("CIF là mã khách hàng. [1] Hoàn tiền sau 30 ngày. [2]",
+            List.of(CIF, GL));
+
+        assertThat(outcome.citations()).extracting(CitationView::n).containsExactly(1);
+        assertThat(outcome.removedMarkers()).isEqualTo(1);
+    }
+
+    @Test
+    void aParaphraseThatKeepsTheKeyWordsIsSupported() {
+        CitationRule.Outcome outcome = CitationRule.apply(
+            "Mỗi giao dịch chuyển khoản liên ngân hàng bị tính phí 10.000 đồng [1].", List.of(FEES));
+
+        assertThat(outcome.removedMarkers()).isZero();
+        assertThat(outcome.citations()).extracting(CitationView::n).containsExactly(1);
+    }
+
+    @Test
+    void theSnippetIsTheSentenceOfTheChunkThatTheAnswerSaysAndNotItsOpening() {
+        CitationRule.Outcome outcome = CitationRule.apply("Giao dịch trên 500 triệu đồng được miễn phí [1].",
+            List.of(FEES));
+
+        CitationView citation = outcome.citations().get(0);
+        assertThat(citation.snippet()).isEqualTo("Giao dịch trên 500 triệu đồng được miễn phí.");
+        assertThat(citation.sectionPath()).isEqualTo("Biểu phí › Chuyển khoản");
+    }
+
+    @Test
+    void aShortBestSentenceGetsTheNextOneAndNeitherIsCutMidWord() {
+        ChunkHit hit = new ChunkHit(4, 45, "a.md", null, 1, 4, "Mở đầu dài dòng. Hạn mức: 5 triệu. "
+            + "Áp dụng cho khách hàng cá nhân. Kết thúc.", 0.8);
+        CitationRule.Outcome outcome = CitationRule.apply("Hạn mức là 5 triệu [1].", List.of(hit));
+
+        assertThat(outcome.citations().get(0).snippet()).isEqualTo("Hạn mức: 5 triệu. Áp dụng cho khách hàng cá nhân.");
+        assertThat(outcome.citations().get(0).sectionPath()).isEmpty();
+    }
+
+    @Test
+    void contentWordsAreSyllablesWithoutStopWordsAndNumbersAndCodesStayWhole() {
+        assertThat(CitationSupport.contentWords("Lãi suất là 12.5% của khoản vay TK-001, và 1,5 triệu."))
+            .containsExactlyInAnyOrder("lãi", "suất", "12.5%", "khoản", "vay", "tk-001", "1,5", "triệu");
     }
 }

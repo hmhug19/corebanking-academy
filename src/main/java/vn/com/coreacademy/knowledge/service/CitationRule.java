@@ -9,14 +9,19 @@ import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 /**
  * The one citation rule of both assistants: the sources of an answer are the chunks it marks with [n]. An answer that
  * used retrieved chunks and marks none is kept as it is, with no sources and {@code grounded = false}, so the UIs can
- * label it; it is never given every chunk as a source.
+ * label it; it is never given every chunk as a source. A marker whose chunk does not support its sentence is removed
+ * first ({@link CitationSupport}).
  */
 public final class CitationRule {
     /**
      * {@code found} is false when the answer is the fixed "not found" sentence; {@code grounded} is false when the
      * answer stands on retrieved chunks but marks none of them.
      */
-    public record Outcome(String answer, boolean found, boolean grounded, List<CitationView> citations) {
+    public record Outcome(String answer, boolean found, boolean grounded, List<CitationView> citations,
+                          int checkedMarkers, int removedMarkers) {
+        public Outcome(String answer, boolean found, boolean grounded, List<CitationView> citations) {
+            this(answer, found, grounded, citations, 0, 0);
+        }
     }
 
     private CitationRule() {
@@ -36,7 +41,15 @@ public final class CitationRule {
             return new Outcome(answer, true, false, List.of());
         }
 
-        return new Outcome(answer, true, true, CitationSelector.select(answer, numberedHits));
+        // A marker on a sentence its chunk does not support is taken out; an answer left with none is ungrounded.
+        CitationSupport.Checked checked = CitationSupport.check(answer, numberedHits);
+        if (CitationSelector.citedNumbers(checked.answer(), numberedHits.size()).isEmpty()) {
+            return new Outcome(checked.answer(), true, false, List.of(), checked.checked(), checked.removed());
+        }
+
+        return new Outcome(checked.answer(), true, true,
+            CitationSelector.select(checked.answer(), numberedHits, checked.citingWords()), checked.checked(),
+            checked.removed());
     }
 
     /** An earlier answer without its [n] markers: the numbers belong to that turn's chunks, not to the next one's. */

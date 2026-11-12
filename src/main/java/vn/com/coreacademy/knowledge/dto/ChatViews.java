@@ -17,12 +17,24 @@ public final class ChatViews {
         @Schema(description = "Số trang bắt đầu từ 1; null với .md và .docx.") Integer page,
         @Schema(description = "Dòng đầu (trong trang với PDF; đoạn với DOCX).") int lineStart,
         int lineEnd,
-        @Schema(description = "280 ký tự đầu của đoạn, cắt ở ranh giới từ.") String snippet,
+        @Schema(description = "Câu (hoặc hai câu) của đoạn khớp nhất với câu trích dẫn, tối đa 280 ký tự.")
+        String snippet,
         @Schema(description = "Chỉ có khi nguồn là bài học của khóa đã xuất bản; khi đó documentId là 0.")
-        @JsonInclude(JsonInclude.Include.NON_NULL) LessonCitation lesson) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) LessonCitation lesson,
+        @Schema(description = "Đường dẫn mục của đoạn (các tiêu đề nối bằng ›); rỗng nếu đoạn nằm trước tiêu đề đầu.")
+        String sectionPath) {
+        public CitationView {
+            sectionPath = sectionPath == null ? "" : sectionPath;
+        }
+
+        public CitationView(int n, long documentId, String fileName, Integer page, int lineStart, int lineEnd,
+                            String snippet, LessonCitation lesson) {
+            this(n, documentId, fileName, page, lineStart, lineEnd, snippet, lesson, "");
+        }
+
         public CitationView(int n, long documentId, String fileName, Integer page, int lineStart, int lineEnd,
                             String snippet) {
-            this(n, documentId, fileName, page, lineStart, lineEnd, snippet, null);
+            this(n, documentId, fileName, page, lineStart, lineEnd, snippet, null, "");
         }
     }
 

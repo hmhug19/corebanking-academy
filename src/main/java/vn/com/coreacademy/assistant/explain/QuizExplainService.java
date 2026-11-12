@@ -41,6 +41,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 import vn.com.coreacademy.knowledge.service.ChatPromptBuilder;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 import vn.com.coreacademy.learning.index.CourseQuestionSearch;
 
 /**
@@ -162,7 +163,7 @@ public class QuizExplainService {
         FinishedAnswer finished = chunks.finish(text);
 
         // The fixed "not found" sentence is for document search; here the explanation stands without sources.
-        return finished.answer().equals(text) ? finished : new FinishedAnswer(text, List.of());
+        return NotFoundAnswer.TEXT.equals(finished.answer()) ? new FinishedAnswer(text, List.of()) : finished;
     }
 
     /** The data block the model reads: nothing in it is an instruction. */

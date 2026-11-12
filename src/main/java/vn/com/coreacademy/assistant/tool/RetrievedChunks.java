@@ -88,6 +88,7 @@ public final class RetrievedChunks {
     public FinishedAnswer finish(String answer) {
         CitationRule.Outcome outcome = CitationRule.apply(answer, hits);
 
-        return new FinishedAnswer(outcome.answer(), outcome.citations(), outcome.grounded());
+        return new FinishedAnswer(outcome.answer(), outcome.citations(), outcome.grounded(), outcome.checkedMarkers(),
+            outcome.removedMarkers());
     }
 }

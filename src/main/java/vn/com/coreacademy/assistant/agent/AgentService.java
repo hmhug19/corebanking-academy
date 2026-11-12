@@ -345,6 +345,7 @@ public class AgentService {
             // qwen3 sometimes ends with nothing after a tool result; an empty bubble reads as a hang.
             finished = new FinishedAnswer(EMPTY_ANSWER, List.of());
         }
+        metrics.citations(AssistantMetrics.AGENT, finished.checkedMarkers(), finished.removedMarkers());
         AgentStreamEvent.Done done = AgentStreamEvent.done(finished.answer(), finished.citations(),
             split.suggestions(), finished.grounded());
         emit(output, turnLog, readShared && !split.suggestions().isEmpty() ? done.withSuggestionsReadOnly() : done);

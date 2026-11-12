@@ -116,6 +116,18 @@ public class AssistantMetrics {
             .tag("surface", surface).tag("cause", cause).register(registry).increment();
     }
 
+    /** The [n] markers the citation support check looked at, and those it removed: precision = 1 - removed / checked. */
+    public void citations(String surface, int checked, int removed) {
+        if (checked <= 0) {
+            return;
+        }
+        Counter.builder("assistant.citations.checked").description("Citation markers checked against their chunk")
+            .tag("surface", surface).register(registry).increment(checked);
+        Counter.builder("assistant.citations.removed")
+            .description("Citation markers removed because the chunk did not support the sentence")
+            .tag("surface", surface).register(registry).increment(removed);
+    }
+
     /** A stream that ended with an error line; {@code code} is the response code the user was shown. */
     public void error(String surface, String code) {
         Counter.builder("assistant.errors").description("Turns that ended in an error, by error code")

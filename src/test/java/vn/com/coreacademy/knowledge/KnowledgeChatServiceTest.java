@@ -222,7 +222,7 @@ class KnowledgeChatServiceTest {
     @Test
     void everyMarkerFormNamesItsChunksAndEachChunkIsCitedOnce() {
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
-        when(ollama.chat(anyList(), any())).thenReturn("Ý một [2][1]. Ý hai [1, 2]. Lại [2].");
+        when(ollama.chat(anyList(), any())).thenReturn("CIF GL [2][1]. CIF GL [1, 2]. GL CIF [2].");
 
         assertThat(service.answer("Hỏi").citations()).extracting(c -> c.n()).containsExactly(1, 2);
     }
@@ -348,14 +348,14 @@ class KnowledgeChatServiceTest {
 
     @Test
     void aLongChunkBecomesA280CharacterSnippetCutAtAWordBoundary() {
-        String content = ("từ ").repeat(200);
+        String content = ("khóa ").repeat(100);
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(
             new ChunkHit(1, 1, "a.md", null, 1, 2, content, 0.9)));
-        when(ollama.chat(anyList(), any())).thenReturn("ok [1]");
+        when(ollama.chat(anyList(), any())).thenReturn("khóa [1]");
 
         String snippet = service.answer("Hỏi").citations().get(0).snippet();
 
-        assertThat(snippet).endsWith("từ…").hasSizeLessThanOrEqualTo(281);
+        assertThat(snippet).endsWith("khóa…").hasSizeLessThanOrEqualTo(281);
         assertThat(content).startsWith(snippet.substring(0, snippet.length() - 1));
     }
 

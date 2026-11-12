@@ -336,6 +336,7 @@ public class KnowledgeChatService {
 
     private ChatAnswerView conclude(String text, List<ChunkHit> hits) {
         CitationRule.Outcome outcome = CitationRule.apply(text, hits);
+        metrics.citations(AssistantMetrics.KNOWLEDGE, outcome.checkedMarkers(), outcome.removedMarkers());
 
         return new ChatAnswerView(outcome.answer(), outcome.found(), outcome.citations(), outcome.grounded());
     }

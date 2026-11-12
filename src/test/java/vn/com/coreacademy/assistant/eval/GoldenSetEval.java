@@ -113,6 +113,8 @@ class GoldenSetEval {
         double coverage = 0;
         long cited = 0;
         long ungrounded = 0;
+        long markers = 0;
+        long removed = 0;
         for (Answer answer : set.answers()) {
             Turn turn = ask(ollama, answer.question(), hits(all, answer.passages()), options);
             double covered = covered(turn.text(), answer.points());
@@ -123,11 +125,17 @@ class GoldenSetEval {
             coverage += covered;
             cited += sourcesOk ? 1 : 0;
             ungrounded += turn.finished().grounded() ? 0 : 1;
+            markers += turn.finished().checkedMarkers();
+            removed += turn.finished().removedMarkers();
             lines.add(new Line(answer.id(), covered >= 1 && sourcesOk, String.format(Locale.ROOT,
                 "points %.0f%% sources %s | %s", 100 * covered, sourcesOk ? "ok" : "WRONG", shorten(turn.text()))));
         }
         int total = set.answers().size();
         lines.add(new Line("citation-correctness", cited == total, cited + "/" + total));
+        // Citation precision: markers whose chunk supports their sentence / all markers the model wrote.
+        lines.add(new Line("citation-precision", markers == 0 || removed == 0, String.format(Locale.ROOT,
+            "%d/%d supported (%.0f%%), %d removed", markers - removed, markers,
+            markers == 0 ? 100.0 : 100.0 * (markers - removed) / markers, removed)));
         // Answers that used chunks and marked none: the UIs label them "Chưa có nguồn".
         lines.add(new Line("ungrounded-share", ungrounded == 0, String.format(Locale.ROOT, "%d/%d (%.0f%%)", ungrounded,
             total, 100.0 * ungrounded / total)));

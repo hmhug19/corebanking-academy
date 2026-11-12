@@ -2,6 +2,7 @@ package vn.com.coreacademy.knowledge.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
@@ -32,11 +33,17 @@ public final class CitationSelector {
      * returns none (see {@link CitationRule}).
      */
     public static List<CitationView> select(String answer, List<ChunkHit> numberedHits) {
+        return select(answer, numberedHits, Map.of());
+    }
+
+    /** As above; the snippet of chunk n is the part of it that overlaps most with {@code citingWords.get(n)}. */
+    public static List<CitationView> select(String answer, List<ChunkHit> numberedHits,
+                                            Map<Integer, Set<String>> citingWords) {
         Set<Integer> cited = citedNumbers(answer, numberedHits.size());
         List<CitationView> citations = new ArrayList<>();
         for (int n = 1; n <= numberedHits.size(); n++) {
             if (cited.contains(n)) {
-                citations.add(citation(n, numberedHits.get(n - 1)));
+                citations.add(citation(n, numberedHits.get(n - 1), citingWords.getOrDefault(n, Set.of())));
             }
         }
 
@@ -68,14 +75,15 @@ public final class CitationSelector {
         return MARKER_WITH_SPACE.matcher(text).replaceAll("");
     }
 
-    private static CitationView citation(int n, ChunkHit hit) {
+    private static CitationView citation(int n, ChunkHit hit, Set<String> citingWords) {
         LessonSource lesson = hit.lesson();
         LessonCitation cited = lesson == null ? null : new LessonCitation(lesson.courseId(), lesson.courseTitle(),
             lesson.revisionId(), lesson.chapterTitle(), lesson.lessonId(), lesson.lessonTitle(), lesson.blockId(),
             lesson.url());
 
         return new CitationView(n, hit.documentId(), hit.fileName(), hit.page(), hit.lineStart(), hit.lineEnd(),
-            snippet(hit.content()), cited);
+            citingWords.isEmpty() ? snippet(hit.content()) : CitationSupport.snippet(hit.content(), citingWords), cited,
+            hit.sectionPath());
     }
 
     /** The first 280 characters, cut back to a word boundary. */
