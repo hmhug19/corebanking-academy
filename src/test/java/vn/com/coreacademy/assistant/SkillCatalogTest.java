@@ -115,6 +115,10 @@ class SkillCatalogTest {
         assertThat(defaults.agentOptions()).isEqualTo(Options.AGENT);
         assertThat(defaults.groundedOptions()).isEqualTo(Options.GROUNDED);
         assertThat(defaults.classifierOptions().temperature()).isZero();
+        // Same context size as the agent, so Ollama keeps the model loaded between the two calls.
+        assertThat(defaults.classifierOptions().numCtx()).isEqualTo(defaults.agentOptions().numCtx());
+        AssistantModels wide = new AssistantModels(new AssistantModels.Use(null, null, 4096), null, null, null);
+        assertThat(wide.classifierOptions().numCtx()).isEqualTo(4096);
 
         AssistantModels custom = new AssistantModels(null, null,
             new AssistantModels.Use("qwen3:1.7b", 0.0, 1024), null);

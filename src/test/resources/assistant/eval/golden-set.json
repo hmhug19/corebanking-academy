@@ -1082,5 +1082,22 @@
    "expectedSkill": "hoi_bai_hoc",
    "expectedTool": "read_lesson"
   }
+ ],
+ "followUps": [
+  {"id": "F01", "previousQuestion": "Quy trình EOD gồm những bước nào?",
+   "previousAnswer": "Quy trình EOD gồm kiểm tra giao dịch treo, chạy batch cuối ngày và đối soát sổ cái [1][2].",
+   "prompt": "Còn trường hợp batch bị lỗi thì sao?", "expectedSkill": "qa_tai_lieu"},
+  {"id": "F02", "previousQuestion": "Mở trang quản lý người dùng",
+   "previousAnswer": "Đã mở trang Quản lý người dùng.",
+   "prompt": "Còn trang kho tri thức?", "expectedSkill": "dieu_huong"},
+  {"id": "F03", "previousQuestion": "Đổi chức danh của tôi thành Chuyên viên chính",
+   "previousAnswer": "Mình đã chuẩn bị thay đổi chức danh, bạn xác nhận trên thẻ bên dưới.",
+   "prompt": "Còn số điện thoại thì sao?", "expectedSkill": "ho_so"},
+  {"id": "F04", "previousQuestion": "Tìm trong cộng đồng bài viết về đối soát cuối ngày",
+   "previousAnswer": "Có hai bài trong cộng đồng nói về đối soát cuối ngày: một bài Wiki và một thảo luận.",
+   "prompt": "Còn bài về hạch toán GL?", "expectedSkill": "qa_tai_lieu"},
+  {"id": "F05", "previousQuestion": "CIF là gì?",
+   "previousAnswer": "CIF là mã định danh duy nhất của khách hàng trong hệ thống core banking [1].",
+   "prompt": "Còn trường hợp kia, khách hàng doanh nghiệp?", "expectedSkill": "qa_tai_lieu"}
  ]
 }

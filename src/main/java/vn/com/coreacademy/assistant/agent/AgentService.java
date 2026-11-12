@@ -152,12 +152,14 @@ public class AgentService {
                 turnSlot.bind(opened.conversationId());
                 write(output, AgentStreamEvent.conversation(opened.conversationId()));
                 List<ChatMessage> history = new ArrayList<>();
+                Conversations.Exchange last = opened.history().isEmpty() ? null
+                    : opened.history().get(opened.history().size() - 1);
                 for (Conversations.Exchange exchange : opened.history()) {
                     history.add(ChatMessage.user(exchange.question()));
                     history.add(ChatMessage.assistant(exchange.answer()));
                 }
                 history.add(ChatMessage.user(question));
-                Skill skill = selector.select(requestedSkill, question, asked);
+                Skill skill = selector.select(requestedSkill, question, asked, last);
                 metrics.skill(skill.id());
                 List<AgentTool> tools = registry.availableTo(asked).stream()
                     .filter(tool -> skill.tools().contains(tool.name())).toList();
@@ -211,7 +213,7 @@ public class AgentService {
                     }, cancellation);
                 metrics.modelCall(AssistantMetrics.AGENT, answer.usage(), options.numCtx());
                 if (answer.toolCalls().isEmpty()) {
-                    finish(output, turnLog, turn, answer.content().strip());
+                    finish(output, turnLog, turn, answer.content().strip(), readShared);
                     return;
                 }
 
@@ -330,7 +332,11 @@ public class AgentService {
         return false;
     }
 
-    private void finish(OutputStream output, TurnLog turnLog, TurnState turn, String raw) {
+    /**
+     * {@code readShared}: the turn read documents, courses or Community, so its suggestions are marked read-only and
+     * the client sends a clicked one with the Q&A skill, whose tools never act for the user.
+     */
+    private void finish(OutputStream output, TurnLog turnLog, TurnState turn, String raw, boolean readShared) {
         Suggestions.Split split = Suggestions.split(raw);
         String answer = split.answer().strip();
         FinishedAnswer finished = turn.finisher().map(finisher -> finisher.finish(answer))
@@ -339,7 +345,9 @@ public class AgentService {
             // qwen3 sometimes ends with nothing after a tool result; an empty bubble reads as a hang.
             finished = new FinishedAnswer(EMPTY_ANSWER, List.of());
         }
-        emit(output, turnLog, AgentStreamEvent.done(finished.answer(), finished.citations(), split.suggestions()));
+        AgentStreamEvent.Done done = AgentStreamEvent.done(finished.answer(), finished.citations(),
+            split.suggestions());
+        emit(output, turnLog, readShared && !split.suggestions().isEmpty() ? done.withSuggestionsReadOnly() : done);
     }
 
     private void emit(OutputStream output, TurnLog turnLog, AgentStreamEvent event) {

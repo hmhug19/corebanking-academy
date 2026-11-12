@@ -19,6 +19,7 @@ class GoldenSetTest {
         assertThat(set.answers().size() + set.notFound().size()).isBetween(40, 60);
         assertThat(set.injection()).hasSize(10);
         assertThat(set.toolChoice()).hasSize(12);
+        assertThat(set.followUps()).hasSize(5);
         assertThat(set.version()).isNotBlank();
     }
 
@@ -29,6 +30,7 @@ class GoldenSetTest {
         set.notFound().forEach(item -> assertThat(ids.add(item.id())).as(item.id()).isTrue());
         set.injection().forEach(item -> assertThat(ids.add(item.id())).as(item.id()).isTrue());
         set.toolChoice().forEach(item -> assertThat(ids.add(item.id())).as(item.id()).isTrue());
+        set.followUps().forEach(item -> assertThat(ids.add(item.id())).as(item.id()).isTrue());
         Set<String> known = set.passageById().keySet();
         for (Answer answer : set.answers()) {
             assertThat(known).containsAll(answer.passages());
@@ -49,6 +51,17 @@ class GoldenSetTest {
             List<String> offered = catalog.find(item.expectedSkill()).orElseThrow().tools();
             assertThat(item.expectedTool().equals("(none)") || offered.contains(item.expectedTool())).as(item.id())
                 .isTrue();
+        });
+    }
+
+    @Test
+    void followUpCasesNameExistingSkillsAndCarryThePreviousExchange() {
+        SkillCatalog catalog = new SkillCatalog();
+        set.followUps().forEach(item -> {
+            assertThat(catalog.find(item.expectedSkill())).as(item.id()).isPresent();
+            assertThat(item.previousQuestion()).as(item.id()).isNotBlank();
+            assertThat(item.previousAnswer()).as(item.id()).isNotBlank();
+            assertThat(item.prompt()).as(item.id()).isNotBlank();
         });
     }
 

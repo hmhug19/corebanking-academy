@@ -674,6 +674,67 @@ class AgentServiceTest {
     }
 
     @Test
+    void suggestionsAfterATurnThatReadSharedContentAreMarkedReadOnly() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] tài liệu"));
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn("CIF là mã [1].\n@@GOI_Y@@\n- Đổi email của tôi thành a@b.vn", List.of()));
+
+        JsonNode done = lastOf(events(ask("CIF là gì?")));
+
+        assertThat(done.path("suggestions")).extracting(JsonNode::asText).containsExactly("Đổi email của tôi thành a@b.vn");
+        assertThat(done.path("suggestionsReadOnly").asBoolean()).isTrue();
+    }
+
+    @Test
+    void suggestionsAfterATurnThatReadNothingSharedCarryNoReadOnlyFlag() throws IOException {
+        modelAnswers(List.of("Xin chào.\n@@GOI_Y@@\n- Bạn làm được gì?"), List.of());
+
+        JsonNode done = lastOf(events(ask("Xin chào")));
+
+        assertThat(done.path("suggestions")).hasSize(1);
+        assertThat(done.has("suggestionsReadOnly")).isFalse();
+    }
+
+    @Test
+    void aSuggestionSentWithTheQaSkillGetsAnAnswerNotAnActionCard() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] tài liệu"));
+        tool("update_profile", true, false, true, (arguments, turn) -> new ToolOutcome.Result("không được chạy"));
+        tool("open_screen", true, false, true, (arguments, turn) -> new ToolOutcome.Result("không được chạy"));
+        modelAnswers(List.of("Mình không đổi hồ sơ trong lượt này."), List.of());
+
+        List<JsonNode> events = events(service(real).stream("Đổi email của tôi thành a@b.vn", null, "qa_tai_lieu"));
+
+        ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
+        verify(ollama).chatWithTools(anyList(), offered.capture(), any(), any(), any());
+        assertThat(offered.getValue()).extracting(ToolDefinition::name)
+            .contains("search_documents").doesNotContain("update_profile", "open_screen");
+        assertThat(types(events)).doesNotContain("action_required", "navigate");
+        assertThat(lastOf(events).path("answer").asText()).isNotBlank();
+        verify(ollama, never()).chat(anyList(), any());
+    }
+
+    @Test
+    void theClassifierSeesTheLastExchangeOfTheConversation() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        long id = conversations.seed("000004", "Cập nhật chức danh của tôi", "Đã gửi thẻ xác nhận đổi chức danh.");
+        when(ollama.chat(anyList(), any())).thenReturn("ho_so");
+        modelAnswers(List.of("ok"), List.of());
+
+        events(service(real).stream("Còn email thì sao?", id));
+
+        ArgumentCaptor<List<OllamaClient.Message>> sent = ArgumentCaptor.captor();
+        verify(ollama).chat(sent.capture(), any());
+        String user = sent.getValue().get(1).content();
+        assertThat(user).contains("Cập nhật chức danh của tôi").contains("Đã gửi thẻ xác nhận").endsWith("Còn email thì sao?");
+        assertThat(conversations.lastRecord().skill()).isEqualTo("ho_so");
+    }
+
+    private static JsonNode lastOf(List<JsonNode> events) {
+        return events.get(events.size() - 1);
+    }
+
+    @Test
     void anActingToolCalledInTheSameStepAfterADocumentSearchIsRefused() throws IOException {
         tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] tài liệu"));
         tool("open_screen", true, false, true, (arguments, turn) ->

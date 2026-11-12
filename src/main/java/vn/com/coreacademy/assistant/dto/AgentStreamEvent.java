@@ -33,10 +33,20 @@ public sealed interface AgentStreamEvent {
     /** Last line on success; {@code answer} replaces what the deltas added up to. */
     record Done(String type, String answer, List<CitationView> citations,
                 @JsonInclude(JsonInclude.Include.NON_NULL) Long turnId,
-                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions) implements AgentStreamEvent {
+                @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> suggestions,
+                @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean suggestionsReadOnly)
+        implements AgentStreamEvent {
         /** The same line naming the stored turn, so the client can send feedback on it. */
         public Done withTurnId(long id) {
-            return new Done(type, answer, citations, id, suggestions);
+            return new Done(type, answer, citations, id, suggestions, suggestionsReadOnly);
+        }
+
+        /**
+         * The turn read shared content (documents, courses, Community): the client sends a clicked suggestion with
+         * the Q&A skill, which has no acting tool. Absent from the line when false, so older clients see no change.
+         */
+        public Done withSuggestionsReadOnly() {
+            return new Done(type, answer, citations, turnId, suggestions, true);
         }
     }
 
@@ -65,11 +75,11 @@ public sealed interface AgentStreamEvent {
     }
 
     static Done done(String answer, List<CitationView> citations) {
-        return new Done("done", answer, citations, null, List.of());
+        return new Done("done", answer, citations, null, List.of(), false);
     }
 
     static Done done(String answer, List<CitationView> citations, List<String> suggestions) {
-        return new Done("done", answer, citations, null, suggestions);
+        return new Done("done", answer, citations, null, suggestions, false);
     }
 
     static Error error(String messageCode, String message) {

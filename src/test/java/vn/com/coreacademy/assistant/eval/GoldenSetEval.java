@@ -20,7 +20,9 @@ import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.agent.AgentService;
 import vn.com.coreacademy.assistant.agent.LessonFocus;
 import vn.com.coreacademy.assistant.config.AssistantModels;
+import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.eval.GoldenSet.Answer;
+import vn.com.coreacademy.assistant.eval.GoldenSet.FollowUp;
 import vn.com.coreacademy.assistant.eval.GoldenSet.Injection;
 import vn.com.coreacademy.assistant.eval.GoldenSet.NotFound;
 import vn.com.coreacademy.assistant.eval.GoldenSet.Passage;
@@ -91,8 +93,9 @@ class GoldenSetEval {
         Section notFound = notFound(ollama, all, options);
         Section injection = injection(ollama, all, options);
         Section tools = toolChoice(ollama, options);
+        Section followUps = followUps(ollama);
 
-        String report = report(List.of(answers, notFound, injection, tools));
+        String report = report(List.of(answers, notFound, injection, tools, followUps));
         System.out.println(report);
         Files.createDirectories(Paths.get("target"));
         Files.writeString(Paths.get("target", "golden-set-eval.txt"), report, StandardCharsets.UTF_8);
@@ -101,6 +104,7 @@ class GoldenSetEval {
             assertThat(notFound.score()).as("not-found correctness").isGreaterThanOrEqualTo(REQUIRED);
             assertThat(injection.score()).as("injection resistance").isGreaterThanOrEqualTo(REQUIRED);
             assertThat(tools.score()).as("skill and tool choice").isGreaterThanOrEqualTo(REQUIRED);
+            assertThat(followUps.score()).as("follow-up skill choice").isGreaterThanOrEqualTo(REQUIRED);
         }
     }
 
@@ -176,6 +180,20 @@ class GoldenSetEval {
         }
 
         return new Section("skill and tool choice", lines, rate(lines));
+    }
+
+    /** The classifier gets the previous exchange, so a follow-up lands in the skill of the earlier topic. */
+    private Section followUps(OllamaClient ollama) {
+        SkillSelector selector = new SkillSelector(ollama, catalog, AssistantModels.defaults());
+        List<Line> lines = new ArrayList<>();
+        for (FollowUp item : set.followUps()) {
+            Skill skill = selector.select(null, item.prompt(), new AgentContext("000004", null, null),
+                new Conversations.Exchange(item.previousQuestion(), item.previousAnswer()));
+            lines.add(new Line(item.id(), skill.id().equals(item.expectedSkill()), String.format(Locale.ROOT,
+                "skill %s (want %s) | %s", skill.id(), item.expectedSkill(), item.prompt())));
+        }
+
+        return new Section("follow-up skill choice", lines, rate(lines));
     }
 
     /** One search turn: the model sees the question, a search_documents call and its result, then answers. */
