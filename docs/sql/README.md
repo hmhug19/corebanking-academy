@@ -1,5 +1,9 @@
 # Khởi tạo Identity / Organization / RBAC
 
+SCORM 1.2: trước khi dùng thư viện bài giảng mới, chạy
+[`upgrade/2026-11-12-scorm12.sql`](upgrade/2026-11-12-scorm12.sql) trên schema hiện hữu.
+Script chỉ thêm hai bảng và index SCORM, không sửa dữ liệu Identity/khóa học; không tự chạy ở startup.
+
 ## Chạy local
 
 DB đã triển khai: chạy [`upgrade/2026-11-05-required-final-quiz.sql`](upgrade/2026-11-05-required-final-quiz.sql)

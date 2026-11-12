@@ -1,5 +1,62 @@
 # API và dữ liệu Learning
 
+## Thư viện bài giảng SCORM 1.2
+
+Module `scorm` phục vụ **bài giảng độc lập, một SCO**, tại FE `/admin/lessons`,
+thư viện học viên `/scorm` và player `/scorm/:id`. Không tự cộng điểm/chứng nhận,
+không đổi điều kiện hoàn thành các khóa học hiện có. SCO tự báo điểm và trạng thái;
+LMS kiểm hợp đồng rồi lưu theo `(packageId, userId, preview)`. Xem thử không ghi vào kết quả học viên.
+
+Chạy [SQL SCORM](../sql/upgrade/2026-11-12-scorm12.sql) trước khi deploy backend/FE mới.
+Không có migration tự chạy ở startup. Tham số origin/connector xem
+[hướng dẫn triển khai SCORM](../operations/DEPLOY_UBUNTU.md#scorm-12).
+
+| API | Request | Response `data` |
+|---|---|---|
+| GET `/api/v1/scorm/packages?q&page&size` | page từ 0; size 1–100 | Page `{items,page,size,totalElements,totalPages}` |
+| POST `/api/v1/scorm/packages?ownerOrgId` | multipart part `file`, ZIP tối đa 100 MiB mặc định | PackageView, `published:false` |
+| GET `/api/v1/scorm/packages/{id}` | ID gói | PackageView |
+| POST `/api/v1/scorm/packages/{id}/publish` | `{"expectedVersion":0}` | PackageView mới |
+| POST `/api/v1/scorm/packages/{id}/launch` | `{"preview":false}`; quản lý xem thử gửi true | `{launchUrl,expiresAt,preview,progress}` |
+| GET `/api/v1/scorm/packages/{id}/progress?preview=false` | kết quả chính mình; preview chỉ cho người quản lý | ProgressView |
+
+PackageView: `{id,ownerOrgId,title,originalName,sizeBytes,fileCount,scormVersion:"1.2",published,
+canManage,rowVersion,createTime,warnings:string[],progress}`. Không trả đường dẫn kho/object key.
+ProgressView: `{lessonStatus,scoreRaw,scoreMin,scoreMax,lessonLocation,resumable,updateTime}`;
+điểm/thời điểm có thể null. `lessonLocation` là mã vị trí do SCO gửi, không được LMS tự suy thành số trang.
+
+Giảng viên/quản trị nhập và xuất bản theo LearningAccessPolicy (role và scope trên cùng grant).
+Học viên chỉ xem gói đã xuất bản của đơn vị mình hoặc đơn vị cha đang hoạt động. Nháp chỉ dành cho
+người có quyền quản lý; người học không được upload/xuất bản. Gói bất biến sau import: nhập phiên bản
+mới tạo ID mới, không ghi đè nội dung đang có kết quả. Chưa hỗ trợ Multi-SCO/SCORM 2004.
+
+ZIP được kiểm giới hạn tổng byte, số tệp (mặc định 2.000), tỷ lệ giải nén, đường dẫn, manifest và
+trang launch. Không giải nén theo đường dẫn do ZIP cung cấp. XML cấm DTD/XXE, không tải XSD bên ngoài.
+Tệp nằm trong S3 private; lỗi metadata có cleanup object. Gói chỉ có trang `Not implemented yet`
+vẫn được nhập nhưng trả cảnh báo rõ để người biên soạn kiểm tra.
+
+**Runtime riêng.** Connector player chỉ nhận `/scorm-player/**`, từ chối mọi API LMS khác.
+Connector LMS từ chối các đường player. Vé ngẫu nhiên 256-bit chỉ lưu SHA-256, ràng buộc user/gói/preview,
+hết hạn mặc định 60 phút. Mở lại đổi vé; logout/đổi auth version hoặc mất scope chặn vé cũ.
+Runtime lưu tại POST `/scorm-player/{capability}/runtime` với JSON
+`{sequence,values:{"cmi.core.lesson_status":"passed","cmi.core.score.raw":"80",
+"cmi.core.score.max":"100","cmi.core.lesson_location":"page-4","cmi.suspend_data":"...",
+"cmi.core.exit":"suspend"},finished:false}`. Response envelope data `{sequence,progress}`.
+Sequence tăng theo snapshot đầy đủ; retry trùng payload là idempotent, snapshot cũ không được ghi đè.
+Thời gian cộng giữa các lần launch, không cộng lại khi retry.
+
+Player cung cấp API SCORM 1.2 tám hàm `LMSInitialize/LMSFinish/LMSGetValue/LMSSetValue/LMSCommit/`
+`LMSGetLastError/LMSGetErrorString/LMSGetDiagnostic`. Hỗ trợ core, score, location,
+suspend_data (4.096 ký tự), objectives/interactions và student preference thông dụng. Dữ liệu tạm
+được ghi tuần tự, retry mạng có giới hạn; khi đóng có keepalive snapshot mới nhất. UI báo lỗi lưu,
+không giả báo đã lưu khi server từ chối. FE chỉ dùng postMessage đúng origin/source để tải lại
+kết quả qua API đã xác thực, không tin điểm trong postMessage.
+
+SCORM là API đồng bộ nhưng HTTP persistence là bất đồng bộ: `LMSCommit("")` trả `"true"` nghĩa là runtime
+đã nhận bản ghi để gửi; trạng thái “Đã lưu tiến độ” chỉ xuất hiện sau ACK server. Mất mạng/đóng trình
+duyệt hoặc mất điện trước ACK có thể mất cập nhật chưa lưu; không hứa resume nếu SCO không gửi bookmark.
+Chưa phải chứng nhận tương thích đầy đủ toàn bộ bộ kiểm SCORM 1.2.
+
 Triển khai backend cho danh mục, tạo/sửa/sao chép/xuất bản khóa học, khối nội dung, tài nguyên, nhóm học, chia sẻ, giao học, tự đăng ký và tiến độ. Các quan hệ chỉ là cột ID scalar, không có FK/REFERENCES/cascade vật lý. Service kiểm tra tồn tại, sở hữu, quyền và vòng đời.
 
 ## Trạng thái kho tài nguyên

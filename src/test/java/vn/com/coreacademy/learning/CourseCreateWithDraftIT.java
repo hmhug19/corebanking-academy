@@ -12,11 +12,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.REPORT_VIEWER;
@@ -37,6 +40,112 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
 
     private ApiClient api;
     private long org;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    private vn.com.coreacademy.storage.service.ObjectStorage scormStorage;
+
+    @Autowired
+    private vn.com.coreacademy.scorm.service.ScormPackageReader scormReader;
+
+    @Test
+    void scormRejectsUnsafePathsExternalEntitiesAndWrongVersions() throws Exception {
+        String manifest = """
+            <manifest xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+              xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+              <metadata><schemaversion>1.2</schemaversion></metadata>
+              <resources><resource adlcp:scormtype="sco" href="index.html"/></resources>
+            </manifest>
+            """;
+        for (Map<String, String> entries : List.of(
+            Map.of("imsmanifest.xml", manifest, "../escape.js", "bad", "index.html", "<html>valid</html>"),
+            Map.of("imsmanifest.xml", "<!DOCTYPE manifest [<!ENTITY unsafe SYSTEM 'file:///no-such-file'>]>" + manifest,
+                "index.html", "<html>valid</html>"),
+            Map.of("imsmanifest.xml", manifest.replace("1.2</", "2004</"), "index.html", "<html>valid</html>"))) {
+            var zipped = new java.io.ByteArrayOutputStream();
+            try (var zip = new java.util.zip.ZipOutputStream(zipped)) {
+                for (var entry : entries.entrySet()) {
+                    zip.putNextEntry(new java.util.zip.ZipEntry(entry.getKey()));
+                    zip.write(entry.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            }
+            var file = new org.springframework.mock.web.MockMultipartFile("file", "invalid.zip", "application/zip", zipped.toByteArray());
+            assertThatThrownBy(() -> scormReader.read(file)).isInstanceOf(vn.com.coreacademy.common.exception.BusinessException.class);
+        }
+    }
+
+    @Test
+    void scormImportRuntimeResumeAndScopeArePersistedOnTheIsolatedConnector() throws Exception {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (var zip = new java.util.zip.ZipOutputStream(bytes)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("imsmanifest.xml"));
+            zip.write("""
+                <manifest xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+                  xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+                  <metadata><schemaversion>1.2</schemaversion></metadata>
+                  <organizations><organization><title>SCORM kiểm thử</title></organization></organizations>
+                  <resources><resource identifier="sco" adlcp:scormtype="sco" href="index.html"/></resources>
+                </manifest>
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zip.closeEntry();
+            zip.putNextEntry(new java.util.zip.ZipEntry("index.html"));
+            zip.write("<!doctype html><html><body>SCORM</body></html>".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        var upload = new org.springframework.mock.web.MockMultipartFile("file", "test-scorm.zip", "application/zip", bytes.toByteArray());
+        var imported = api.ok(INSTRUCTOR, MockMvcRequestBuilders
+            .multipart("/api/v1/scorm/packages").file(upload).param("ownerOrgId", Long.toString(org)));
+        long packageId = imported.path("id").asLong();
+        assertThat(imported.path("published").asBoolean()).isFalse();
+        assertThat(imported.path("fileCount").asInt()).isEqualTo(2);
+        api.http(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}", packageId), 403, "CORE-ACCESS_DENIED");
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", 0), "/api/v1/scorm/packages/{id}/publish", packageId));
+        api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}", packageId));
+        JsonNode learnerLibrary = api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages").param("q", "SCORM"));
+        assertThat(learnerLibrary.path("items").findValues("id").stream().map(JsonNode::asLong).toList())
+            .contains(packageId);
+        api.http(LEARNER, MockMvcRequestBuilders
+            .multipart("/api/v1/scorm/packages").file(upload).param("ownerOrgId", Long.toString(org)), 403, "CORE-ACCESS_DENIED");
+
+        long av = jdbc.queryForObject("SELECT auth_ver FROM learning_hub.users WHERE user_id = ?", Long.class, LEARNER);
+        var launchRequest = api.post(Map.of("preview", false), "/api/v1/scorm/packages/{id}/launch", packageId)
+            .with(SecurityMockMvcRequestPostProcessors.jwt()
+                .jwt(jwt -> jwt.subject(LEARNER).claim("av", av)));
+        var launched = json.readTree(mvc.perform(launchRequest).andReturn().getResponse().getContentAsString());
+        assertThat(launched.path("status").asText()).as(launched.toPrettyString()).isEqualTo("SUCCESS");
+        String token = java.net.URI.create(launched.path("data").path("launchUrl").asText()).getPath().split("/")[2];
+        String runtime = "/scorm-player/" + token + "/runtime";
+        var values = Map.of("cmi.core.lesson_status", "passed", "cmi.core.score.raw", "80",
+            "cmi.core.score.max", "100", "cmi.core.lesson_location", "page-4",
+            "cmi.suspend_data", "{\"page\":4}", "cmi.core.exit", "suspend", "cmi.core.session_time", "0000:01:12.50");
+        var save = Map.of("sequence", 1, "values", values, "finished", false);
+        for (int retry = 0; retry < 2; retry++) {
+            var response = mvc.perform(api.post(save, runtime).with(request -> { request.setLocalPort(8020); return request; }))
+                .andReturn().getResponse();
+            assertThat(response.getStatus()).isEqualTo(200);
+            var receipt = json.readTree(response.getContentAsString());
+            assertThat(receipt.path("status").asText()).as(receipt.toPrettyString()).isEqualTo("SUCCESS");
+            assertThat(receipt.path("data").path("progress").path("scoreRaw").asInt()).isEqualTo(80);
+        }
+        assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}/progress", packageId))
+            .path("lessonLocation").asText()).isEqualTo("page-4");
+        var resume = json.readTree(mvc.perform(api.post(Map.of("preview", false),
+            "/api/v1/scorm/packages/{id}/launch", packageId).with(
+                SecurityMockMvcRequestPostProcessors.jwt()
+                    .jwt(jwt -> jwt.subject(LEARNER).claim("av", av))))
+            .andReturn().getResponse().getContentAsString());
+        String resumed = java.net.URI.create(resume.path("data").path("launchUrl").asText()).getPath();
+        var html = mvc.perform(ApiClient.get(resumed).with(request -> {request.setLocalPort(8020);return request;}))
+            .andReturn().getResponse();
+        assertThat(html.getContentAsString()).contains("page-4", "cmi.suspend_data", "resume");
+        assertThat(mvc.perform(ApiClient.get(resumed)).andReturn().getResponse().getStatus()).isIn(401, 403);
+        assertThat(mvc.perform(ApiClient.get("/api/v1/scorm/packages").with(request -> {
+            request.setLocalPort(8020);return request;})).andReturn().getResponse().getStatus()).isEqualTo(403);
+        assertThat(mvc.perform(api.post(save, runtime).with(request -> {request.setLocalPort(8020);return request;}))
+            .andReturn().getResponse().getStatus()).isEqualTo(403);
+        assertThat(jdbc.queryForObject("SELECT total_seconds FROM learning_hub.scorm_registrations WHERE package_id = ? AND user_id = ?",
+            java.math.BigDecimal.class, packageId, LEARNER)).isEqualByComparingTo("72.50");
+    }
 
     @BeforeAll
     void setUp() {
