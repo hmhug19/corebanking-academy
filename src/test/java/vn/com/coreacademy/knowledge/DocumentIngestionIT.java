@@ -68,6 +68,28 @@ class DocumentIngestionIT extends KnowledgeIntegrationTest {
     }
 
     @Test
+    void anInsertThatOmitsTitleGetsTheFileNameLikeTheOldBackend() {
+        jdbc.update("""
+            INSERT INTO learning_hub.knowledge_documents (uploaded_by, file_name, mime_type, size_bytes, storage_key, status, scope)
+            VALUES ('000005', 'cu.md', 'text/markdown', 1, 'k-old-1', 'queued', 'personal')""");
+        jdbc.update("""
+            INSERT INTO learning_hub.knowledge_documents (uploaded_by, file_name, title, mime_type, size_bytes, storage_key, status, scope)
+            VALUES ('000005', 'trong.md', '  ', 'text/markdown', 1, 'k-old-2', 'queued', 'personal')""");
+        jdbc.update("""
+            INSERT INTO learning_hub.knowledge_documents (uploaded_by, file_name, title, mime_type, size_bytes, storage_key, status, scope)
+            VALUES ('000005', 'goc.md', 'Tên riêng', 'text/markdown', 1, 'k-old-3', 'queued', 'personal')""");
+
+        assertThat(titleOf("k-old-1")).isEqualTo("cu.md");
+        assertThat(titleOf("k-old-2")).isEqualTo("trong.md");
+        assertThat(titleOf("k-old-3")).isEqualTo("Tên riêng");
+    }
+
+    private String titleOf(String storageKey) {
+        return jdbc.queryForObject("SELECT title FROM learning_hub.knowledge_documents WHERE storage_key = ?",
+            String.class, storageKey);
+    }
+
+    @Test
     void aQueuedMarkdownDocumentBecomesReadyWithItsChunks() throws IOException {
         long id = queue("quy-trinh.md", "text/markdown", "# Quy trình\n\nBước một.\nBước hai.\n");
 

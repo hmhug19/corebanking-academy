@@ -6,6 +6,8 @@
 -- file (one pass, nothing to run by hand).
 -- Run once on a DB that already has 2026-11-19-chunker-v2-columns.sql. Safe to run again.
 -- The backend refuses to start without these columns: run it BEFORE deploying the backend.
+-- During that gap the OLD backend is still running and its INSERT omits title, which is NOT NULL: a BEFORE INSERT
+-- trigger fills title from file_name when it is null or blank, so uploads keep working until the new backend is up.
 --   psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-20-document-title-checksum-replace.sql
 -- Rollback: docs/sql/upgrade/2026-11-20-document-title-checksum-replace.rollback.sql
 BEGIN;
@@ -14,6 +16,19 @@ SET LOCAL lock_timeout = '5s';
 ALTER TABLE learning_hub.knowledge_documents ADD COLUMN IF NOT EXISTS title varchar(255);
 UPDATE learning_hub.knowledge_documents SET title = file_name WHERE title IS NULL;
 ALTER TABLE learning_hub.knowledge_documents ALTER COLUMN title SET NOT NULL;
+
+CREATE OR REPLACE FUNCTION learning_hub.knowledge_documents_default_title() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.title IS NULL OR btrim(NEW.title) = '' THEN
+        NEW.title := NEW.file_name;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS trg_knowledge_documents_default_title ON learning_hub.knowledge_documents;
+CREATE TRIGGER trg_knowledge_documents_default_title BEFORE INSERT ON learning_hub.knowledge_documents
+    FOR EACH ROW EXECUTE FUNCTION learning_hub.knowledge_documents_default_title();
 
 ALTER TABLE learning_hub.knowledge_documents ADD COLUMN IF NOT EXISTS checksum_sha256 varchar(64);
 ALTER TABLE learning_hub.knowledge_documents ADD COLUMN IF NOT EXISTS replacement_status varchar(20)

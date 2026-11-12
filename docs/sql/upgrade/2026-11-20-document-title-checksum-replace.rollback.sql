@@ -3,6 +3,8 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
+DROP TRIGGER IF EXISTS trg_knowledge_documents_default_title ON learning_hub.knowledge_documents;
+DROP FUNCTION IF EXISTS learning_hub.knowledge_documents_default_title();
 DROP INDEX IF EXISTS learning_hub.idx_knowledge_documents_replacement_queue;
 DROP INDEX IF EXISTS learning_hub.idx_knowledge_documents_checksum;
 ALTER TABLE learning_hub.knowledge_documents DROP COLUMN IF EXISTS replacement_checksum;
