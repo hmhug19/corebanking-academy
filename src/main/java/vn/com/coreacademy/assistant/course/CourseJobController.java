@@ -70,6 +70,17 @@ public class CourseJobController {
         return BaseResponse.ok(jobs.list());
     }
 
+    @GetMapping("/active")
+    @Operation(
+        summary = "Các job đang chạy và job lỗi hoặc đã dừng gần đây",
+        description = "Job đang chờ, đang chạy hoặc chờ duyệt, cùng job failed hoặc stopped trong 3 ngày qua; "
+            + "mỗi job kèm courseId. Ứng dụng dùng danh sách này khi mở để không mất tiến độ và thông báo lỗi sau khi tải lại."
+    )
+    public BaseResponse<List<JobSummary>> active() {
+        gate.requireAccess();
+        return BaseResponse.ok(jobs.active());
+    }
+
     @GetMapping("/{jobId}")
     @Operation(
         summary = "Chi tiết một job",

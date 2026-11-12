@@ -257,6 +257,26 @@ class CourseJobIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void theActiveListHoldsRunningAndRecentlyFailedOrStoppedJobsWithTheirCourse() {
+        long failed = create(INSTRUCTOR, null);
+        long stopped = create(INSTRUCTOR, null);
+        long old = create(INSTRUCTOR, null);
+        jdbc.update("UPDATE learning_hub.course_generation_jobs SET status = 'failed', error_message = 'x' "
+            + "WHERE job_id = ?", failed);
+        jdbc.update("UPDATE learning_hub.course_generation_jobs SET status = 'stopped' WHERE job_id = ?", stopped);
+        jdbc.update("UPDATE learning_hub.course_generation_jobs SET status = 'failed', "
+            + "update_time = now() - interval '5 days' WHERE job_id = ?", old);
+
+        JsonNode mine = api.ok(INSTRUCTOR, get(JOBS + "/active"));
+        List<Long> ids = new java.util.ArrayList<>();
+        mine.forEach(item -> ids.add(item.path("jobId").asLong()));
+
+        assertThat(ids).contains(failed, stopped).doesNotContain(old);
+        mine.forEach(item -> assertThat(item.path("courseId").asLong()).isPositive());
+        api.http(LEARNER, get(JOBS + "/active"), 403, "CORE-ACCESS_DENIED");
+    }
+
+    @Test
     void cancelStopsAJobAndDeleteRemovesItWithItsSourceDocument() {
         JsonNode created = api.ok(INSTRUCTOR, start(inputs(null)));
         long job = created.path("jobId").asLong();

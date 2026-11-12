@@ -52,6 +52,8 @@ public class CourseJobService {
     private static final Set<String> MANAGERS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN, RoleCodes.INSTRUCTOR);
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
     private static final int LIST_LIMIT = 50;
+    /** How long a failed or stopped job stays in the active list, so its notice survives a reload. */
+    private static final Duration NOTICE_WINDOW = Duration.ofDays(3);
     private static final String DEFAULT_TITLE = "Khóa học mới (AI)";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -138,7 +140,16 @@ public class CourseJobService {
 
     /** The caller's jobs, newest first. */
     public List<JobSummary> list() {
-        List<JobRow> rows = jobs.jobsOf(SecurityContextUtils.getUserId(), LIST_LIMIT);
+        return summaries(jobs.jobsOf(SecurityContextUtils.getUserId(), LIST_LIMIT));
+    }
+
+    /** The caller's running jobs and the ones that failed or were stopped in the last days, newest first. */
+    public List<JobSummary> active() {
+        return summaries(jobs.activeJobsOf(SecurityContextUtils.getUserId(),
+            OffsetDateTime.now().minus(NOTICE_WINDOW), LIST_LIMIT));
+    }
+
+    private List<JobSummary> summaries(List<JobRow> rows) {
         Map<Long, DocumentInfo> sources = jobs.documents(rows.stream().map(JobRow::sourceDocumentId)
             .filter(java.util.Objects::nonNull).toList());
 

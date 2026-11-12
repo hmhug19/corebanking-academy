@@ -101,6 +101,19 @@ public class CourseJobRepository {
             """, JOB, ownerUserId, limit);
     }
 
+    /**
+     * The owner's jobs that still work or wait for approval, plus the ones that failed or were stopped since the
+     * instant: what the app shows as running or as a notice that lasts. Newest first.
+     */
+    public List<JobRow> activeJobsOf(String ownerUserId, OffsetDateTime stoppedSince, int limit) {
+        return jdbc.query("SELECT " + JOB_COLUMNS + """
+             FROM learning_hub.course_generation_jobs WHERE owner_user_id = ? AND deleted_at IS NULL
+               AND (status IN ('queued', 'running', 'waiting_approval')
+                    OR (status IN ('failed', 'stopped') AND update_time > ?))
+             ORDER BY create_time DESC, job_id DESC LIMIT ?
+            """, JOB, ownerUserId, stoppedSince, limit);
+    }
+
     /** Create times of the owner's jobs since the instant, oldest first (cancelled, failed and deleted ones count too). */
     public List<OffsetDateTime> createdSince(String ownerUserId, OffsetDateTime since) {
         return jdbc.queryForList("""
