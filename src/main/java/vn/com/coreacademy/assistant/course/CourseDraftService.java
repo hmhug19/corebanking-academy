@@ -278,8 +278,11 @@ public class CourseDraftService {
 
     private void writeIntoCourse(JobRow job, JsonNode outline) {
         if (job.courseId() != null && job.revisionId() != null) {
-            course.writeOutline(job.courseId(), job.revisionId(), job.ownerUserId(), outline.path("summary").asText(),
-                CourseOutlineMapper.objectives(outline), CourseOutlineMapper.chapters(outline));
+            if (!course.writeOutline(job.courseId(), job.revisionId(), job.ownerUserId(),
+                outline.path("summary").asText(), CourseOutlineMapper.objectives(outline),
+                CourseOutlineMapper.chapters(outline), () -> true)) {
+                throw refuse("LESSON_EDITED", "Khóa học đã có bài do bạn chỉnh sửa nên không ghi đè dàn ý được.");
+            }
         }
     }
 

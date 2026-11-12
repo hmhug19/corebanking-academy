@@ -147,7 +147,16 @@ public class CourseJobService {
     /** Stops a job that has not finished; what was generated so far stays visible, nothing more is generated. */
     public JobView cancel(long jobId) {
         JobRow job = owned(jobId);
-        if (!jobs.setStatus(job.id(), CourseJobRepository.CANCELLED, null)) {
+        boolean cancelled = Boolean.TRUE.equals(transaction.execute(status -> {
+            if (!jobs.setStatus(job.id(), CourseJobRepository.CANCELLED, null)) {
+                return false;
+            }
+            if (job.courseId() != null && job.revisionId() != null) {
+                draftWriter.revertWriting(job.courseId(), job.revisionId(), job.ownerUserId());
+            }
+            return true;
+        }));
+        if (!cancelled) {
             throw BusinessException.validation("jobId", "JOB_FINISHED", "Công việc này đã kết thúc.");
         }
 

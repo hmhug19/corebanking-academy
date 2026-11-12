@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,7 +25,7 @@ import vn.com.coreacademy.learning.repository.LearningRepository;
 @RequiredArgsConstructor
 public class LearningAiDraftService {
     /** What happened to a lesson the job tried to write. */
-    public enum Written { WRITTEN, SKIPPED_USER_EDITED, MISSING }
+    public enum Written { WRITTEN, SKIPPED_USER_EDITED, MISSING, JOB_STOPPED }
 
     private final LearningRepository repository;
     private final LearningWriteLock writeLock;
@@ -34,13 +35,29 @@ public class LearningAiDraftService {
      * Replaces the tree of the draft with the outline: chapters and lessons without content, all {@code pending}. The
      * title, programme, level and any summary or objectives the author already wrote stay; the AI ones fill only what
      * is empty (the author owns the description).
+     * <p>
+     * {@code stillWanted} is asked inside the transaction once the course is locked, so a stop or cancel that landed
+     * while the model was working cannot be overtaken by the write. Nothing is written, and false returned, when it
+     * says no, or when a lesson of the draft is already {@code user_edited} or {@code written}: a repeated run of the
+     * outline step must not replace the author's work or reset their lessons to {@code pending}.
+     *
+     * @return true when the outline was written
      */
     @Transactional
-    public void writeOutline(Long courseId, Long revisionId, String owner, String summaryWhenEmpty,
-                             List<String> objectivesWhenEmpty, List<LearningRequests.ChapterInput> chapters) {
+    public boolean writeOutline(Long courseId, Long revisionId, String owner, String summaryWhenEmpty,
+                                List<String> objectivesWhenEmpty, List<LearningRequests.ChapterInput> chapters,
+                                BooleanSupplier stillWanted) {
         Course course = lockedCourse(courseId);
+        if (!stillWanted.getAsBoolean()) {
+            return false;
+        }
         CourseRevision revision = repository.require(CourseRevision.class, revisionId);
         content.requireDraft(course, revision);
+        if (repository.lessons(revisionId).stream().anyMatch(lesson ->
+            LearningAiOwnership.USER_EDITED.equals(lesson.getAiState())
+                || LearningAiOwnership.WRITTEN.equals(lesson.getAiState()))) {
+            return false;
+        }
         var rule = repository.rules(revisionId).get(0);
         List<String> objectives = repository.objectives(revisionId).stream().map(row -> row.getDescription())
             .toList();
@@ -56,16 +73,21 @@ public class LearningAiDraftService {
             lesson.setAiState(LearningAiOwnership.PENDING);
             repository.save(lesson, owner);
         }
+        return true;
     }
 
     /**
      * Writes the blocks of the lesson at the position if the job still owns it ({@code pending} or {@code writing}),
-     * and marks it {@code written}.
+     * and marks it {@code written}. {@code stillWanted} is asked inside the transaction once the course is locked; when
+     * it says no (the job was stopped or cancelled) nothing is written and {@code JOB_STOPPED} is returned.
      */
     @Transactional
     public Written writeLesson(Long courseId, Long revisionId, int chapter, int lesson,
-                               List<LearningRequests.BlockInput> blocks, String owner) {
+                               List<LearningRequests.BlockInput> blocks, String owner, BooleanSupplier stillWanted) {
         Course course = lockedCourse(courseId);
+        if (!stillWanted.getAsBoolean()) {
+            return Written.JOB_STOPPED;
+        }
         CourseRevision revision = repository.require(CourseRevision.class, revisionId);
         content.requireDraft(course, revision);
         CourseLesson target = lessonAt(revisionId, chapter, lesson);

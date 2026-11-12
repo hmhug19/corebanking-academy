@@ -23,6 +23,9 @@ import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 import vn.com.coreacademy.assistant.course.CourseGenerationWorker;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
+import vn.com.coreacademy.learning.service.CourseStructureGuard;
+import vn.com.coreacademy.learning.service.LearningAiDraftService;
+import vn.com.coreacademy.learning.service.LearningAiDraftService.Written;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -58,6 +61,10 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     private JdbcTemplate jdbc;
     @Autowired
     private CourseGenerationWorker worker;
+    @Autowired
+    private LearningAiDraftService drafts;
+    @Autowired
+    private List<CourseStructureGuard> guards;
 
     private ApiClient api;
     private long programme;
@@ -366,6 +373,75 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT count(*) " + LESSONS_OF_REVISION + " AND l.ai_state = 'pending'",
             Integer.class, revision)).isEqualTo(2);
         api.error(INSTRUCTOR, api.post(Map.of(), path(job, "/stop")), "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
+    void aLessonOrOutlineWriteThatArrivesAfterTheStopWritesNothingAndTheStructureStaysUnlocked() throws Exception {
+        long job = startJob();
+        runAll();
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/outline/approve")));
+        Map<String, Object> row = jobRow(job);
+        long course = ((Number) row.get("course_id")).longValue();
+        long revision = ((Number) row.get("revision_id")).longValue();
+        String owner = jdbc.queryForObject("SELECT owner_user_id FROM learning_hub.course_generation_jobs "
+            + "WHERE job_id = ?", String.class, job);
+        // the model is still answering when the author stops the job
+        assertThat(drafts.startLesson(course, revision, 0, 0, owner)).isTrue();
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/stop")));
+        String titlesBefore = lessonStates(revision);
+
+        Written late = drafts.writeLesson(course, revision, 0, 0, List.of(), owner, () -> false);
+        boolean outlineWritten = drafts.writeOutline(course, revision, owner, "Tóm tắt muộn", List.of(), List.of(),
+            () -> false);
+
+        assertThat(late).isEqualTo(Written.JOB_STOPPED);
+        assertThat(outlineWritten).isFalse();
+        assertThat(lessonStates(revision)).isEqualTo(titlesBefore).isEqualTo("pending,pending");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.lesson_blocks b JOIN "
+            + "learning_hub.course_lessons l ON l.lesson_id = b.lesson_id JOIN learning_hub.course_chapters c "
+            + "ON c.chapter_id = l.chapter_id WHERE c.revision_id = ?", Integer.class, revision)).isZero();
+        assertThat(guards).noneMatch(guard -> guard.structureLocked(revision));
+    }
+
+    @Test
+    void cancelPutsTheLessonBeingWrittenBackToPendingLikeStop() throws Exception {
+        long job = startJob();
+        runAll();
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/outline/approve")));
+        Map<String, Object> row = jobRow(job);
+        long revision = ((Number) row.get("revision_id")).longValue();
+        jdbc.update("UPDATE learning_hub.course_lessons SET ai_state = 'writing' WHERE lesson_id = "
+            + "(SELECT min(l.lesson_id) " + LESSONS_OF_REVISION + ")", revision);
+
+        api.ok(INSTRUCTOR, api.post(Map.of(), path(job, "/cancel")));
+
+        assertThat(lessonStates(revision)).isEqualTo("pending,pending");
+        assertThat(guards).noneMatch(guard -> guard.structureLocked(revision));
+    }
+
+    @Test
+    void writingTheOutlineAgainChangesNothingWhenALessonIsAlreadyTheAuthors() throws Exception {
+        long job = startJob();
+        runAll();
+        Map<String, Object> row = jobRow(job);
+        long course = ((Number) row.get("course_id")).longValue();
+        long revision = ((Number) row.get("revision_id")).longValue();
+        jdbc.update("UPDATE learning_hub.course_lessons SET ai_state = 'user_edited', title = 'Bài của tác giả' "
+            + "WHERE lesson_id = (SELECT min(l.lesson_id) " + LESSONS_OF_REVISION + ")", revision);
+        String before = lessonStates(revision);
+
+        boolean written = drafts.writeOutline(course, revision, "000004", "Tóm tắt mới", List.of("Mục tiêu"),
+            List.of(), () -> true);
+
+        assertThat(written).isFalse();
+        assertThat(lessonStates(revision)).isEqualTo(before).isEqualTo("user_edited,pending");
+        assertThat(jdbc.queryForObject("SELECT count(*) " + LESSONS_OF_REVISION + " AND l.title = 'Bài của tác giả'",
+            Integer.class, revision)).isEqualTo(1);
+    }
+
+    private String lessonStates(Object revision) {
+        return String.join(",", jdbc.queryForList("SELECT l.ai_state " + LESSONS_OF_REVISION
+            + " ORDER BY c.sort_no, l.sort_no", String.class, revision));
     }
 
     @Test

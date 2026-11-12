@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.Function;
@@ -151,8 +152,10 @@ public class CourseGenerationRunner implements GenerationStepRunner {
         JsonNode outline = ask(OUTLINE, user.toString(), GenerationSchemas::outline);
         if (job.courseId() != null && job.revisionId() != null) {
             // The outline goes straight into the draft course, where the author edits it until they approve it.
+            // The status is checked inside the write transaction: a stop landing after the model call writes nothing.
             drafts.writeOutline(job.courseId(), job.revisionId(), job.ownerUserId(), outline.path("summary").asText(),
-                CourseOutlineMapper.objectives(outline), CourseOutlineMapper.chapters(outline));
+                CourseOutlineMapper.objectives(outline), CourseOutlineMapper.chapters(outline),
+                running(step.jobId()));
         }
 
         return new Result(write(outline), digest(user.toString()), List.of(), OUTLINE_PROGRESS, WAITING_APPROVAL);
@@ -180,13 +183,18 @@ public class CourseGenerationRunner implements GenerationStepRunner {
         lesson.path("objectives").forEach(objective -> user.append("- ").append(objective.asText()).append('\n'));
         user.append("\nĐOẠN NGUỒN:\n").append(join(pieces));
         JsonNode content = withSourceNotesInside(ask(LESSON, user.toString(), GenerationSchemas::lesson), pieces);
-        if (inCourse && CourseJobRepository.RUNNING.equals(jobs.job(step.jobId()).map(JobRow::status).orElse(null))) {
-            // A job stopped or cancelled while the model was writing leaves the lesson empty.
+        if (inCourse) {
+            // A job stopped or cancelled while the model was writing leaves the lesson empty: the status is checked
+            // inside the write transaction, after the course is locked, so a stop cannot land between check and write.
             drafts.writeLesson(job.courseId(), job.revisionId(), place[0], place[1], blocksOf(content),
-                job.ownerUserId());
+                job.ownerUserId(), running(step.jobId()));
         }
 
         return new Result(write(content), digest(user.toString()), List.of(), contentProgress(step.jobId()), null);
+    }
+
+    private BooleanSupplier running(long jobId) {
+        return () -> CourseJobRepository.RUNNING.equals(jobs.job(jobId).map(JobRow::status).orElse(null));
     }
 
     private Result questions(StepRow step) {

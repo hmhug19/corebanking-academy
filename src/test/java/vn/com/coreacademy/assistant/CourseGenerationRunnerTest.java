@@ -89,7 +89,7 @@ class CourseGenerationRunnerTest {
         ArgumentCaptor<List<vn.com.coreacademy.learning.dto.LearningRequests.ChapterInput>> chapters =
             ArgumentCaptor.forClass(List.class);
         verify(drafts).writeOutline(eq(70L), eq(71L), eq("000004"), eq("Quy trình mở tài khoản."), anyList(),
-            chapters.capture());
+            chapters.capture(), any());
         assertThat(chapters.getValue()).hasSize(1);
         assertThat(chapters.getValue().get(0).lessons().get(0).title()).isEqualTo("Điều kiện");
         assertThat(chapters.getValue().get(0).lessons().get(0).blocks()).isEmpty();
@@ -105,8 +105,61 @@ class CourseGenerationRunnerTest {
 
         verify(ollama, times(0)).chat(anyList(), any(), any(), any());
         verify(drafts, times(0)).writeLesson(anyLong(), anyLong(), org.mockito.ArgumentMatchers.anyInt(),
-            org.mockito.ArgumentMatchers.anyInt(), anyList(), any());
+            org.mockito.ArgumentMatchers.anyInt(), anyList(), any(), any());
         assertThat(result.outputJson()).contains("user_edited");
+    }
+
+    @Test
+    void theOutlineWriteAsksTheJobStatusInsideTheWriteNotBeforeTheModelCall() {
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(VALID_OUTLINE);
+        StepRow step = outlineStep();
+        ArgumentCaptor<java.util.function.BooleanSupplier> wanted =
+            ArgumentCaptor.forClass(java.util.function.BooleanSupplier.class);
+
+        runner.run(step);
+
+        verify(drafts).writeOutline(eq(70L), eq(71L), eq("000004"), any(), anyList(), anyList(), wanted.capture());
+        assertThat(wanted.getValue().getAsBoolean()).isTrue();
+        when(jobs.job(5)).thenReturn(Optional.of(jobWithStatus("stopped")));
+        assertThat(wanted.getValue().getAsBoolean()).isFalse();
+        when(jobs.job(5)).thenReturn(Optional.empty());
+        assertThat(wanted.getValue().getAsBoolean()).isFalse();
+    }
+
+    @Test
+    void theLessonWriteAsksTheJobStatusInsideTheWriteSoAStopAfterTheModelCallWritesNothing() {
+        lessonFixtures();
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(
+            "{\"blocks\":[{\"type\":\"text\",\"title\":\"Điều kiện\",\"body\":\"Nội dung.\"}],\"sourceNotes\":[]}");
+        ArgumentCaptor<java.util.function.BooleanSupplier> wanted =
+            ArgumentCaptor.forClass(java.util.function.BooleanSupplier.class);
+
+        runner.run(new StepRow(3, 5, "lesson", "c1l1", null, null, "running", 1, null));
+
+        verify(drafts).writeLesson(eq(70L), eq(71L), eq(0), eq(0), anyList(), eq("000004"), wanted.capture());
+        assertThat(wanted.getValue().getAsBoolean()).isTrue();
+        // The author stops the job after the model answered: the check made inside the write now says no.
+        when(jobs.job(5)).thenReturn(Optional.of(jobWithStatus("stopped")));
+        assertThat(wanted.getValue().getAsBoolean()).isFalse();
+        when(jobs.job(5)).thenReturn(Optional.of(jobWithStatus("cancelled")));
+        assertThat(wanted.getValue().getAsBoolean()).isFalse();
+    }
+
+    private JobRow jobWithStatus(String status) {
+        return new JobRow(5, "000004", 1, 9L, "{}", status, "lesson", 40, null, null, null, null, 70L, 71L);
+    }
+
+    private void lessonFixtures() {
+        when(jobs.job(5)).thenReturn(Optional.of(jobWithStatus("running")));
+        when(jobs.stepByKey(anyLong(), eq("summarise_sections"), eq(""))).thenReturn(Optional.of(new StepRow(1, 5,
+            "summarise_sections", "", null,
+            "{\"sections\":[{\"title\":\"Mở\",\"summary\":\"Điều kiện.\",\"keyPoints\":[],\"firstPiece\":0,"
+                + "\"lastPiece\":0}]}", "done", 1, null)));
+        when(jobs.stepByKey(anyLong(), eq("outline"), eq(""))).thenReturn(Optional.of(new StepRow(2, 5, "outline", "",
+            null, VALID_OUTLINE, "done", 1, null)));
+        when(sources.pieces(9L)).thenReturn(List.of(new SourceTextRepository.Piece(0, "Điều kiện mở tài khoản.", 3,
+            10, 24)));
+        when(drafts.startLesson(70L, 71L, 0, 0, "000004")).thenReturn(true);
     }
 
     @Test
