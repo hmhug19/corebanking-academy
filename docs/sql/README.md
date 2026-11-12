@@ -47,6 +47,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5o | `upgrade/2026-11-19-chunker-v2-columns.sql` | Đoạn tài liệu và đoạn khóa học có `section_path`, `content_hash`, `chunker_version`, `embed_model` (lập chỉ mục lại sau khi đổi bộ tách đoạn hoặc mô hình nhúng); chạy trước backend mới |
 | 5p | `upgrade/2026-11-20-document-title-checksum-replace.sql` | Tài liệu có `title` (đổi tên được), `checksum_sha256` (chặn tải trùng) và cột `replacement_*` cho tệp thay thế đang chờ; chạy trước backend mới |
 | 5q | `upgrade/2026-11-21-assistant-feedback-review.sql` | Bản sao lượt hỏi đáp kèm 👎 khi người dùng đồng ý chia sẻ (cột `shared_*` của `assistant_feedback`) và chức năng `AI_FEEDBACK_REVIEW` (không cấp cho vai trò nào); chạy trước backend mới |
+| 5r | `upgrade/2026-11-22-system-audit-route.sql` | Chức năng `SYSTEM_AUDIT` trỏ tới `/admin/gamification`, màn mà menu "Hệ thống & nhật ký" thực sự mở (trước đó seed ghi `/admin/system`, màn giữ chỗ). Chỉ đổi dòng còn giá trị seed cũ; chạy lại an toàn. Rollback: `upgrade/2026-11-22-system-audit-route.rollback.sql` |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |

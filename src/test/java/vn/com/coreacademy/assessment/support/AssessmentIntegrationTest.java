@@ -55,7 +55,7 @@ public abstract class AssessmentIntegrationTest {
         "upgrade/2026-11-16-assistant-retrieval-trace.sql", "upgrade/2026-11-16-knowledge-document-course-source-scope.sql",
         "upgrade/2026-11-17-course-job-owns-course.sql", "upgrade/2026-11-18-course-index-coverage.sql",
         "upgrade/2026-11-19-chunker-v2-columns.sql", "upgrade/2026-11-20-document-title-checksum-replace.sql",
-        "upgrade/2026-11-21-assistant-feedback-review.sql",
+        "upgrade/2026-11-21-assistant-feedback-review.sql", "upgrade/2026-11-22-system-audit-route.sql",
         "learning_hub_community.sql", "learning_hub_reporting.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */
