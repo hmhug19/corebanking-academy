@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -12,6 +14,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface FeedbackRepository extends JpaRepository<AssistantFeedback, Long> {
     List<AssistantFeedback> findByTurnIdIn(Collection<Long> turnIds);
+
+    /** Shared rows only; an empty {@code reason} or {@code skill} means no filter. */
+    @Query("select f from AssistantFeedback f where f.shared = true "
+        + "and (:reason = '' or f.reasonCode = :reason) and (:skill = '' or f.sharedSkill = :skill)")
+    Page<AssistantFeedback> findShared(@Param("reason") String reason, @Param("skill") String skill,
+                                       Pageable pageable);
 
     @Transactional
     @Modifying

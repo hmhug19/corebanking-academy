@@ -66,6 +66,7 @@ FILES=(
   upgrade/2026-11-18-course-index-coverage.sql
   upgrade/2026-11-19-chunker-v2-columns.sql
   upgrade/2026-11-20-document-title-checksum-replace.sql
+  upgrade/2026-11-21-assistant-feedback-review.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

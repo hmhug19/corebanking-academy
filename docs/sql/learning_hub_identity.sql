@@ -280,6 +280,7 @@ INSERT INTO learning_hub.functions(code, name, route_pattern, sort_no) VALUES
     ('SYSTEM_AUDIT'           , 'Nhật ký hệ thống'             , '/admin/system'     , 140),
     ('KNOWLEDGE_HUB'          , 'Kho tri thức'                 , '/knowledge'        , 150),
     ('AI_ASSISTANT'           , 'Trợ lý AI'                    , '/assistant'        , 155),
+    ('AI_FEEDBACK_REVIEW'     , 'Xem phản hồi 👎 được chia sẻ' , NULL               , 156),
     ('ISSUE_HUB'              , 'Tra cứu sự cố'                , '/issues'           , 160);
 
 -- 12. Dữ liệu nền: vai trò - chức năng

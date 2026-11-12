@@ -32,6 +32,6 @@ public class FeedbackController {
     public BaseResponse<FeedbackView> put(@PathVariable long turnId, @RequestBody FeedbackRequest request) {
         gate.requireAccess();
         return BaseResponse.ok(feedback.put(SecurityContextUtils.getUserId(), turnId, request.helpful(),
-            request.reasonCode(), request.note()));
+            request.reasonCode(), request.note(), Boolean.TRUE.equals(request.share())));
     }
 }

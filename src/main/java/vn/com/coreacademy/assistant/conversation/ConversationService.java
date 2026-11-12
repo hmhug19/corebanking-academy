@@ -216,7 +216,7 @@ public class ConversationService implements Conversations {
             .toList()).forEach(action -> proposed.put(action.getId(), action));
         Map<Long, FeedbackView> rated = new HashMap<>();
         feedback.findByTurnIdIn(stored.stream().map(AssistantTurn::getId).toList()).forEach(row -> rated.put(
-            row.getTurnId(), new FeedbackView(row.isHelpful(), row.getReasonCode(), row.getNote())));
+            row.getTurnId(), new FeedbackView(row.isHelpful(), row.getReasonCode(), row.getNote(), row.isShared())));
         Instant now = clock.instant();
         List<TurnView> views = stored.stream()
             .map(turn -> view(turn, turn.getActionId() == null ? null : proposed.get(turn.getActionId()),
