@@ -60,6 +60,7 @@ class CourseJobIT extends AssessmentIntegrationTest {
     private long ownOrg;
     private long otherOrg;
     private long programme;
+    private long otherProgramme;
     private long competency;
 
     @BeforeAll
@@ -77,6 +78,21 @@ class CourseJobIT extends AssessmentIntegrationTest {
             """);
         otherOrg = jdbc.queryForObject("SELECT org_id FROM learning_hub.orgs WHERE code = 'COURSEJOB-OTHER'",
             Long.class);
+        // A course is made with its job, and a field and a programme belong to one unit: the other unit needs its own.
+        jdbc.update("""
+            INSERT INTO learning_hub.training_fields(owner_org_id, code, name, status, sort_no, created_by, updated_by)
+            SELECT ?, 'COURSEJOB-FIELD', 'Lĩnh vực đơn vị khác', 'active', 9, '000001', '000001'
+             WHERE NOT EXISTS (SELECT 1 FROM learning_hub.training_fields WHERE code = 'COURSEJOB-FIELD')
+            """, otherOrg);
+        jdbc.update("""
+            INSERT INTO learning_hub.training_programs(field_id, owner_org_id, code, name, status, sort_no,
+                                                       created_by, updated_by)
+            SELECT f.field_id, ?, 'COURSEJOB-PROG', 'Chương trình đơn vị khác', 'active', 9, '000001', '000001'
+              FROM learning_hub.training_fields f WHERE f.code = 'COURSEJOB-FIELD'
+               AND NOT EXISTS (SELECT 1 FROM learning_hub.training_programs WHERE code = 'COURSEJOB-PROG')
+            """, otherOrg);
+        otherProgramme = jdbc.queryForObject(
+            "SELECT program_id FROM learning_hub.training_programs WHERE code = 'COURSEJOB-PROG'", Long.class);
     }
 
     @BeforeEach
@@ -101,7 +117,7 @@ class CourseJobIT extends AssessmentIntegrationTest {
         inputs.put("targetLearners", "Giao dịch viên mới vào làm");
         inputs.put("level", "BEGINNER");
         inputs.put("chapters", 3);
-        inputs.put("programmeId", programme);
+        inputs.put("programmeId", ownerOrgId != null && ownerOrgId == otherOrg ? otherProgramme : programme);
         inputs.put("competencyId", competency);
         inputs.put("ownerOrgId", ownerOrgId);
         return inputs;
@@ -156,12 +172,12 @@ class CourseJobIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void theSourceIsAPersonalDocumentNobodyElseCanSeeAndJobsOfOthersAreNotFound() {
+    void theSourceIsACourseSourceDocumentNobodyElseCanSeeAndJobsOfOthersAreNotFound() {
         JsonNode job = api.ok(INSTRUCTOR, start(inputs(null)));
         long documentId = job.path("source").path("documentId").asLong();
 
         assertThat(jdbc.queryForMap("SELECT scope, uploaded_by FROM learning_hub.knowledge_documents "
-            + "WHERE document_id = ?", documentId)).containsEntry("scope", "personal")
+            + "WHERE document_id = ?", documentId)).containsEntry("scope", "course_source")
             .containsEntry("uploaded_by", INSTRUCTOR);
         api.error(ADMIN, get("/api/v1/knowledge/documents/{id}", documentId), "CORE-RESOURCE_NOT_FOUND");
         api.error(ADMIN, get(JOBS + "/{id}", job.path("jobId").asLong()), "CORE-RESOURCE_NOT_FOUND");
@@ -273,7 +289,8 @@ class CourseJobIT extends AssessmentIntegrationTest {
 
         assertThat(ids).contains(failed, stopped).doesNotContain(old);
         mine.forEach(item -> assertThat(item.path("courseId").asLong()).isPositive());
-        api.http(LEARNER, get(JOBS + "/active"), 403, "CORE-ACCESS_DENIED");
+        // Only the caller's own jobs: a learner may use the assistant but owns none.
+        assertThat(api.ok(LEARNER, get(JOBS + "/active"))).isEmpty();
     }
 
     @Test
