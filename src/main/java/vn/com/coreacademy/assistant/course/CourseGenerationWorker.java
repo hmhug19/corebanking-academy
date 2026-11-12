@@ -9,6 +9,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.StepRow;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
@@ -26,7 +27,6 @@ import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 @Component
 public class CourseGenerationWorker {
     static final String GENERIC_FAILURE = "Không tạo được khóa học. Vui lòng thử lại hoặc liên hệ quản trị.";
-    static final String REVIEW_STEP = "review";
     static final String NOT_SUPPORTED = "Bước này chưa được hỗ trợ.";
 
     private final CourseJobRepository jobs;
@@ -34,15 +34,17 @@ public class CourseGenerationWorker {
     private final OllamaClient ollama;
     private final TransactionTemplate transaction;
     private final AssistantMetrics metrics;
+    private final TurnLimiter chat;
 
     public CourseGenerationWorker(CourseJobRepository jobs, ObjectProvider<GenerationStepRunner> runner,
                                   OllamaClient ollama, TransactionTemplate transaction,
-                                  AssistantMetrics metrics) {
+                                  AssistantMetrics metrics, TurnLimiter chat) {
         this.jobs = jobs;
         this.runner = runner;
         this.ollama = ollama;
         this.transaction = transaction;
         this.metrics = metrics;
+        this.chat = chat;
     }
 
     /** A previous run that stopped mid-step leaves it running; it goes back to pending and the job resumes there. */
@@ -66,9 +68,12 @@ public class CourseGenerationWorker {
         }
     }
 
-    /** Runs the next step if one may run now; false when there is nothing to do or the model is unreachable. */
+    /**
+     * Runs the next step if one may run now; false when there is nothing to do, the model is unreachable or a chat turn
+     * is running (chat keeps priority: the step waits for the next poll and no step is claimed meanwhile).
+     */
     public boolean runOnce() {
-        if (!ollama.isAvailable()) {
+        if (chat.chatRunning() || !ollama.isAvailable()) {
             return false;
         }
         Optional<StepRow> claimed = transaction.execute(status -> jobs.claimNext());
@@ -121,9 +126,9 @@ public class CourseGenerationWorker {
         if (result.jobStatus() != null) {
             jobs.setStatus(step.jobId(), result.jobStatus(), null);
         } else if (!jobs.hasOpenSteps(step.jobId())) {
-            // Everything that could be generated is: the author reviews it and asks for the draft (assemble).
-            jobs.setProgress(step.jobId(), REVIEW_STEP, result.progress());
-            jobs.setStatus(step.jobId(), CourseJobRepository.WAITING_APPROVAL, null);
+            // Everything that could be generated is, and it already sits in the draft course: the job is finished.
+            jobs.setProgress(step.jobId(), step.kind(), 100);
+            jobs.setStatus(step.jobId(), CourseJobRepository.COMPLETED, null);
         }
     }
 

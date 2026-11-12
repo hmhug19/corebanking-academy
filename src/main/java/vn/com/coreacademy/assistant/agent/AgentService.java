@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.conversation.Conversations;
@@ -36,7 +37,9 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.identity.service.AuthService;
 import vn.com.coreacademy.knowledge.ai.ChatMessage;
+import vn.com.coreacademy.knowledge.ai.Cancellation;
 import vn.com.coreacademy.knowledge.ai.ChatTurn;
+import vn.com.coreacademy.knowledge.ai.TurnCancelledException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
@@ -81,6 +84,7 @@ public class AgentService {
     private final SkillCatalog catalog;
     private final AssistantModels models;
     private final LessonAccess lessons;
+    private final AssistantBudget budget;
 
     /**
      * Validates the request, then streams the turn. The client sends only the new question and, for a follow-up, the
@@ -143,28 +147,38 @@ public class AgentService {
                 write(output, refusal(admission));
                 return;
             }
-            try (TurnLimiter.Turn ignored = started.turn()) {
+            try (TurnLimiter.Turn turnSlot = started.turn()) {
                 Conversations.Opened opened = conversations.open(asked.userId(), conversationId, question, focus);
+                turnSlot.bind(opened.conversationId());
                 write(output, AgentStreamEvent.conversation(opened.conversationId()));
                 List<ChatMessage> history = new ArrayList<>();
+                Conversations.Exchange last = opened.history().isEmpty() ? null
+                    : opened.history().get(opened.history().size() - 1);
                 for (Conversations.Exchange exchange : opened.history()) {
                     history.add(ChatMessage.user(exchange.question()));
                     history.add(ChatMessage.assistant(exchange.answer()));
                 }
                 history.add(ChatMessage.user(question));
-                Skill skill = selector.select(requestedSkill, question, asked);
+                Skill skill = selector.select(requestedSkill, question, asked, last);
                 metrics.skill(skill.id());
                 List<AgentTool> tools = registry.availableTo(asked).stream()
                     .filter(tool -> skill.tools().contains(tool.name())).toList();
                 List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(asked)).toList();
                 TurnLog turnLog = new TurnLog(opened.conversationId(), question, skill.id(), catalog.version());
                 try {
-                    run(output, history, asked, skill, tools, definitions, turnLog);
+                    run(output, history, asked, skill, tools, definitions, turnLog, turnSlot.cancellation());
                 } finally {
                     store(turnLog);
                 }
             }
         };
+    }
+
+    /** Stops the caller's running turn of this conversation; refused when the conversation is not the caller's. */
+    public void cancel(Long conversationId) {
+        String userId = AssistantAccess.require(auth.me()).user().userId();
+        conversations.requireOwned(userId, conversationId);
+        limiter.cancel(userId, conversationId);
     }
 
     private static AgentStreamEvent refusal(TurnLimiter.Admission admission) {
@@ -176,11 +190,12 @@ public class AgentService {
     }
 
     private void run(OutputStream output, List<ChatMessage> history, AgentContext context, Skill skill,
-                     List<AgentTool> tools, List<ToolDefinition> definitions, TurnLog turnLog) {
+                     List<AgentTool> tools, List<ToolDefinition> definitions, TurnLog turnLog,
+                     Cancellation cancellation) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(catalog.systemPrompt(skill) + lessonNote(context) + attachmentNote(context)));
         messages.addAll(history);
-        TurnState turn = new TurnState();
+        TurnState turn = new TurnState(budget);
         List<ToolDefinition> offered = definitions;
         boolean readShared = false;
         Suggestions.Filter filter = new Suggestions.Filter();
@@ -188,15 +203,17 @@ public class AgentService {
         try {
             for (int step = 0; step < properties.maxSteps(); step++) {
                 turnLog.steps++;
-                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, models.agentOptions(),
+                OllamaClient.Options options = models.agentOptions().withNumPredict(budget.answer());
+                ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, options,
                     delta -> {
                         String shown = filter.accept(delta);
                         if (!shown.isEmpty()) {
                             emit(output, turnLog, AgentStreamEvent.delta(shown));
                         }
-                    });
+                    }, cancellation);
+                metrics.modelCall(AssistantMetrics.AGENT, answer.usage(), options.numCtx());
                 if (answer.toolCalls().isEmpty()) {
-                    finish(output, turnLog, turn, answer.content().strip());
+                    finish(output, turnLog, turn, answer.content().strip(), readShared);
                     return;
                 }
 
@@ -209,6 +226,7 @@ public class AgentService {
                     ToolOutcome outcome = tool != null && tool.actsForUser() && readShared
                         ? new ToolOutcome.Result(ACTION_AFTER_DOCUMENTS)
                         : runTool(call, tool, context, turn);
+                    traceSearches(turn, turnLog);
                     if (end(output, turnLog, outcome)) {
                         return;
                     }
@@ -220,6 +238,9 @@ public class AgentService {
                 }
             }
             emit(output, turnLog, AgentStreamEvent.done(STEP_CAP_ANSWER, List.of()));
+        } catch (TurnCancelledException exception) {
+            // The user pressed "Dung": the turn is stored as stopped and no error is shown.
+            turnLog.stopped();
         } catch (UncheckedIOException exception) {
             // The client went away: nobody is left to read an error event.
             turnLog.stopped();
@@ -287,9 +308,18 @@ public class AgentService {
     }
 
     /** Writes the closing events of a terminal outcome; false for a result that goes back to the model. */
+    /** Copies the searches the tool just made into the stored turn, and counts each one once. */
+    private void traceSearches(TurnState turn, TurnLog turnLog) {
+        List<TurnRecord.Search> trace = turn.retrievalTrace();
+        for (int i = turnLog.retrieval.size(); i < trace.size(); i++) {
+            metrics.search(AssistantMetrics.AGENT, trace.get(i));
+        }
+        turnLog.retrieval = trace;
+    }
+
     private boolean end(OutputStream output, TurnLog turnLog, ToolOutcome outcome) {
         if (outcome instanceof ToolOutcome.Navigate navigate) {
-            emit(output, turnLog, AgentStreamEvent.navigate(navigate.path(), navigate.title()));
+            emit(output, turnLog, AgentStreamEvent.navigate(navigate.path(), navigate.title(), navigate.prefill()));
             emit(output, turnLog, AgentStreamEvent.done(navigate.text(), List.of()));
             return true;
         }
@@ -302,7 +332,11 @@ public class AgentService {
         return false;
     }
 
-    private void finish(OutputStream output, TurnLog turnLog, TurnState turn, String raw) {
+    /**
+     * {@code readShared}: the turn read documents, courses or Community, so its suggestions are marked read-only and
+     * the client sends a clicked one with the Q&A skill, whose tools never act for the user.
+     */
+    private void finish(OutputStream output, TurnLog turnLog, TurnState turn, String raw, boolean readShared) {
         Suggestions.Split split = Suggestions.split(raw);
         String answer = split.answer().strip();
         FinishedAnswer finished = turn.finisher().map(finisher -> finisher.finish(answer))
@@ -311,7 +345,10 @@ public class AgentService {
             // qwen3 sometimes ends with nothing after a tool result; an empty bubble reads as a hang.
             finished = new FinishedAnswer(EMPTY_ANSWER, List.of());
         }
-        emit(output, turnLog, AgentStreamEvent.done(finished.answer(), finished.citations(), split.suggestions()));
+        metrics.citations(AssistantMetrics.AGENT, finished.checkedMarkers(), finished.removedMarkers());
+        AgentStreamEvent.Done done = AgentStreamEvent.done(finished.answer(), finished.citations(),
+            split.suggestions(), finished.grounded());
+        emit(output, turnLog, readShared && !split.suggestions().isEmpty() ? done.withSuggestionsReadOnly() : done);
     }
 
     private void emit(OutputStream output, TurnLog turnLog, AgentStreamEvent event) {
@@ -321,7 +358,8 @@ public class AgentService {
         }
         if (event instanceof AgentStreamEvent.Done done) {
             if (NotFoundAnswer.isNotFound(done.answer())) {
-                metrics.notFound(AssistantMetrics.AGENT);
+                metrics.notFound(AssistantMetrics.AGENT, turnLog.retrievedNothing()
+                    ? AssistantMetrics.EMPTY_RETRIEVAL : AssistantMetrics.MODEL_SAID_SO);
             }
             // The turn is stored before its last line goes out, so the line can name the turn the user may rate.
             Long turnId = store(turnLog);
@@ -369,6 +407,7 @@ public class AgentService {
         private final long started = System.nanoTime();
         private final List<String> tools = new ArrayList<>();
         private TurnRecord.Status status = TurnRecord.Status.STOPPED;
+        private List<TurnRecord.Search> retrieval = List.of();
         private String answer;
         private List<CitationView> citations = List.of();
         private TurnRecord.Navigation navigation;
@@ -380,6 +419,11 @@ public class AgentService {
             this.question = question;
             this.skill = skill;
             this.promptVersion = promptVersion;
+        }
+
+        /** Searched, and every search came back empty: the "not found" is the retrieval's, not the model's. */
+        boolean retrievedNothing() {
+            return !retrieval.isEmpty() && retrieval.stream().allMatch(TurnRecord.Search::gaveNothing);
         }
 
         void stopped() {
@@ -412,7 +456,7 @@ public class AgentService {
 
         TurnRecord record() {
             return new TurnRecord(TurnRecord.AGENT, question, answer, citations, List.copyOf(tools), navigation,
-                actionId, status, firstTokenMs, millisSince(), skill, promptVersion);
+                actionId, status, firstTokenMs, millisSince(), skill, promptVersion, retrieval);
         }
     }
 

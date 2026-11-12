@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -19,6 +20,7 @@ import vn.com.coreacademy.assessment.service.QuizAttemptService;
 import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.agent.AssistantAccess;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
@@ -26,6 +28,7 @@ import vn.com.coreacademy.assistant.dto.AgentStreamEvent;
 import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
+import vn.com.coreacademy.assistant.skill.Suggestions;
 import vn.com.coreacademy.assistant.tool.FinishedAnswer;
 import vn.com.coreacademy.assistant.tool.RetrievedChunks;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -38,6 +41,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 import vn.com.coreacademy.knowledge.service.ChatPromptBuilder;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 import vn.com.coreacademy.learning.index.CourseQuestionSearch;
 
 /**
@@ -64,6 +68,7 @@ public class QuizExplainService {
     private final SkillCatalog catalog;
     private final AssistantModels models;
     private final AssistantMetrics metrics;
+    private final AssistantBudget budget;
     private final ObjectMapper json;
 
     /**
@@ -100,17 +105,16 @@ public class QuizExplainService {
         write(output, AgentStreamEvent.conversation(opened.conversationId()));
         TurnTrace trace = new TurnTrace(opened.conversationId(), question);
         metrics.skill(SKILL);
-        RetrievedChunks chunks = new RetrievedChunks();
-        var added = chunks.add(lesson);
+        RetrievedChunks chunks = new RetrievedChunks(budget.retrieved());
+        var added = chunks.add("explain", lesson);
         try {
             List<ChatMessage> messages = List.of(ChatMessage.system(catalog.explainPrompt()),
                 ChatMessage.user(request(source, added)));
-            ChatTurn reply = ollama.chatWithTools(messages, List.of(), models.agentOptions(), delta -> {
-                if (!delta.isEmpty()) {
-                    emit(output, trace, AgentStreamEvent.delta(delta));
-                }
-            });
-            String text = reply.content().strip();
+            var options = models.agentOptions().withNumPredict(budget.answer());
+            ChatTurn reply = ollama.chatWithTools(messages, List.of(), options,
+                withoutSuggestions(delta -> emit(output, trace, AgentStreamEvent.delta(delta))));
+            metrics.modelCall(AssistantMetrics.AGENT, reply.usage(), options.numCtx());
+            String text = Suggestions.split(reply.content().strip()).answer().strip();
             FinishedAnswer finished = finish(chunks, text);
             emit(output, trace, AgentStreamEvent.done(finished.answer(), finished.citations()));
         } catch (UncheckedIOException exception) {
@@ -131,6 +135,21 @@ public class QuizExplainService {
     }
 
     /**
+     * Passes streamed text on until the suggestion marker shows. The explanation prompt does not ask for suggestions,
+     * but a model may print the block anyway, and it must never reach the learner.
+     */
+    static Consumer<String> withoutSuggestions(Consumer<String> shown) {
+        Suggestions.Filter filter = new Suggestions.Filter();
+
+        return delta -> {
+            String text = filter.accept(delta);
+            if (!text.isEmpty()) {
+                shown.accept(text);
+            }
+        };
+    }
+
+    /**
      * Without lesson text the answer rests on the author's explanation and cites nothing; with it, the sources are the
      * chunks the answer marks, as in every agent answer. An empty answer is a fixed sentence, never a blank bubble.
      */
@@ -144,7 +163,7 @@ public class QuizExplainService {
         FinishedAnswer finished = chunks.finish(text);
 
         // The fixed "not found" sentence is for document search; here the explanation stands without sources.
-        return finished.answer().equals(text) ? finished : new FinishedAnswer(text, List.of());
+        return NotFoundAnswer.TEXT.equals(finished.answer()) ? new FinishedAnswer(text, List.of()) : finished;
     }
 
     /** The data block the model reads: nothing in it is an instruction. */

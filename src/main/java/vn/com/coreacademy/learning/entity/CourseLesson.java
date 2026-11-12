@@ -57,4 +57,11 @@ public class CourseLesson extends LearningRecord {
     /** Bài kiểm tra của bài học loại quiz (ID logic, cùng khóa học); null với bài nội dung. */
     @Column(name = "quiz_id")
     private Long quizId;
+
+    /**
+     * Bài do AI viết: pending | writing | written | user_edited (người dùng đã sửa, job không ghi đè); null nếu bài
+     * không do AI quản lý. Không được nhân bản sang phiên bản khác.
+     */
+    @Column(name = "ai_state", length = 12)
+    private String aiState;
 }

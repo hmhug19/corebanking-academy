@@ -82,6 +82,7 @@ public class LearningContentService {
     private final IdentityAuditService audit;
     private final List<LearningResourceExtension> resourceExtensions;
     private final LearningQuizDirectory quizzes;
+    private final LearningAiOwnership aiOwnership;
 
     /**
      * Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload.
@@ -150,8 +151,16 @@ public class LearningContentService {
         requireDraft(course, revision);
         version(revision, request.expectedVersion());
 
-        // Bước 2: kiểm tra và thay cây draft bằng nội dung mới.
+        // Bước 2: kiểm tra và thay cây draft bằng nội dung mới; khóa do AI viết giữ trạng thái từng bài.
+        var aiBefore = aiOwnership.snapshot(revision.getId());
+        if (aiBefore != null) {
+            aiOwnership.requireStructureAllowed(revision.getId(), aiBefore, request.content());
+        }
         applyDraft(course, revision, request.content(), actor.person().id());
+        if (aiBefore != null) {
+            repository.flush();
+            aiOwnership.reconcile(revision.getId(), aiBefore, request.content());
+        }
 
         // Bước 3: audit và flush trong cùng transaction để caller nhận version mới dùng lần lưu sau.
         record(actor.person().id(), AuditAction.DRAFT_SAVED, course);
@@ -186,7 +195,7 @@ public class LearningContentService {
      * Kiểm tra rồi ghi toàn bộ nội dung nháp vào revision; dùng chung cho lưu nháp và tạo khóa kèm nháp.
      * Lỗi bất kỳ ném ngoại lệ trước khi cây cũ bị thay, transaction của caller sẽ rollback.
      */
-    private void applyDraft(Course course, CourseRevision revision, LearningRequests.DraftContent draft,
+    void applyDraft(Course course, CourseRevision revision, LearningRequests.DraftContent draft,
                             String actor) {
         // Bước 1: kiểm tra danh mục và quy mô.
         validateCatalog(course, draft.programId(), draft.moduleId(), false);
@@ -473,7 +482,7 @@ public class LearningContentService {
             revision.getProgramId(), revision.getModuleId(), true);
     }
 
-    private void requireDraft(Course course, CourseRevision revision) {
+    void requireDraft(Course course, CourseRevision revision) {
         if (!course.getId().equals(revision.getCourseId()) || !RevisionState.DRAFT.equals(revision.getState())
             || CourseStatus.ARCHIVED.equals(course.getLifecycleStatus())) {
             throw new BusinessException(LearningResponseCode.CONFLICT);
@@ -780,7 +789,7 @@ public class LearningContentService {
         }
     }
 
-    private void writeBlock(Long lessonId, LearningRequests.BlockInput input, int sort, String actor) {
+    void writeBlock(Long lessonId, LearningRequests.BlockInput input, int sort, String actor) {
         LessonBlock block = new LessonBlock();
         block.setLessonId(lessonId);
         block.setBlockType(input.blockType());

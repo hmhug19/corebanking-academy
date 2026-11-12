@@ -52,14 +52,15 @@ public class SearchCoursesTool implements AgentTool {
 
         List<ChunkHit> hits;
         try {
-            hits = courses.hits(query, context.lesson() == null ? null : context.lesson().lessonId());
+            hits = context.lesson() == null ? courses.hits(query)
+                : courses.hits(query, context.lesson().lessonId(), context.lesson().courseId());
         } catch (OllamaException exception) {
             // The runtime ends the stream with ASSISTANT-AI_UNAVAILABLE for this exception.
             throw new OllamaUnavailableException("Retrieval needs Ollama", exception);
         }
 
-        RetrievedChunks chunks = turn.state(RetrievedChunks.class, RetrievedChunks::new);
-        var added = chunks.add(hits);
+        RetrievedChunks chunks = turn.chunks();
+        var added = chunks.add("search_courses", hits);
         turn.finishWith(chunks::finish);
         if (chunks.isEmpty()) {
             return new ToolOutcome.Result(SearchDocumentsTool.NOTHING_FOUND);

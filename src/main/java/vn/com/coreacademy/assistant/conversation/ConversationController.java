@@ -40,6 +40,14 @@ public class ConversationController {
         return BaseResponse.ok(conversations.list(SecurityContextUtils.getUserId(), q, page, size));
     }
 
+    @GetMapping("/latest")
+    @Operation(summary = "Hội thoại mới nhất của tôi về một bài học",
+        description = "Trả null khi chưa có; dùng để \"Hỏi về bài này\" tiếp tục hội thoại cũ thay vì tạo mới.")
+    public BaseResponse<ConversationSummary> latestForLesson(@RequestParam long lessonId) {
+        gate.requireAccess();
+        return BaseResponse.ok(conversations.latestForLesson(SecurityContextUtils.getUserId(), lessonId));
+    }
+
     @GetMapping("/{conversationId}")
     @Operation(summary = "Một hội thoại kèm các lượt",
         description = "Id của người khác trả ASSISTANT-CONVERSATION_NOT_FOUND, giống id không tồn tại.")

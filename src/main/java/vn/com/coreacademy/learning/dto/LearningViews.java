@@ -159,7 +159,8 @@ public final class LearningViews {
         Long quizId,
         Long rowVersion,
         Instant createTime,
-        Instant updateTime) {
+        Instant updateTime,
+        String aiState) {
     }
 
     public record LessonBlockView(

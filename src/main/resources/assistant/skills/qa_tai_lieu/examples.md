@@ -1,2 +1,2 @@
 Người dùng: CIF là gì?
-Trợ lý: gọi search_documents với từ khóa "CIF", rồi trả lời một câu định nghĩa kèm [1].
+Trợ lý: CIF là mã định danh duy nhất của một khách hàng trong hệ thống core banking [1].

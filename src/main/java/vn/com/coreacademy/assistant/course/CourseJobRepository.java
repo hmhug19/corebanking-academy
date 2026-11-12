@@ -26,10 +26,15 @@ public class CourseJobRepository {
     static final String COMPLETED = "completed";
     static final String FAILED = "failed";
     static final String CANCELLED = "cancelled";
+    static final String STOPPED = "stopped";
 
     public record JobRow(long id, String ownerUserId, long ownerOrgId, Long sourceDocumentId, String inputs,
                          String status, String step, int progress, String errorMessage, Long createdDraftId,
-                         OffsetDateTime createTime, OffsetDateTime updateTime) {
+                         OffsetDateTime createTime, OffsetDateTime updateTime, Long courseId, Long revisionId) {
+    }
+
+    /** A job's source file that may be deleted. */
+    public record ExpiredSource(long jobId, long documentId) {
     }
 
     public record StepRow(long id, long jobId, String kind, String itemKey, String inputHash, String output,
@@ -38,13 +43,14 @@ public class CourseJobRepository {
 
     private static final String JOB_COLUMNS = """
         job_id, owner_user_id, owner_org_id, source_document_id, inputs::text AS inputs, status, step, progress,
-        error_message, created_draft_id, create_time, update_time
+        error_message, created_draft_id, create_time, update_time, course_id, revision_id
         """;
     private static final RowMapper<JobRow> JOB = (rs, row) -> new JobRow(rs.getLong("job_id"),
         rs.getString("owner_user_id"), rs.getLong("owner_org_id"), (Long) rs.getObject("source_document_id"),
         rs.getString("inputs"), rs.getString("status"), rs.getString("step"), rs.getInt("progress"),
         rs.getString("error_message"), (Long) rs.getObject("created_draft_id"),
-        rs.getObject("create_time", OffsetDateTime.class), rs.getObject("update_time", OffsetDateTime.class));
+        rs.getObject("create_time", OffsetDateTime.class), rs.getObject("update_time", OffsetDateTime.class),
+        (Long) rs.getObject("course_id"), (Long) rs.getObject("revision_id"));
     private static final String STEP_COLUMNS = """
         step_id, job_id, kind, item_key, input_hash, output::text AS output, status, attempts, error_message
         """;
@@ -61,13 +67,15 @@ public class CourseJobRepository {
         jdbc.queryForObject("SELECT pg_advisory_xact_lock(hashtext(?))", Object.class, "course-job:" + ownerUserId);
     }
 
-    public long insertJob(String ownerUserId, long ownerOrgId, Long sourceDocumentId, String inputsJson) {
+    /** The job and the draft course it fills; created_draft_id mirrors course_id for clients of the older field. */
+    public long insertJob(String ownerUserId, long ownerOrgId, Long sourceDocumentId, String inputsJson, long courseId,
+                          long revisionId) {
         Long id = jdbc.queryForObject("""
             INSERT INTO learning_hub.course_generation_jobs (owner_user_id, owner_org_id, source_document_id, inputs,
-                                                             status, step)
-            VALUES (?, ?, ?, ?::jsonb, 'queued', 'summarise_sections')
+                                                             status, step, course_id, revision_id, created_draft_id)
+            VALUES (?, ?, ?, ?::jsonb, 'queued', 'summarise_sections', ?, ?, ?)
             RETURNING job_id
-            """, Long.class, ownerUserId, ownerOrgId, sourceDocumentId, inputsJson);
+            """, Long.class, ownerUserId, ownerOrgId, sourceDocumentId, inputsJson, courseId, revisionId, courseId);
 
         return id;
     }
@@ -93,6 +101,19 @@ public class CourseJobRepository {
             """, JOB, ownerUserId, limit);
     }
 
+    /**
+     * The owner's jobs that still work or wait for approval, plus the ones that failed or were stopped since the
+     * instant: what the app shows as running or as a notice that lasts. Newest first.
+     */
+    public List<JobRow> activeJobsOf(String ownerUserId, OffsetDateTime stoppedSince, int limit) {
+        return jdbc.query("SELECT " + JOB_COLUMNS + """
+             FROM learning_hub.course_generation_jobs WHERE owner_user_id = ? AND deleted_at IS NULL
+               AND (status IN ('queued', 'running', 'waiting_approval')
+                    OR (status IN ('failed', 'stopped') AND update_time > ?))
+             ORDER BY create_time DESC, job_id DESC LIMIT ?
+            """, JOB, ownerUserId, stoppedSince, limit);
+    }
+
     /** Create times of the owner's jobs since the instant, oldest first (cancelled, failed and deleted ones count too). */
     public List<OffsetDateTime> createdSince(String ownerUserId, OffsetDateTime since) {
         return jdbc.queryForList("""
@@ -114,6 +135,26 @@ public class CourseJobRepository {
             UPDATE learning_hub.course_generation_jobs SET status = ?, error_message = ?, update_time = now()
              WHERE job_id = ? AND status IN ('queued', 'running', 'waiting_approval')
             """, status, errorMessage, jobId) == 1;
+    }
+
+    /** The revision of a course the job creates is flagged as AI generated, so publishing needs the review (ticket 22). */
+    public void markAiGenerated(long revisionId) {
+        jdbc.update("UPDATE learning_hub.course_revisions SET ai_generated = true WHERE revision_id = ?", revisionId);
+    }
+
+    /**
+     * Whether a job is writing lessons into the revision now: its outline is approved (it has lesson steps) and it has
+     * not finished, stopped or failed. Chapters and lessons of the revision may not change while this is true.
+     */
+    public boolean structureLocked(long revisionId) {
+        Boolean locked = jdbc.queryForObject("""
+            SELECT EXISTS (SELECT 1 FROM learning_hub.course_generation_jobs j
+                            WHERE j.revision_id = ? AND j.status IN ('queued', 'running') AND j.deleted_at IS NULL
+                              AND EXISTS (SELECT 1 FROM learning_hub.course_generation_steps s
+                                           WHERE s.job_id = j.job_id AND s.kind = 'lesson'))
+            """, Boolean.class, revisionId);
+
+        return Boolean.TRUE.equals(locked);
     }
 
     public void setDraft(long jobId, long courseId) {
@@ -173,15 +214,19 @@ public class CourseJobRepository {
             (rs, row) -> new Named(rs.getLong(1), rs.getString(2)), "%" + text.strip() + "%", text.strip());
     }
 
-    /** A document the user uploaded for themselves that no job uses yet. */
-    public boolean isFreePersonalDocument(long documentId, String userId) {
-        Integer n = jdbc.queryForObject("""
-            SELECT count(*) FROM learning_hub.knowledge_documents d
-             WHERE d.document_id = ? AND d.uploaded_by = ? AND d.scope = 'personal'
-               AND NOT EXISTS (SELECT 1 FROM learning_hub.course_generation_jobs j WHERE j.source_document_id = d.document_id)
-            """, Integer.class, documentId, userId);
+    /** Sources of jobs that ended (finished, stopped, failed or cancelled) before {@code cutoff}. */
+    public List<ExpiredSource> expiredSources(OffsetDateTime cutoff) {
+        return jdbc.query("""
+            SELECT job_id, source_document_id FROM learning_hub.course_generation_jobs
+             WHERE source_document_id IS NOT NULL AND status IN ('completed', 'failed', 'cancelled', 'stopped')
+               AND update_time < ?
+            """, (rs, row) -> new ExpiredSource(rs.getLong("job_id"), rs.getLong("source_document_id")), cutoff);
+    }
 
-        return n != null && n > 0;
+    /** The job no longer has a source file; its steps keep what they wrote. */
+    public void clearSource(long jobId) {
+        jdbc.update("UPDATE learning_hub.course_generation_jobs SET source_document_id = NULL, update_time = now() "
+            + "WHERE job_id = ?", jobId);
     }
 
     public Optional<DocumentInfo> document(long documentId) {
@@ -295,6 +340,15 @@ public class CourseJobRepository {
             """, stepId) == 1;
     }
 
+    /** The questions of a lesson that is written again are proposed again; a missing or running step is left as it is. */
+    public void resetStepIfDone(long jobId, String kind, String itemKey) {
+        jdbc.update("""
+            UPDATE learning_hub.course_generation_steps
+               SET status = 'pending', output = NULL, error_message = NULL, finished_at = NULL
+             WHERE job_id = ? AND kind = ? AND item_key = ? AND status IN ('done', 'failed')
+            """, jobId, kind, itemKey);
+    }
+
     /** Failed steps that have run fewer than the attempts run again (the author pressed retry). */
     public int requeueFailed(long jobId, int maxAttempts) {
         return jdbc.update("""
@@ -311,12 +365,15 @@ public class CourseJobRepository {
             """, stepId);
     }
 
-    /** Puts a job waiting for the author, or one that failed, back to work; a cancelled or completed job stays. */
+    /**
+     * Puts a job waiting for the author, one that failed, one that finished or one that was stopped back to work (the
+     * author asked for a lesson again); a cancelled job stays.
+     */
     public boolean reopen(long jobId, String step, int progress) {
         return jdbc.update("""
             UPDATE learning_hub.course_generation_jobs
                SET status = 'running', step = ?, progress = ?, error_message = NULL, update_time = now()
-             WHERE job_id = ? AND status IN ('waiting_approval', 'failed')
+             WHERE job_id = ? AND status IN ('waiting_approval', 'failed', 'completed', 'stopped')
             """, step, progress, jobId) == 1;
     }
 

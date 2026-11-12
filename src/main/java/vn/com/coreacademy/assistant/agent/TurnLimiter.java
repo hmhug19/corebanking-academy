@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.knowledge.ai.Cancellation;
 
 /**
  * Keeps the local model from being queued up, for the agent and the document chat alike: one turn per user at a time,
@@ -30,6 +31,7 @@ public class TurnLimiter {
     private final int questionsPerHour;
     private final Clock clock;
     private final Set<String> answering = ConcurrentHashMap.newKeySet();
+    private final Map<String, Turn> running = new ConcurrentHashMap<>();
     private final Map<String, Deque<Instant>> asked = new ConcurrentHashMap<>();
 
     @Autowired
@@ -78,7 +80,30 @@ public class TurnLimiter {
             return new Admission.RateLimited(wait);
         }
 
-        return new Admission.Started(new Turn(userId));
+        Turn turn = new Turn(userId);
+        running.put(userId, turn);
+
+        return new Admission.Started(turn);
+    }
+
+    /**
+     * Stops the user's running turn of this conversation: the model call is aborted and the place is given back at
+     * once, so the next question is admitted. False when the user has no such turn running.
+     */
+    public boolean cancel(String userId, long conversationId) {
+        Turn turn = running.get(userId);
+        if (turn == null || turn.conversationId != conversationId) {
+            return false;
+        }
+        turn.cancellation.cancel();
+        turn.close();
+
+        return true;
+    }
+
+    /** True while any chat turn is running: background work such as course generation starts nothing meanwhile. */
+    public boolean chatRunning() {
+        return !running.isEmpty();
     }
 
     /** Null when the question was counted; otherwise how long until the user may ask again. */
@@ -105,14 +130,26 @@ public class TurnLimiter {
     public final class Turn implements AutoCloseable {
         private final String userId;
         private final AtomicBoolean closed = new AtomicBoolean();
+        private final Cancellation cancellation = new Cancellation();
+        private volatile long conversationId = -1;
 
         private Turn(String userId) {
             this.userId = userId;
         }
 
+        /** Names the conversation this turn answers, so a cancel can find it. */
+        public void bind(long conversationId) {
+            this.conversationId = conversationId;
+        }
+
+        public Cancellation cancellation() {
+            return cancellation;
+        }
+
         @Override
         public void close() {
             if (closed.compareAndSet(false, true)) {
+                running.remove(userId, this);
                 places.release();
                 answering.remove(userId);
             }

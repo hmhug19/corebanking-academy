@@ -30,6 +30,7 @@ import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.agent.ToolRegistry;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
+import vn.com.coreacademy.assistant.config.AssistantBudget;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
 import vn.com.coreacademy.assistant.skill.Skill;
@@ -112,7 +113,7 @@ class AgentServiceTest {
         when(provider.orderedStream()).thenAnswer(invocation -> tools.stream());
         return new AgentService(ollama, auth, new ToolRegistry(provider), properties, limiter, conversations, json,
             new AssistantMetrics(meters), new SkillSelector(ollama, skills, AssistantModels.defaults()), skills,
-            AssistantModels.defaults(), lessonAccess);
+            AssistantModels.defaults(), lessonAccess, AssistantBudget.defaults());
     }
 
     /** A tool that records the context it saw and delegates to {@code behaviour}. */
@@ -178,7 +179,7 @@ class AgentServiceTest {
             int index = Math.min(call[0]++, turns.size() - 1);
             deltaPerCall.get(index).forEach(onDelta);
             return turns.get(index);
-        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
     }
 
     /** The events after the opening {@code conversation} line, which has its own tests. */
@@ -217,7 +218,104 @@ class AgentServiceTest {
         assertThat(events.get(0).path("text").asText()).isEqualTo("Xin ");
         assertThat(events.get(2).path("answer").asText()).isEqualTo("Xin chào");
         assertThat(events.get(2).path("citations").size()).isZero();
-        verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any(), any());
+    }
+
+    @Test
+    void aTurnCancelledWhileTheModelAnswersIsStoredAsStoppedWithoutAnErrorEvent() throws IOException {
+        doAnswer(invocation -> {
+            throw new vn.com.coreacademy.knowledge.ai.TurnCancelledException();
+        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
+
+        List<JsonNode> events = events(ask("Xin chào"));
+
+        assertThat(types(events)).isEmpty();
+        assertThat(conversations.recorded.get(0).status()).isEqualTo(TurnRecord.Status.STOPPED);
+    }
+
+    @Test
+    void theTokenCountsOfEachModelCallAreRecordedAndACallNearNumCtxIsCounted() throws IOException {
+        doAnswer(invocation -> new ChatTurn("ok", List.of(), new vn.com.coreacademy.knowledge.ai.Usage(7500, 40, "stop")))
+            .when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
+
+        events(ask("Xin chào"));
+
+        assertThat(meters.get("assistant.model.prompt_tokens").tag("surface", "agent").summary().totalAmount())
+            .isEqualTo(7500);
+        assertThat(meters.get("assistant.model.answer_tokens").tag("surface", "agent").summary().totalAmount())
+            .isEqualTo(40);
+        assertThat(meters.get("assistant.model.near_context_limit").tag("surface", "agent").counter().count())
+            .isEqualTo(1);
+    }
+
+    @Test
+    void aCallFarFromNumCtxIsNotCountedAsNearTheLimit() throws IOException {
+        doAnswer(invocation -> new ChatTurn("ok", List.of(), new vn.com.coreacademy.knowledge.ai.Usage(3000, 40, "stop")))
+            .when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
+
+        events(ask("Xin chào"));
+
+        assertThat(meters.find("assistant.model.near_context_limit").counter()).isNull();
+    }
+
+    private static vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit secretChunk(long id) {
+        return new vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit(id, 9L, "quy-trinh.pdf", 2,
+            3, 4, "NỘI DUNG BÍ MẬT CỦA ĐOẠN", 0.81);
+    }
+
+    private void searchTool(List<vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit> found) {
+        tool("search_documents", true, true, false, (arguments, turn) -> {
+            var added = turn.chunks().add("search_documents", found);
+            return new ToolOutcome.Result("found " + added.size());
+        });
+    }
+
+    @Test
+    void aStoredTurnCarriesTheRetrievalTraceWithIdsAndNumbersOnly() throws Exception {
+        searchTool(List.of(secretChunk(41), secretChunk(42)));
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("CIF là mã [1].", List.of()));
+
+        events(ask("CIF là gì?"));
+
+        var trace = conversations.lastRecord().retrieval();
+        assertThat(trace).hasSize(1);
+        assertThat(trace.get(0).tool()).isEqualTo("search_documents");
+        assertThat(trace.get(0).candidates()).isEqualTo(2);
+        assertThat(trace.get(0).given()).extracting(TurnRecord.Given::chunkId).containsExactly(41L, 42L);
+        assertThat(trace.get(0).given()).extracting(TurnRecord.Given::rank).containsExactly(1, 2);
+        assertThat(trace.get(0).given().get(0).kind()).isEqualTo("document");
+        assertThat(trace.get(0).given().get(0).similarity()).isEqualTo(0.81);
+        String stored = json.writeValueAsString(trace);
+        assertThat(stored).doesNotContain("BÍ MẬT").doesNotContain("CIF là gì").doesNotContain("CIF là mã");
+        assertThat(meters.get("assistant.retrieval.hits").tag("surface", "agent").summary().totalAmount()).isEqualTo(2);
+        assertThat(meters.get("assistant.retrieval.top_similarity").summary().count()).isEqualTo(1);
+    }
+
+    @Test
+    void aSearchThatFindsNothingIsCountedAndItsNotFoundIsBlamedOnTheRetrieval() throws IOException {
+        searchTool(List.of());
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn(vn.com.coreacademy.knowledge.service.NotFoundAnswer.TEXT, List.of()));
+
+        events(ask("Điều gì đó không có"));
+
+        assertThat(meters.get("assistant.retrieval.empty").counter().count()).isEqualTo(1);
+        assertThat(meters.get("assistant.answers.not_found").tag("cause", "empty_retrieval").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.find("assistant.answers.not_found").tag("cause", "model_said_so").counter()).isNull();
+    }
+
+    @Test
+    void aNotFoundAfterASearchThatFoundChunksIsTheModelsDoing() throws IOException {
+        searchTool(List.of(secretChunk(41)));
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn(vn.com.coreacademy.knowledge.service.NotFoundAnswer.TEXT, List.of()));
+
+        events(ask("CIF là gì?"));
+
+        assertThat(meters.get("assistant.answers.not_found").tag("cause", "model_said_so").counter().count())
+            .isEqualTo(1);
+        assertThat(meters.find("assistant.answers.not_found").tag("cause", "empty_retrieval").counter()).isNull();
     }
 
     private static String conversationOf(List<JsonNode> all) {
@@ -267,7 +365,7 @@ class AgentServiceTest {
         events(service(real).stream("Mở màn hình", null, "dieu_huong"));
 
         ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
-        verify(ollama).chatWithTools(anyList(), offered.capture(), any(), any());
+        verify(ollama).chatWithTools(anyList(), offered.capture(), any(), any(), any());
         assertThat(offered.getValue()).extracting(ToolDefinition::name).containsExactly("open_screen");
     }
 
@@ -324,7 +422,7 @@ class AgentServiceTest {
 
         doAnswer(invocation -> {
             throw new OllamaUnavailableException("down", null);
-        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
         clock.advance(Duration.ofMinutes(1));
         events(ask("Xin chào"));
         assertThat(meters.get("assistant.errors").tag("code", "ASSISTANT-AI_UNAVAILABLE").counter().count())
@@ -372,7 +470,7 @@ class AgentServiceTest {
         assertThat(types(events)).containsExactly("tool", "tool", "tool", "delta", "done");
         assertThat(contexts).hasSize(AgentService.MAX_CALLS_PER_STEP);
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any());
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         List<ChatMessage> second = messages.getAllValues().get(1);
         assertThat(second.get(2).toolCalls()).hasSize(AgentService.MAX_CALLS_PER_STEP);
         assertThat(second).extracting(ChatMessage::role).containsExactly("system", "user", "assistant", "tool", "tool",
@@ -406,7 +504,7 @@ class AgentServiceTest {
 
         assertThat(events.get(0).path("conversationId").asLong()).isEqualTo(id);
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any());
+        verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         assertThat(messages.getValue()).extracting(ChatMessage::role).containsExactly("system", "user", "assistant",
             "user");
         assertThat(messages.getValue().get(1).content()).isEqualTo("CIF là gì?");
@@ -421,12 +519,12 @@ class AgentServiceTest {
         assertThatThrownBy(() -> service().stream("Xin chào", theirs)).isInstanceOf(BusinessException.class)
             .extracting(exception -> ((BusinessException) exception).getResponseCode().getCode())
             .isEqualTo("ASSISTANT-CONVERSATION_NOT_FOUND");
-        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any(), any());
     }
 
     @Test
     void aFailedTurnIsStoredAsErrorWithoutAnAnswer() throws IOException {
-        when(ollama.chatWithTools(anyList(), anyList(), any(), any())).thenThrow(new IllegalStateException("boom"));
+        when(ollama.chatWithTools(anyList(), anyList(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
 
         events(ask("Xin chào"));
 
@@ -441,7 +539,7 @@ class AgentServiceTest {
             modelAnswers(List.of("Đáp án riêng tư 24680"), List.of());
             events(ask("Câu hỏi riêng tư 13579"));
             org.mockito.Mockito.doThrow(new IllegalStateException("Câu hỏi riêng tư 13579")).when(ollama)
-                .chatWithTools(anyList(), anyList(), any(), any());
+                .chatWithTools(anyList(), anyList(), any(), any(), any());
             events(ask("Câu hỏi riêng tư 13579"));
 
             assertThat(logs.lines()).isNotEmpty();
@@ -466,12 +564,12 @@ class AgentServiceTest {
 
         assertThat(types(events)).containsExactly("error");
         assertThat(events.get(0).path("messageCode").asText()).isEqualTo("ASSISTANT-BUSY");
-        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any(), any());
     }
 
     @Test
     void theQuestionAfterTheHourlyLimitEndsRateLimitedWithTheWaitAndWithoutCallingTheModel() throws IOException {
-        when(ollama.chatWithTools(anyList(), anyList(), any(), any())).thenReturn(new ChatTurn("Chào bạn", List.of()));
+        when(ollama.chatWithTools(anyList(), anyList(), any(), any(), any())).thenReturn(new ChatTurn("Chào bạn", List.of()));
         for (int i = 0; i < 3; i++) {
             assertThat(types(events(ask("Xin chào")))).contains("done");
             clock.advance(Duration.ofMinutes(1));
@@ -483,12 +581,12 @@ class AgentServiceTest {
         assertThat(types(events)).containsExactly("error");
         assertThat(events.get(0).path("messageCode").asText()).isEqualTo("ASSISTANT-RATE_LIMITED");
         assertThat(events.get(0).path("message").asText()).isEqualTo("Bạn đã hỏi nhiều, thử lại sau 57 phút.");
-        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any(), any());
     }
 
     @Test
     void aTurnFreesItsPlaceWhenItEndsEvenOnAFailure() throws IOException {
-        when(ollama.chatWithTools(anyList(), anyList(), any(), any())).thenThrow(new IllegalStateException("boom"));
+        when(ollama.chatWithTools(anyList(), anyList(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
 
         events(ask("Xin chào"));
 
@@ -503,6 +601,30 @@ class AgentServiceTest {
 
         assertThat(types(events)).containsExactly("done");
         assertThat(events.get(0).path("answer").asText()).isEqualTo(AgentService.EMPTY_ANSWER);
+    }
+
+    @Test
+    void anUngroundedAnswerEndsWithGroundedFalseAndAGroundedOneLeavesTheFieldOut() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> {
+            turn.finishWith(answer -> new FinishedAnswer(answer, List.of(), false));
+            return new ToolOutcome.Result("[1] tài liệu");
+        });
+        modelAnswers(List.of(), List.of(call("search_documents")), new ChatTurn("CIF là mã.", List.of()));
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        JsonNode done = events.get(events.size() - 1);
+        assertThat(done.path("grounded").asBoolean(true)).isFalse();
+        assertThat(done.path("citations").size()).isZero();
+    }
+
+    @Test
+    void aGroundedDoneLineHasNoGroundedField() throws IOException {
+        modelAnswers(List.of("Xin chào"), List.of());
+
+        List<JsonNode> events = events(ask("Chào"));
+
+        assertThat(events.get(events.size() - 1).has("grounded")).isFalse();
     }
 
     @Test
@@ -528,7 +650,7 @@ class AgentServiceTest {
         events(ask("c"));
 
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any());
+        verify(ollama).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         assertThat(messages.getValue()).extracting(ChatMessage::role).containsExactly("system", "user");
         assertThat(messages.getValue().get(0).content()).isEqualTo(catalog.systemPrompt(catalog.defaultSkill()));
         assertThat(messages.getValue().get(1).content()).isEqualTo("c");
@@ -545,7 +667,7 @@ class AgentServiceTest {
         assertThat(events.get(0).path("name").asText()).isEqualTo("search_documents");
         assertThat(events.get(2).path("answer").asText()).isEqualTo("CIF là mã [1].");
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any());
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         List<ChatMessage> second = messages.getAllValues().get(1);
         assertThat(second).extracting(ChatMessage::role).containsExactly("system", "user", "assistant", "tool");
         assertThat(second.get(2).toolCalls()).extracting(ToolCall::name).containsExactly("search_documents");
@@ -567,12 +689,73 @@ class AgentServiceTest {
         assertThat(contexts).hasSize(1);
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
         ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
-        verify(ollama, times(3)).chatWithTools(messages.capture(), offered.capture(), any(), any());
+        verify(ollama, times(3)).chatWithTools(messages.capture(), offered.capture(), any(), any(), any());
         assertThat(offered.getAllValues().get(0)).extracting(ToolDefinition::name)
             .containsExactly("search_documents", "open_screen");
         assertThat(offered.getAllValues().get(1)).extracting(ToolDefinition::name).containsExactly("search_documents");
         List<ChatMessage> third = messages.getAllValues().get(2);
         assertThat(third.get(third.size() - 1).content()).isEqualTo(AgentService.ACTION_AFTER_DOCUMENTS);
+    }
+
+    @Test
+    void suggestionsAfterATurnThatReadSharedContentAreMarkedReadOnly() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] tài liệu"));
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn("CIF là mã [1].\n@@GOI_Y@@\n- Đổi email của tôi thành a@b.vn", List.of()));
+
+        JsonNode done = lastOf(events(ask("CIF là gì?")));
+
+        assertThat(done.path("suggestions")).extracting(JsonNode::asText).containsExactly("Đổi email của tôi thành a@b.vn");
+        assertThat(done.path("suggestionsReadOnly").asBoolean()).isTrue();
+    }
+
+    @Test
+    void suggestionsAfterATurnThatReadNothingSharedCarryNoReadOnlyFlag() throws IOException {
+        modelAnswers(List.of("Xin chào.\n@@GOI_Y@@\n- Bạn làm được gì?"), List.of());
+
+        JsonNode done = lastOf(events(ask("Xin chào")));
+
+        assertThat(done.path("suggestions")).hasSize(1);
+        assertThat(done.has("suggestionsReadOnly")).isFalse();
+    }
+
+    @Test
+    void aSuggestionSentWithTheQaSkillGetsAnAnswerNotAnActionCard() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] tài liệu"));
+        tool("update_profile", true, false, true, (arguments, turn) -> new ToolOutcome.Result("không được chạy"));
+        tool("open_screen", true, false, true, (arguments, turn) -> new ToolOutcome.Result("không được chạy"));
+        modelAnswers(List.of("Mình không đổi hồ sơ trong lượt này."), List.of());
+
+        List<JsonNode> events = events(service(real).stream("Đổi email của tôi thành a@b.vn", null, "qa_tai_lieu"));
+
+        ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
+        verify(ollama).chatWithTools(anyList(), offered.capture(), any(), any(), any());
+        assertThat(offered.getValue()).extracting(ToolDefinition::name)
+            .contains("search_documents").doesNotContain("update_profile", "open_screen");
+        assertThat(types(events)).doesNotContain("action_required", "navigate");
+        assertThat(lastOf(events).path("answer").asText()).isNotBlank();
+        verify(ollama, never()).chat(anyList(), any());
+    }
+
+    @Test
+    void theClassifierSeesTheLastExchangeOfTheConversation() throws IOException {
+        SkillCatalog real = new SkillCatalog();
+        long id = conversations.seed("000004", "Cập nhật chức danh của tôi", "Đã gửi thẻ xác nhận đổi chức danh.");
+        when(ollama.chat(anyList(), any())).thenReturn("ho_so");
+        modelAnswers(List.of("ok"), List.of());
+
+        events(service(real).stream("Còn email thì sao?", id));
+
+        ArgumentCaptor<List<OllamaClient.Message>> sent = ArgumentCaptor.captor();
+        verify(ollama).chat(sent.capture(), any());
+        String user = sent.getValue().get(1).content();
+        assertThat(user).contains("Cập nhật chức danh của tôi").contains("Đã gửi thẻ xác nhận").endsWith("Còn email thì sao?");
+        assertThat(conversations.lastRecord().skill()).isEqualTo("ho_so");
+    }
+
+    private static JsonNode lastOf(List<JsonNode> events) {
+        return events.get(events.size() - 1);
     }
 
     @Test
@@ -610,7 +793,19 @@ class AgentServiceTest {
         assertThat(events.get(1).path("path").asText()).isEqualTo("/admin/users");
         assertThat(events.get(1).path("title").asText()).isEqualTo("Quản lý người dùng");
         assertThat(events.get(2).path("answer").asText()).isEqualTo("Đã mở trang Quản lý người dùng.");
-        verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any(), any());
+    }
+
+    @Test
+    void aNavigateOutcomeWithPrefillCarriesItOnTheEventAndOneWithoutLeavesItOut() throws IOException {
+        tool("open_screen", true, (arguments, turn) -> new ToolOutcome.Navigate("/admin/courses/new", "Khóa học mới",
+            "Đã mở form.", java.util.Map.of("title", "[TEST-AI] Khóa thử", "chapters", 3)));
+        modelAnswers(List.of(), List.of(call("open_screen")));
+
+        List<JsonNode> events = events(ask("tạo khóa học"));
+
+        assertThat(events.get(1).path("prefill").path("title").asText()).isEqualTo("[TEST-AI] Khóa thử");
+        assertThat(events.get(1).path("prefill").path("chapters").asInt()).isEqualTo(3);
     }
 
     @Test
@@ -632,7 +827,7 @@ class AgentServiceTest {
         assertThat(card.path("expiresAt").asText()).isEqualTo("2026-10-24T09:10:00Z");
         assertThat(card.has("userId")).isFalse();
         assertThat(events.get(2).path("answer").asText()).isEqualTo("Vui lòng kiểm tra và xác nhận thay đổi bên dưới.");
-        verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any(), any());
     }
 
     @Test
@@ -643,7 +838,7 @@ class AgentServiceTest {
 
         assertThat(types(events)).containsExactly("tool", "delta", "done");
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any());
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         ChatMessage result = messages.getAllValues().get(1).get(3);
         assertThat(result.role()).isEqualTo("tool");
         assertThat(result.content()).isEqualTo("Công cụ không tồn tại.");
@@ -658,7 +853,7 @@ class AgentServiceTest {
 
         assertThat(types(events)).containsExactly("tool", "delta", "done");
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any());
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         assertThat(messages.getAllValues().get(1).get(3).content()).isEqualTo("Email không hợp lệ.");
     }
 
@@ -672,7 +867,7 @@ class AgentServiceTest {
 
         assertThat(contexts).isEmpty();
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any());
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         assertThat(messages.getAllValues().get(1).get(3).content()).isEqualTo("Tham số của công cụ không hợp lệ.");
     }
 
@@ -683,7 +878,7 @@ class AgentServiceTest {
 
         List<JsonNode> events = events(ask("CIF là gì?"));
 
-        verify(ollama, times(4)).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, times(4)).chatWithTools(anyList(), anyList(), any(), any(), any());
         JsonNode done = events.get(events.size() - 1);
         assertThat(done.path("type").asText()).isEqualTo("done");
         assertThat(done.path("answer").asText()).isEqualTo(STEP_CAP_SENTENCE);
@@ -700,7 +895,7 @@ class AgentServiceTest {
 
         ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
-        verify(ollama, times(2)).chatWithTools(messages.capture(), offered.capture(), any(), any());
+        verify(ollama, times(2)).chatWithTools(messages.capture(), offered.capture(), any(), any(), any());
         assertThat(offered.getAllValues().get(0)).extracting(ToolDefinition::name).containsExactly("search_documents");
         assertThat(messages.getAllValues().get(1).get(3).content()).isEqualTo("Công cụ không tồn tại.");
         assertThat(contexts).isEmpty();
@@ -760,7 +955,7 @@ class AgentServiceTest {
             Consumer<String> onDelta = invocation.getArgument(3);
             onDelta.accept("Một ");
             throw new OllamaUnavailableException("down", null);
-        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
 
         List<JsonNode> events = events(ask("Xin chào"));
 
@@ -773,7 +968,7 @@ class AgentServiceTest {
     void anOllamaErrorEndsWithTheSameAiUnavailableEvent() throws IOException {
         doAnswer(invocation -> {
             throw new OllamaException("crashed");
-        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+        }).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
 
         List<JsonNode> events = events(ask("Xin chào"));
 
@@ -829,7 +1024,7 @@ class AgentServiceTest {
         assertThatThrownBy(() -> service().stream("Bài này nói gì?", null, null, LESSON))
             .isInstanceOf(BusinessException.class).extracting("responseCode")
             .isEqualTo(AssistantResponseCode.LESSON_NOT_FOUND);
-        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any());
+        verify(ollama, never()).chatWithTools(anyList(), anyList(), any(), any(), any());
         assertThat(conversations.recorded).isEmpty();
     }
 
@@ -846,7 +1041,7 @@ class AgentServiceTest {
         assertThat(conversations.lastOpenedLesson).isEqualTo(FOCUS);
         @SuppressWarnings("unchecked")
         org.mockito.ArgumentCaptor<List<ChatMessage>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
-        verify(ollama, times(2)).chatWithTools(sent.capture(), anyList(), any(), any());
+        verify(ollama, times(2)).chatWithTools(sent.capture(), anyList(), any(), any(), any());
         assertThat(sent.getAllValues().get(0).get(0).content()).contains("«Tín dụng» › «Lãi suất»");
     }
 

@@ -63,7 +63,7 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
             ? new ChatTurn("", List.of(ToolCall.of("open_screen", JSON.createObjectNode()
                 .put("functionCode", "USER_MANAGEMENT"))))
             : new ChatTurn("Bạn không có quyền mở màn hình này.", List.of()))
-            .when(ollama).chatWithTools(anyList(), anyList(), any(), any());
+            .when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
 
         return mvc.perform(post("/api/v1/assistant/agent/stream").with(as(userId))
                 .accept(NDJSON, MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON)
@@ -115,7 +115,7 @@ class AgentOpenScreenIT extends KnowledgeIntegrationTest {
 
         ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
         verify(ollama, atLeastOnce())
-            .chatWithTools(anyList(), offered.capture(), any(), any());
+            .chatWithTools(anyList(), offered.capture(), any(), any(), any());
         ToolDefinition openScreen = offered.getAllValues().get(0).stream()
             .filter(definition -> definition.name().equals("open_screen")).findFirst().orElseThrow();
         assertThat(openScreen.description()).contains("PROFILE").doesNotContain("USER_MANAGEMENT")

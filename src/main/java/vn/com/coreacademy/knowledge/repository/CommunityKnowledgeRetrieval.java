@@ -29,7 +29,7 @@ public class CommunityKnowledgeRetrieval implements KnowledgeSource {
         String userId = SecurityContextUtils.getUserId();
         List<Long> orgs = List.copyOf(access.visibility(userId).orgIdsOrPlaceholder());
         return jdbc.query("""
-            select c.chunk_id,c.document_id,d.file_name,left(c.content,2000),c.page_number,c.line_start,c.line_end,
+            select c.chunk_id,c.document_id,d.title,left(c.content,2000),c.page_number,c.line_start,c.line_end,
               1-(c.embedding <=> cast(? as vector)) similarity
             from learning_hub.knowledge_document_chunks c join learning_hub.knowledge_documents d
               on d.document_id=c.document_id where d.status='ready'
@@ -47,7 +47,7 @@ public class CommunityKnowledgeRetrieval implements KnowledgeSource {
         String userId = SecurityContextUtils.getUserId();
         List<Long> orgs = List.copyOf(access.visibility(userId).orgIdsOrPlaceholder());
         var result = jdbc.query("""
-            select c.chunk_id,c.document_id,d.file_name,left(c.content,2000),c.page_number,c.line_start,c.line_end
+            select c.chunk_id,c.document_id,d.title,left(c.content,2000),c.page_number,c.line_start,c.line_end
             from learning_hub.knowledge_document_chunks c join learning_hub.knowledge_documents d
               on d.document_id=c.document_id where d.status='ready' and c.chunk_id=?
                 and c.document_id=coalesce(cast(? as bigint),c.document_id)

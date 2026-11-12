@@ -19,11 +19,27 @@ import vn.com.coreacademy.identity.service.LearningIdentityService;
 @RequiredArgsConstructor
 public class CommunityAssistantAdapter {
     private static final int MAX_RESULTS = 5;
+    private static final int SNIPPET_CHARS = 200;
     private final LearningIdentityService identity;
     private final ContentRepository contents;
     private final CommunityRepository repository;
 
-    public record Source(Long contentId, Long revisionId, String title, String url) {
+    /** One readable post; {@code snippet} is a short plain-text lead, for the model only, never shown as a link. */
+    public record Source(Long contentId, Long revisionId, String title, String url, String snippet) {
+        public Source(Long contentId, Long revisionId, String title, String url) {
+            this(contentId, revisionId, title, url, "");
+        }
+    }
+
+    private static String snippetOf(ContentRevision revision) {
+        String text = revision.getSummary() != null && !revision.getSummary().isBlank() ? revision.getSummary()
+            : revision.getBodyMarkdown();
+        if (text == null) {
+            return "";
+        }
+        String flat = text.strip().replaceAll("\\s+", " ");
+
+        return flat.length() <= SNIPPET_CHARS ? flat : flat.substring(0, SNIPPET_CHARS).strip() + "…";
     }
 
     public List<Source> search(String trustedUserId, String query) {
@@ -38,7 +54,8 @@ public class CommunityAssistantAdapter {
         return contents.search(input, actor.person().id(), actor.person().orgId()).stream().map(content -> {
             var revision = repository.require(ContentRevision.class, content.getCurrentPublishedRevisionId());
             return new Source(content.getContentId(), revision.getRevisionId(), revision.getTitle(),
-                "/community/contents/" + content.getContentId() + "?revisionId=" + revision.getRevisionId());
+                "/community/contents/" + content.getContentId() + "?revisionId=" + revision.getRevisionId(),
+                snippetOf(revision));
         }).toList();
     }
 

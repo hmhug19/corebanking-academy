@@ -13,6 +13,10 @@ import org.springframework.data.repository.query.Param;
 public interface ConversationRepository extends JpaRepository<AssistantConversation, Long> {
     Optional<AssistantConversation> findByIdAndOwnerId(Long id, String ownerId);
 
+    /** The caller's most recently used conversation that was opened from this lesson. */
+    Optional<AssistantConversation> findFirstByOwnerIdAndContextLessonIdOrderByLastActivityTimeDesc(String ownerId,
+                                                                                                  Long lessonId);
+
     boolean existsByIdAndOwnerId(Long id, String ownerId);
 
     Page<AssistantConversation> findByOwnerId(String ownerId, Pageable pageable);

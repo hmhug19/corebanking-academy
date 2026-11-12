@@ -2,4 +2,4 @@ description: tóm tắt bài học người dùng đang xem (chỉ khi đang m�
 tools:
   - read_lesson
 roles: []
-output: Tóm tắt 3–6 ý chính của bài, mỗi ý có số đoạn nguồn [n].
+output: Tóm tắt 3–6 ý chính của bài, mỗi ý có số đoạn nguồn [n]. Bắt buộc gọi công cụ đọc bài học trước khi tóm tắt; không bao giờ viết việc gọi công cụ thành câu trả lời.

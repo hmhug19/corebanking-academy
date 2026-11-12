@@ -40,6 +40,14 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5h | `upgrade/2026-11-13-course-revision-ai-generated.sql` | Cờ ai_generated trên revision khóa học (nội dung do AI tạo); chạy trước backend mới |
 | 5i | `upgrade/2026-11-14-course-revision-review-confirmed.sql` | Người và thời điểm xác nhận đã rà soát khi xuất bản bản do AI tạo; chạy trước backend mới |
 | 5j | `upgrade/2026-11-15-course-job-soft-delete.sql` | Đánh dấu job tạo khóa học bằng AI đã xóa thay vì xóa dòng, để hạn mức trong ngày vẫn tính (cột deleted_at). |
+| 5k | `upgrade/2026-11-16-assistant-retrieval-trace.sql` | Cột `retrieval_trace` của lượt hỏi đáp (dấu vết truy xuất, chỉ ID và số); chạy trước backend mới |
+| 5l | `upgrade/2026-11-16-knowledge-document-course-source-scope.sql` | Phạm vi tài liệu `course_source` cho tệp nguồn của job tạo khóa học; chạy trước backend mới |
+| 5m | `upgrade/2026-11-17-course-job-owns-course.sql` | Job tạo khóa học sở hữu khóa nháp (`course_id`, `revision_id`), trạng thái `stopped`, `course_lessons.ai_state`; chạy trước backend mới |
+| 5n | `upgrade/2026-11-18-course-index-coverage.sql` | Chỉ mục khóa học: trang PDF của đoạn, trạng thái `done/retry/failed` với số lần thử; chạy trước backend mới |
+| 5o | `upgrade/2026-11-19-chunker-v2-columns.sql` | Đoạn tài liệu và đoạn khóa học có `section_path`, `content_hash`, `chunker_version`, `embed_model` (lập chỉ mục lại sau khi đổi bộ tách đoạn hoặc mô hình nhúng); chạy trước backend mới |
+| 5p | `upgrade/2026-11-20-document-title-checksum-replace.sql` | Tài liệu có `title` (đổi tên được), `checksum_sha256` (chặn tải trùng) và cột `replacement_*` cho tệp thay thế đang chờ; chạy trước backend mới |
+| 5q | `upgrade/2026-11-21-assistant-feedback-review.sql` | Bản sao lượt hỏi đáp kèm 👎 khi người dùng đồng ý chia sẻ (cột `shared_*` của `assistant_feedback`) và chức năng `AI_FEEDBACK_REVIEW` (không cấp cho vai trò nào); chạy trước backend mới |
+| 5r | `upgrade/2026-11-22-system-audit-route.sql` | Chức năng `SYSTEM_AUDIT` trỏ tới `/admin/gamification`, màn mà menu "Hệ thống & nhật ký" thực sự mở (trước đó seed ghi `/admin/system`, màn giữ chỗ). Chỉ đổi dòng còn giá trị seed cũ; chạy lại an toàn. Rollback: `upgrade/2026-11-22-system-audit-route.rollback.sql` |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |
@@ -402,7 +410,7 @@ Nguồn SQL duy nhất: [learning_hub_identity.sql](learning_hub_identity.sql), 
 ## Nội dung
 
 - 8 bảng: orgs, teams, users, roles, functions, role_functions, user_roles, audit_log; kèm comment cho từng bảng/cột và 12 index.
-- 5 vai trò: SUPER_ADMIN, ADMIN, LEARNER, INSTRUCTOR, REPORT_VIEWER; 17 chức năng (gồm AI_ASSISTANT, route /assistant, cấp cho mọi vai trò) và mapping màn hình hiện có. Danh mục màn hình không có nghĩa backend đã triển khai API khóa học/thi/báo cáo.
+- 5 vai trò: SUPER_ADMIN, ADMIN, LEARNER, INSTRUCTOR, REPORT_VIEWER; 19 chức năng (gồm AI_ASSISTANT, route /assistant, cấp cho mọi vai trò; AI_FEEDBACK_REVIEW không cấp cho vai trò nào, người vận hành cấp tay cho người xem phản hồi) và mapping màn hình hiện có. Danh mục màn hình không có nghĩa backend đã triển khai API khóa học/thi/báo cáo.
 - Một tổ chức gốc trong phạm vi demo: BIDV110B803 — Ban Quản lý và phát triển Core Banking (UNIT). 15 nhóm/bộ phận giữ nguyên mã và tên từ dữ liệu nguồn; gồm Ban Giám đốc, BA&QC, phát triển Core/Kênh, tích hợp, quản trị và hỗ trợ. Không tạo phòng trung gian hoặc node cha ngoài phạm vi; HO/WORK_LOGIC là loại nguồn, không thay trực tiếp org_type nội bộ.
 - 7 tài khoản LOCAL, 8 phân quyền theo đúng cặp role/scope và một audit khởi tạo. ID số tự tăng được database sinh; dữ liệu tham chiếu bằng mã, không cần chỉnh sequence.
 - Không có FOREIGN KEY vật lý. Service kiểm tra quan hệ logic, cây active, org/team và scope. users.must_change_password đã nằm trong schema; không cần nâng cột sau tạo.

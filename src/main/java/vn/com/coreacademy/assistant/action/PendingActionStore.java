@@ -31,6 +31,10 @@ public class PendingActionStore {
     public static final String CONFIRMED = "CONFIRMED";
     public static final String CANCELLED = "CANCELLED";
     public static final String FAILED = "FAILED";
+    /** What a cancelled card says when its conversation is reopened. */
+    public static final String CANCELLED_MESSAGE = "Đã huỷ thay đổi";
+    /** What a card nobody answered in time says when its conversation is reopened. */
+    public static final String EXPIRED_MESSAGE = "Đề xuất đã hết hạn";
 
     private static final int MAX_PER_USER = 20;
     private static final int MAX_MESSAGE = 500;
@@ -74,7 +78,9 @@ public class PendingActionStore {
         long excess = actions.countLive(userId, now) - MAX_PER_USER;
         if (excess > 0) {
             for (AssistantPendingAction oldest : actions.live(userId, now, PageRequest.of(0, (int) excess))) {
-                actions.answer(oldest.getId(), userId, CANCELLED, now);
+                if (actions.answer(oldest.getId(), userId, CANCELLED, now) == 1) {
+                    actions.setMessage(oldest.getId(), CANCELLED_MESSAGE);
+                }
             }
         }
 
@@ -105,6 +111,7 @@ public class PendingActionStore {
         if (actions.answer(id, actorId, CANCELLED, clock.instant()) != 1) {
             throw new BusinessException(AssistantResponseCode.ACTION_NOT_FOUND);
         }
+        actions.setMessage(id, CANCELLED_MESSAGE);
     }
 
     /** What the user was told after a confirmed action ran, shown again when the conversation is reopened. */

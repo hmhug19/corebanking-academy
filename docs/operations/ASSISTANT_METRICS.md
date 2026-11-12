@@ -36,9 +36,17 @@ curl -s "http://127.0.0.1:8020/actuator/metrics/assistant.turn.duration?tag=surf
 | `assistant.turn.duration` | Timer | `surface` (`agent`/`knowledge`), `status` (`done`/`error`/`stopped`) | Một lượt dài bao lâu, và bao nhiêu lượt lỗi hoặc bị dừng |
 | `assistant.turn.first_token` | Timer | `surface` | Từ lúc hỏi đến khi có chữ đầu tiên. Tăng cao: mô hình nghẽn hoặc nạp lại |
 | `assistant.turn.steps` | Summary | `surface` | Số lần gọi mô hình trong một lượt của trợ lý nhanh. Gần `max-steps`: mô hình lặp công cụ |
+| `assistant.model.prompt_tokens` | Summary | `surface` | Số token prompt Ollama báo cho mỗi lần gọi mô hình (`prompt_eval_count`) |
+| `assistant.model.answer_tokens` | Summary | `surface` | Số token câu trả lời (`eval_count`) |
+| `assistant.model.near_context_limit` | Counter | `surface` | Số lần gọi có prompt vượt 90% `app.assistant.budget.num-ctx`; Ollama cắt prompt quá dài mà không báo |
+| `assistant.retrieval.hits` | Summary | `surface`, `tool` | Số ứng viên một lần tìm trả về |
+| `assistant.retrieval.top_similarity` | Summary (histogram 0.3–0.9) | `surface`, `tool` | Độ tương đồng của đoạn tốt nhất đưa cho mô hình, mỗi lần tìm |
+| `assistant.retrieval.empty` | Counter | `surface`, `tool` | Số lần tìm không trả về gì |
+| `assistant.retrieval.embed` | Timer | | Thời gian một lần gọi embed |
 | `assistant.tool.calls` | Counter | `tool` (tên công cụ; `unknown` cho tên mô hình bịa) | Công cụ nào được gọi |
 | `assistant.skill.turns` | Counter | `skill` | Lượt theo skill (`qa_tai_lieu`, `dieu_huong`, `ho_so`, `tro_chuyen`) |
-| `assistant.answers.not_found` | Counter | `surface` | Câu trả lời "không tìm thấy trong tài liệu". Tỉ lệ so với số lượt cho biết kho tài liệu có thiếu |
+| `assistant.answers.not_found` | Counter | `surface`, `cause` (`empty_retrieval` = tìm không ra đoạn nào, `model_said_so` = mô hình tự nói không có) | Câu trả lời "không tìm thấy trong tài liệu". Tỉ lệ so với số lượt cho biết kho tài liệu có thiếu |
+| `assistant.citations.checked` / `assistant.citations.removed` | Counter | `surface` | Số dấu [n] được đối chiếu với đoạn trích dẫn và số dấu bị gỡ vì đoạn không nâng đỡ câu. Độ chính xác trích dẫn = 1 - removed / checked |
 | `assistant.errors` | Counter | `surface`, `code` | Lượt kết thúc bằng lỗi, theo mã (`ASSISTANT-AI_UNAVAILABLE`, `CORE-INTERNAL_ERROR`…) |
 | `assistant.refusals` | Counter | `surface`, `reason` (`rate_limited`/`busy`) | Câu hỏi bị từ chối trước khi chạy |
 | `assistant.feedback` | Counter | `surface`, `helpful` (`true`/`false`), `reason` (mã lý do hoặc `none`) | 👍/👎 và lý do. Mỗi lần người dùng gửi hoặc sửa đánh giá đếm một lần |

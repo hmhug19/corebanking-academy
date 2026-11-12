@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "note": "Bộ vàng truy hồi do đội phát triển soạn; chưa được nghiệp vụ duyệt nên kết quả chỉ mang tính tham khảo (trừ rò quyền xem: luôn làm eval fail). Mỗi ca nêu tài liệu và marker của mục phải xuất hiện trong top k. `previous` là câu hỏi liền trước của ca follow_up.",
+  "cases": [
+    {"id": "P01", "group": "plain", "user": "000004", "question": "Mở tài khoản cá nhân thì khách phải đủ bao nhiêu tuổi?", "expect": {"doc": "mo-tai-khoan", "marker": "đủ 18 tuổi"}},
+    {"id": "P02", "group": "plain", "user": "000004", "question": "Hồ sơ mở tài khoản gồm những giấy tờ gì?", "expect": {"doc": "mo-tai-khoan", "marker": "mẫu đăng ký chữ ký"}},
+    {"id": "P03", "group": "plain", "user": "000004", "question": "Số tiền tối thiểu khi mở tài khoản thanh toán là bao nhiêu?", "expect": {"doc": "mo-tai-khoan", "marker": "50.000 đồng"}},
+    {"id": "P04", "group": "plain", "user": "000004", "question": "Hồ sơ mở tài khoản tại quầy được xử lý trong bao lâu?", "expect": {"doc": "mo-tai-khoan", "marker": "30 phút làm việc"}},
+    {"id": "P05", "group": "plain", "user": "000004", "question": "Khách hàng nước ngoài cần giấy tờ gì để mở tài khoản?", "expect": {"doc": "mo-tai-khoan", "marker": "đủ 18 tuổi"}},
+    {"id": "P06", "group": "plain", "user": "000004", "question": "Chuyển tiền liên ngân hàng qua Internet Banking mất phí bao nhiêu?", "expect": {"doc": "bieu-phi", "marker": "0,02% giá trị giao dịch"}},
+    {"id": "P07", "group": "plain", "user": "000004", "question": "Phí thường niên của thẻ ghi nợ nội địa?", "expect": {"doc": "bieu-phi", "marker": "thẻ ghi nợ nội địa là 100.000 đồng"}},
+    {"id": "P08", "group": "plain", "user": "000004", "question": "Rút tiền ở ATM ngân hàng khác bị thu phí thế nào?", "expect": {"doc": "bieu-phi", "marker": "ATM của ngân hàng khác là 3.300 đồng"}},
+    {"id": "P09", "group": "plain", "user": "000004", "question": "Quên mã PIN thì cấp lại mất bao nhiêu tiền?", "expect": {"doc": "bieu-phi", "marker": "cấp lại mã PIN là 30.000 đồng"}},
+    {"id": "P10", "group": "plain", "user": "000004", "question": "Khi nào phải dùng bút toán thủ công thay vì để hệ thống tự hạch toán?", "expect": {"doc": "huong-dan-gl", "marker": "chức năng GL-101"}},
+    {"id": "P11", "group": "plain", "user": "000004", "question": "Các bước ghi một bút toán thủ công trong sổ cái?", "expect": {"doc": "huong-dan-gl", "marker": "chức năng GL-101"}},
+    {"id": "P12", "group": "plain", "user": "000004", "question": "Muốn đảo một bút toán đã duyệt thì làm thế nào?", "expect": {"doc": "huong-dan-gl", "marker": "chức năng GL-205"}},
+    {"id": "P13", "group": "plain", "user": "000004", "question": "Khách cá nhân được vay tối đa bao nhiêu?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "hạn mức cho vay tối đa là 5 tỷ đồng"}},
+    {"id": "P14", "group": "plain", "user": "000004", "question": "Cho vay có thế chấp nhà thì tối đa bao nhiêu phần trăm giá trị nhà?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "không vượt quá 70% giá trị định giá"}},
+    {"id": "P15", "group": "plain", "user": "000004", "question": "Khoản vay bị chuyển nhóm nợ thì phải làm gì trong bao lâu?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "nợ nhóm 2 trở lên"}},
+    {"id": "P16", "group": "plain", "user": "000004", "question": "Phòng giao dịch U1 làm việc mấy giờ?", "expect": {"doc": "quy-che-u1", "marker": "giờ giao dịch của phòng U1"}},
+
+    {"id": "C01", "group": "codes", "user": "000004", "question": "GL-101 dùng để làm gì?", "expect": {"doc": "huong-dan-gl", "marker": "chức năng GL-101"}},
+    {"id": "C02", "group": "codes", "user": "000004", "question": "GL-205", "expect": {"doc": "huong-dan-gl", "marker": "chức năng GL-205"}},
+    {"id": "C03", "group": "codes", "user": "000004", "question": "Chức năng GL-310 in báo cáo gì?", "expect": {"doc": "huong-dan-gl", "marker": "chức năng GL-310"}},
+    {"id": "C04", "group": "codes", "user": "000004", "question": "Mã loại ADJ nghĩa là gì?", "expect": {"doc": "huong-dan-gl", "marker": "ADJ là bút toán điều chỉnh"}},
+    {"id": "C05", "group": "codes", "user": "000004", "question": "Bút toán REV khác ACC thế nào?", "expect": {"doc": "huong-dan-gl", "marker": "ADJ là bút toán điều chỉnh"}},
+    {"id": "C06", "group": "codes", "user": "000004", "question": "Điều 12 quy định gì?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "không vượt quá 70% giá trị định giá"}},
+    {"id": "C07", "group": "codes", "user": "000004", "question": "Điều 18 nói về việc gì?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "nợ nhóm 2 trở lên"}},
+    {"id": "C08", "group": "codes", "user": "000004", "question": "LTV tối đa là bao nhiêu?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "không vượt quá 70% giá trị định giá"}},
+    {"id": "C09", "group": "codes", "user": "000004", "question": "Khi nào cần tra cứu CIC?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "nợ nhóm 2 trở lên"}},
+    {"id": "C10", "group": "codes", "user": "000004", "question": "Điều 21 ai được phê duyệt khoản vay 2 tỷ?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "phó giám đốc chi nhánh phê duyệt khoản vay đến 2 tỷ đồng"}},
+
+    {"id": "F01", "group": "follow_up", "user": "000004", "previous": "Hồ sơ mở tài khoản gồm những giấy tờ gì?", "question": "Còn thời gian xử lý thì sao?", "expect": {"doc": "mo-tai-khoan", "marker": "30 phút làm việc"}},
+    {"id": "F02", "group": "follow_up", "user": "000004", "previous": "Phí rút tiền ATM ngân hàng khác là bao nhiêu?", "question": "Còn cấp lại mã PIN?", "expect": {"doc": "bieu-phi", "marker": "cấp lại mã PIN là 30.000 đồng"}},
+    {"id": "F03", "group": "follow_up", "user": "000004", "previous": "GL-101 dùng để làm gì?", "question": "Còn đảo bút toán thì dùng chức năng nào?", "expect": {"doc": "huong-dan-gl", "marker": "chức năng GL-205"}},
+    {"id": "F04", "group": "follow_up", "user": "000004", "previous": "Hạn mức cho vay cá nhân là bao nhiêu?", "question": "Ai phê duyệt khoản đó?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "phó giám đốc chi nhánh phê duyệt khoản vay đến 2 tỷ đồng"}},
+    {"id": "F05", "group": "follow_up", "user": "000004", "previous": "Cho vay thế chấp bất động sản thì LTV bao nhiêu?", "question": "Định giá có hiệu lực bao lâu?", "expect": {"doc": "chinh-sach-tin-dung", "marker": "không vượt quá 70% giá trị định giá"}},
+    {"id": "F06", "group": "follow_up", "user": "000004", "previous": "Phòng U1 làm việc mấy giờ?", "question": "Còn quy định về két sắt?", "expect": {"doc": "quy-che-u1", "marker": "chìa két sắt do hai người giữ"}},
+
+    {"id": "E01", "group": "empty", "user": "000004", "question": "Lãi suất tiết kiệm kỳ hạn 12 tháng hiện nay là bao nhiêu?"},
+    {"id": "E02", "group": "empty", "user": "000004", "question": "Quy trình đóng cửa chi nhánh khi có hỏa hoạn?"},
+    {"id": "E03", "group": "empty", "user": "000004", "question": "Chính sách nghỉ phép năm của nhân viên?"},
+    {"id": "E04", "group": "empty", "user": "000004", "question": "Cách cài đặt ứng dụng Mobile Banking trên điện thoại?"},
+
+    {"id": "X01", "group": "permission", "user": "000004", "question": "Lịch trực ngày 28 tháng 12 của tôi là gì?", "forbidden": "ghi-chu-ca-nhan"},
+    {"id": "X02", "group": "permission", "user": "000009", "question": "Giờ giao dịch của phòng U1?", "forbidden": "quy-che-u1"},
+    {"id": "X03", "group": "permission", "user": "000005", "question": "Tôi phải nộp báo cáo kiểm kê quỹ khi nào?", "expect": {"doc": "ghi-chu-ca-nhan", "marker": "nộp báo cáo kiểm kê quỹ"}},
+    {"id": "X04", "group": "permission", "user": "000009", "question": "Chìa két sắt do ai giữ?", "forbidden": "quy-che-u1"}
+  ]
+}

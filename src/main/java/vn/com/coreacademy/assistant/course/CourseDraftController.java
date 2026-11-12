@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.RestController;
 import vn.com.coreacademy.assistant.agent.AssistantGate;
 import vn.com.coreacademy.assistant.course.CourseJobViews.ContentView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.DecisionRequest;
-import vn.com.coreacademy.assistant.course.CourseJobViews.JobView;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.web.StandardApiErrors;
 
@@ -74,12 +73,4 @@ public class CourseDraftController {
         return BaseResponse.ok(drafts.retry(jobId));
     }
 
-    @PostMapping("/draft")
-    @Operation(summary = "Tạo khóa học nháp",
-        description = "Cần dàn ý đã duyệt và mọi bài học xong. Khóa học luôn ở trạng thái nháp, đánh dấu do AI tạo; "
-            + "chỉ câu hỏi đã chấp nhận được ghi vào ngân hàng câu hỏi. Gọi lại trả cùng bản nháp.")
-    public BaseResponse<JobView> draft(@PathVariable @Positive long jobId) {
-        gate.requireAccess();
-        return BaseResponse.ok(drafts.createDraft(jobId));
-    }
 }

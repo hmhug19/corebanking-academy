@@ -4,6 +4,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(KnowledgeProperties.class)
+@EnableConfigurationProperties({KnowledgeProperties.class, ExtractionLimits.class})
 public class KnowledgeConfig {
 }

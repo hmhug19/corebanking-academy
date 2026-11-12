@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import vn.com.coreacademy.assistant.dto.PendingActionView;
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
@@ -50,7 +51,10 @@ public final class ConversationViews {
         ActionState action,
         @Schema(description = "Đánh giá của người dùng cho lượt; null nếu chưa đánh giá.") FeedbackView feedback,
         @Schema(description = "done, error hoặc stopped.") String status,
-        Instant createTime) {
+        Instant createTime,
+        @Schema(description = "false khi câu trả lời dùng tài liệu nhưng không ghi nguồn [n] nào (hiện nhãn "
+            + "\"Chưa có nguồn\"); không có trường nghĩa là bình thường.")
+        @JsonInclude(JsonInclude.Include.NON_NULL) Boolean grounded) {
     }
 
     @Schema(description = "Thay đổi dữ liệu mà một lượt đã đề xuất, với trạng thái hiện tại.")
@@ -71,11 +75,30 @@ public final class ConversationViews {
         @Schema(description = "true = hữu ích (👍), false = chưa tốt (👎).") boolean helpful,
         @Schema(description = "Chỉ khi helpful=false: irrelevant, incorrect, outdated, missing_source hoặc other.")
         String reasonCode,
-        @Schema(description = "Ghi chú tuỳ chọn, tối đa 2000 ký tự.") String note) {
+        @Schema(description = "Ghi chú tuỳ chọn, tối đa 2000 ký tự.") String note,
+        @Schema(description = "Chỉ khi helpful=false: true = gửi kèm câu hỏi và câu trả lời của lượt cho đội phát triển. "
+            + "Mặc định false; bỏ tick (gửi lại false) thì bản sao bị xoá.") Boolean share) {
     }
 
     @Schema(description = "Đánh giá đã lưu của một lượt.")
-    public record FeedbackView(boolean helpful, String reasonCode, String note) {
+    public record FeedbackView(boolean helpful, String reasonCode, String note,
+        @Schema(description = "true khi bản sao của lượt đang được chia sẻ cho đội phát triển.") boolean shared) {
+    }
+
+    @Schema(description = "Một lượt 👎 mà người dùng đồng ý chia sẻ cho đội phát triển: chỉ bản sao của lượt đó. "
+        + "Không có id hội thoại hay người dùng.")
+    public record SharedFeedbackView(
+        @Schema(description = "Id lượt được đánh giá (không mở được hội thoại).") long id,
+        Instant sharedTime,
+        String reasonCode,
+        String note,
+        String skill,
+        String promptVersion,
+        String question,
+        String answer,
+        @Schema(description = "Trích dẫn của lượt.") JsonNode citations,
+        @Schema(description = "Dấu vết truy xuất của lượt: mỗi lần tìm gồm công cụ, số ứng viên, các đoạn (loại, id, "
+            + "hạng, độ tương đồng). Chỉ ID và số.") JsonNode retrievalTrace) {
     }
 
     @Schema(description = "Đổi tên hội thoại.")

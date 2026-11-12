@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.config.AssistantModels;
+import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 
 /**
@@ -19,26 +20,40 @@ import vn.com.coreacademy.knowledge.ai.OllamaClient;
 @Component
 @RequiredArgsConstructor
 public class SkillSelector {
+    public static final String LESSON_SKILL = "hoi_bai_hoc";
     private static final Pattern LABEL = Pattern.compile("[a-z_]+");
 
     private final OllamaClient ollama;
     private final SkillCatalog catalog;
     private final AssistantModels models;
 
+    /** The last exchange is cut to this many characters of answer; the classifier needs the topic, not the text. */
+    public static final int ANSWER_CUT = 300;
+
     public Skill select(String requested, String question, AgentContext context) {
+        return select(requested, question, context, null);
+    }
+
+    /**
+     * {@code last} is the previous exchange of the conversation (null for a first question): a follow-up such as
+     * "còn trường hợp kia?" is classified with the topic of the turn before it.
+     */
+    public Skill select(String requested, String question, AgentContext context, Conversations.Exchange last) {
         Skill named = catalog.find(requested).filter(skill -> offered(skill, context)).orElse(null);
         if (named != null) {
             return named;
         }
         if (context.lesson() != null) {
-            // Asked from a lesson page: the question is about that lesson, so no classifier call is needed.
-            return catalog.defaultSkill();
+            // Asked from a lesson page: the question is about that lesson, so no classifier call is needed; the
+            // lesson skill reads the lesson itself first.
+            return catalog.find(LESSON_SKILL).orElse(catalog.defaultSkill());
         }
 
         List<Skill> allowed = catalog.all().stream().filter(skill -> offered(skill, context)).toList();
         try {
             String reply = ollama.chat(List.of(
-                OllamaClient.Message.system(prompt(allowed)), OllamaClient.Message.user(question)),
+                OllamaClient.Message.system(prompt(allowed)),
+                OllamaClient.Message.user(classifierInput(question, last))),
                 models.classifierOptions());
             if (reply != null) {
                 Matcher matcher = LABEL.matcher(reply.toLowerCase());
@@ -56,6 +71,20 @@ public class SkillSelector {
         }
 
         return catalog.defaultSkill();
+    }
+
+    static String classifierInput(String question, Conversations.Exchange last) {
+        if (last == null || last.question() == null) {
+            return question;
+        }
+        String answer = last.answer() == null ? "" : last.answer().replaceAll("\\s+", " ").strip();
+        if (answer.length() > ANSWER_CUT) {
+            answer = answer.substring(0, ANSWER_CUT) + "…";
+        }
+
+        return "Lượt trước, người dùng hỏi: " + last.question().replaceAll("\\s+", " ").strip()
+            + "\nTrợ lý trả lời: " + answer + "\nCâu hỏi mới (chọn kỹ năng cho câu này, dựa vào lượt trước nếu câu "
+            + "mới là hỏi tiếp): " + question;
     }
 
     /** The user's role allows it, and a skill that reads the open lesson needs a lesson to be open. */

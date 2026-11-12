@@ -85,10 +85,10 @@ class QuizExplainIT extends AssessmentIntegrationTest {
             // Stubbing again calls the earlier answer once, with no arguments.
             Consumer<String> onDelta = invocation.getArgument(3);
             if (onDelta != null) {
-                onDelta.accept("Bạn chọn sai, đáp án đúng là A ");
-                onDelta.accept("vì lãi suất là chi phí vay [1].");
+                onDelta.accept("Bạn chọn sai, đáp án đúng là A. ");
+                onDelta.accept("Nội dung bài học [1].");
             }
-            return new ChatTurn("Bạn chọn sai, đáp án đúng là A vì lãi suất là chi phí vay [1].", List.of());
+            return new ChatTurn("Bạn chọn sai, đáp án đúng là A. Nội dung bài học [1].", List.of());
         });
     }
 
