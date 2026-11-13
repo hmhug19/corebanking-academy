@@ -55,6 +55,14 @@ public final class LearningDetails {
                                      List<LearningViews.RecipientTargetSourceView> sources) {
     }
 
+    public record RevisionChangePreview(Long enrollmentId, Long expectedVersion, Long currentRevisionId,
+                                        int currentRevisionNo, Long targetRevisionId, Integer targetRevisionNo,
+                                        String learningStatus, int activeObligations, String impactToken, boolean canTransfer,
+                                        boolean canRelearn, String blockReason) { }
+
+    public record RevisionChangeResult(Long previousEnrollmentId, Long enrollmentId, Long assignmentId,
+                                       Long revisionId) { }
+
     public record GroupDetail(LearningViews.LearningGroupView group,
                               List<LearningViews.LearningGroupMemberView> members) {
     }

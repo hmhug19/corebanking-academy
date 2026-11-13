@@ -70,8 +70,9 @@ public class QuizAttemptService {
     public AssessmentViews.QuizIntro intro(Long quizId) {
         Quiz quiz = visibleQuiz(quizId);
         StudyingLearner learner = learning.requireStudyingLearner(quiz.getCourseId());
+        requireRevisionExam(quiz, learner);
         Instant now = ServerTime.now();
-        List<QuizAttempt> attempts = repository.attempts(quizId, learner.userId());
+        List<QuizAttempt> attempts = repository.enrollmentAttempts(quizId, learner.userId(), learner.enrollmentId());
         AttemptSummary summary = AttemptSummaries.summarize(quiz, attempts,
             repository.grantedAttempts(quizId, learner.userId()), now);
         Block block = summary.runningAttemptId() != null ? null : block(quiz, summary, learner, now);
@@ -89,10 +90,12 @@ public class QuizAttemptService {
         StudyingLearner learner = learning.requireStudyingLearner(courseId);
         Instant now = ServerTime.now();
         Map<Long, Long> lessons = learning.quizLessonIds(learner.revisionId());
+        Long finalQuizId = learning.finalQuizId(learner.revisionId());
         return repository.publishedQuizzes(courseId).stream()
+            .filter(q -> !QuizType.FINAL_EXAM.equals(q.getQuizType()) || finalQuizId == null || finalQuizId.equals(q.getId()))
             .sorted(Comparator.comparing((Quiz q) -> QuizType.FINAL_EXAM.equals(q.getQuizType())))
             .map(quiz -> {
-                List<QuizAttempt> attempts = repository.attempts(quiz.getId(), learner.userId());
+                List<QuizAttempt> attempts = repository.enrollmentAttempts(quiz.getId(), learner.userId(), learner.enrollmentId());
                 AttemptSummary summary = AttemptSummaries.summarize(quiz, attempts,
                     repository.grantedAttempts(quiz.getId(), learner.userId()), now);
                 Block block = summary.runningAttemptId() != null ? null : block(quiz, summary, learner, now);
@@ -100,6 +103,13 @@ public class QuizAttemptService {
                     block == null ? null : block.reason(), block == null ? null : block.availableAt(),
                     lessons.get(quiz.getId()));
             }).toList();
+    }
+
+    private void requireRevisionExam(Quiz quiz, StudyingLearner learner) {
+        Long selected = learning.finalQuizId(learner.revisionId());
+        if (QuizType.FINAL_EXAM.equals(quiz.getQuizType()) && selected != null && !selected.equals(quiz.getId())) {
+            throw new BusinessException(AssessmentResponseCode.NOT_FOUND);
+        }
     }
 
     private AssessmentViews.LearnerQuiz learnerQuiz(Quiz quiz) {
@@ -116,12 +126,14 @@ public class QuizAttemptService {
      */
     @Transactional
     public AssessmentViews.AttemptSession start(Long quizId, String clientIp, String userAgent) {
+        learning.lockEnrollmentMutation();
         Quiz quiz = visibleQuiz(quizId);
         StudyingLearner learner = learning.requireStudyingLearner(quiz.getCourseId());
+        requireRevisionExam(quiz, learner);
         repository.lockLearnerQuiz(quizId, learner.userId());
         Instant now = ServerTime.now();
 
-        List<QuizAttempt> attempts = repository.attempts(quizId, learner.userId());
+        List<QuizAttempt> attempts = repository.enrollmentAttempts(quizId, learner.userId(), learner.enrollmentId());
         QuizAttempt running = attempts.stream().filter(a -> AttemptStatus.IN_PROGRESS.equals(a.getStatus()))
             .findFirst().orElse(null);
         if (running != null) {
@@ -140,7 +152,7 @@ public class QuizAttemptService {
         if (block != null) {
             throw new BusinessException(blockCode(block.reason()));
         }
-        int attemptNo = attempts.stream().mapToInt(QuizAttempt::getAttemptNo).max().orElse(0) + 1;
+        int attemptNo = repository.attempts(quizId, learner.userId()).stream().mapToInt(QuizAttempt::getAttemptNo).max().orElse(0) + 1;
         QuizAttempt attempt = createAttempt(quiz, learner, attemptNo, now, clientIp, userAgent);
         learning.recordQuizActivity(learner.userId());
         return session(attempt, quiz.getTitle(), now);
@@ -252,7 +264,8 @@ public class QuizAttemptService {
         Quiz quiz = visibleQuiz(quizId);
         String userId = learning.actor().person().id();
         Instant now = ServerTime.now();
-        List<QuizAttempt> attempts = repository.attempts(quizId, userId);
+        List<QuizAttempt> attempts = repository.enrollmentAttempts(quizId, userId,
+            learning.currentEnrollmentId(quiz.getCourseId(), userId));
         AttemptSummary summary = AttemptSummaries.summarize(quiz, attempts,
             repository.grantedAttempts(quizId, userId), now);
         List<AssessmentViews.AttemptRow> rows = attempts.stream().map(a -> new AssessmentViews.AttemptRow(a.getId(),
@@ -376,7 +389,7 @@ public class QuizAttemptService {
         Quiz quiz = repository.require(Quiz.class, attempt.getQuizId());
         Instant now = ServerTime.now();
         String userId = attempt.getUserId();
-        AttemptSummary summary = AttemptSummaries.summarize(quiz, repository.attempts(quiz.getId(), userId),
+        AttemptSummary summary = AttemptSummaries.summarize(quiz, repository.enrollmentAttempts(quiz.getId(), userId, attempt.getEnrollmentId()),
             repository.grantedAttempts(quiz.getId(), userId), now);
         List<AttemptQuestion> questions = repository.attemptQuestions(attempt.getId());
         Map<Long, AttemptAnswer> answers = readModel.answersByQuestion(attempt.getId());
@@ -472,6 +485,9 @@ public class QuizAttemptService {
     private QuizAttempt ownAttempt(QuizAttempt attempt) {
         if (!attempt.getUserId().equals(learning.actor().person().id())) {
             throw new BusinessException(AssessmentResponseCode.NOT_FOUND);
+        }
+        if (AttemptStatus.IN_PROGRESS.equals(attempt.getStatus())) {
+            learning.requireAttemptEnrollment(attempt.getEnrollmentId());
         }
         return attempt;
     }

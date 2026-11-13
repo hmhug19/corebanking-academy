@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.http.MediaType;
 import vn.com.coreacademy.learning.constants.LearningCodes.MediaKind;
@@ -18,12 +19,16 @@ import vn.com.coreacademy.storage.media.MediaProbe;
 
 /** Adapter giữ policy/exception Learning; probe bytes dùng chung không biết ACL hoặc repository nghiệp vụ. */
 @Component
+@Slf4j
 public class LearningMediaProbe {
     private final MediaProbe probe;
 
     public LearningMediaProbe(LearningMediaProperties properties, ObjectMapper json) {
         probe = new MediaProbe(new MediaProbe.Settings(properties.getFfprobe(), properties.getFfmpeg(),
-            properties.getProbeTimeout(), properties.getTranscodeTimeout()), json);
+            properties.getProbeTimeout(), properties.getTranscodeTimeout(), properties.effectiveTranscodeThreads(),
+            properties.getTranscodePreset()), json);
+        log.info("Media transcode threads={} preset={}", properties.effectiveTranscodeThreads(),
+            properties.getTranscodePreset());
     }
 
     public static String type(String mime) {

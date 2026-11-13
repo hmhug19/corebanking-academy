@@ -524,3 +524,5 @@ script này không tự mở khóa, đổi đơn vị hay cấp thêm quyền ch
   bảo trì để lập bản xóa chọn lọc được duyệt. Bản sao DB thử nghiệm có thể hủy/tạo lại theo cơ chế vận hành;
   khôi phục snapshot prod chỉ được thực hiện theo kế hoạch phục hồi đã duyệt, tránh mất giao dịch mới.
 
+
+Course SCORM lessons: after `upgrade/2026-11-12-scorm12.sql`, apply [`upgrade/2026-11-13-course-scorm.sql`](upgrade/2026-11-13-course-scorm.sql), then [`upgrade/2026-11-13-scorm-course-lessons.sql`](upgrade/2026-11-13-scorm-course-lessons.sql) before deploying the corresponding backend/frontend. The final migration reconciles both earlier schema variants, normalizing standalone context 0/0 to NULL/NULL while preserving its runtime snapshot. Stop old backend instances while upgrading; the merged backend uses the expression index described above. Existing lesson content and progress remain intact.

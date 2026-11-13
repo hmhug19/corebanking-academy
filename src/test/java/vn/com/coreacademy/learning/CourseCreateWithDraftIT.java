@@ -164,6 +164,27 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
             .andReturn().getResponse().getStatus()).isEqualTo(403);
         assertThat(jdbc.queryForObject("SELECT total_seconds FROM learning_hub.scorm_registrations WHERE package_id = ? AND user_id = ?",
             java.math.BigDecimal.class, packageId, LEARNER)).isEqualByComparingTo("72.50");
+
+        // Hai nhánh từng dùng scope NULL/NULL và 0/0; nâng cấp phải giữ nguyên ID và dữ liệu resume.
+        long registrationId = jdbc.queryForObject("SELECT registration_id FROM learning_hub.scorm_registrations"
+            + " WHERE package_id = ? AND user_id = ?", Long.class, packageId, LEARNER);
+        var beforeUpgrade = api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}/progress", packageId));
+        jdbc.update("UPDATE learning_hub.scorm_registrations SET enrollment_id = 0, lesson_id = 0"
+            + " WHERE registration_id = ?", registrationId);
+        for (String script : List.of("2026-11-13-course-scorm.sql", "2026-11-13-scorm-course-lessons.sql",
+            "2026-11-13-scorm-course-lessons.sql", "2026-11-13-course-scorm.sql",
+            "2026-11-13-scorm-course-lessons.sql")) {
+            jdbc.execute(java.nio.file.Files.readString(java.nio.file.Path.of("docs/sql/upgrade", script)));
+        }
+        assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}/progress", packageId)))
+            .isEqualTo(beforeUpgrade);
+        assertThat(jdbc.queryForObject("SELECT registration_id FROM learning_hub.scorm_registrations"
+            + " WHERE package_id = ? AND user_id = ? AND enrollment_id IS NULL AND lesson_id IS NULL",
+            Long.class, packageId, LEARNER)).isEqualTo(registrationId);
+        assertThat(mvc.perform(ApiClient.get(resumed).with(request -> {
+            request.setLocalPort(8020);
+            return request;
+        })).andReturn().getResponse().getContentAsString()).contains("page-4", "cmi.suspend_data", "resume");
     }
 
     @Test

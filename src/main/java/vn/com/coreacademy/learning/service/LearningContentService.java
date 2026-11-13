@@ -19,7 +19,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.safety.Cleaner;
 import org.jsoup.safety.Safelist;
 import org.springframework.http.MediaType;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
@@ -60,7 +59,6 @@ import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.mapper.LearningMapper;
 import vn.com.coreacademy.learning.mapper.LessonBlockJson;
 import vn.com.coreacademy.learning.repository.LearningRepository;
-import vn.com.coreacademy.scorm.repository.ScormRepository;
 
 @Service
 @Transactional(readOnly = true)
@@ -84,8 +82,8 @@ public class LearningContentService {
     private final IdentityAuditService audit;
     private final List<LearningResourceExtension> resourceExtensions;
     private final LearningQuizDirectory quizzes;
+    private final LearningScormDirectory scorm;
     private final LearningAiOwnership aiOwnership;
-    private final ScormRepository scormPackages;
 
     /**
      * Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload.
@@ -519,16 +517,20 @@ public class LearningContentService {
         TrainingProgram program = repository.require(TrainingProgram.class, programId);
         TrainingField field = repository.require(TrainingField.class, program.getFieldId());
         if (!program.getOwnerOrgId().equals(course.getOwnerOrgId())
-            || !field.getOwnerOrgId().equals(course.getOwnerOrgId())
-            || (published && (!CatalogStatus.PUBLISHED.equals(program.getStatus())
-                || !CatalogStatus.PUBLISHED.equals(field.getStatus())))) {
+            || !field.getOwnerOrgId().equals(course.getOwnerOrgId())) {
             throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+        }
+        if (published && (!CatalogStatus.PUBLISHED.equals(program.getStatus())
+            || !CatalogStatus.PUBLISHED.equals(field.getStatus()))) {
+            throw new BusinessException(LearningResponseCode.CATALOG_UNAVAILABLE);
         }
         if (moduleId != null) {
             BusinessModule module = repository.require(BusinessModule.class, moduleId);
-            if (!module.getFieldId().equals(program.getFieldId())
-                || (published && !CatalogStatus.PUBLISHED.equals(module.getStatus()))) {
+            if (!module.getFieldId().equals(program.getFieldId())) {
                 throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+            }
+            if (published && !CatalogStatus.PUBLISHED.equals(module.getStatus())) {
+                throw new BusinessException(LearningResponseCode.CATALOG_UNAVAILABLE);
             }
         }
     }
@@ -555,7 +557,7 @@ public class LearningContentService {
                 throw BusinessException.validation("chapters", "INVALID_VALUE",
                     "Bài SCORM không chứa đề thi hoặc khối nội dung khác.");
             }
-            if (lesson.scormPackageId() != null) validateScormPackage(course, lesson.scormPackageId());
+            scorm.validate(lesson.scormPackageId(), course.getOwnerOrgId(), false);
             return;
         }
         if (lesson.scormPackageId() != null) {
@@ -580,31 +582,12 @@ public class LearningContentService {
         }
     }
 
-    private void validateScormPackage(Course course, Long id) {
-        if (id == null) {
-            throw BusinessException.validation("scormPackageId", "REQUIRED", "Vui lòng tải lên hoặc chọn bài giảng SCORM.");
-        }
-        var lecture = scormPackages.require(id);
-        var actor = access.actor();
-        boolean managed = access.canManage(actor, lecture.orgId(),
-            lecture.uploadedBy().equals(actor.person().id()) ? actor.person().teamId() : null, lecture.uploadedBy());
-        boolean shared = lecture.published()
-            && identity.activeOrgIds(lecture.orgId(), true).contains(course.getOwnerOrgId());
-        if (!managed && !shared) throw new AccessDeniedException("SCORM library scope denied");
-    }
-
     /** Xuất bản gói nháp do tác giả được quyền quản lý cùng transaction xuất bản khóa học. */
     private void publishLinkedScorm(Long revisionId, String actor) {
         for (var lesson : repository.lessons(revisionId)) {
-            if (!LessonType.SCORM.equals(lesson.getLessonType())) continue;
-            var lecture = scormPackages.require(lesson.getScormPackageId());
-            if (lecture.published()) continue;
-            if (!scormPackages.publish(lecture.id(), lecture.version())) {
-                throw BusinessException.validation("scormPackageId", "INVALID_VALUE",
-                    "Bài giảng đã thay đổi. Tải lại khóa học.");
+            if (LessonType.SCORM.equals(lesson.getLessonType())) {
+                scorm.publish(lesson.getScormPackageId(), revisionId, actor);
             }
-            audit.record(actor, "SCORM_PUBLISHED", "scorm_package", Long.toString(lecture.id()), lecture.orgId(),
-                Map.of("revisionId", revisionId));
         }
     }
 
@@ -744,7 +727,7 @@ public class LearningContentService {
                     requiredLessons++;
                 }
                 if (LessonType.SCORM.equals(lesson.lesson().lessonType())) {
-                    validateScormPackage(course, lesson.lesson().scormPackageId());
+                    scorm.validate(lesson.lesson().scormPackageId(), course.getOwnerOrgId(), true);
                     continue;
                 }
                 if (LessonType.QUIZ.equals(lesson.lesson().lessonType())) {

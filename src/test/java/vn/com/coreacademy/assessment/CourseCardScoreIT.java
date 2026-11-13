@@ -92,7 +92,7 @@ class CourseCardScoreIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void aPageCostsOneScoresCall() {
+    void aPageCostsOneEnrollmentScoresCall() {
         fixtures.course(LEARNER);
         fixtures.course(LEARNER);
         Mockito.clearInvocations(directory);
@@ -100,7 +100,7 @@ class CourseCardScoreIT extends AssessmentIntegrationTest {
         JsonNode page = api.ok(LEARNER, get(LEARNING + "/courses?size=100"));
 
         assertThat(page.path("items").size()).isGreaterThanOrEqualTo(2);
-        verify(directory, times(1)).scores(any(), any());
+        verify(directory, times(1)).enrollmentScores(any(), any());
     }
 
     @Test
@@ -154,7 +154,12 @@ class CourseCardScoreIT extends AssessmentIntegrationTest {
         body.put("quizType", type);
         body.put("maxAttempts", 5);
         body.put("allowRetakeAfterPass", true);
-        return fixtures.quiz(body, questions, true);
+        long quizId = fixtures.quiz(body, questions, true);
+        if ("FINAL_EXAM".equals(type)) {
+            jdbc.update("update learning_hub.course_completion_rules set final_quiz_id = ? where revision_id = ?",
+                quizId, course.revisionId());
+        }
+        return quizId;
     }
 
     /** Trả lời đúng {@code right} câu đầu của đề hai câu, bỏ trống phần còn lại, rồi nộp. */

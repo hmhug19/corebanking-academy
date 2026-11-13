@@ -22,8 +22,8 @@ import vn.com.coreacademy.assessment.entity.QuizAttemptGrant;
 import vn.com.coreacademy.assessment.exception.AssessmentResponseCode;
 import vn.com.coreacademy.assessment.repository.AssessmentRepository;
 import vn.com.coreacademy.assessment.repository.QuizAttemptRepository;
-import vn.com.coreacademy.assessment.repository.custom.QuizAttemptRepositoryCustom;
 import vn.com.coreacademy.assessment.repository.custom.AssessmentResultRepository;
+import vn.com.coreacademy.assessment.repository.custom.QuizAttemptRepositoryCustom;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.dto.PageResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -180,7 +180,8 @@ public class QuizAttemptAdminService {
                 "Học viên chưa có lần học của khóa này.");
         }
         if (requireExhausted) {
-            var summary = AttemptSummaries.summarize(managed.quiz(), repository.attempts(quizId, userId),
+            var summary = AttemptSummaries.summarize(managed.quiz(), repository.enrollmentAttempts(quizId, userId,
+                    learning.currentEnrollmentId(managed.course().id(), userId)),
                 repository.grantedAttempts(quizId, userId), ServerTime.now());
             if (summary.attemptsLeft() > 0) {
                 throw BusinessException.field(AssessmentResponseCode.CONFLICT, "userId", "ATTEMPTS_REMAIN",

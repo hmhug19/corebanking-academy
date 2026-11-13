@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.AttemptStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizStatus;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizType;
@@ -106,11 +107,22 @@ public class QuizAttemptRepositoryCustomImpl implements QuizAttemptRepositoryCus
             select z.course_id
             from learning_hub.quizzes z
             join learning_hub.quiz_attempts a on a.quiz_id = z.quiz_id
+            join learning_hub.course_enrollments e on e.enrollment_id = a.enrollment_id
             where a.user_id = :user and a.status in (:graded) and a.graded_at is not null
+              and e.status <> :withdrawn and not exists (
+                  select 1 from learning_hub.course_enrollments newer
+                  where newer.course_id = e.course_id and newer.user_id = e.user_id
+                    and newer.status <> :withdrawn and newer.cycle_no > e.cycle_no)
               and z.quiz_type = :finalExam and z.status = :published and not z.is_deleted
+              and z.quiz_id = coalesce(
+                  (select ca.assessment_revision_id from learning_hub.course_assessments ca
+                   where ca.revision_id = e.revision_id and ca.placement = 'final' limit 1),
+                  (select cr.final_quiz_id from learning_hub.course_completion_rules cr
+                   where cr.revision_id = e.revision_id), z.quiz_id)
             group by z.course_id
             having not bool_or(coalesce(a.passed, false))
             """)
+            .setParameter("withdrawn", ProgressStatus.WITHDRAWN)
             .setParameter("user", userId)
             .setParameter("graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED))
             .setParameter("finalExam", QuizType.FINAL_EXAM)

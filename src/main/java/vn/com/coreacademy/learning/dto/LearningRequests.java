@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -18,6 +17,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import vn.com.coreacademy.learning.constants.LearningCodes.AssetUsage;
 import vn.com.coreacademy.learning.constants.LearningCodes.BlockType;
 import vn.com.coreacademy.learning.constants.LearningCodes.BodyFormat;
@@ -29,6 +29,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
 import vn.com.coreacademy.learning.constants.LearningCodes.Level;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressEvent;
 import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
+import vn.com.coreacademy.learning.constants.LearningCodes.RevisionChangeMode;
 import vn.com.coreacademy.learning.constants.LearningCodes.TargetType;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 
@@ -244,6 +245,17 @@ public final class LearningRequests {
         @Positive Long groupId,
         boolean includeDescendants) {
     }
+
+    public record RevisionChangeRequest(
+        @NotBlank @Size(max = 64) String impactToken,
+        @NotNull @Positive Long enrollmentId,
+        @NotNull @Min(0) Long expectedVersion,
+        @NotNull @Positive Long targetRevisionId,
+        @NotNull @Pattern(regexp = RevisionChangeMode.PATTERN)
+        String mode,
+        @NotBlank @Size(max = 2000) String reason,
+        Instant dueAt,
+        @NotBlank @Size(max = 100) String idempotencyKey) { }
 
     public record RevokeRequest(@NotBlank @Size(max = 2000) String reason) {
     }

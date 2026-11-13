@@ -477,14 +477,27 @@ public class LearningProgressService {
     @Transactional
     public void synchronizeScorm(String userId, CourseEnrollment enrollment, CourseLesson lesson, boolean complete) {
         lock.acquire();
+        if (!userId.equals(enrollment.getUserId()) || ProgressStatus.WITHDRAWN.equals(enrollment.getStatus())) {
+            throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
+        }
+        if (!LessonType.SCORM.equals(lesson.getLessonType()) || repository.lessons(enrollment.getRevisionId()).stream()
+            .noneMatch(value -> value.getId().equals(lesson.getId()))) {
+            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+        }
         Instant now = Instant.now();
         LessonProgress progress = repository.lessonProgress(enrollment.getId()).stream()
             .filter(p -> p.getLessonId().equals(lesson.getId())).findFirst().orElseGet(LessonProgress::new);
         progress.setEnrollmentId(enrollment.getId());
         progress.setLessonId(lesson.getId());
-        if (progress.getStartedAt() == null) progress.setStartedAt(now);
-        if (progress.getProgressPercent() == null) progress.setProgressPercent(BigDecimal.ZERO);
-        if (complete) progress.setProgressPercent(HUNDRED);
+        if (progress.getStartedAt() == null) {
+            progress.setStartedAt(now);
+        }
+        if (progress.getProgressPercent() == null) {
+            progress.setProgressPercent(BigDecimal.ZERO);
+        }
+        if (complete) {
+            progress.setProgressPercent(HUNDRED);
+        }
         progress.setStatus(progress.getProgressPercent().compareTo(HUNDRED) >= 0
             ? ProgressStatus.COMPLETED : ProgressStatus.IN_PROGRESS);
         if (ProgressStatus.COMPLETED.equals(progress.getStatus()) && progress.getCompletedAt() == null) {

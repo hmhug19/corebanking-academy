@@ -9,6 +9,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -22,6 +23,7 @@ import vn.com.coreacademy.common.constants.HttpHeaderNames;
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
+@Slf4j
 public class RequestIdFilter extends OncePerRequestFilter {
     private static final String ATTRIBUTE = RequestIdFilter.class.getName() + ".id";
     private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
@@ -50,9 +52,13 @@ public class RequestIdFilter extends OncePerRequestFilter {
         MDC.put(RequestIdContext.MDC_KEY, id);
         response.setHeader(HttpHeaderNames.REQUEST_ID, id);
 
+        long startedAt = System.nanoTime();
+        log.info("HTTP request started method={} path={}", request.getMethod(), request.getRequestURI());
         try {
             chain.doFilter(request, response);
         } finally {
+            log.info("HTTP request completed method={} path={} httpStatus={} durationMs={}", request.getMethod(),
+                request.getRequestURI(), response.getStatus(), (System.nanoTime() - startedAt) / 1_000_000);
             // Thread của servlet được tái sử dụng; khôi phục MDC để không lẫn requestId giữa các yêu cầu.
             if (previous == null) {
                 MDC.remove(RequestIdContext.MDC_KEY);

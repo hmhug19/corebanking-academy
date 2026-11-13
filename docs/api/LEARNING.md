@@ -11,6 +11,10 @@ Scope thư viện/preview có enrollmentId và lessonId NULL; cùng gói trong h
 Runtime cập nhật lesson_progress và course_enrollments trong cùng transaction khi lưu thành công.
 `completed`/`passed` làm bài đạt 100%; các trạng thái còn lại là đang học, không suy % học từ điểm quiz.
 XP, điều kiện bài thi cuối và chứng nhận dùng quy tắc hoàn thành khóa hiện hành. Preview không tăng tiến độ khóa.
+Module `scorm` phục vụ **bài giảng một SCO, độc lập hoặc gắn vào bài học của khóa**, tại FE `/admin/lessons`,
+thư viện học viên `/scorm` và player `/scorm/:id`. Không tự cộng điểm/chứng nhận,
+không đổi điều kiện hoàn thành các khóa học hiện có. SCO tự báo điểm và trạng thái;
+LMS kiểm hợp đồng rồi lưu theo `(packageId, userId, preview)`. Xem thử không ghi vào kết quả học viên.
 
 GET package/progress nhận query `enrollmentId`, `lessonId`; POST launch nhận thêm hai ID này trong body.
 Cả hai phải cùng có hoặc cùng vắng. BE kiểm người sở hữu lần học, lịch mở học, revision/bài/gói và quyền hiện hành
@@ -293,8 +297,12 @@ Init ví dụ (ID và hash chỉ minh họa, phải lấy theo file/đơn vị t
   Audio là tùy chọn, chỉ track hình chính và track audio đầu tiên được dùng. File hỏng/mã hóa hoặc
   không có video vẫn trả lỗi xác minh. MP4 học tập áp dụng giới hạn dung lượng, không giới hạn 24 giờ.
   Timeout chuyển đổi riêng là `app.learning.media.transcode-timeout` (mặc định 6 giờ); worker tiếp tục
-  gia hạn lease trong khi chạy. Bản chuyển đổi tối đa 1920×1080, bitrate theo thời lượng để giới hạn
-  dung lượng rendition. File gốc và rendition có key/size/MIME/hash riêng.
+  gia hạn lease trong khi chạy (heartbeat chạy luồng riêng, không phụ thuộc scheduler dùng chung). Số luồng
+  giải mã/mã hóa của một lần chuyển đổi là `app.learning.media.transcode-threads` (env
+  `APP_LEARNING_MEDIA_TRANSCODE_THREADS`; mặc định 0 = số CPU JVM thấy, tối đa 4) và preset x264 là
+  `app.learning.media.transcode-preset` (mặc định `veryfast`). Nhiều luồng nhanh hơn nhưng tốn RAM hơn:
+  khoảng 290 MB ở 2 luồng, 330 MB ở 4 và 410 MB ở 8; cần chừa đủ RAM container ngoài JVM. Bản chuyển
+  đổi tối đa 1920×1080, bitrate theo thời lượng để giới hạn dung lượng rendition. File gốc và rendition có key/size/MIME/hash riêng.
   WebM giữ VP8/VP9 + Opus/Vorbis.
 - POST upload một request cũ vẫn dùng được, nay kiểm file thật cùng pipeline đồng bộ; durationSeconds/pageCount
   vẫn nhận để tương thích nhưng không dùng làm dữ liệu xác minh. Không còn đường bỏ qua kiểm codec/page count.
@@ -1147,3 +1155,36 @@ Báo cáo có kỳ/đơn vị không dùng kết quả suốt lịch sử của 
 Native query áp scope/filter trước aggregate và phân trang; không gọi GET danh sách từng người. CSV có giới hạn,
 BOM/escape và bảo vệ công thức. Hai bảng read model không có JPA entity: repository native đọc/ghi projection,
 không auto DDL. Không kết luận throughput/latency production từ kiểm thử dữ liệu nhỏ; cần EXPLAIN và đo tải đại diện.
+
+### Learning access and historical scores
+
+Learner course details validate the same enrollment access policy as the player before returning blocks.
+An existing enrollment alone does not authorize reading content after a pause, revocation, or before the assignment start.
+Unpublished, paused, or archived catalog parents return `LEARNING-CATALOG_UNAVAILABLE`; invalid ownership and parent relations retain `LEARNING-INVALID_REFERENCE`.
+Course cards and certificates use the best graded score for the exact enrollment and the final exam selected by its revision (including the legacy completion-rule fallback). Closed historical exams remain eligible for certificate scores; other cycles and unselected final exams do not contribute. No database migration is required.
+
+### SCORM lessons inside courses
+
+The course editor keeps manual content and quiz lessons and adds `lessonType: "scorm"` with `scormPackageId`. A SCORM lesson has no manual blocks and no quizId; a course can mix all lesson types. Authors can upload a ZIP directly or select from the optional library. Packages must be manageable by the author or already published in the course owner's ancestor organization scope. Draft lessons may omit the package; course publication requires the link and publishes attached draft packages in the same transaction. Cloning a revision preserves its immutable package ID.
+
+Learner package get/progress accept `enrollmentId` and `lessonId` query parameters; launch accepts both in its body alongside `preview:false`. Both IDs must be supplied together. The server checks enrollment ownership, assignment start/revocation, catalog availability, and the exact lesson/package/revision relation on launch and every capability use. Course sharing grants access through the enrollment, independently of the standalone package catalog.
+
+Runtime registrations are isolated by package/user/preview/enrollment/lesson. Standalone registrations use NULL enrollment/lesson context and never contribute to course completion; the compatibility migration normalizes the earlier 0/0 variant without discarding its runtime snapshot. SCORM `completed` or `passed` completes that lesson; other statuses keep it in progress. Completion is monotonic and the configured final exam remains required. Progress updates and runtime snapshots commit atomically.
+
+After the SCORM library migration, apply `docs/sql/upgrade/2026-11-13-course-scorm.sql` followed by `docs/sql/upgrade/2026-11-13-scorm-course-lessons.sql` before deploying backend and frontend. The latter reconciles both earlier registration schemas. Stop old backend instances while upgrading; a backend that uses the old three-column or five-column ON CONFLICT target is not compatible with the final expression index. No migration is executed automatically. Existing manual lessons and independent runtime data are preserved.
+
+## Republishing and explicit learning revision changes
+
+Publishing creates an immutable content revision and changes the latest published pointer. Existing assignments, enrollment revisions, progress, quiz results and certificates remain intact. New assignments target the latest published revision; CONTINUE reuses an existing unfinished cycle even when that cycle belongs to an older revision. A completed cycle on an older revision does not satisfy a new assignment targeting a different revision.
+
+In assignment details, managers can preview and explicitly change one recipient's current learning:
+
+- GET /api/v1/learning-assignments/recipients/{id}/revision-change returns the current/target revisions, enrollment row version, active obligation count, impact token and server eligibility flags.
+- POST to the same URL accepts impactToken, enrollmentId, expectedVersion, targetRevisionId, mode, reason, optional dueAt and idempotencyKey. Modes: transfer_unstarted or relearn.
+- Transfer is allowed only before any learning interaction: no start/access time, progress, lesson/block rows, quiz attempts or SCORM registrations. A new cycle replaces the untouched cycle and all its active recipient links move together, preserving their schedules, requirements and reminders. Audit retains the previous cycle and affected recipients.
+- Relearn creates a separate assignment and zero-progress cycle, opening immediately with an optional new deadline. Unfinished old learning is withdrawn and its active obligations/reminders are revoked with the reason. Completed old cycles and certificates remain intact. No progress, SCORM resume state or grade is copied.
+- Every affected obligation must be manageable by the actor. Stale enrollment versions, changed obligation snapshots or a changed latest revision cause a conflict; the UI must refresh the preview. Repeated stale submissions cannot create another cycle.
+
+Published revision quiz configuration, pools and referenced questions are frozen. The editor creates a separate draft exam when changing a published exam. Closing an exam is blocked while the current published revision or unfinished historical learning still needs it. Quiz quotas, running attempts and completion results are evaluated per enrollment; attempt numbers remain globally increasing for each learner/quiz.
+
+Deployment requires [the revision-learning migration](../sql/upgrade/2026-11-13-course-revision-learning.sql). Stop old backend instances, apply with the provisioned table-owner migration role, then deploy the matching backend and frontend. It removes the single-final-exam uniqueness restriction and scopes running-attempt uniqueness to enrollment. It creates no tables and changes no ownership or runtime grants; retain the provisioned dev_user access. Do not apply old baseline SQL over existing data.

@@ -11,6 +11,9 @@ import vn.com.coreacademy.common.exception.ApiResponseCode;
 @Getter
 @RequiredArgsConstructor
 public enum AssessmentResponseCode implements ApiResponseCode {
+    QUIZ_REVISION_FROZEN("ASSESSMENT-QUIZ_REVISION_FROZEN",
+        "Bài kiểm tra đang thuộc phiên bản khóa học đã xuất bản. Hãy tạo đề mới để thay đổi nội dung; "
+            + "chỉ đóng đề cũ khi không còn phiên bản hiện hành hoặc lần học dở cần sử dụng.", "Cần giữ bài kiểm tra cũ"),
     NOT_FOUND("ASSESSMENT-NOT_FOUND", "Không tìm thấy dữ liệu kiểm tra phù hợp.", "Không tìm thấy"),
     CONFLICT("ASSESSMENT-CONFLICT", "Dữ liệu đã thay đổi hoặc xung đột. Vui lòng tải lại và kiểm tra.",
         "Xung đột dữ liệu"),

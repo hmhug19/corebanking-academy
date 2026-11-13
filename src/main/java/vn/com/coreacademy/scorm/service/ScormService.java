@@ -28,20 +28,20 @@ import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
-import vn.com.coreacademy.learning.service.LearningAccessPolicy;
-import vn.com.coreacademy.scorm.config.ScormProperties;
-import vn.com.coreacademy.scorm.dto.ScormDtos;
-import vn.com.coreacademy.scorm.repository.ScormRepository;
-import vn.com.coreacademy.scorm.repository.ScormRepository.PackageRow;
-import vn.com.coreacademy.scorm.repository.ScormRepository.Registration;
 import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
 import vn.com.coreacademy.learning.entity.CourseChapter;
 import vn.com.coreacademy.learning.entity.CourseEnrollment;
 import vn.com.coreacademy.learning.entity.CourseLesson;
 import vn.com.coreacademy.learning.repository.LearningRepository;
+import vn.com.coreacademy.learning.service.LearningAccessPolicy;
 import vn.com.coreacademy.learning.service.LearningAssignmentService;
 import vn.com.coreacademy.learning.service.LearningProgressService;
 import vn.com.coreacademy.learning.service.LearningWriteLock;
+import vn.com.coreacademy.scorm.config.ScormProperties;
+import vn.com.coreacademy.scorm.dto.ScormDtos;
+import vn.com.coreacademy.scorm.repository.ScormRepository;
+import vn.com.coreacademy.scorm.repository.ScormRepository.PackageRow;
+import vn.com.coreacademy.scorm.repository.ScormRepository.Registration;
 import vn.com.coreacademy.security.SecurityContextUtils;
 import vn.com.coreacademy.storage.dto.ObjectDownload;
 import vn.com.coreacademy.storage.service.ObjectStorage;
@@ -148,12 +148,22 @@ public class ScormService {
     }
 
     @Transactional(readOnly = true)
+    public ScormDtos.ProgressView progress(long id, boolean preview) {
+        return progress(id, preview, null, null);
+    }
+
+    @Transactional(readOnly = true)
     public ScormDtos.ProgressView progress(long id, boolean preview, Long enrollmentId, Long lessonId) {
         Actor actor = access.actor();
         var lecture = repository.require(id);
         var course = context(id, enrollmentId, lessonId, actor);
         requireLaunchAccess(lecture, actor, preview, course);
         return progress(repository.registration(id, actor.person().id(), preview, enrollmentId, lessonId, false));
+    }
+
+    @Transactional
+    public ScormDtos.LaunchView launch(long id, boolean preview) {
+        return launch(id, preview, null, null);
     }
 
     @Transactional

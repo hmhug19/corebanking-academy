@@ -18,6 +18,7 @@ import vn.com.coreacademy.learning.dto.CertificateView;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.repository.LearningCertificateRepository;
 import vn.com.coreacademy.learning.repository.LearningCertificateRepository.CertificateRow;
+import vn.com.coreacademy.learning.repository.LearningRepository;
 
 /**
  * Chứng nhận của người gọi. Chứng nhận là một chu kỳ ghi danh đã hoàn thành: không lưu gì thêm nên không có gì để cấp
@@ -32,6 +33,7 @@ public class LearningCertificateService {
     private final LearningAccessPolicy access;
     private final LearningIdentityService identity;
     private final LearningQuizDirectory quizzes;
+    private final LearningRepository records;
 
     /**
      * Các chu kỳ đã hoàn thành của người gọi, hoàn thành gần nhất trước. Họ tên và điểm được điền một lần cho mỗi
@@ -57,13 +59,18 @@ public class LearningCertificateService {
             return List.of();
         }
         String fullName = identity.fullNames(List.of(userId)).get(userId);
-        Map<Long, BigDecimal> finalExamBest = new HashMap<>();
-        quizzes.scores(userId, rows.stream().map(CertificateRow::courseId).distinct().toList()).stream()
-            .filter(LearningQuizDirectory.QuizScore::finalExam)
-            .forEach(score -> finalExamBest.put(score.courseId(), score.bestScore()));
+        Map<Long, Long> exams = new HashMap<>();
+        var selected = records.finalQuizIds(rows.stream().map(CertificateRow::revisionId).distinct().toList());
+        for (CertificateRow row : rows) {
+            Long quizId = selected.get(row.revisionId());
+            if (quizId != null) {
+                exams.put(row.enrollmentId(), quizId);
+            }
+        }
+        Map<Long, BigDecimal> finalExamBest = quizzes.enrollmentScores(userId, exams);
         return rows.stream().map(row -> new CertificateView(row.enrollmentId(), row.courseId(), row.courseCode(),
             row.courseTitle(), row.cycleNo(), row.revisionId(), row.userId(), fullName, row.completedAt(),
-            finalExamBest.get(row.courseId()), verificationCode(row))).toList();
+            finalExamBest.get(row.enrollmentId()), verificationCode(row))).toList();
     }
 
     private static String verificationCode(CertificateRow row) {

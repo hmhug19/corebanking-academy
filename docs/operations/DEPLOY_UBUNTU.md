@@ -5,9 +5,8 @@
 
 Tính năng mới dùng hai bảng riêng và connector player riêng; cập nhật đồng thời backend và frontend.
 
-1. Review/chạy [`2026-11-12-scorm12.sql`](../sql/upgrade/2026-11-12-scorm12.sql) trên database đang dùng.
-   Sau đó chạy [`2026-11-13-scorm-course-lessons.sql`](../sql/upgrade/2026-11-13-scorm-course-lessons.sql)
-   để liên kết bài SCORM với từng lần học. Không bật ddl-auto=update hoặc tự chạy migration khi startup.
+1. Review/chạy [`2026-11-12-scorm12.sql`](../sql/upgrade/2026-11-12-scorm12.sql) trên database đang dùng. Để gắn SCORM vào bài học của khóa, chạy tiếp [`2026-11-13-course-scorm.sql`](../sql/upgrade/2026-11-13-course-scorm.sql), rồi [`2026-11-13-scorm-course-lessons.sql`](../sql/upgrade/2026-11-13-scorm-course-lessons.sql) trước khi deploy backend/FE. Dừng BE cũ trong lúc nâng cấp; script cuối thống nhất scope NULL/NULL của runtime độc lập, giữ nguyên kết quả từng bài/lần học.
+   Không bật ddl-auto=update hoặc tự chạy migration khi startup; không đặt lại tiến độ khóa học cũ.
 2. Đặt biến môi trường, ví dụ `SCORM_LMS_ORIGIN=https://academy.example.com` và
    `SCORM_PLAYER_ORIGIN=https://scorm.academy.example.com`. Hai origin bắt buộc khác nhau, không có path/trailing slash.
    Dùng hostname player riêng có HTTPS; không đưa bearer JWT vào URL hoặc cấu hình trình phát.
