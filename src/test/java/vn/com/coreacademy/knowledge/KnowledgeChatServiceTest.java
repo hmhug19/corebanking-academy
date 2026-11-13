@@ -228,7 +228,7 @@ class KnowledgeChatServiceTest {
     }
 
     @Test
-    void withoutAUsableMarkerTheAnswerIsKeptWithNoSourcesAndIsNotGrounded() {
+    void withoutAUsableMarkerTheAnswerIsKeptWithoutItsMarkersAndIsNotGrounded() {
         when(chunks.search(any(), anyInt(), any())).thenReturn(List.of(CIF, GL));
         when(ollama.chat(anyList(), any())).thenReturn("Không có dấu nguồn, chỉ [9] và [12345678901].");
 
@@ -236,7 +236,8 @@ class KnowledgeChatServiceTest {
 
         assertThat(answer.found()).isTrue();
         assertThat(answer.grounded()).isFalse();
-        assertThat(answer.answer()).isEqualTo("Không có dấu nguồn, chỉ [9] và [12345678901].");
+        // Markers that name no chunk open nothing, so they are not shown.
+        assertThat(answer.answer()).isEqualTo("Không có dấu nguồn, chỉ và.");
         assertThat(answer.citations()).isEmpty();
     }
 

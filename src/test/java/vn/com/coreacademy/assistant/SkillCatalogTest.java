@@ -42,6 +42,17 @@ class SkillCatalogTest {
     }
 
     @Test
+    void noChatPromptShowsTheLiteralPlaceholderTheModelWouldCopy() {
+        SkillCatalog catalog = new SkillCatalog();
+
+        catalog.all().forEach(skill -> {
+            assertThat(skill.output()).as(skill.id()).doesNotContain("[n]");
+            assertThat(catalog.systemPrompt(skill)).as(skill.id()).doesNotContain("[n]");
+        });
+        assertThat(catalog.explainPrompt()).doesNotContain("[n]");
+    }
+
+    @Test
     void everySkillWithToolsSaysTheToolCallIsMandatory() {
         new SkillCatalog().all().stream().filter(skill -> !skill.tools().isEmpty()).forEach(skill ->
             assertThat(skill.output().toLowerCase()).as(skill.id()).contains("bắt buộc gọi công cụ"));

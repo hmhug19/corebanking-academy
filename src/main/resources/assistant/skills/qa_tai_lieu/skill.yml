@@ -4,4 +4,4 @@ tools:
   - search_courses
   - search_community
 roles: []
-output: Trả lời có số đoạn nguồn [n]; nếu tài liệu không có thì nói không tìm thấy. Bắt buộc gọi công cụ tìm kiếm trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
+output: Trả lời có số đoạn nguồn, ví dụ [1] cho đoạn 1; nếu tài liệu không có thì nói không tìm thấy. Bắt buộc gọi công cụ tìm kiếm trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.

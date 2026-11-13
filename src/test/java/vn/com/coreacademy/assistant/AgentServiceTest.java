@@ -380,7 +380,7 @@ class AgentServiceTest {
             .map(e -> e.path("text").asText()).reduce("", String::concat);
         assertThat(streamed).doesNotContain("GOI_Y").doesNotContain("CIF cấp thế nào").startsWith("CIF là mã");
         JsonNode done = events.get(events.size() - 1);
-        assertThat(done.path("answer").asText()).isEqualTo("CIF là mã khách hàng [1].");
+        assertThat(done.path("answer").asText()).isEqualTo("CIF là mã khách hàng.");
         assertThat(done.path("suggestions")).extracting(JsonNode::asText)
             .containsExactly("CIF cấp thế nào?", "Ai quản lý CIF?", "Thêm");
         assertThat(conversations.lastRecord().answer()).doesNotContain("GOI_Y");
@@ -489,7 +489,7 @@ class AgentServiceTest {
         assertThat(conversations.recorded).hasSize(1);
         TurnRecord stored = conversations.recorded.get(0);
         assertThat(stored.question()).isEqualTo("CIF là gì?");
-        assertThat(stored.answer()).isEqualTo("CIF là mã [1].");
+        assertThat(stored.answer()).isEqualTo("CIF là mã.");
         assertThat(stored.toolNames()).containsExactly("search_documents");
         assertThat(stored.status()).isEqualTo(TurnRecord.Status.DONE);
         assertThat(stored.surface()).isEqualTo(TurnRecord.AGENT);
@@ -665,7 +665,7 @@ class AgentServiceTest {
 
         assertThat(types(events)).containsExactly("tool", "delta", "done");
         assertThat(events.get(0).path("name").asText()).isEqualTo("search_documents");
-        assertThat(events.get(2).path("answer").asText()).isEqualTo("CIF là mã [1].");
+        assertThat(events.get(2).path("answer").asText()).isEqualTo("CIF là mã.");
         ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
         verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
         List<ChatMessage> second = messages.getAllValues().get(1);

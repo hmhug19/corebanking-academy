@@ -340,7 +340,7 @@ public class AgentService {
         Suggestions.Split split = Suggestions.split(raw);
         String answer = split.answer().strip();
         FinishedAnswer finished = turn.finisher().map(finisher -> finisher.finish(answer))
-            .orElseGet(() -> new FinishedAnswer(answer, List.of()));
+            .orElseGet(() -> new FinishedAnswer(answer, List.of())).withoutStrayMarkers();
         if (finished.answer().isBlank()) {
             // qwen3 sometimes ends with nothing after a tool result; an empty bubble reads as a hang.
             finished = new FinishedAnswer(EMPTY_ANSWER, List.of());

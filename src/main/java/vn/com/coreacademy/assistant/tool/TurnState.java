@@ -15,6 +15,7 @@ public final class TurnState {
     private final Map<Class<?>, Object> state = new HashMap<>();
     private final int retrievedBudget;
     private TurnFinisher finisher;
+    private TurnLinks links;
 
     public TurnState() {
         this(AssistantBudget.defaults());
@@ -40,12 +41,47 @@ public final class TurnState {
         return chunks == null ? java.util.List.of() : ((RetrievedChunks) chunks).trace();
     }
 
-    /** Shapes the final answer; a tool that needs to (citations, fixed sentences) registers it. */
+    /**
+     * Shapes the final answer from the turn's retrieved chunks (citations, fixed sentences). The tools that retrieve
+     * chunks all finish from the same chunks, so the latest one stands for all of them.
+     */
     public void finishWith(TurnFinisher finisher) {
         this.finisher = finisher;
     }
 
+    /** Links the server adds after the answer (Community posts); they never replace the sources of the chunks. */
+    public void linkWith(TurnLinks links) {
+        this.links = links;
+    }
+
+    /**
+     * The finisher of the turn: chunks alone, links alone, or both, where the answer keeps the sources of its chunks
+     * and the links follow it.
+     */
     public Optional<TurnFinisher> finisher() {
-        return Optional.ofNullable(finisher);
+        if (links == null) {
+            return Optional.ofNullable(finisher);
+        }
+        if (finisher == null) {
+            return Optional.of(links::alone);
+        }
+        TurnFinisher chunks = finisher;
+        TurnLinks after = links;
+
+        return Optional.of(answer -> {
+            FinishedAnswer finished = chunks.finish(answer);
+            String extra = after.appended();
+            return extra.isEmpty() ? finished : new FinishedAnswer(finished.answer() + "\n\n" + extra,
+                finished.citations(), finished.grounded(), finished.checkedMarkers(), finished.removedMarkers());
+        });
+    }
+
+    /** Server-built links of one turn. */
+    public interface TurnLinks {
+        /** The whole answer when the turn retrieved no chunks: the model's text is only a lead to the links. */
+        FinishedAnswer alone(String answer);
+
+        /** The links to put after an answer that has its own sources; empty when there are none to show. */
+        String appended();
     }
 }

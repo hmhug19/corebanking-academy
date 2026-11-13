@@ -41,6 +41,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 import vn.com.coreacademy.knowledge.service.ChatPromptBuilder;
+import vn.com.coreacademy.knowledge.service.CitationRule;
 import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 import vn.com.coreacademy.learning.index.CourseQuestionSearch;
 
@@ -153,17 +154,18 @@ public class QuizExplainService {
      * Without lesson text the answer rests on the author's explanation and cites nothing; with it, the sources are the
      * chunks the answer marks, as in every agent answer. An empty answer is a fixed sentence, never a blank bubble.
      */
-    private static FinishedAnswer finish(RetrievedChunks chunks, String text) {
+    static FinishedAnswer finish(RetrievedChunks chunks, String text) {
         if (text.isBlank()) {
             return new FinishedAnswer("Mình chưa giải thích được câu này. Bạn thử lại nhé.", List.of());
         }
         if (chunks.isEmpty()) {
-            return new FinishedAnswer(text, List.of());
+            return new FinishedAnswer(CitationRule.withoutMarkers(text), List.of());
         }
         FinishedAnswer finished = chunks.finish(text);
 
         // The fixed "not found" sentence is for document search; here the explanation stands without sources.
-        return NotFoundAnswer.TEXT.equals(finished.answer()) ? new FinishedAnswer(text, List.of()) : finished;
+        return NotFoundAnswer.TEXT.equals(finished.answer())
+            ? new FinishedAnswer(CitationRule.withoutMarkers(text), List.of()) : finished;
     }
 
     /** The data block the model reads: nothing in it is an instruction. */
