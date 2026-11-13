@@ -53,8 +53,10 @@ public class ScormController {
     }
 
     @GetMapping("/{id}")
-    public BaseResponse<ScormDtos.PackageView> get(@PathVariable @Positive long id) {
-        return BaseResponse.ok(service.get(id));
+    public BaseResponse<ScormDtos.PackageView> get(@PathVariable @Positive long id,
+        @RequestParam(required = false) @Positive Long enrollmentId,
+        @RequestParam(required = false) @Positive Long lessonId) {
+        return BaseResponse.ok(service.get(id, enrollmentId, lessonId));
     }
 
     @PostMapping("/{id}/publish")
@@ -66,8 +68,10 @@ public class ScormController {
 
     @GetMapping("/{id}/progress")
     public BaseResponse<ScormDtos.ProgressView> progress(@PathVariable @Positive long id,
-        @RequestParam(defaultValue = "false") boolean preview) {
-        return BaseResponse.ok(service.progress(id, preview));
+        @RequestParam(defaultValue = "false") boolean preview,
+        @RequestParam(required = false) @Positive Long enrollmentId,
+        @RequestParam(required = false) @Positive Long lessonId) {
+        return BaseResponse.ok(service.progress(id, preview, enrollmentId, lessonId));
     }
 
     @PostMapping("/{id}/launch")
@@ -75,6 +79,6 @@ public class ScormController {
         description = "Mỗi lần mở thay vé cũ; dữ liệu xem thử tách khỏi kết quả học viên. Vé hết hạn/revoke không được ghi.")
     public BaseResponse<ScormDtos.LaunchView> launch(@PathVariable @Positive long id,
         @Valid @RequestBody ScormDtos.LaunchRequest request) {
-        return BaseResponse.ok(service.launch(id, request.preview()));
+        return BaseResponse.ok(service.launch(id, request.preview(), request.enrollmentId(), request.lessonId()));
     }
 }

@@ -19,6 +19,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.safety.Cleaner;
 import org.jsoup.safety.Safelist;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
@@ -59,6 +60,7 @@ import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.mapper.LearningMapper;
 import vn.com.coreacademy.learning.mapper.LessonBlockJson;
 import vn.com.coreacademy.learning.repository.LearningRepository;
+import vn.com.coreacademy.scorm.repository.ScormRepository;
 
 @Service
 @Transactional(readOnly = true)
@@ -83,6 +85,7 @@ public class LearningContentService {
     private final List<LearningResourceExtension> resourceExtensions;
     private final LearningQuizDirectory quizzes;
     private final LearningAiOwnership aiOwnership;
+    private final ScormRepository scormPackages;
 
     /**
      * Tạo định danh khóa và bản nháp đầu tiên; không lấy owner/actor từ payload.
@@ -302,6 +305,7 @@ public class LearningContentService {
         }
 
         // Bước 2: đóng băng bản nội dung và chuyển con trỏ; enrollment cũ giữ revision_id cũ.
+        publishLinkedScorm(revisionId, actor.person().id());
         revision.setState(RevisionState.PUBLISHED);
         revision.setPublishedAt(Instant.now());
         revision.setPublishedBy(actor.person().id());
@@ -546,6 +550,18 @@ public class LearningContentService {
      * Bản nháp được phép chưa chọn đề: việc đó chỉ bị chặn khi xuất bản.
      */
     private void validateLessonInput(Course course, LearningRequests.LessonInput lesson) {
+        if (LessonType.SCORM.equals(lesson.lessonType())) {
+            if (lesson.quizId() != null || !lesson.blocks().isEmpty()) {
+                throw BusinessException.validation("chapters", "INVALID_VALUE",
+                    "Bài SCORM không chứa đề thi hoặc khối nội dung khác.");
+            }
+            if (lesson.scormPackageId() != null) validateScormPackage(course, lesson.scormPackageId());
+            return;
+        }
+        if (lesson.scormPackageId() != null) {
+            throw BusinessException.validation("scormPackageId", "INVALID_VALUE",
+                "Chỉ bài SCORM được gắn bài giảng SCORM.");
+        }
         if (LessonType.CONTENT.equals(lesson.lessonType())) {
             if (lesson.quizId() != null) {
                 throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
@@ -561,6 +577,34 @@ public class LearningContentService {
             if (quiz.isEmpty() || quiz.get().deleted() || !course.getId().equals(quiz.get().courseId())) {
                 throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
             }
+        }
+    }
+
+    private void validateScormPackage(Course course, Long id) {
+        if (id == null) {
+            throw BusinessException.validation("scormPackageId", "REQUIRED", "Vui lòng tải lên hoặc chọn bài giảng SCORM.");
+        }
+        var lecture = scormPackages.require(id);
+        var actor = access.actor();
+        boolean managed = access.canManage(actor, lecture.orgId(),
+            lecture.uploadedBy().equals(actor.person().id()) ? actor.person().teamId() : null, lecture.uploadedBy());
+        boolean shared = lecture.published()
+            && identity.activeOrgIds(lecture.orgId(), true).contains(course.getOwnerOrgId());
+        if (!managed && !shared) throw new AccessDeniedException("SCORM library scope denied");
+    }
+
+    /** Xuất bản gói nháp do tác giả được quyền quản lý cùng transaction xuất bản khóa học. */
+    private void publishLinkedScorm(Long revisionId, String actor) {
+        for (var lesson : repository.lessons(revisionId)) {
+            if (!LessonType.SCORM.equals(lesson.getLessonType())) continue;
+            var lecture = scormPackages.require(lesson.getScormPackageId());
+            if (lecture.published()) continue;
+            if (!scormPackages.publish(lecture.id(), lecture.version())) {
+                throw BusinessException.validation("scormPackageId", "INVALID_VALUE",
+                    "Bài giảng đã thay đổi. Tải lại khóa học.");
+            }
+            audit.record(actor, "SCORM_PUBLISHED", "scorm_package", Long.toString(lecture.id()), lecture.orgId(),
+                Map.of("revisionId", revisionId));
         }
     }
 
@@ -699,6 +743,10 @@ public class LearningContentService {
                 if (lesson.lesson().isRequired()) {
                     requiredLessons++;
                 }
+                if (LessonType.SCORM.equals(lesson.lesson().lessonType())) {
+                    validateScormPackage(course, lesson.lesson().scormPackageId());
+                    continue;
+                }
                 if (LessonType.QUIZ.equals(lesson.lesson().lessonType())) {
                     Optional<LearningQuizDirectory.QuizRef> quiz = lesson.lesson().quizId() == null
                         ? Optional.empty() : quizzes.find(lesson.lesson().quizId());
@@ -781,6 +829,7 @@ public class LearningContentService {
                 lesson.setIsRequired(lessonInput.isRequired());
                 lesson.setSortNo(li);
                 lesson.setQuizId(lessonInput.quizId());
+                lesson.setScormPackageId(lessonInput.scormPackageId());
                 repository.save(lesson, actor);
                 for (int bi = 0; bi < lessonInput.blocks().size(); bi++) {
                     writeBlock(lesson.getId(), lessonInput.blocks().get(bi), bi, actor);
@@ -873,7 +922,7 @@ public class LearningContentService {
                         b.block().videoChapters().stream().map(ch -> new LearningRequests.VideoChapterInput(
                             ch.startSeconds(), ch.title())).toList(), b.block().transcript().stream()
                             .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList()))
-                    .toList()))
+                    .toList(), l.lesson().scormPackageId()))
                 .toList())).toList();
         var payload = new LearningRequests.DraftContent(source.getProgramId(), source.getModuleId(),
             source.getTitle(), source.getSummary(), source.getLevel(), source.getDefaultRequirement(),

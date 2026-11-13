@@ -166,6 +166,109 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
             java.math.BigDecimal.class, packageId, LEARNER)).isEqualByComparingTo("72.50");
     }
 
+    @Test
+    void scormLessonsImportWithTheCourseAndKeepAuthoritativeProgressPerEnrollmentAndLesson() throws Exception {
+        var bytes = new java.io.ByteArrayOutputStream();
+        try (var zip = new java.util.zip.ZipOutputStream(bytes)) {
+            Map<String, String> files = Map.of("imsmanifest.xml", """
+                <manifest xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+                  xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+                  <metadata><schemaversion>1.2</schemaversion></metadata>
+                  <resources><resource identifier="sco" adlcp:scormtype="sco" href="index.html"/></resources>
+                </manifest>
+                """, "index.html", "<!doctype html><html><body>SCORM course lesson</body></html>");
+            for (var file : files.entrySet()) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(file.getKey()));
+                zip.write(file.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        var upload = new org.springframework.mock.web.MockMultipartFile("file", "lesson.zip",
+            "application/zip", bytes.toByteArray());
+        long packageId = api.ok(INSTRUCTOR, MockMvcRequestBuilders.multipart("/api/v1/scorm/packages")
+            .file(upload).param("ownerOrgId", Long.toString(org))).path("id").asLong();
+        var fixtures = new AssessmentFixtures(api, jdbc);
+        var reference = fixtures.course();
+        Long program = jdbc.queryForObject("SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Long.class, reference.revisionId());
+        Map<String, Object> lesson = Map.of("title", "SCORM trong khóa", "lessonType", "scorm",
+            "estimatedDurationSeconds", 300, "isRequired", true, "blocks", List.of(), "scormPackageId", packageId);
+        Map<String, Object> content = draft("Khóa học SCORM", block("text"));
+        content.put("programId", program);
+        content.put("chapters", List.of(Map.of("title", "Nội dung tương tác", "lessons", List.of(lesson, lesson))));
+        var created = api.ok(INSTRUCTOR, api.post(create(unique("SCORM"), "Khóa học SCORM", content), COURSES));
+        long courseId = created.path("course").path("id").asLong();
+        long revision = created.path("revision").path("id").asLong();
+        long first = created.path("chapters").get(0).path("lessons").get(0).path("lesson").path("id").asLong();
+        long second = created.path("chapters").get(0).path("lessons").get(1).path("lesson").path("id").asLong();
+        assertThat(created.path("chapters").get(0).path("lessons").get(0).path("lesson")
+            .path("scormPackageId").asLong()).isEqualTo(packageId);
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", created.path("revision").path("rowVersion").asLong()),
+            "/api/v1/courses/{c}/revisions/{r}/publish", courseId, revision));
+        assertThat(api.ok(INSTRUCTOR, ApiClient.get("/api/v1/scorm/packages/{id}", packageId))
+            .path("published").asBoolean()).isTrue();
+        fixtures.assign(courseId, revision, LEARNER);
+        long enrollment = jdbc.queryForObject("SELECT enrollment_id FROM learning_hub.course_enrollments"
+            + " WHERE course_id = ? AND user_id = ?", Long.class, courseId, LEARNER);
+        var context = Map.of("preview", false, "enrollmentId", enrollment, "lessonId", first);
+        api.http(AssessmentFixtures.LEARNER_2, api.post(context, "/api/v1/scorm/packages/{id}/launch", packageId),
+            403, "CORE-ACCESS_DENIED");
+        api.http(LEARNER, api.post(Map.of("preview", false, "enrollmentId", enrollment,
+            "lessonId", reference.lessonId()), "/api/v1/scorm/packages/{id}/launch", packageId),
+            403, "CORE-ACCESS_DENIED");
+        String firstPath = courseScormLaunch(packageId, enrollment, first);
+        var values = new HashMap<String, String>(Map.of("cmi.core.lesson_status", "incomplete",
+            "cmi.core.score.raw", "100", "cmi.core.lesson_location", "page-4", "cmi.core.exit", "suspend"));
+        var incomplete = mvc.perform(api.post(Map.of("sequence", 1, "values", values, "finished", false),
+            firstPath.replace("/launch", "/runtime")).with(request -> {
+                request.setLocalPort(8020); return request;
+            })).andReturn().getResponse();
+        assertThat(incomplete.getStatus()).isEqualTo(200);
+        assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment))
+            .path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("0");
+        values.put("cmi.core.lesson_status", "passed");
+        assertThat(mvc.perform(api.post(Map.of("sequence", 2, "values", values, "finished", true),
+            firstPath.replace("/launch", "/runtime")).with(request -> {
+                request.setLocalPort(8020); return request;
+            })).andReturn().getResponse().getStatus()).isEqualTo(200);
+        var halfway = api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment));
+        assertThat(halfway.path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("50");
+        assertThat(halfway.path("enrollment").path("status").asText()).isEqualTo("in_progress");
+        assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}/progress", packageId))
+            .path("lessonStatus").asText()).isEqualTo("not attempted");
+        String resumed = courseScormLaunch(packageId, enrollment, first);
+        String html = mvc.perform(ApiClient.get(resumed).with(request -> {
+            request.setLocalPort(8020); return request;
+        })).andReturn().getResponse().getContentAsString();
+        assertThat(html).contains("page-4", "resume", "passed");
+        String secondPath = courseScormLaunch(packageId, enrollment, second);
+        assertThat(mvc.perform(ApiClient.get(secondPath).with(request -> {
+            request.setLocalPort(8020); return request;
+        })).andReturn().getResponse().getContentAsString()).doesNotContain("page-4");
+        assertThat(mvc.perform(api.post(Map.of("sequence", 1, "values", values, "finished", true),
+            secondPath.replace("/launch", "/runtime")).with(request -> {
+                request.setLocalPort(8020); return request;
+            })).andReturn().getResponse().getStatus()).isEqualTo(200);
+        var finished = api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment));
+        assertThat(finished.path("enrollment").path("status").asText()).isEqualTo("completed");
+        assertThat(finished.path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("100");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.scorm_registrations"
+            + " WHERE package_id = ? AND enrollment_id = ?", Integer.class, packageId, enrollment)).isEqualTo(2);
+    }
+
+    private String courseScormLaunch(long packageId, long enrollmentId, long lessonId) throws Exception {
+        long version = jdbc.queryForObject("SELECT auth_ver FROM learning_hub.users WHERE user_id = ?",
+            Long.class, LEARNER);
+        var response = mvc.perform(api.post(Map.of("preview", false, "enrollmentId", enrollmentId,
+            "lessonId", lessonId), "/api/v1/scorm/packages/{id}/launch", packageId)
+            .with(SecurityMockMvcRequestPostProcessors.jwt().jwt(jwt -> jwt.subject(LEARNER).claim("av", version))))
+            .andReturn().getResponse();
+        assertThat(response.getStatus()).isEqualTo(200);
+        var data = json.readTree(response.getContentAsString());
+        assertThat(data.path("status").asText()).as(data.toPrettyString()).isEqualTo("SUCCESS");
+        return java.net.URI.create(data.path("data").path("launchUrl").asText()).getPath();
+    }
+
     @BeforeAll
     void setUp() {
         api = new ApiClient(mvc, json);

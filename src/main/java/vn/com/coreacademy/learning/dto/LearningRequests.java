@@ -164,7 +164,12 @@ public final class LearningRequests {
         BigDecimal estimatedDurationSeconds,
         boolean isRequired,
         @Positive Long quizId,
-        @NotNull @Size(max = 100) List<@Valid BlockInput> blocks) {
+        @NotNull @Size(max = 100) List<@Valid BlockInput> blocks,
+        @Positive Long scormPackageId) {
+        public LessonInput(String title, String lessonType, BigDecimal estimatedDurationSeconds,
+                           boolean isRequired, Long quizId, List<BlockInput> blocks) {
+            this(title, lessonType, estimatedDurationSeconds, isRequired, quizId, blocks, null);
+        }
     }
 
     public record BlockInput(

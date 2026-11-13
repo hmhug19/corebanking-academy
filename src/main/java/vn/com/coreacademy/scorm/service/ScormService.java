@@ -34,11 +34,19 @@ import vn.com.coreacademy.scorm.dto.ScormDtos;
 import vn.com.coreacademy.scorm.repository.ScormRepository;
 import vn.com.coreacademy.scorm.repository.ScormRepository.PackageRow;
 import vn.com.coreacademy.scorm.repository.ScormRepository.Registration;
+import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
+import vn.com.coreacademy.learning.entity.CourseChapter;
+import vn.com.coreacademy.learning.entity.CourseEnrollment;
+import vn.com.coreacademy.learning.entity.CourseLesson;
+import vn.com.coreacademy.learning.repository.LearningRepository;
+import vn.com.coreacademy.learning.service.LearningAssignmentService;
+import vn.com.coreacademy.learning.service.LearningProgressService;
+import vn.com.coreacademy.learning.service.LearningWriteLock;
 import vn.com.coreacademy.security.SecurityContextUtils;
 import vn.com.coreacademy.storage.dto.ObjectDownload;
 import vn.com.coreacademy.storage.service.ObjectStorage;
 
-/** Independent lectures: author preview never changes a learner's runtime registration. */
+/** SCORM library and course lessons; author previews are isolated from every learner enrollment. */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -54,6 +62,10 @@ public class ScormService {
     private final ScormProperties properties;
     private final PlatformTransactionManager transactions;
     private final IdentityAuditService audit;
+    private final LearningRepository learning;
+    private final LearningAssignmentService assignments;
+    private final LearningProgressService courseProgress;
+    private final LearningWriteLock learningLock;
 
     public ScormDtos.PackageView upload(long orgId, MultipartFile file) throws IOException {
         Actor actor = access.actor();
@@ -112,10 +124,17 @@ public class ScormService {
 
     @Transactional(readOnly = true)
     public ScormDtos.PackageView get(long id) {
+        return get(id, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public ScormDtos.PackageView get(long id, Long enrollmentId, Long lessonId) {
         Actor actor = access.actor();
         var lecture = repository.require(id);
-        requireRead(lecture, actor);
-        return view(lecture, actor);
+        var course = context(id, enrollmentId, lessonId, actor);
+        if (course == null) requireRead(lecture, actor);
+        return course == null ? view(lecture, actor) : view(lecture, false,
+            repository.registration(id, actor.person().id(), false, enrollmentId, lessonId, false));
     }
 
     @Transactional
@@ -129,29 +148,33 @@ public class ScormService {
     }
 
     @Transactional(readOnly = true)
-    public ScormDtos.ProgressView progress(long id, boolean preview) {
+    public ScormDtos.ProgressView progress(long id, boolean preview, Long enrollmentId, Long lessonId) {
         Actor actor = access.actor();
         var lecture = repository.require(id);
-        if (preview ? !canManage(lecture, actor) : !canStudy(lecture, actor)) throw denied();
-        return progress(repository.registration(id, actor.person().id(), preview, false));
+        var course = context(id, enrollmentId, lessonId, actor);
+        requireLaunchAccess(lecture, actor, preview, course);
+        return progress(repository.registration(id, actor.person().id(), preview, enrollmentId, lessonId, false));
     }
 
     @Transactional
-    public ScormDtos.LaunchView launch(long id, boolean preview) {
+    public ScormDtos.LaunchView launch(long id, boolean preview, Long enrollmentId, Long lessonId) {
+        learningLock.acquire();
         Actor actor = access.actor();
         PackageRow lecture = repository.require(id);
-        if (preview ? !canManage(lecture, actor) : !canStudy(lecture, actor)) throw denied();
+        var course = context(id, enrollmentId, lessonId, actor);
+        requireLaunchAccess(lecture, actor, preview, course);
         URI player = origin(properties.getPlayerOrigin());
         URI lms = origin(properties.getLmsOrigin());
         if (player.equals(lms)) throw new IllegalStateException("SCORM player must use a separate origin");
-        repository.ensureRegistration(id, actor.person().id(), preview);
-        var registration = repository.registration(id, actor.person().id(), preview, true);
+        repository.ensureRegistration(id, actor.person().id(), preview, enrollmentId, lessonId);
+        var registration = repository.registration(id, actor.person().id(), preview, enrollmentId, lessonId, true);
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         Instant expires = Instant.now().plus(properties.getLaunchTtl());
         repository.launch(registration, ScormPackageReader.hash(token), expires,
             SecurityContextUtils.getAuthorizationVersion());
+        if (course != null) synchronize(registration, registration.cmi());
         return new ScormDtos.LaunchView(player + "/scorm-player/" + token + "/launch", expires, preview,
             progress(registration));
     }
@@ -188,6 +211,7 @@ public class ScormService {
 
     @Transactional
     public ScormDtos.RuntimeReceipt runtime(String token, ScormDtos.RuntimeRequest request) {
+        learningLock.acquire();
         Registration r = requireToken(token, true);
         String payload = repository.encode(request);
         if (payload.getBytes(StandardCharsets.UTF_8).length > 60000) throw invalid("values", "Dữ liệu phiên học quá lớn.");
@@ -210,8 +234,9 @@ public class ScormService {
         for (String field : List.of("raw", "min", "max")) number(values.get("cmi.core.score." + field));
         BigDecimal seconds = parseTime(values.getOrDefault("cmi.core.session_time", "0000:00:00"));
         repository.runtime(r, values, seconds.max(r.sessionSeconds()), request.sequence(), hash);
+        if (r.enrollmentId() != null) synchronize(r, values);
         return new ScormDtos.RuntimeReceipt(request.sequence(), progress(repository.registration(r.packageId(),
-            r.userId(), r.preview(), false)));
+            r.userId(), r.preview(), r.enrollmentId(), r.lessonId(), false)));
     }
 
     private Registration requireToken(String token, boolean locked) {
@@ -221,8 +246,43 @@ public class ScormService {
         identity.requireSession(registration.userId(), registration.authVersion());
         Actor actor = identity.actor(registration.userId());
         var lecture = repository.require(registration.packageId());
-        if (registration.preview() ? !canManage(lecture, actor) : !canStudy(lecture, actor)) throw denied();
+        var course = context(registration.packageId(), registration.enrollmentId(), registration.lessonId(), actor);
+        requireLaunchAccess(lecture, actor, registration.preview(), course);
         return registration;
+    }
+
+    private record CourseContext(CourseEnrollment enrollment, CourseLesson lesson) { }
+
+    private void requireLaunchAccess(PackageRow lecture, Actor actor, boolean preview, CourseContext course) {
+        if (course != null) {
+            if (preview) throw denied();
+            return;
+        }
+        if (preview ? !canManage(lecture, actor) : !canStudy(lecture, actor)) throw denied();
+    }
+
+    /** An enrollment is the authority for studying a linked package, including shared courses across units. */
+    private CourseContext context(long packageId, Long enrollmentId, Long lessonId, Actor actor) {
+        if (enrollmentId == null && lessonId == null) return null;
+        if (enrollmentId == null || lessonId == null) {
+            throw invalid("enrollmentId", "Cần xác định đủ lần học và bài học SCORM.");
+        }
+        var enrollment = assignments.requireOwnEnrollment(actor, enrollmentId, true);
+        var lesson = learning.require(CourseLesson.class, lessonId);
+        var chapter = learning.require(CourseChapter.class, lesson.getChapterId());
+        if (!enrollment.getRevisionId().equals(chapter.getRevisionId())
+            || !LessonType.SCORM.equals(lesson.getLessonType())
+            || !Long.valueOf(packageId).equals(lesson.getScormPackageId())
+            || !repository.require(packageId).published()) throw denied();
+        return new CourseContext(enrollment, lesson);
+    }
+
+    private void synchronize(Registration registration, Map<String, String> values) {
+        var course = context(registration.packageId(), registration.enrollmentId(), registration.lessonId(),
+            identity.actor(registration.userId()));
+        String status = values.getOrDefault("cmi.core.lesson_status", "not attempted");
+        courseProgress.synchronizeScorm(registration.userId(), course.enrollment(), course.lesson(),
+            "completed".equals(status) || "passed".equals(status));
     }
 
     private ScormDtos.PackageView view(PackageRow p, Actor actor) {

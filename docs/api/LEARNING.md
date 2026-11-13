@@ -2,12 +2,22 @@
 
 ## Thư viện bài giảng SCORM 1.2
 
-Module `scorm` phục vụ **bài giảng độc lập, một SCO**, tại FE `/admin/lessons`,
-thư viện học viên `/scorm` và player `/scorm/:id`. Không tự cộng điểm/chứng nhận,
-không đổi điều kiện hoàn thành các khóa học hiện có. SCO tự báo điểm và trạng thái;
-LMS kiểm hợp đồng rồi lưu theo `(packageId, userId, preview)`. Xem thử không ghi vào kết quả học viên.
+Module `scorm` phục vụ gói SCORM 1.2 một SCO. Giảng viên quản lý ở **Thư viện bài giảng** `/admin/lessons`,
+hoặc tải ZIP trực tiếp trong phần soạn bài học. Khóa học lưu lessonType `scorm` và `scormPackageId`, không có
+khối nội dung hay quizId trên cùng bài. Gói nháp thuộc quyền tác giả được xuất bản cùng transaction với khóa.
+Học viên học trong `/lesson/:courseId/:lessonId`, giữ cây khóa học và nút chuyển bài; `/scorm/:id` vẫn dùng
+cho xem thử thư viện và đường dẫn cũ. Runtime khóa học lưu theo `(packageId,userId,preview,enrollmentId,lessonId)`.
+Scope thư viện/preview có enrollmentId và lessonId NULL; cùng gói trong hai bài hoặc hai lần học không dùng chung kết quả.
+Runtime cập nhật lesson_progress và course_enrollments trong cùng transaction khi lưu thành công.
+`completed`/`passed` làm bài đạt 100%; các trạng thái còn lại là đang học, không suy % học từ điểm quiz.
+XP, điều kiện bài thi cuối và chứng nhận dùng quy tắc hoàn thành khóa hiện hành. Preview không tăng tiến độ khóa.
 
-Chạy [SQL SCORM](../sql/upgrade/2026-11-12-scorm12.sql) trước khi deploy backend/FE mới.
+GET package/progress nhận query `enrollmentId`, `lessonId`; POST launch nhận thêm hai ID này trong body.
+Cả hai phải cùng có hoặc cùng vắng. BE kiểm người sở hữu lần học, lịch mở học, revision/bài/gói và quyền hiện hành
+trên cả launch lẫn mọi lần đọc/ghi runtime; vé của thư viện không thể được dùng để hoàn thành một bài học.
+
+Chạy [SQL SCORM](../sql/upgrade/2026-11-12-scorm12.sql), sau đó
+[SQL tích hợp bài học](../sql/upgrade/2026-11-13-scorm-course-lessons.sql) trước khi deploy backend/FE mới.
 Không có migration tự chạy ở startup. Tham số origin/connector xem
 [hướng dẫn triển khai SCORM](../operations/DEPLOY_UBUNTU.md#scorm-12).
 
@@ -15,10 +25,10 @@ Không có migration tự chạy ở startup. Tham số origin/connector xem
 |---|---|---|
 | GET `/api/v1/scorm/packages?q&page&size` | page từ 0; size 1–100 | Page `{items,page,size,totalElements,totalPages}` |
 | POST `/api/v1/scorm/packages?ownerOrgId` | multipart part `file`, ZIP tối đa 100 MiB mặc định | PackageView, `published:false` |
-| GET `/api/v1/scorm/packages/{id}` | ID gói | PackageView |
+| GET `/api/v1/scorm/packages/{id}` | ID gói; thêm query `enrollmentId`, `lessonId` khi học trong khóa | PackageView |
 | POST `/api/v1/scorm/packages/{id}/publish` | `{"expectedVersion":0}` | PackageView mới |
-| POST `/api/v1/scorm/packages/{id}/launch` | `{"preview":false}`; quản lý xem thử gửi true | `{launchUrl,expiresAt,preview,progress}` |
-| GET `/api/v1/scorm/packages/{id}/progress?preview=false` | kết quả chính mình; preview chỉ cho người quản lý | ProgressView |
+| POST `/api/v1/scorm/packages/{id}/launch` | `{"preview":false,"enrollmentId":12,"lessonId":25}` trong khóa; bỏ hai ID khi học độc lập; quản lý xem thử gửi true | `{launchUrl,expiresAt,preview,progress}` |
+| GET `/api/v1/scorm/packages/{id}/progress?preview=false` | thêm query `enrollmentId`, `lessonId` trong khóa; kết quả chính mình; preview chỉ cho người quản lý | ProgressView |
 
 PackageView: `{id,ownerOrgId,title,originalName,sizeBytes,fileCount,scormVersion:"1.2",published,
 canManage,rowVersion,createTime,warnings:string[],progress}`. Không trả đường dẫn kho/object key.
@@ -26,7 +36,8 @@ ProgressView: `{lessonStatus,scoreRaw,scoreMin,scoreMax,lessonLocation,resumable
 điểm/thời điểm có thể null. `lessonLocation` là mã vị trí do SCO gửi, không được LMS tự suy thành số trang.
 
 Giảng viên/quản trị nhập và xuất bản theo LearningAccessPolicy (role và scope trên cùng grant).
-Học viên chỉ xem gói đã xuất bản của đơn vị mình hoặc đơn vị cha đang hoạt động. Nháp chỉ dành cho
+Học viên xem gói đã xuất bản của đơn vị mình hoặc đơn vị cha đang hoạt động; trong khóa học được chia sẻ,
+quyền sở hữu lần học và liên kết đúng bài/gói là phạm vi cho phép. Nháp chỉ dành cho
 người có quyền quản lý; người học không được upload/xuất bản. Gói bất biến sau import: nhập phiên bản
 mới tạo ID mới, không ghi đè nội dung đang có kết quả. Chưa hỗ trợ Multi-SCO/SCORM 2004.
 

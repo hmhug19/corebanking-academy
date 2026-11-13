@@ -473,6 +473,30 @@ public class LearningProgressService {
         return true;
     }
 
+    /** Đồng bộ từ runtime đã xác thực trên đúng lần học; điểm không được dùng thay trạng thái hoàn thành. */
+    @Transactional
+    public void synchronizeScorm(String userId, CourseEnrollment enrollment, CourseLesson lesson, boolean complete) {
+        lock.acquire();
+        Instant now = Instant.now();
+        LessonProgress progress = repository.lessonProgress(enrollment.getId()).stream()
+            .filter(p -> p.getLessonId().equals(lesson.getId())).findFirst().orElseGet(LessonProgress::new);
+        progress.setEnrollmentId(enrollment.getId());
+        progress.setLessonId(lesson.getId());
+        if (progress.getStartedAt() == null) progress.setStartedAt(now);
+        if (progress.getProgressPercent() == null) progress.setProgressPercent(BigDecimal.ZERO);
+        if (complete) progress.setProgressPercent(HUNDRED);
+        progress.setStatus(progress.getProgressPercent().compareTo(HUNDRED) >= 0
+            ? ProgressStatus.COMPLETED : ProgressStatus.IN_PROGRESS);
+        if (ProgressStatus.COMPLETED.equals(progress.getStatus()) && progress.getCompletedAt() == null) {
+            progress.setCompletedAt(now);
+            xp.lessonCompleted(userId, lessonKey(lesson), now);
+        }
+        progress.setLastAccessAt(now);
+        repository.save(progress, userId);
+        repository.flush();
+        updateEnrollment(enrollment, lesson.getId(), null, now, userId);
+    }
+
     private Long finalQuizId(Long revisionId) {
         return repository.finalAssessment(revisionId).map(exam -> exam.getAssessmentRevisionId())
             .orElseGet(() -> repository.rules(revisionId).stream().findFirst()

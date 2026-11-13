@@ -4,6 +4,13 @@ SCORM 1.2: trước khi dùng thư viện bài giảng mới, chạy
 [`upgrade/2026-11-12-scorm12.sql`](upgrade/2026-11-12-scorm12.sql) trên schema hiện hữu.
 Script chỉ thêm hai bảng và index SCORM, không sửa dữ liệu Identity/khóa học; không tự chạy ở startup.
 
+SCORM tích hợp bài học: sau script trên, chạy
+[`upgrade/2026-11-13-scorm-course-lessons.sql`](upgrade/2026-11-13-scorm-course-lessons.sql).
+Script thêm liên kết bài học/gói và scope `(enrollment_id, lesson_id)` vào registration, thay unique index cũ
+bằng index theo scope, đổi nhãn chức năng thành Thư viện bài giảng. Dữ liệu SCORM cũ giữ scope thư viện (NULL).
+Cần triển khai BE hỗ trợ index theo scope ngay sau migration; BE cũ dùng ON CONFLICT ba cột không tương thích
+index mới. Khi rollback giữ dữ liệu và dùng bản BE hiểu scope; không xóa registration hoặc tiến độ khóa.
+
 ## Chạy local
 
 DB đã triển khai: chạy [`upgrade/2026-11-05-required-final-quiz.sql`](upgrade/2026-11-05-required-final-quiz.sql)
