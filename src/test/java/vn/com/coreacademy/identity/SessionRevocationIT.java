@@ -12,16 +12,21 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
+import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.repository.UserRepository;
+import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.TokenService;
 import vn.com.coreacademy.security.SecurityConstants;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.ROOT;
@@ -44,6 +49,10 @@ class SessionRevocationIT extends AssessmentIntegrationTest {
     private JwtEncoder encoder;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private JwtDecoder decoder;
+    @Autowired
+    private LearningIdentityService identity;
 
     private String signIn(String userId) {
         return tokens.issue(users.findById(userId).orElseThrow()).accessToken();
@@ -57,6 +66,23 @@ class SessionRevocationIT extends AssessmentIntegrationTest {
     private int logout(String token) throws Exception {
         return mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer " + token)).andReturn()
             .getResponse().getStatus();
+    }
+
+    @Test
+    void theChatRoomAndScormPlayerOfALoggedOutSessionStopToo() throws Exception {
+        String browserA = signIn(TWO_BROWSERS);
+        String browserB = signIn(TWO_BROWSERS);
+        String sessionA = decoder.decode(browserA).getClaimAsString(SecurityConstants.SESSION_ID_CLAIM);
+        String sessionB = decoder.decode(browserB).getClaimAsString(SecurityConstants.SESSION_ID_CLAIM);
+        long version = users.findById(TWO_BROWSERS).orElseThrow().getAuthorizationVersion();
+
+        assertThat(logout(browserA)).isEqualTo(200);
+
+        // Both long-lived channels check their stored session through requireSession on every use.
+        assertThatThrownBy(() -> identity.requireSession(TWO_BROWSERS, version, sessionA))
+            .isInstanceOf(BusinessException.class);
+        assertThatCode(() -> identity.requireChatRoomSession(TWO_BROWSERS, version, sessionB))
+            .doesNotThrowAnyException();
     }
 
     @Test

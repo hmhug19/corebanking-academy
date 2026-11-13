@@ -4,6 +4,7 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
+ALTER TABLE IF EXISTS learning_hub.scorm_registrations DROP COLUMN IF EXISTS launch_session_id;
 DROP TABLE IF EXISTS learning_hub.revoked_sessions;
 
 COMMIT;

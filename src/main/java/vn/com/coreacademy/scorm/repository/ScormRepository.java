@@ -33,7 +33,7 @@ public class ScormRepository {
     public record Registration(long id, long packageId, String userId, boolean preview, Map<String, String> cmi,
                                BigDecimal totalSeconds, BigDecimal sessionSeconds, Instant expiresAt,
                                long authVersion, long sequence, String payloadHash, Instant updatedAt,
-                               Long enrollmentId, Long lessonId) { }
+                               Long enrollmentId, Long lessonId, String sessionId) { }
 
     public long insert(long orgId, String userId, String name, long size, PackageData data) {
         return jdbc.queryForObject("""
@@ -131,12 +131,12 @@ public class ScormRepository {
             + (locked ? " FOR UPDATE" : ""), registrationMapper(), hash).stream().findFirst().orElse(null);
     }
 
-    public void launch(Registration r, String hash, Instant expires, long authVersion) {
+    public void launch(Registration r, String hash, Instant expires, long authVersion, String sessionId) {
         jdbc.update("""
             UPDATE learning_hub.scorm_registrations SET launch_token_hash = ?, launch_expires_at = ?,
-              authorization_version = ?, last_sequence = 0, last_payload_hash = null,
+              authorization_version = ?, launch_session_id = ?, last_sequence = 0, last_payload_hash = null,
               total_seconds = total_seconds + session_seconds, session_seconds = 0 WHERE registration_id = ?
-            """, hash, java.sql.Timestamp.from(expires), authVersion, r.id());
+            """, hash, java.sql.Timestamp.from(expires), authVersion, sessionId, r.id());
     }
 
     public void runtime(Registration r, Map<String, String> cmi, BigDecimal seconds, long sequence, String hash) {
@@ -170,7 +170,8 @@ public class ScormRepository {
             r.getString("user_id"), r.getBoolean("preview"), decode(r.getString("cmi"), new TypeReference<>() { }),
             r.getBigDecimal("total_seconds"), r.getBigDecimal("session_seconds"), time(r, "launch_expires_at"),
             r.getLong("authorization_version"), r.getLong("last_sequence"), r.getString("last_payload_hash"),
-            time(r, "update_time"), r.getObject("enrollment_id", Long.class), r.getObject("lesson_id", Long.class));
+            time(r, "update_time"), r.getObject("enrollment_id", Long.class), r.getObject("lesson_id", Long.class),
+            r.getString("launch_session_id"));
     }
 
     private static Instant time(ResultSet result, String column) throws SQLException {

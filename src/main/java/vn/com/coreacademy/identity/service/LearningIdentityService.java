@@ -14,6 +14,7 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.identity.dto.RoleGrant;
 import vn.com.coreacademy.identity.enums.UserStatus;
+import vn.com.coreacademy.identity.repository.RevokedSessionRepository;
 import vn.com.coreacademy.identity.repository.UserRepository;
 import vn.com.coreacademy.organization.repository.OrganizationRepository;
 import vn.com.coreacademy.organization.repository.TeamRepository;
@@ -28,6 +29,7 @@ public class LearningIdentityService {
     private final UserRepository users;
     private final OrganizationRepository organizations;
     private final TeamRepository teams;
+    private final RevokedSessionRepository revokedSessions;
 
     public record Person(String id, String name, Long orgId, Long teamId) {
     }
@@ -52,14 +54,18 @@ public class LearningIdentityService {
     }
 
     /** Kiểm tra lại phiên phòng học từ danh tính tin cậy đã gắn với vé WebSocket, không nhận ID từ packet. */
-    public void requireChatRoomSession(String userId, long authorizationVersion) {
-        requireSession(userId, authorizationVersion);
+    public void requireChatRoomSession(String userId, long authorizationVersion, String sessionId) {
+        requireSession(userId, authorizationVersion, sessionId);
     }
 
-    /** Scoped long-lived channels must stop when logout, password or permission changes revoke the session. */
-    public void requireSession(String userId, long authorizationVersion) {
+    /**
+     * Kênh sống lâu phải dừng khi phiên bị thu hồi: đăng xuất phiên này (sid), đổi mật khẩu hoặc quyền (auth_ver).
+     * sessionId null là token phát trước khi có mã phiên.
+     */
+    public void requireSession(String userId, long authorizationVersion, String sessionId) {
         var user = policy.current(userId);
-        if (user.getAuthorizationVersion() != authorizationVersion) {
+        if (user.getAuthorizationVersion() != authorizationVersion
+            || sessionId != null && revokedSessions.isRevoked(sessionId)) {
             throw new BusinessException(ResponseCode.UNAUTHORIZED);
         }
         policy.requirePasswordChanged(user);
