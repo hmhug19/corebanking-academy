@@ -68,6 +68,9 @@ public class AgentService {
     static final String BAD_ARGUMENTS = "Tham số của công cụ không hợp lệ.";
     public static final String ACTION_AFTER_DOCUMENTS = "Không thể mở màn hình hay đề xuất thay đổi trong lượt "
         + "đã đọc tài liệu. Hãy trả lời câu hỏi, người dùng có thể gửi yêu cầu đó riêng.";
+    /** The reply when a skill's mandatory tool was not called after one retry: never the model's claim of an action. */
+    public static final String TOOL_MISSING_ANSWER = "Mình chưa mở được màn hình này, bạn thử lại nhé.";
+    static final String TOOL_NUDGE = "Bạn phải gọi công cụ %s để làm việc này; không trả lời bằng chữ.";
     public static final String EMPTY_ANSWER = "Mình chưa có câu trả lời cho yêu cầu này. Bạn thử hỏi lại nhé.";
     static final String STEP_CAP_ANSWER =
         "Mình chưa xử lý được yêu cầu này. Bạn thử diễn đạt lại ngắn gọn hơn nhé.";
@@ -199,6 +202,9 @@ public class AgentService {
         List<ToolDefinition> offered = definitions;
         boolean readShared = false;
         Suggestions.Filter filter = new Suggestions.Filter();
+        // A skill whose reply is its tool's shows no model text: a text-only answer there claims an action not done.
+        boolean[] mustCall = {skill.mustCall(tools.stream().map(AgentTool::name).toList())};
+        boolean nudged = false;
 
         try {
             for (int step = 0; step < properties.maxSteps(); step++) {
@@ -206,12 +212,24 @@ public class AgentService {
                 OllamaClient.Options options = models.agentOptions().withNumPredict(budget.answer());
                 ChatTurn answer = ollama.chatWithTools(List.copyOf(messages), offered, options,
                     delta -> {
-                        String shown = filter.accept(delta);
+                        String shown = mustCall[0] ? "" : filter.accept(delta);
                         if (!shown.isEmpty()) {
                             emit(output, turnLog, AgentStreamEvent.delta(shown));
                         }
                     }, cancellation);
                 metrics.modelCall(AssistantMetrics.AGENT, answer.usage(), options.numCtx());
+                if (answer.toolCalls().isEmpty() && mustCall[0]) {
+                    if (!nudged) {
+                        nudged = true;
+                        messages.add(ChatMessage.assistant(answer.content()));
+                        messages.add(ChatMessage.system(TOOL_NUDGE.formatted(skill.requiredTool())));
+                        continue;
+                    }
+                    log.warn("Assistant mandatory tool not called skill={} tool={}", skill.id(), skill.requiredTool());
+                    metrics.toolMissing(skill.id());
+                    emit(output, turnLog, AgentStreamEvent.done(TOOL_MISSING_ANSWER, List.of()));
+                    return;
+                }
                 if (answer.toolCalls().isEmpty()) {
                     finish(output, turnLog, turn, answer.content().strip(), readShared);
                     return;
@@ -220,6 +238,10 @@ public class AgentService {
                 List<ToolCall> calls = answer.toolCalls().stream().limit(MAX_CALLS_PER_STEP).toList();
                 messages.add(ChatMessage.assistant(answer.content(), calls));
                 for (ToolCall call : calls) {
+                    if (call.name().equals(skill.requiredTool())) {
+                        // Called: whatever the tool answers, the model may now reply in its own words.
+                        mustCall[0] = false;
+                    }
                     emit(output, turnLog, AgentStreamEvent.tool(call.name()));
                     AgentTool tool = find(tools, call.name());
                     metrics.toolCall(tool == null ? AssistantMetrics.UNKNOWN_TOOL : tool.name());

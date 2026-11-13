@@ -336,6 +336,52 @@ class AgentServiceTest {
         assertThat(conversations.lastRecord().promptVersion()).isEqualTo(real.version());
     }
 
+    private SkillCatalog navigationCatalog() {
+        return new SkillCatalog("base", List.of(new Skill("dieu_huong", "điều hướng", List.of("open_screen"), List.of(),
+            "system", "", "", "open_screen")), "v1");
+    }
+
+    @Test
+    void aSkillWhoseToolIsMandatoryAsksOnceMoreThenRepliesWithTheFixedSentence() throws IOException {
+        tool("open_screen", true, false, true, (arguments, turn) -> new ToolOutcome.Navigate("/progress", "Tiến độ",
+            "Đã mở."));
+        modelAnswers(List.of("Mình đã mở trang tiến độ cho bạn."), List.of());
+
+        List<JsonNode> events = events(service(navigationCatalog()).stream("Mở trang tiến độ", null, "dieu_huong"));
+
+        assertThat(types(events)).containsExactly("done");
+        assertThat(events.get(0).path("answer").asText()).isEqualTo(AgentService.TOOL_MISSING_ANSWER);
+        ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
+        List<ChatMessage> retry = messages.getAllValues().get(1);
+        assertThat(retry.get(retry.size() - 1).role()).isEqualTo("system");
+        assertThat(retry.get(retry.size() - 1).content()).contains("open_screen");
+        assertThat(meters.get("assistant.tool_missing").tag("skill", "dieu_huong").counter().count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void aMandatoryToolCalledOnTheRetryNavigatesAsUsual() throws IOException {
+        tool("open_screen", true, false, true, (arguments, turn) -> new ToolOutcome.Navigate("/progress", "Tiến độ",
+            "Đã mở trang Tiến độ."));
+        modelAnswers(List.of("Mình đã mở."), List.of(), new ChatTurn("", List.of(call("open_screen"))));
+
+        List<JsonNode> events = events(service(navigationCatalog()).stream("Mở trang tiến độ", null, "dieu_huong"));
+
+        assertThat(types(events)).containsExactly("tool", "navigate", "done");
+        assertThat(events.get(2).path("answer").asText()).isEqualTo("Đã mở trang Tiến độ.");
+        assertThat(meters.find("assistant.tool_missing").counter()).isNull();
+    }
+
+    @Test
+    void aSkillWithoutAMandatoryToolStreamsItsTextAnswer() throws IOException {
+        modelAnswers(List.of("CIF là mã."), List.of());
+
+        List<JsonNode> events = events(ask("CIF là gì?"));
+
+        assertThat(types(events)).containsExactly("delta", "done");
+        verify(ollama, times(1)).chatWithTools(anyList(), anyList(), any(), any(), any());
+    }
+
     @Test
     void anUnknownLabelOrAFailingClassifierFallsBackToTheDocumentSkill() throws IOException {
         SkillCatalog real = new SkillCatalog();
@@ -365,8 +411,10 @@ class AgentServiceTest {
         events(service(real).stream("Mở màn hình", null, "dieu_huong"));
 
         ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
-        verify(ollama).chatWithTools(anyList(), offered.capture(), any(), any(), any());
-        assertThat(offered.getValue()).extracting(ToolDefinition::name).containsExactly("open_screen");
+        // The model answers with text only, so the mandatory tool is asked for once more: both calls offer one tool.
+        verify(ollama, times(2)).chatWithTools(anyList(), offered.capture(), any(), any(), any());
+        assertThat(offered.getAllValues()).allSatisfy(definitions ->
+            assertThat(definitions).extracting(ToolDefinition::name).containsExactly("open_screen"));
     }
 
     @Test

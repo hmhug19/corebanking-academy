@@ -101,6 +101,12 @@ public class AssistantMetrics {
         count("assistant.tool.calls", "Tool calls by tool name", "tool", tool);
     }
 
+    /** A turn of a skill with a mandatory tool that ended without calling it, after one retry. */
+    public void toolMissing(String skill) {
+        Counter.builder("assistant.tool_missing").description("Turns whose mandatory tool was never called")
+            .tag("skill", skill).register(registry).increment();
+    }
+
     public void skill(String skill) {
         count("assistant.skill.turns", "Turns by skill", "skill", skill);
     }
