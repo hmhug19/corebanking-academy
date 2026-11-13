@@ -20,7 +20,7 @@
                 <Delete basePath="${LOG_DIR}/archive" maxDepth="1">
                     <IfFileName glob="${APP_NAME}-*.log.gz">
                         <IfAny>
-                            <IfLastModified age="P14D"/>
+                            <IfLastModified age="P7D"/>
                             <IfAccumulatedFileSize exceeds="200 MB"/>
                         </IfAny>
                     </IfFileName>

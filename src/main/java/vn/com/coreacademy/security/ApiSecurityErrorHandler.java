@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
@@ -24,6 +25,7 @@ import vn.com.coreacademy.common.exception.ResponseCode;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
     private final ObjectMapper mapper;
 
@@ -31,12 +33,16 @@ public class ApiSecurityErrorHandler implements AuthenticationEntryPoint, Access
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException exception) throws IOException {
         response.setHeader(HttpHeaders.WWW_AUTHENTICATE, SecurityConstants.TOKEN_TYPE);
+        log.warn("Rejected unauthenticated API request method={} path={} messageCode={}", request.getMethod(),
+            request.getRequestURI(), ResponseCode.UNAUTHORIZED.getCode());
         write(response, ResponseCode.UNAUTHORIZED);
     }
 
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        AccessDeniedException exception) throws IOException {
+        log.warn("Rejected forbidden API request method={} path={} messageCode={}", request.getMethod(),
+            request.getRequestURI(), ResponseCode.FORBIDDEN.getCode());
         write(response, ResponseCode.FORBIDDEN);
     }
 
