@@ -36,7 +36,26 @@ public class MediaProbe {
 
     private final Settings properties;
 
-    public record Settings(String ffprobe, String ffmpeg, Duration probeTimeout, Duration transcodeTimeout) {
+    /** The x264 speed/size trade-off when nothing else is configured. */
+    public static final String DEFAULT_PRESET = "veryfast";
+    /** Threads per transcode when nothing else is configured: each one costs memory (about 290 MB at 2, 410 MB at 8). */
+    public static final int DEFAULT_THREADS = 2;
+
+    /**
+     * @param threads decoder and encoder threads of one transcode; the wall time of an AV1 or HEVC source is
+     *                almost inversely proportional to it
+     * @param preset  x264 preset of a transcode (a remux copies the streams)
+     */
+    public record Settings(String ffprobe, String ffmpeg, Duration probeTimeout, Duration transcodeTimeout,
+                           int threads, String preset) {
+        public Settings {
+            if (threads < 1) throw new IllegalArgumentException("threads must be positive");
+        }
+
+        public Settings(String ffprobe, String ffmpeg, Duration probeTimeout, Duration transcodeTimeout) {
+            this(ffprobe, ffmpeg, probeTimeout, transcodeTimeout, DEFAULT_THREADS, DEFAULT_PRESET);
+        }
+
         public Settings(String ffprobe, String ffmpeg, Duration probeTimeout) {
             this(ffprobe, ffmpeg, probeTimeout, Duration.ofHours(6));
         }
@@ -138,12 +157,13 @@ public class MediaProbe {
         return new Checked(mime, duration, null, playback);
     }
 
-    private List<String> mp4Command(Path source, Path destination, JsonNode video, JsonNode audio,
+    List<String> mp4Command(Path source, Path destination, JsonNode video, JsonNode audio,
                                    BigDecimal duration, long maxBytes, boolean copy) {
         List<String> command = new ArrayList<>(List.of(properties.ffmpeg(), "-v", "error", "-nostdin", "-y",
             // Decoder threads otherwise follow the host's core count (AV1 keeps a frame buffer per thread),
             // which is memory the container may not have.
-            "-protocol_whitelist", "file,pipe", "-threads", "2", "-i", source.toString(),
+            "-protocol_whitelist", "file,pipe", "-threads", Integer.toString(properties.threads()),
+            "-i", source.toString(),
             "-map", "0:" + video.path("index").asInt()));
         if (audio != null) command.addAll(List.of("-map", "0:" + audio.path("index").asInt()));
         command.addAll(List.of("-map_metadata", "-1", "-map_chapters", "-1", "-sn", "-dn"));
@@ -156,7 +176,8 @@ public class MediaProbe {
                 .longValue();
             long audioRate = audio == null ? 0 : Math.min(128_000, budget / 4);
             long videoRate = budget - audioRate;
-            command.addAll(List.of("-c:v", "libx264", "-preset", "veryfast", "-threads", "2", "-pix_fmt", "yuv420p",
+            command.addAll(List.of("-c:v", "libx264", "-preset", properties.preset(),
+                "-threads", Integer.toString(properties.threads()), "-pix_fmt", "yuv420p",
                 "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
                 "-fpsmax", "60", "-b:v", Long.toString(videoRate), "-maxrate", Long.toString(videoRate),
                 "-bufsize", Long.toString(videoRate * 2)));

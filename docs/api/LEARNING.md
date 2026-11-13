@@ -282,8 +282,12 @@ Init ví dụ (ID và hash chỉ minh họa, phải lấy theo file/đơn vị t
   Audio là tùy chọn, chỉ track hình chính và track audio đầu tiên được dùng. File hỏng/mã hóa hoặc
   không có video vẫn trả lỗi xác minh. MP4 học tập áp dụng giới hạn dung lượng, không giới hạn 24 giờ.
   Timeout chuyển đổi riêng là `app.learning.media.transcode-timeout` (mặc định 6 giờ); worker tiếp tục
-  gia hạn lease trong khi chạy. Bản chuyển đổi tối đa 1920×1080, bitrate theo thời lượng để giới hạn
-  dung lượng rendition. File gốc và rendition có key/size/MIME/hash riêng.
+  gia hạn lease trong khi chạy (heartbeat chạy luồng riêng, không phụ thuộc scheduler dùng chung). Số luồng
+  giải mã/mã hóa của một lần chuyển đổi là `app.learning.media.transcode-threads` (env
+  `APP_LEARNING_MEDIA_TRANSCODE_THREADS`; mặc định 0 = số CPU JVM thấy, tối đa 4) và preset x264 là
+  `app.learning.media.transcode-preset` (mặc định `veryfast`). Nhiều luồng nhanh hơn nhưng tốn RAM hơn:
+  khoảng 290 MB ở 2 luồng, 330 MB ở 4 và 410 MB ở 8; cần chừa đủ RAM container ngoài JVM. Bản chuyển
+  đổi tối đa 1920×1080, bitrate theo thời lượng để giới hạn dung lượng rendition. File gốc và rendition có key/size/MIME/hash riêng.
   WebM giữ VP8/VP9 + Opus/Vorbis.
 - POST upload một request cũ vẫn dùng được, nay kiểm file thật cùng pipeline đồng bộ; durationSeconds/pageCount
   vẫn nhận để tương thích nhưng không dùng làm dữ liệu xác minh. Không còn đường bỏ qua kiểm codec/page count.
