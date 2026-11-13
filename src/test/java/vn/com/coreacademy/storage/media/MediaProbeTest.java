@@ -6,9 +6,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -48,6 +51,33 @@ class MediaProbeTest {
     @Test
     void successfulToolReturnsItsOutput() throws IOException {
         assertThat(probe.run(exitWith(0), Duration.ofSeconds(30))).contains("{\"ok\":true}");
+    }
+
+    @Test
+    void transcodeUsesTheConfiguredThreadsAndPreset() throws IOException {
+        MediaProbe tuned = new MediaProbe(new MediaProbe.Settings("ffprobe", "ffmpeg", Duration.ofSeconds(30),
+            Duration.ofHours(6), 4, "superfast"), new ObjectMapper());
+        ObjectMapper json = new ObjectMapper();
+        JsonNode video = json.readTree("{\"index\":0}");
+        JsonNode audio = json.readTree("{\"index\":1}");
+
+        List<String> command = tuned.mp4Command(Path.of("in.mp4"), Path.of("out.mp4"), video, audio,
+            new BigDecimal("600"), 500_000_000L, false);
+
+        // Decoder threads come before -i, encoder threads after it: both follow the setting.
+        int input = command.indexOf("-i");
+        assertThat(command.subList(0, input)).containsSequence("-threads", "4");
+        assertThat(command.subList(input, command.size())).containsSequence("-threads", "4")
+            .containsSequence("-preset", "superfast");
+    }
+
+    @Test
+    void settingsWithoutTuningKeepTwoThreadsAndVeryfast() {
+        var settings = new MediaProbe.Settings("ffprobe", "ffmpeg", Duration.ofSeconds(30));
+        assertThat(settings.threads()).isEqualTo(2);
+        assertThat(settings.preset()).isEqualTo("veryfast");
+        assertThatThrownBy(() -> new MediaProbe.Settings("ffprobe", "ffmpeg", Duration.ofSeconds(30),
+            Duration.ofHours(6), 0, "veryfast")).isInstanceOf(IllegalArgumentException.class);
     }
 
     /** A stand-in for ffmpeg: a real child process that prints a line and exits with `code`. */
