@@ -42,6 +42,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.RecipientStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.ReminderChannel;
 import vn.com.coreacademy.learning.constants.LearningCodes.ReminderStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
+import vn.com.coreacademy.learning.constants.LearningCodes.RevisionChangeMode;
 import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
 import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.TargetType;
@@ -280,6 +281,9 @@ public class LearningAssignmentService {
         }
         CourseRevision revision = repository.require(CourseRevision.class, request.revisionId());
         requirePublished(course, revision);
+        if (!revision.getId().equals(course.getPublishedRevisionId())) {
+            throw new BusinessException(LearningResponseCode.CONFLICT);
+        }
         CourseAssignment assignment = new CourseAssignment();
         assignment.setCourseId(courseId);
         assignment.setRevisionId(revision.getId());
@@ -546,22 +550,132 @@ public class LearningAssignmentService {
         return enrollment;
     }
 
+    private String revisionImpactToken(List<AssignmentRecipient> recipients) {
+        String versions = recipients.stream().map(r -> r.getId() + ":" + r.getRowVersion()).sorted()
+            .collect(Collectors.joining(","));
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(versions.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("Cannot fingerprint revision impact", exception);
+        }
+    }
+
+    public LearningDetails.RevisionChangePreview revisionChangePreview(Long recipientId) {
+        var actor = access.actor();
+        AssignmentRecipient recipient = repository.require(AssignmentRecipient.class, recipientId);
+        CourseAssignment source = repository.require(CourseAssignment.class, recipient.getAssignmentId());
+        requireAssignmentManager(actor, source);
+        CourseEnrollment current = repository.require(CourseEnrollment.class, recipient.getEnrollmentId());
+        if (!source.getCourseId().equals(current.getCourseId()) || !recipient.getUserId().equals(current.getUserId())) {
+            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+        }
+        Course course = repository.require(Course.class, current.getCourseId());
+        CourseRevision previous = repository.require(CourseRevision.class, current.getRevisionId());
+        CourseRevision target = course.getPublishedRevisionId() == null ? null
+            : repository.require(CourseRevision.class, course.getPublishedRevisionId());
+        var obligations = repository.enrollmentRecipients(current.getId());
+        boolean ownsAll = obligations.stream().allMatch(r -> {
+            var assignment = repository.require(CourseAssignment.class, r.getAssignmentId());
+            return access.canManage(actor, assignment.getAssigningOrgId(), null, assignment.getAssignedBy());
+        });
+        Long latest = repository.enrollmentHistory(course.getId(), current.getUserId()).stream()
+            .filter(e -> !ProgressStatus.WITHDRAWN.equals(e.getStatus())).map(CourseEnrollment::getId)
+            .findFirst().orElse(null);
+        boolean allowed = target != null && CourseStatus.ACTIVE.equals(course.getLifecycleStatus())
+            && AssignmentStatus.ACTIVE.equals(source.getStatus()) && RecipientStatus.ACTIVE.equals(recipient.getStatus())
+            && current.getId().equals(latest) && ownsAll;
+        boolean untouched = ProgressStatus.NOT_STARTED.equals(current.getStatus()) && current.getStartedAt() == null
+            && current.getLastAccessAt() == null && current.getProgressPercent().signum() == 0
+            && !repository.enrollmentHasInteractions(current.getId());
+        String reason = !allowed ? "Lần học không còn hiện hành, nguồn giao không còn hiệu lực hoặc có nghĩa vụ ngoài quyền quản lý."
+            : !untouched ? "Học viên đã có tương tác hoặc kết quả; cần tạo lần học lại để giữ lịch sử." : null;
+        return new LearningDetails.RevisionChangePreview(current.getId(), current.getRowVersion(), previous.getId(),
+            previous.getRevisionNo(), target == null ? null : target.getId(), target == null ? null : target.getRevisionNo(),
+            current.getStatus(), obligations.size(), revisionImpactToken(obligations), allowed && untouched && !previous.getId().equals(target.getId()),
+            allowed, reason);
+    }
+
+    @Transactional
+    public LearningDetails.RevisionChangeResult changeRevision(Long recipientId, LearningRequests.RevisionChangeRequest request) {
+        var actor = access.actor();
+        lock.acquire();
+        var preview = revisionChangePreview(recipientId);
+        if (!preview.impactToken().equals(request.impactToken())
+            || !preview.enrollmentId().equals(request.enrollmentId())
+            || !Objects.equals(preview.targetRevisionId(), request.targetRevisionId())) {
+            throw new BusinessException(LearningResponseCode.CONFLICT);
+        }
+        CourseEnrollment previous = repository.require(CourseEnrollment.class, request.enrollmentId());
+        LearningContentService.version(previous, request.expectedVersion());
+        boolean transfer = RevisionChangeMode.TRANSFER.equals(request.mode());
+        if (transfer ? !preview.canTransfer() : !preview.canRelearn()) {
+            throw new BusinessException(LearningResponseCode.CONFLICT);
+        }
+        AssignmentRecipient recipient = repository.require(AssignmentRecipient.class, recipientId);
+        CourseAssignment source = repository.require(CourseAssignment.class, recipient.getAssignmentId());
+        Course course = repository.require(Course.class, previous.getCourseId());
+        CourseRevision target = repository.require(CourseRevision.class, request.targetRevisionId());
+        requireAssignCourse(actor, course, source.getAssigningOrgId());
+        requirePublished(course, target);
+        Person person = identity.activePerson(previous.getUserId());
+        access.requireRecipientScope(actor, person);
+        var obligations = repository.enrollmentRecipients(previous.getId());
+        String previousStatus = previous.getStatus();
+        if (!ProgressStatus.COMPLETED.equals(previous.getStatus())) {
+            previous.setStatus(ProgressStatus.WITHDRAWN);
+            repository.save(previous, actor.person().id());
+        }
+        CourseEnrollment next;
+        Long assignmentId = source.getId();
+        if (transfer) {
+            next = enrollment(course, target, person, EnrollmentMode.RETAKE, previous.getEnrollmentOrigin(), actor.person().id());
+            next.setSelfEnrolledAt(previous.getSelfEnrolledAt());
+            repository.save(next, actor.person().id());
+            for (AssignmentRecipient obligation : obligations) {
+                obligation.setEnrollmentId(next.getId());
+                repository.save(obligation, actor.person().id());
+            }
+        } else {
+            if (!ProgressStatus.COMPLETED.equals(previous.getStatus())) {
+                for (AssignmentRecipient obligation : obligations) {
+                    revokeRecipient(obligation, request.reason(), actor.person().id());
+                }
+            }
+            var assigned = assign(course.getId(), new LearningRequests.AssignmentRequest(target.getId(),
+                source.getAssigningOrgId(), "Học lại phiên bản " + target.getRevisionNo(), Instant.now(), request.dueAt(),
+                source.getRequirement(), EnrollmentMode.RETAKE, false, 0, request.idempotencyKey(),
+                List.of(new LearningRequests.TargetInput(TargetType.USER, person.id(), null, null, null, false))));
+            assignmentId = assigned.assignment().id();
+            next = repository.require(CourseEnrollment.class, assigned.recipients().get(0).enrollmentId());
+        }
+        audit.record(actor.person().id(), transfer ? AuditAction.ENROLLMENT_TRANSFERRED : AuditAction.RELEARNING_ASSIGNED,
+            "course_enrollment", previous.getId().toString(), source.getAssigningOrgId(),
+            Map.of("previousRevisionId", previous.getRevisionId(), "revisionId", target.getId(),
+                "enrollmentId", next.getId(), "assignmentId", assignmentId, "reason", request.reason(),
+                "previousStatus", previousStatus, "affectedRecipientIds", obligations.stream().map(AssignmentRecipient::getId).toList()));
+        repository.flush();
+        return new LearningDetails.RevisionChangeResult(previous.getId(), next.getId(), assignmentId, target.getId());
+    }
+
     private CourseEnrollment enrollment(Course course, CourseRevision revision, Person person, String mode,
                                         String origin, String actor) {
         var history = repository.enrollmentHistory(course.getId(), person.id());
         var open = history.stream().filter(e -> Set.of(ProgressStatus.NOT_STARTED,
             ProgressStatus.IN_PROGRESS).contains(e.getStatus()))
             .findFirst();
-        if (open.isPresent() && (EnrollmentMode.RETAKE.equals(mode) ||
-            !revision.getId().equals(open.get().getRevisionId()))) {
-            throw new BusinessException(LearningResponseCode.CONFLICT);
-        }
         if (EnrollmentMode.CONTINUE.equals(mode)) {
+            if (open.isPresent()) {
+                return open.get();
+            }
             var matching = history.stream().filter(e -> !ProgressStatus.WITHDRAWN.equals(e.getStatus())
                 && revision.getId().equals(e.getRevisionId())).findFirst();
             if (matching.isPresent()) {
                 return matching.get();
             }
+        }
+        if (open.isPresent()) {
+            throw new BusinessException(LearningResponseCode.CONFLICT);
         }
         CourseEnrollment value = new CourseEnrollment();
         value.setCourseId(course.getId());

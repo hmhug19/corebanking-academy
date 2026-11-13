@@ -180,6 +180,7 @@ public class QuestionService {
     Question overwrite(Question question, Bank bank, AssessmentRequests.QuestionRequest request,
                                String actor) {
         Long id = question.getId();
+        requireMutableRevisionQuestions(List.of(id));
         if (request.programId() != null && !request.programId().equals(question.getProgramId())) {
             throw BusinessException.validation("programId", "INVALID_VALUE",
                 "Không thể chuyển câu hỏi sang chương trình khác.");
@@ -235,6 +236,7 @@ public class QuestionService {
         String actor = learning.actor().person().id();
         lock.acquire();
 
+        requireMutableRevisionQuestions(request.ids());
         List<Question> changed = found.stream().filter(q -> !request.status().equals(q.getStatus())).toList();
         changed.forEach(q -> {
             q.setStatus(request.status());
@@ -273,7 +275,13 @@ public class QuestionService {
         return new AssessmentViews.BulkResult(found.size());
     }
 
-    /** Mọi ID phải tồn tại và chưa xóa; thiếu một ID thì từ chối cả lô để không cập nhật một phần. */
+    /** Keep published exam questions stable for historical learning cycles. */
+    private void requireMutableRevisionQuestions(List<Long> ids) {
+        if (repository.quizIdsUsingQuestions(ids).stream().anyMatch(id -> learning.quizProtected(id, false))) {
+            throw new BusinessException(AssessmentResponseCode.QUIZ_REVISION_FROZEN);
+        }
+    }
+
     private List<Question> requireBulk(List<Long> ids) {
         List<Long> distinct = ids.stream().distinct().toList();
         List<Question> found = repository.questions(distinct).stream()

@@ -5,8 +5,8 @@
 
 Tính năng mới dùng hai bảng riêng và connector player riêng; cập nhật đồng thời backend và frontend.
 
-1. Review/chạy [`2026-11-12-scorm12.sql`](../sql/upgrade/2026-11-12-scorm12.sql) trên database đang dùng.
-   Không bật ddl-auto=update hoặc tự chạy migration khi startup. Script không thay bảng/tiến độ khóa học cũ.
+1. Review/chạy [`2026-11-12-scorm12.sql`](../sql/upgrade/2026-11-12-scorm12.sql) trên database đang dùng. Để gắn SCORM vào bài học của khóa, chạy tiếp [`2026-11-13-course-scorm.sql`](../sql/upgrade/2026-11-13-course-scorm.sql), rồi [`2026-11-13-scorm-course-lessons.sql`](../sql/upgrade/2026-11-13-scorm-course-lessons.sql) trước khi deploy backend/FE. Dừng BE cũ trong lúc nâng cấp; script cuối thống nhất scope NULL/NULL của runtime độc lập, giữ nguyên kết quả từng bài/lần học.
+   Không bật ddl-auto=update hoặc tự chạy migration khi startup; không đặt lại tiến độ khóa học cũ.
 2. Đặt biến môi trường, ví dụ `SCORM_LMS_ORIGIN=https://academy.example.com` và
    `SCORM_PLAYER_ORIGIN=https://scorm.academy.example.com`. Hai origin bắt buộc khác nhau, không có path/trailing slash.
    Dùng hostname player riêng có HTTPS; không đưa bearer JWT vào URL hoặc cấu hình trình phát.
@@ -37,17 +37,19 @@ Tính năng mới dùng hai bảng riêng và connector player riêng; cập nh�
 5. Build/chạy lại backend và frontend. Không chạy nhiều instance dùng cùng host port 8020.
    Local mặc định LMS `http://localhost:4200`, player `http://localhost:8020`; nếu dùng 127.0.0.1 thì
    đặt cả hai biến origin đúng theo địa chỉ browser. Player không dùng cookie bên thứ ba.
-6. Vào `/admin/lessons`, nhập ZIP, xem thử, xuất bản. Đăng nhập học viên trong phạm vi đơn vị,
-   mở **Học tập → Công cụ học nhanh → Bài giảng SCORM** (route `/scorm`), làm quiz và xem điểm/trạng thái.
-   Thoát giữa bài, mở lại để kiểm bookmark của chính học viên; chờ trạng thái lưu thành công trước khi đóng.
+6. Vào tạo/sửa khóa học → Nội dung → thêm/sửa bài → loại SCORM. Tải ZIP trực tiếp hoặc bấm
+   **Chọn từ thư viện bài giảng** để chọn gói ở `/admin/lessons`. Lưu nháp rồi xuất bản khóa học;
+   gói mới được xuất bản cùng khóa. Học viên mở bài ngay trong cây khóa học, làm quiz và xem điểm/trạng thái.
+   Thoát giữa bài, mở lại để kiểm bookmark; khi SCO báo completed/passed thì bài và tiến độ khóa được cập nhật.
+   Bài thi cuối khóa vẫn phải đạt nếu đã cấu hình. Chờ trạng thái lưu thành công trước khi đóng.
 
 Giới hạn mặc định: ZIP 100 MiB, giải nén 500 MiB, 2.000 entry và tỷ lệ nén không quá 200 lần (cho phép
 tối thiểu 1 MiB). Tệp tạm đặt dưới `UPLOAD_TEMP_DIR/scorm`, dùng volume upload có dung lượng trống phù hợp;
 không tăng giới hạn mà bỏ kiểm tra ZIP hoặc dùng `/tmp` nhỏ. Mỗi file được lưu riêng vào S3 private.
 Gói mới là ID mới; không ghi đè nội dung có kết quả. Chưa có tác vụ tự xóa phiên bản cũ.
 
-Rollback ứng dụng: có thể quay về image FE/BE trước; giữ nguyên hai bảng SCORM để bảo toàn kết quả và S3.
-Không DROP bảng/xóa object để rollback. Module không tự đánh dấu hoàn thành các khóa học/chứng nhận cũ.
+Rollback: giữ nguyên các bảng SCORM, tiến độ và S3. Sau migration scope bài học, dùng bản BE hỗ trợ index theo scope;
+BE SCORM cũ chỉ biết unique ba cột không thể ghi registration bằng ON CONFLICT cũ. Không DROP bảng/xóa object để rollback.
 
 ### Cùng hostname, cổng HTTPS 8020
 

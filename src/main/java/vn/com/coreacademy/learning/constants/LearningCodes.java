@@ -61,7 +61,8 @@ public final class LearningCodes {
     public static final class LessonType {
         public static final String CONTENT = "content";
         public static final String QUIZ = "quiz";
-        public static final String PATTERN = CONTENT + "|" + QUIZ;
+        public static final String SCORM = "scorm";
+        public static final String PATTERN = CONTENT + "|" + QUIZ + "|" + SCORM;
 
         private LessonType() {
         }
@@ -150,6 +151,13 @@ public final class LearningCodes {
 
         private ProgressStatus() {
         }
+    }
+
+    public static final class RevisionChangeMode {
+        public static final String TRANSFER = "transfer_unstarted";
+        public static final String RELEARN = "relearn";
+        public static final String PATTERN = TRANSFER + "|" + RELEARN;
+        private RevisionChangeMode() { }
     }
 
     public static final class EnrollmentMode {
@@ -455,6 +463,8 @@ public final class LearningCodes {
     }
 
     public static final class AuditAction {
+        public static final String ENROLLMENT_TRANSFERRED = "LEARNING_ENROLLMENT_TRANSFERRED";
+        public static final String RELEARNING_ASSIGNED = "LEARNING_RELEARNING_ASSIGNED";
         public static final String ASSET_DELETED = "LEARNING_ASSET_DELETED";
         public static final String ASSET_UPLOADED = "LEARNING_ASSET_UPLOADED";
         public static final String ASSIGNMENT_REMINDED = "LEARNING_ASSIGNMENT_REMINDED";

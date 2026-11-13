@@ -14,7 +14,7 @@ LOG_LEVEL_APP=INFO
 
 Dùng DEBUG cho LOG_LEVEL_APP khi cần điều tra. Không bật TRACE hoặc log request body/Authorization header cho API xác thực; không log mật khẩu, password hash, JWT, secret. Cấu hình không bật SQL bind parameter logging hoặc HTTP body logging.
 
-File xoay theo ngày hoặc khi đạt 10 MB; nén gzip vào `logs/archive/`. Tối đa 30 file index mỗi ngày. Cleanup archive chạy khi rollover: xóa file quá 14 ngày hoặc phần archive vượt 200 MB, ưu tiên giữ file mới. Giới hạn này áp dụng archive, không phải quota ổ cứng tức thời.
+File xoay theo ngày hoặc khi đạt 10 MB; nén gzip vào `logs/archive/`. Tối đa 30 file index mỗi ngày. Cleanup archive chạy khi rollover: xóa file quá 7 ngày hoặc phần archive vượt 200 MB, ưu tiên giữ file mới. Giới hạn này áp dụng archive, không phải quota ổ cứng tức thời.
 
 ## Docker / Ubuntu
 
@@ -34,4 +34,6 @@ Tham khảo [Spring Boot logging](https://docs.spring.io/spring-boot/3.5/how-to/
 
 ## Request context dùng chung
 
-common.web.RequestIdFilter chạy trước Spring Security để cả response 401/403 có X-Request-Id và correlation ID trong envelope. Tên custom header thuộc common.constants.HttpHeaderNames; RequestIdContext chỉ quản lý MDC key và response ID fallback. Filter validate ID đầu vào, giữ qua dispatch và khôi phục MDC trong finally, không log/cache body. Use case lấy caller qua security.SecurityContextUtils sau xác thực; không đưa JWT/password vào MDC. Chưa tự thêm access log hoặc truyền context qua @Async/executor; hai việc này cần cấu hình riêng khi có luồng sử dụng.
+common.web.RequestIdFilter chạy trước Spring Security để cả response 401/403 có X-Request-Id và correlation ID trong envelope. Tên custom header thuộc common.constants.HttpHeaderNames; RequestIdContext chỉ quản lý MDC key và response ID fallback. Filter validate ID đầu vào, giữ qua dispatch và khôi phục MDC trong finally, không log/cache body. Mỗi request ghi log INFO lúc bắt đầu và kết thúc, gồm method, path, HTTP status và thời gian xử lý. `requestId` được lấy từ MDC. Không ghi query string, request body, Authorization header hay thông tin xác thực. Use case lấy caller qua security.SecurityContextUtils sau xác thực; không đưa JWT/password vào MDC.
+
+`common.exception.ApiExceptionHandler` ghi log cho lỗi nghiệp vụ, validation, lỗi HTTP chuẩn và lỗi hệ thống. `security.ApiSecurityErrorHandler` ghi mã lỗi cho 401/403 từ Spring Security. Lỗi hệ thống ghi loại exception và vị trí stack trace, không ghi exception message/cause có thể chứa dữ liệu đầu vào. Cặp log bắt đầu/kết thúc request giúp lần theo luồng HTTP. Không ghi query string, request body, token hoặc thông tin xác thực.

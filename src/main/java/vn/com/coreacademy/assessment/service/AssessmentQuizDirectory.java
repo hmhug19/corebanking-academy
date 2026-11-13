@@ -1,7 +1,9 @@
 package vn.com.coreacademy.assessment.service;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,6 +66,19 @@ public class AssessmentQuizDirectory implements LearningQuizDirectory {
     @Transactional(readOnly = true)
     public Map<String, Integer> passedQuizCounts(Collection<String> userIds) {
         return attempts.passedQuizCounts(userIds);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, BigDecimal> enrollmentScores(String userId, Map<Long, Long> quizIdsByEnrollment) {
+        Map<Long, BigDecimal> result = new HashMap<>();
+        for (QuizAttempt attempt : repository.gradedEnrollmentAttempts(userId, quizIdsByEnrollment.keySet())) {
+            if (attempt.getQuizId().equals(quizIdsByEnrollment.get(attempt.getEnrollmentId()))
+                && attempt.getScorePercent() != null) {
+                result.merge(attempt.getEnrollmentId(), attempt.getScorePercent(), BigDecimal::max);
+            }
+        }
+        return result;
     }
 
     /** Dùng AttemptSummaries như màn giới thiệu đề nên điểm trên tổng quan và trên đề không thể lệch nhau. */

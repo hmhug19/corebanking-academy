@@ -140,7 +140,7 @@ public class LearningAnalyticsRepository {
                     order by a.sort_no, a.block_asset_id limit 1
                 ) ba on true
                 where ch.revision_id = x.revision_id
-                  and ((l.lesson_type = :quizLesson and coalesce(lp.progress_percent, 0) < 100)
+                  and ((l.lesson_type in (:quizLesson, :scormLesson) and coalesce(lp.progress_percent, 0) < 100)
                     or (b.block_id is not null and coalesce(bp.progress_percent, 0) < 100))
                 order by case when b.block_id = x.last_block_id then 0 else 1 end,
                          ch.sort_no, ch.chapter_id, l.sort_no, l.lesson_id, b.sort_no, b.block_id
@@ -150,7 +150,8 @@ public class LearningAnalyticsRepository {
             order by x.last_access_at desc nulls last, x.enrolled_at, x.id
             """, LearningAnalytics.NextAction.class));
         List<?> rows = query.setParameter("primaryUsage", AssetUsage.PRIMARY)
-            .setParameter("quizLesson", LessonType.QUIZ).setMaxResults(1).getResultList();
+            .setParameter("quizLesson", LessonType.QUIZ).setParameter("scormLesson", LessonType.SCORM)
+            .setMaxResults(1).getResultList();
         return rows.isEmpty() ? null : (LearningAnalytics.NextAction) rows.get(0);
     }
 

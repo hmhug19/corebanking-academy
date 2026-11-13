@@ -53,6 +53,7 @@ public class LearningSearchService {
     private final LearningRepository records;
     private final LearningContentService content;
     private final LessonFeedbackReadRepository feedback;
+    private final LearningAssignmentService assignments;
 
     public PageResponse<CourseCard> search(String mode, String q, Long fieldId, Long programId, Long moduleId,
                                            String level, String requirement, String learningStatus, String state,
@@ -117,18 +118,23 @@ public class LearningSearchService {
     }
 
     /**
-     * Điền điểm cao nhất của bài thi cuối khóa vào từng thẻ của trang bằng một lần gọi cổng quiz cho cả trang. Chế độ
+     * Điền điểm theo đúng lần học và đề cuối của revision, gom truy vấn cho cả trang. Chế độ
      * MANAGE là danh sách của giảng viên, không phải của người học nên không gọi cổng và để null.
      */
     private Page<CourseCard> withBestScores(String mode, Page<CourseCard> cards) {
         if (SearchMode.MANAGE.equals(mode) || cards.isEmpty()) {
             return cards;
         }
-        Map<Long, BigDecimal> finalExamBest = new HashMap<>();
-        quizzes.scores(access.actor().person().id(), cards.map(CourseCard::courseId).toList()).stream()
-            .filter(LearningQuizDirectory.QuizScore::finalExam)
-            .forEach(score -> finalExamBest.put(score.courseId(), score.bestScore()));
-        return cards.map(card -> card.withBestScorePercent(finalExamBest.get(card.courseId())));
+        Map<Long, Long> exams = new HashMap<>();
+        var selected = records.finalQuizIds(cards.map(CourseCard::revisionId).toList());
+        for (CourseCard card : cards) {
+            Long quizId = selected.get(card.revisionId());
+            if (card.enrollmentId() != null && quizId != null) {
+                exams.put(card.enrollmentId(), quizId);
+            }
+        }
+        Map<Long, BigDecimal> scores = quizzes.enrollmentScores(access.actor().person().id(), exams);
+        return cards.map(card -> card.withBestScorePercent(scores.get(card.enrollmentId())));
     }
 
     /**
@@ -186,6 +192,9 @@ public class LearningSearchService {
             throw new BusinessException(LearningResponseCode.NOT_FOUND);
         }
         var card = withRatings(withBestScores(SearchMode.CATALOG, cards)).getContent().get(0);
+        if (card.enrollmentId() != null) {
+            assignments.requireOwnEnrollment(actor, card.enrollmentId(), true);
+        }
         var detail = content.detail(records.require(Course.class, courseId),
             records.require(CourseRevision.class, card.revisionId()));
         return new LearnerCourse(card, card.enrollmentId() == null ? withoutBlocks(detail) : detail);

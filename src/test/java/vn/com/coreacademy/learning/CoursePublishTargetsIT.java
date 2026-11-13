@@ -1,5 +1,6 @@
 package vn.com.coreacademy.learning;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -192,6 +193,86 @@ class CoursePublishTargetsIT extends AssessmentIntegrationTest {
             """, draft.course().id(), sharedOrg))
             .containsEntry("include_descendants", true).containsEntry("can_assign", true)
             .containsEntry("can_self_enroll", false).containsEntry("status", "active");
+    }
+
+    private JsonNode nextRevision(Course course) {
+        JsonNode draft = api.ok(INSTRUCTOR, api.post(Map.of(), "/api/v1/courses/{c}/draft", course.id()));
+        return api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", draft.path("revision").path("rowVersion").asLong()),
+            PUBLISH, course.id(), draft.path("revision").path("id").asLong()));
+    }
+
+    private long recipient(Course course, String user) {
+        return jdbc.queryForObject("""
+            select ar.recipient_id from learning_hub.assignment_recipients ar
+            join learning_hub.course_assignments a on a.assignment_id = ar.assignment_id
+            where a.course_id = ? and ar.user_id = ? order by ar.recipient_id limit 1
+            """, Long.class, course.id(), user);
+    }
+
+    private JsonNode revisionPreview(long recipient) {
+        return api.ok(INSTRUCTOR, ApiClient.get("/api/v1/learning-assignments/recipients/{id}/revision-change", recipient));
+    }
+
+    private Map<String, Object> changeBody(JsonNode preview, String mode) {
+        return Map.of("impactToken", preview.path("impactToken").asText(),
+            "enrollmentId", preview.path("enrollmentId").asLong(), "expectedVersion", preview.path("expectedVersion").asLong(),
+            "targetRevisionId", preview.path("targetRevisionId").asLong(), "mode", mode,
+            "reason", "Cập nhật nội dung bắt buộc", "idempotencyKey", AssessmentFixtures.unique("revision-change"));
+    }
+
+    @Test
+    void publishingKeepsOldLearningAndExplicitChangesPreserveHistoryAndObligations() {
+        Course course = fixtures.course(LEARNER, LEARNER_2);
+        long started = recipient(course, LEARNER), untouched = recipient(course, LEARNER_2);
+        long oldStarted = jdbc.queryForObject("select enrollment_id from learning_hub.assignment_recipients where recipient_id = ?", Long.class, started);
+        jdbc.update("update learning_hub.course_enrollments set status = 'in_progress', started_at = now(), progress_percent = 25 where enrollment_id = ?", oldStarted);
+        long next = nextRevision(course).path("revision").path("id").asLong();
+        assertThat(jdbc.queryForObject("select revision_id from learning_hub.course_enrollments where enrollment_id = ?", Long.class, oldStarted))
+            .isEqualTo(course.revisionId());
+        assertThat(jdbc.queryForObject("select progress_percent from learning_hub.course_enrollments where enrollment_id = ?", BigDecimal.class, oldStarted))
+            .isEqualByComparingTo("25");
+        fixtures.assign(course.id(), next, LEARNER);
+        assertThat(jdbc.queryForObject("select count(*) from learning_hub.course_enrollments where course_id = ? and user_id = ?", Long.class, course.id(), LEARNER))
+            .isEqualTo(1);
+        JsonNode startedPreview = revisionPreview(started);
+        assertThat(startedPreview.path("canTransfer").asBoolean()).isFalse();
+        api.error(INSTRUCTOR, api.post(changeBody(startedPreview, "transfer_unstarted"),
+            "/api/v1/learning-assignments/recipients/{id}/revision-change", started), "LEARNING-CONFLICT");
+        JsonNode stale = revisionPreview(untouched);
+        fixtures.assign(course.id(), next, LEARNER_2);
+        api.error(INSTRUCTOR, api.post(changeBody(stale, "transfer_unstarted"),
+            "/api/v1/learning-assignments/recipients/{id}/revision-change", untouched), "LEARNING-CONFLICT");
+        JsonNode preview = revisionPreview(untouched);
+        assertThat(preview.path("canTransfer").asBoolean()).isTrue();
+        assertThat(preview.path("activeObligations").asInt()).isEqualTo(2);
+        JsonNode transferred = api.ok(INSTRUCTOR, api.post(changeBody(preview, "transfer_unstarted"),
+            "/api/v1/learning-assignments/recipients/{id}/revision-change", untouched));
+        assertThat(transferred.path("revisionId").asLong()).isEqualTo(next);
+        assertThat(jdbc.queryForObject("select count(*) from learning_hub.assignment_recipients where enrollment_id = ? and status = 'active'", Long.class,
+            transferred.path("enrollmentId").asLong())).isEqualTo(2);
+        JsonNode relearned = api.ok(INSTRUCTOR, api.post(changeBody(revisionPreview(started), "relearn"),
+            "/api/v1/learning-assignments/recipients/{id}/revision-change", started));
+        assertThat(relearned.path("enrollmentId").asLong()).isNotEqualTo(oldStarted);
+        assertThat(jdbc.queryForObject("select status from learning_hub.course_enrollments where enrollment_id = ?", String.class, oldStarted))
+            .isEqualTo("withdrawn");
+        assertThat(jdbc.queryForObject("select progress_percent from learning_hub.course_enrollments where enrollment_id = ?", BigDecimal.class,
+            relearned.path("enrollmentId").asLong())).isEqualByComparingTo("0");
+        assertThat(jdbc.queryForObject("select progress_percent from learning_hub.course_enrollments where enrollment_id = ?", BigDecimal.class,
+            oldStarted)).isEqualByComparingTo("25");
+    }
+
+    @Test
+    void relearningKeepsCompletedCyclesAndTheirCertificates() {
+        Course course = fixtures.course(LEARNER);
+        long recipient = recipient(course, LEARNER);
+        long old = revisionPreview(recipient).path("enrollmentId").asLong();
+        jdbc.update("update learning_hub.course_enrollments set status = 'completed', completed_at = now(), progress_percent = 100 where enrollment_id = ?", old);
+        nextRevision(course);
+        api.ok(INSTRUCTOR, api.post(changeBody(revisionPreview(recipient), "relearn"),
+            "/api/v1/learning-assignments/recipients/{id}/revision-change", recipient));
+        assertThat(jdbc.queryForObject("select status from learning_hub.course_enrollments where enrollment_id = ?", String.class, old))
+            .isEqualTo("completed");
+        api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/certificates/{id}", old));
     }
 
     @Test

@@ -20,3 +20,9 @@
 - Không lộ secret; không tự seed/reset password/cấp quyền để kiểm tra pass. Chỉ kiểm tra API thật bằng tài khoản/dữ liệu đã được cho phép.
 - Không tự sinh thêm file test vào source repository; chỉ thêm khi người dùng yêu cầu rõ ràng. Chạy kiểm tra hiện có/phù hợp; build thành công không đồng nghĩa test pass.
 - Cập nhật hướng dẫn theo phạm vi trong guideline hoặc tài liệu chuyên đề hiện có; không tạo thêm Markdown trùng lặp. Contract Identity và phạm vi UI hiện tại được dẫn tại mục 13 của guideline.
+
+## Quy tắc database dùng chung
+
+- PostgreSQL dùng chung cho phát triển: database `appdb`, schema `learning_hub`; backend runtime kết nối bằng role `dev_user` (`DB_USER=dev_user`). Không tự đổi sang `app_user` hoặc role khác.
+- Migration và thao tác tạo/sửa object trong schema phải bảo đảm `dev_user` có quyền cần thiết; ưu tiên chạy migration bằng `dev_user`, tránh tạo bảng/sequence thuộc role khác khiến backend không truy cập được.
+- Mật khẩu chỉ lấy từ secret/env đã provision trên môi trường chạy; không ghi credential thật vào source, tài liệu, log hoặc output.

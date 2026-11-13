@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.repository;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,6 +18,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.RecipientStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.ReminderKind;
 import vn.com.coreacademy.learning.constants.LearningCodes.ReminderStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
 import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.entity.AssignmentRecipient;
 import vn.com.coreacademy.learning.entity.AssignmentTarget;
@@ -71,6 +73,30 @@ public class LearningRepository {
                 where a.placement = :placement and a.assessmentRevisionId = :id
                 """, Long.class).setParameter("id", quizId)
                 .setParameter("placement", CourseAssessment.PLACEMENT_FINAL).getSingleResult() > 0;
+    }
+
+    /** Published revisions freeze exam configuration; closing must also preserve current and unfinished learning. */
+    public boolean quizProtected(Long quizId, boolean closing) {
+        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
+            select exists (
+                select 1 from learning_hub.course_revisions r
+                join learning_hub.courses c on c.course_id = r.course_id
+                where r.state = :published and (
+                    exists (select 1 from learning_hub.course_lessons l
+                        join learning_hub.course_chapters ch on ch.chapter_id = l.chapter_id
+                        where ch.revision_id = r.revision_id and l.quiz_id = :id)
+                    or exists (select 1 from learning_hub.course_completion_rules cr
+                        where cr.revision_id = r.revision_id and cr.final_quiz_id = :id)
+                    or exists (select 1 from learning_hub.course_assessments ca
+                        where ca.revision_id = r.revision_id and ca.assessment_revision_id = :id)
+                ) and (not :closing or c.published_revision_id = r.revision_id
+                    or exists (select 1 from learning_hub.course_enrollments e
+                        where e.revision_id = r.revision_id and e.status in (:notStarted, :inProgress)))
+            )
+            """).setParameter("id", quizId).setParameter("closing", closing)
+            .setParameter("published", RevisionState.PUBLISHED)
+            .setParameter("notStarted", ProgressStatus.NOT_STARTED)
+            .setParameter("inProgress", ProgressStatus.IN_PROGRESS).getSingleResult());
     }
 
     public <T> T require(Class<T> type, Long id) {
@@ -425,6 +451,16 @@ public class LearningRepository {
             """, RecipientTargetSource.class, Map.of("id", assignmentId));
     }
 
+    /** Any recorded interaction prevents treating an enrollment as untouched, even at zero percent. */
+    public boolean enrollmentHasInteractions(Long enrollmentId) {
+        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
+            select exists (select 1 from learning_hub.lesson_progress where enrollment_id = :id)
+                or exists (select 1 from learning_hub.block_progress where enrollment_id = :id)
+                or exists (select 1 from learning_hub.quiz_attempts where enrollment_id = :id)
+                or exists (select 1 from learning_hub.scorm_registrations where enrollment_id = :id)
+            """).setParameter("id", enrollmentId).getSingleResult());
+    }
+
     public List<CourseEnrollment> enrollmentHistory(Long courseId, String userId) {
         return query("""
             select e
@@ -543,6 +579,27 @@ public class LearningRepository {
             from CourseRevision r
             where r.coverAssetId = :id
             """, CourseRevision.class, Map.of("id", assetId));
+    }
+
+    /** Selected final exams for a page of revisions; explicit links override legacy completion rules. */
+    public Map<Long, Long> finalQuizIds(Collection<Long> revisionIds) {
+        Map<Long, Long> result = new HashMap<>();
+        if (revisionIds.isEmpty()) {
+            return result;
+        }
+        for (CourseCompletionRule rule : query("""
+            select r from CourseCompletionRule r where r.revisionId in :ids
+            """, CourseCompletionRule.class, Map.of("ids", revisionIds))) {
+            if (rule.getFinalQuizId() != null) {
+                result.put(rule.getRevisionId(), rule.getFinalQuizId());
+            }
+        }
+        for (CourseAssessment exam : query("""
+            select a from CourseAssessment a where a.revisionId in :ids and a.placement = :placement
+            """, CourseAssessment.class, Map.of("ids", revisionIds, "placement", CourseAssessment.PLACEMENT_FINAL))) {
+            result.put(exam.getRevisionId(), exam.getAssessmentRevisionId());
+        }
+        return result;
     }
 
     public List<CourseEnrollment> userEnrollments(String userId) {

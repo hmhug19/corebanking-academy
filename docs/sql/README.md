@@ -4,6 +4,13 @@ SCORM 1.2: trước khi dùng thư viện bài giảng mới, chạy
 [`upgrade/2026-11-12-scorm12.sql`](upgrade/2026-11-12-scorm12.sql) trên schema hiện hữu.
 Script chỉ thêm hai bảng và index SCORM, không sửa dữ liệu Identity/khóa học; không tự chạy ở startup.
 
+SCORM tích hợp bài học: sau script trên, chạy
+[`upgrade/2026-11-13-scorm-course-lessons.sql`](upgrade/2026-11-13-scorm-course-lessons.sql).
+Script thêm liên kết bài học/gói và scope `(enrollment_id, lesson_id)` vào registration, thay unique index cũ
+bằng index theo scope, đổi nhãn chức năng thành Thư viện bài giảng. Dữ liệu SCORM cũ giữ scope thư viện (NULL).
+Cần triển khai BE hỗ trợ index theo scope ngay sau migration; BE cũ dùng ON CONFLICT ba cột không tương thích
+index mới. Khi rollback giữ dữ liệu và dùng bản BE hiểu scope; không xóa registration hoặc tiến độ khóa.
+
 ## Chạy local
 
 DB đã triển khai: chạy [`upgrade/2026-11-05-required-final-quiz.sql`](upgrade/2026-11-05-required-final-quiz.sql)
@@ -518,3 +525,5 @@ script này không tự mở khóa, đổi đơn vị hay cấp thêm quyền ch
   bảo trì để lập bản xóa chọn lọc được duyệt. Bản sao DB thử nghiệm có thể hủy/tạo lại theo cơ chế vận hành;
   khôi phục snapshot prod chỉ được thực hiện theo kế hoạch phục hồi đã duyệt, tránh mất giao dịch mới.
 
+
+Course SCORM lessons: after `upgrade/2026-11-12-scorm12.sql`, apply [`upgrade/2026-11-13-course-scorm.sql`](upgrade/2026-11-13-course-scorm.sql), then [`upgrade/2026-11-13-scorm-course-lessons.sql`](upgrade/2026-11-13-scorm-course-lessons.sql) before deploying the corresponding backend/frontend. The final migration reconciles both earlier schema variants, normalizing standalone context 0/0 to NULL/NULL while preserving its runtime snapshot. Stop old backend instances while upgrading; the merged backend uses the expression index described above. Existing lesson content and progress remain intact.

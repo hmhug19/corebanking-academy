@@ -283,7 +283,7 @@ INSERT INTO learning_hub.functions(code, name, route_pattern, sort_no) VALUES
     ('QUIZ_TAKING'            , 'Làm bài kiểm tra'             , '/quiz'             ,  40),
     ('COURSE_MANAGEMENT'      , 'Quản lý khóa học'             , '/admin/courses'    ,  50),
     ('TRAINING_CATALOG'       , 'Lĩnh vực và chương trình'     , '/admin/catalog'    ,  55),
-    ('LESSON_MANAGEMENT'      , 'Quản lý bài giảng'            , '/admin/lessons'    ,  60),
+    ('LESSON_MANAGEMENT'      , 'Thư viện bài giảng'           , '/admin/lessons'    ,  60),
     ('QUESTION_BANK'          , 'Ngân hàng câu hỏi'            , '/admin/questions'  ,  70),
     ('QUIZ_MANAGEMENT'        , 'Quản lý bài thi'              , '/admin/quizzes'    ,  80),
     ('USER_MANAGEMENT'        , 'Quản lý người dùng'           , '/admin/users'      ,  90),

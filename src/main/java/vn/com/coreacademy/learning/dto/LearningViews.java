@@ -157,6 +157,7 @@ public final class LearningViews {
         Integer sortNo,
         Long sourceLessonId,
         Long quizId,
+        Long scormPackageId,
         Long rowVersion,
         Instant createTime,
         Instant updateTime,
