@@ -16,6 +16,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.AssetUsage;
 import vn.com.coreacademy.learning.constants.LearningCodes.AuditAction;
 import vn.com.coreacademy.learning.constants.LearningCodes.BlockType;
 import vn.com.coreacademy.learning.constants.LearningCodes.LeaseState;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.dto.MediaRequests;
 import vn.com.coreacademy.learning.dto.MediaViews;
 import vn.com.coreacademy.learning.entity.CourseChapter;
@@ -92,6 +93,14 @@ public class LearningSessionService {
         }
         var progress = repository.blockProgress(request.enrollmentId()).stream()
             .filter(p -> p.getBlockId().equals(request.blockId())).findFirst().orElse(null);
+        if (enrollment.getStartedAt() == null) {
+            enrollment.setStartedAt(now);
+            if (ProgressStatus.NOT_STARTED.equals(enrollment.getStatus())) {
+                enrollment.setStatus(ProgressStatus.IN_PROGRESS);
+            }
+            repository.save(enrollment, actor.person().id());
+            repository.flush();
+        }
         return new MediaViews.Session(lease.getSessionId(), lease.getSessionFence(), lease.getExpiresAt(),
             lease.getLastEventSequence(), lease.getEnrollmentId(), lease.getBlockId(), assetId,
             progress == null ? 0 : progress.getRowVersion(), progress == null ? null : mapper.view(progress));

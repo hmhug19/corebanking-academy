@@ -246,11 +246,11 @@ CREATE INDEX ix_asm_questions_course ON learning_hub.questions (course_id, statu
 CREATE INDEX ix_asm_questions_competency ON learning_hub.questions (competency_id, difficulty) WHERE NOT is_deleted;
 CREATE INDEX ix_asm_question_options_question ON learning_hub.question_options (question_id, sort_no) WHERE NOT is_deleted;
 CREATE INDEX ix_asm_quizzes_course ON learning_hub.quizzes (course_id) WHERE NOT is_deleted;
-CREATE UNIQUE INDEX ux_asm_quizzes_final ON learning_hub.quizzes (course_id) WHERE quiz_type = 'FINAL_EXAM' AND NOT is_deleted;
+CREATE INDEX ix_asm_quizzes_final ON learning_hub.quizzes (course_id) WHERE quiz_type = 'FINAL_EXAM' AND NOT is_deleted;
 CREATE UNIQUE INDEX ux_asm_quiz_questions ON learning_hub.quiz_questions (quiz_id, question_id);
 CREATE INDEX ix_asm_quiz_questions_question ON learning_hub.quiz_questions (question_id);
 CREATE UNIQUE INDEX ux_asm_quiz_attempts_no ON learning_hub.quiz_attempts (quiz_id, user_id, attempt_no);
-CREATE UNIQUE INDEX ux_asm_quiz_attempts_running ON learning_hub.quiz_attempts (quiz_id, user_id) WHERE status = 'IN_PROGRESS';
+CREATE UNIQUE INDEX ux_asm_quiz_attempts_running ON learning_hub.quiz_attempts (quiz_id, user_id, enrollment_id) WHERE status = 'IN_PROGRESS';
 CREATE INDEX ix_asm_quiz_attempts_expire ON learning_hub.quiz_attempts (deadline_at) WHERE status = 'IN_PROGRESS';
 CREATE INDEX ix_asm_quiz_attempts_report ON learning_hub.quiz_attempts (quiz_id, status, submitted_at);
 CREATE INDEX ix_asm_quiz_attempts_org ON learning_hub.quiz_attempts (org_id, submitted_at);

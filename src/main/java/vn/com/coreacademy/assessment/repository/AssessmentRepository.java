@@ -217,6 +217,13 @@ public class AssessmentRepository {
             """, Long.class, Map.of("ids", questionIds));
     }
 
+    public List<Long> quizIdsUsingQuestions(Collection<Long> ids) {
+        return query("""
+            select distinct p.quizId from QuizQuestion p, Quiz z
+            where p.quizId = z.id and z.deleted = false and p.questionId in :ids
+            """, Long.class, Map.of("ids", ids));
+    }
+
     public List<Quiz> publishedQuizzesUsing(Collection<Long> questionIds) {
         return query("""
             select distinct z
@@ -269,6 +276,14 @@ public class AssessmentRepository {
             order by a.quizId, a.attemptNo
             """, QuizAttempt.class, Map.of("user", userId, "quizzes", quizIds,
             "graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED)));
+    }
+
+    public List<QuizAttempt> enrollmentAttempts(Long quizId, String userId, Long enrollmentId) {
+        if (enrollmentId == null) return List.of();
+        return query("""
+            select a from QuizAttempt a where a.quizId = :quiz and a.userId = :user
+            and a.enrollmentId = :enrollment order by a.attemptNo
+            """, QuizAttempt.class, Map.of("quiz", quizId, "user", userId, "enrollment", enrollmentId));
     }
 
     public List<QuizAttempt> gradedEnrollmentAttempts(String userId, Collection<Long> enrollmentIds) {
@@ -396,18 +411,6 @@ public class AssessmentRepository {
             """, Map.of("id", quizId, "active", ItemStatus.ACTIVE, "multiple", QuestionType.MULTIPLE));
     }
 
-    public boolean finalQuizExists(Long courseId, Long excludeId) {
-        return exists("""
-            select count(z)
-            from Quiz z
-            where z.deleted = false
-            and z.courseId = :course
-            and z.quizType = :final
-            and z.id <> :exclude
-            """, Map.of("course", courseId, "final", QuizType.FINAL_EXAM,
-                "exclude", excludeId == null ? -1L : excludeId));
-    }
-
     public List<QuizAttempt> attempts(Long quizId, String userId) {
         return query("""
             select a
@@ -423,7 +426,11 @@ public class AssessmentRepository {
             from (
                 select a.user_id, count(*) as attempts_used
                 from learning_hub.quiz_attempts a
-                where a.quiz_id = :quiz and a.status <> :voided
+                join learning_hub.course_enrollments ce on ce.enrollment_id = a.enrollment_id
+                where a.quiz_id = :quiz and a.status <> :voided and ce.status <> :withdrawn
+                  and not exists (select 1 from learning_hub.course_enrollments newer
+                      where newer.course_id = ce.course_id and newer.user_id = ce.user_id
+                        and newer.status <> :withdrawn and newer.cycle_no > ce.cycle_no)
                 group by a.user_id
             ) used
             left join (

@@ -1157,3 +1157,19 @@ Learner package get/progress accept `enrollmentId` and `lessonId` query paramete
 Runtime registrations are isolated by package/user/preview/enrollment/lesson. Existing standalone registrations use enrollment_id=lesson_id=0 and never contribute to course completion. SCORM `completed` or `passed` completes that lesson; other statuses keep it in progress. Completion is monotonic and the configured final exam remains required. Progress updates and runtime snapshots commit atomically.
 
 Apply `docs/sql/upgrade/2026-11-13-course-scorm.sql` after the SCORM library migration, before deploying backend and frontend. No migration is executed automatically. Existing manual lessons and independent runtime data are preserved.
+
+## Republishing and explicit learning revision changes
+
+Publishing creates an immutable content revision and changes the latest published pointer. Existing assignments, enrollment revisions, progress, quiz results and certificates remain intact. New assignments target the latest published revision; CONTINUE reuses an existing unfinished cycle even when that cycle belongs to an older revision. A completed cycle on an older revision does not satisfy a new assignment targeting a different revision.
+
+In assignment details, managers can preview and explicitly change one recipient's current learning:
+
+- GET /api/v1/learning-assignments/recipients/{id}/revision-change returns the current/target revisions, enrollment row version, active obligation count, impact token and server eligibility flags.
+- POST to the same URL accepts impactToken, enrollmentId, expectedVersion, targetRevisionId, mode, reason, optional dueAt and idempotencyKey. Modes: transfer_unstarted or relearn.
+- Transfer is allowed only before any learning interaction: no start/access time, progress, lesson/block rows, quiz attempts or SCORM registrations. A new cycle replaces the untouched cycle and all its active recipient links move together, preserving their schedules, requirements and reminders. Audit retains the previous cycle and affected recipients.
+- Relearn creates a separate assignment and zero-progress cycle, opening immediately with an optional new deadline. Unfinished old learning is withdrawn and its active obligations/reminders are revoked with the reason. Completed old cycles and certificates remain intact. No progress, SCORM resume state or grade is copied.
+- Every affected obligation must be manageable by the actor. Stale enrollment versions, changed obligation snapshots or a changed latest revision cause a conflict; the UI must refresh the preview. Repeated stale submissions cannot create another cycle.
+
+Published revision quiz configuration, pools and referenced questions are frozen. The editor creates a separate draft exam when changing a published exam. Closing an exam is blocked while the current published revision or unfinished historical learning still needs it. Quiz quotas, running attempts and completion results are evaluated per enrollment; attempt numbers remain globally increasing for each learner/quiz.
+
+Deployment requires [the revision-learning migration](../sql/upgrade/2026-11-13-course-revision-learning.sql). Stop old backend instances, apply with the provisioned table-owner migration role, then deploy the matching backend and frontend. It removes the single-final-exam uniqueness restriction and scopes running-attempt uniqueness to enrollment. It creates no tables and changes no ownership or runtime grants; retain the provisioned dev_user access. Do not apply old baseline SQL over existing data.

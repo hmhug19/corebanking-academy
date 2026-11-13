@@ -67,6 +67,39 @@ class LearnerCourseQuizzesIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void relearningDoesNotResumeOrConsumeAttemptsFromThePreviousCycle() {
+        Course course = fixtures.course(LEARNER);
+        long quizId = quiz(course, "PRACTICE", "Learning cycle isolation", true);
+        long oldAttempt = api.ok(LEARNER, api.post(Map.of(), "/api/v1/me/quizzes/{id}/attempts", quizId))
+            .path("attemptId").asLong();
+        long recipient = jdbc.queryForObject("""
+            select ar.recipient_id from learning_hub.assignment_recipients ar
+            join learning_hub.course_assignments a on a.assignment_id = ar.assignment_id
+            where a.course_id = ? and ar.user_id = ? order by ar.recipient_id limit 1
+            """, Long.class, course.id(), LEARNER);
+        String path = "/api/v1/learning-assignments/recipients/{id}/revision-change";
+        JsonNode preview = api.ok(INSTRUCTOR, get(path, recipient));
+        assertThat(preview.path("canTransfer").asBoolean()).isFalse();
+        JsonNode changed = api.ok(INSTRUCTOR, api.post(Map.of(
+            "impactToken", preview.path("impactToken").asText(),
+            "enrollmentId", preview.path("enrollmentId").asLong(),
+            "expectedVersion", preview.path("expectedVersion").asLong(),
+            "targetRevisionId", preview.path("targetRevisionId").asLong(),
+            "mode", "relearn", "reason", "Mandatory refresher",
+            "idempotencyKey", AssessmentFixtures.unique("relearn")), path, recipient));
+        JsonNode intro = api.ok(LEARNER, get("/api/v1/me/quizzes/{id}", quizId));
+        assertThat(intro.path("summary").path("attemptsLeft").asInt()).isEqualTo(3);
+        assertThat(intro.path("summary").path("runningAttemptId").isNull()).isTrue();
+        long nextAttempt = api.ok(LEARNER, api.post(Map.of(), "/api/v1/me/quizzes/{id}/attempts", quizId))
+            .path("attemptId").asLong();
+        assertThat(nextAttempt).isNotEqualTo(oldAttempt);
+        assertThat(jdbc.queryForObject("select enrollment_id from learning_hub.quiz_attempts where attempt_id = ?",
+            Long.class, nextAttempt)).isEqualTo(changed.path("enrollmentId").asLong());
+        api.error(LEARNER, api.post(Map.of(), "/api/v1/me/quiz-attempts/{id}/submit", oldAttempt),
+            "LEARNING-NOT_AVAILABLE");
+    }
+
+    @Test
     void listsPublishedQuizzesWithTheFinalExamLastAndHidesDraftsAndDeleted() {
         Course course = fixtures.course(LEARNER);
         long exam = quiz(course, "FINAL_EXAM", "Thi cuối khóa", true);

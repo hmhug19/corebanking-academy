@@ -28,6 +28,8 @@ import vn.com.coreacademy.audit.service.IdentityAuditService;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
+import vn.com.coreacademy.learning.entity.CourseEnrollment;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 import vn.com.coreacademy.learning.service.LearningAccessPolicy;
 import vn.com.coreacademy.learning.service.LearningAssignmentService;
@@ -176,6 +178,17 @@ public class ScormService {
         if (player.equals(lms)) throw new IllegalStateException("SCORM player must use a separate origin");
         long enrollment = enrollmentId == null ? 0 : enrollmentId;
         long lesson = lessonId == null ? 0 : lessonId;
+        if (enrollmentId != null) {
+            var current = learning.require(CourseEnrollment.class, enrollmentId);
+            if (current.getStartedAt() == null) {
+                current.setStartedAt(Instant.now());
+                if (ProgressStatus.NOT_STARTED.equals(current.getStatus())) {
+                    current.setStatus(ProgressStatus.IN_PROGRESS);
+                }
+                learning.save(current, actor.person().id());
+                learning.flush();
+            }
+        }
         repository.ensureRegistration(id, actor.person().id(), preview, enrollment, lesson);
         var registration = repository.registration(id, actor.person().id(), preview, true, enrollment, lesson);
         byte[] bytes = new byte[32];

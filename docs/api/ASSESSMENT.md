@@ -399,3 +399,9 @@ Câu hỏi đã sửa phải được duyệt lại trước khi học viên th�
 Chạy `upgrade/2026-11-07-personal-flashcards.sql` sau script flashcard trước khi triển khai. Các API `/api/v1/me/flashcard-decks` hỗ trợ GET/POST bộ thẻ, PUT/DELETE bộ theo ID, GET/POST thẻ trong bộ, PUT/DELETE thẻ và PATCH trạng thái ôn hoặc đánh dấu. Chủ sở hữu được xác định từ phiên đăng nhập. Các thao tác sửa nội dung đặt lại trạng thái ôn của thẻ. Khóa học và nhóm kiến thức có thể được truyền qua API khi tạo hoặc sửa.
 
 API `POST /api/v1/me/flashcard-decks/{deckId}/cards/batch` nhận `items` gồm 1–100 thẻ với `prompt`, `answer`, `competencyId` tùy chọn. Tất cả thẻ được lưu cùng giao dịch.
+
+## Exams across course revisions
+
+A course can retain multiple FINAL_EXAM quizzes; each published course revision selects its own final exam. Configuration, pool and question edits affecting a published revision return ASSESSMENT-QUIZ_REVISION_FROZEN. Create a new draft exam for the new course revision instead. Closing also returns this code when a current published revision or unfinished historical enrollment needs the exam. Learner final-exam listing/start uses the final selected by the enrollment revision; legacy revisions without a selected final retain the legacy listing behavior.
+
+Attempt summaries and limits use the current enrollment, while global attempt history keeps previous cycles. Relearning creates a clean cycle without reusing a prior cycle's running attempt or passed result. Apply upgrade/2026-11-13-course-revision-learning.sql during the coordinated release; existing quiz and attempt data are retained.

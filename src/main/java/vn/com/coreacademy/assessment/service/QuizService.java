@@ -116,6 +116,7 @@ public class QuizService {
             throw BusinessException.validation("courseId", "INVALID_VALUE",
                 "Không thể chuyển bài kiểm tra sang khóa khác.");
         }
+        requireMutableRevisionQuiz(id);
         validateConfig(course.id(), id, request);
         requirePrivatePool(request.quizType(), repository.pool(id).stream().map(QuizQuestion::getQuestionId).toList());
         if (QuizStatus.PUBLISHED.equals(quiz.getStatus())
@@ -140,6 +141,7 @@ public class QuizService {
         String actor = learning.actor().person().id();
 
         requireVersion(quiz, expectedVersion);
+        requireMutableRevisionQuiz(id);
         List<AssessmentRequests.PoolItem> items = request.items();
         requirePrivatePool(quiz.getQuizType(), items.stream().map(AssessmentRequests.PoolItem::questionId).toList());
         Map<Long, Question> found = repository.questions(items.stream().map(AssessmentRequests.PoolItem::questionId)
@@ -242,6 +244,9 @@ public class QuizService {
         if (!QuizStatus.PUBLISHED.equals(quiz.getStatus())) {
             throw new BusinessException(AssessmentResponseCode.CONFLICT);
         }
+        if (learning.quizProtected(id, true)) {
+            throw new BusinessException(AssessmentResponseCode.QUIZ_REVISION_FROZEN);
+        }
         quiz.setStatus(QuizStatus.CLOSED);
         repository.save(quiz, actor);
         repository.flush();
@@ -330,20 +335,22 @@ public class QuizService {
         }
     }
 
+    private void requireMutableRevisionQuiz(Long id) {
+        if (learning.quizProtected(id, false)) {
+            throw new BusinessException(AssessmentResponseCode.QUIZ_REVISION_FROZEN);
+        }
+    }
+
     private static void requireVersion(Quiz quiz, Long expectedVersion) {
         if (!Objects.equals(quiz.getRowVersion(), expectedVersion)) {
             throw new BusinessException(AssessmentResponseCode.CONFLICT);
         }
     }
 
-    /** Mỗi khóa tối đa một đề FINAL_EXAM; thời gian đóng phải sau thời gian mở. */
+    /** Each revision selects its final exam; a course may retain several immutable exam generations. */
     private void validateConfig(Long courseId, Long quizId, AssessmentRequests.QuizRequest request) {
         if (request.openAt() != null && request.closeAt() != null && !request.closeAt().isAfter(request.openAt())) {
             throw BusinessException.validation("closeAt", "OUT_OF_RANGE", "Thời gian đóng phải sau thời gian mở.");
-        }
-        if (QuizType.FINAL_EXAM.equals(request.quizType()) && repository.finalQuizExists(courseId, quizId)) {
-            throw BusinessException.field(AssessmentResponseCode.DUPLICATE, "quizType", "ALREADY_EXISTS",
-                "Khóa học đã có bài thi cuối khóa.");
         }
     }
 

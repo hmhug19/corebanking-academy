@@ -112,6 +112,23 @@ public class LearningAssignmentController {
         return BaseResponse.ok(assignments.get(assignmentId));
     }
 
+    @GetMapping("/recipients/{recipientId}/revision-change")
+    @ApiResponse(responseCode = "200", useReturnTypeSchema = true,
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.")
+    @Operation(summary = "Xem trước chuyển phiên bản hoặc giao học lại cho một học viên")
+    public BaseResponse<LearningDetails.RevisionChangePreview> revisionChangePreview(@PathVariable @Positive Long recipientId) {
+        return BaseResponse.ok(assignments.revisionChangePreview(recipientId));
+    }
+
+    @PostMapping("/recipients/{recipientId}/revision-change")
+    @ApiResponse(responseCode = "200", useReturnTypeSchema = true,
+        description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.")
+    @Operation(summary = "Chuyển người chưa bắt đầu hoặc tạo đợt học lại; giữ lịch sử và ghi lý do")
+    public BaseResponse<LearningDetails.RevisionChangeResult> changeRevision(@PathVariable @Positive Long recipientId,
+        @Valid @RequestBody LearningRequests.RevisionChangeRequest request) {
+        return BaseResponse.ok(assignments.changeRevision(recipientId, request));
+    }
+
     @PostMapping("/recipients/{recipientId}/revoke")
     @ApiResponse(responseCode = "200",
         description = "Kết quả xử lý; kiểm tra status=SUCCESS hoặc ERROR.", useReturnTypeSchema = true)

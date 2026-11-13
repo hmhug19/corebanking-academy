@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -41,6 +42,7 @@ public class LearningAssessmentAccess {
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
     private final LearningAccessPolicy access;
+    private final LearningWriteLock writeLock;
     private final LearningRepository repository;
     private final LearningAssignmentService assignments;
     private final LearningIdentityService identity;
@@ -190,7 +192,28 @@ public class LearningAssessmentAccess {
             enrollment.getId(), revision.getId(), revision.getTitle());
     }
 
-    /** Học viên có ít nhất một lần học (chưa rút) của khóa; dùng khi cấp thêm lượt để tránh cấp nhầm người. */
+    /** Serialize attempt creation with learning-cycle transitions. */
+    public void lockEnrollmentMutation() {
+        writeLock.acquire();
+    }
+
+    public void requireAttemptEnrollment(Long enrollmentId) {
+        var enrollment = assignments.requireOwnEnrollment(access.actor(), enrollmentId, true);
+        if (!enrollmentId.equals(currentEnrollmentId(enrollment.getCourseId(), enrollment.getUserId()))) {
+            throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
+        }
+    }
+
+    public Long finalQuizId(Long revisionId) {
+        return repository.finalQuizIds(List.of(revisionId)).get(revisionId);
+    }
+
+    public Long currentEnrollmentId(Long courseId, String userId) {
+        return repository.enrollmentHistory(courseId, userId).stream()
+            .filter(e -> !ProgressStatus.WITHDRAWN.equals(e.getStatus())).map(CourseEnrollment::getId)
+            .findFirst().orElse(null);
+    }
+
     public boolean hasEnrollment(Long courseId, String userId) {
         return repository.enrollmentHistory(courseId, userId).stream()
             .anyMatch(e -> !ProgressStatus.WITHDRAWN.equals(e.getStatus()));
@@ -230,6 +253,10 @@ public class LearningAssessmentAccess {
     @Transactional
     public void quizPassedXp(String userId, Long quizId, int attemptNo, BigDecimal scorePercent, Instant at) {
         xp.quizPassed(userId, quizId, attemptNo, scorePercent, at);
+    }
+
+    public boolean quizProtected(Long quizId, boolean closing) {
+        return repository.quizProtected(quizId, closing);
     }
 
     public boolean quizLinked(Long quizId) {

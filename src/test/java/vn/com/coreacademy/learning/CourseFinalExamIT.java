@@ -397,4 +397,33 @@ class CourseFinalExamIT extends AssessmentIntegrationTest {
         assertThat(status(enrollment)).isEqualTo("completed");
         assertThat(status(newer)).isNotEqualTo("completed");
     }
+    @Test
+    void newFinalExamDoesNotReplaceTheExamOfAnExistingEnrollment() {
+        WithExam old = publishedWithExam(LEARNER);
+        long nextQuiz = quiz(old.course(), "FINAL_EXAM", true);
+        JsonNode next = publish(save(newDraft(old.course()), old.course(), nextQuiz), old.course());
+        fixtures.assign(old.course().id(), next.path("revision").path("id").asLong(), LEARNER_2);
+        JsonNode oldCards = api.ok(LEARNER, get("/api/v1/me/courses/{id}/quizzes", old.course().id()));
+        JsonNode nextCards = api.ok(LEARNER_2, get("/api/v1/me/courses/{id}/quizzes", old.course().id()));
+        assertThat(oldCards.size()).isEqualTo(1);
+        assertThat(oldCards.get(0).path("quiz").path("id").asLong()).isEqualTo(old.quizId());
+        assertThat(nextCards.size()).isEqualTo(1);
+        assertThat(nextCards.get(0).path("quiz").path("id").asLong()).isEqualTo(nextQuiz);
+        api.error(LEARNER, get("/api/v1/me/quizzes/{id}", nextQuiz), "ASSESSMENT-NOT_FOUND");
+        api.error(INSTRUCTOR, api.post(Map.of("expectedVersion", fixtures.quizVersion(old.quizId())),
+            "/api/v1/quizzes/{id}/close", old.quizId()), "ASSESSMENT-QUIZ_REVISION_FROZEN");
+    }
+
+    @Test
+    void publishedCourseExamsCannotBeClosedOrReconfiguredInPlace() {
+        WithExam exam = publishedWithExam();
+        long version = fixtures.quizVersion(exam.quizId());
+        api.error(INSTRUCTOR, api.post(Map.of("expectedVersion", version),
+            "/api/v1/quizzes/{id}/close", exam.quizId()), "ASSESSMENT-QUIZ_REVISION_FROZEN");
+        Map<String, Object> body = AssessmentFixtures.quizBody(exam.course().id());
+        body.put("quizType", "FINAL_EXAM");
+        api.error(INSTRUCTOR, api.put(body, "/api/v1/quizzes/{id}?expectedVersion={v}", exam.quizId(), version),
+            "ASSESSMENT-QUIZ_REVISION_FROZEN");
+    }
+
 }
