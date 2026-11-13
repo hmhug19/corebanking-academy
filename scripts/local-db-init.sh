@@ -68,6 +68,7 @@ FILES=(
   upgrade/2026-11-20-document-title-checksum-replace.sql
   upgrade/2026-11-21-assistant-feedback-review.sql
   upgrade/2026-11-22-system-audit-route.sql
+  upgrade/2026-11-23-revoked-sessions.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

@@ -2,6 +2,7 @@ package vn.com.coreacademy.identity.service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -24,7 +25,8 @@ public class TokenService {
     private final RoleAssignmentRepository assignments;
 
     /**
-     * Phát JWT HS256 với subject là mã cán bộ dạng chuỗi và av là phiên bản quyền hiện tại. Claim roles chỉ là
+     * Phát JWT HS256 với subject là mã cán bộ dạng chuỗi, av là phiên bản quyền hiện tại và sid là mã phiên mới
+     * (đăng xuất chỉ thu hồi phiên này). Claim roles chỉ là
      * ảnh chụp mã vai trò lúc phát; backend không dùng claim này làm nguồn cấp quyền hoặc scope.
      */
     public TokenResponse issue(UserAccount user) {
@@ -42,6 +44,7 @@ public class TokenService {
             .issuedAt(now)
             .expiresAt(expiresAt)
             .claim(SecurityConstants.AUTH_VERSION_CLAIM, user.getAuthorizationVersion())
+            .claim(SecurityConstants.SESSION_ID_CLAIM, UUID.randomUUID().toString())
             .claim("roles", roles)
             .build();
 

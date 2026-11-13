@@ -48,6 +48,16 @@ public final class SecurityContextUtils {
         return number.longValue();
     }
 
+    /** The session id of the current token; null for a token issued before sessions had one. */
+    public static String getSessionId() {
+        return requireJwt().getClaimAsString(SecurityConstants.SESSION_ID_CLAIM);
+    }
+
+    /** When the current token expires. */
+    public static java.time.Instant getExpiresAt() {
+        return requireJwt().getExpiresAt();
+    }
+
     private static Jwt requireJwt() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)
