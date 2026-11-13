@@ -13,6 +13,7 @@ import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.agent.TurnLimiter.Admission;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.course.CourseDraftService;
 import vn.com.coreacademy.assistant.course.CourseGenerationWorker;
 import vn.com.coreacademy.assistant.course.CourseJobRepository;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.StepRow;
@@ -72,6 +73,19 @@ class CourseGenerationWorkerTest {
     }
 
     // ---- demo fix ticket 04: a slow model never loops a step forever --------------------------------------------
+
+    @Test
+    void aStepInterruptedAtItsLastAttemptFailsAtStartupInsteadOfStartingAgain() {
+        StepRow spent = new StepRow(9, 5, "lesson", "c1l2", null, null, "running",
+            CourseDraftService.MAX_STEP_ATTEMPTS, null);
+        when(jobs.interruptedAtCap(CourseDraftService.MAX_STEP_ATTEMPTS)).thenReturn(java.util.List.of(spent));
+
+        worker.requeueInterrupted();
+
+        verify(jobs).failStep(9, CourseGenerationWorker.TOO_SLOW);
+        verify(jobs).setStatus(5, "failed", CourseGenerationWorker.TOO_SLOW);
+        verify(jobs).requeueInterrupted();
+    }
 
     private StepRow claimedSummarise(int attempts) {
         StepRow step = new StepRow(7, 5, "summarise_sections", "", null, null, "running", attempts, null);

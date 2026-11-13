@@ -24,8 +24,8 @@ public class UserJwtAuthenticationConverter implements Converter<Jwt, AbstractAu
 
     /**
      * Đối chiếu JWT đã qua decoder với tài khoản trong database trên từng yêu cầu. Từ chối tài khoản không
-     * active, av không khớp auth_ver hoặc phiên (sid) đã đăng xuất; authority chung chỉ xác nhận đăng nhập, không cấp role/scope nghiệp
-     * vụ.
+     * active, av không khớp auth_ver hoặc phiên (sid) đã đăng xuất; authority chung chỉ xác nhận đăng nhập,
+     * không cấp role/scope nghiệp vụ.
      */
     @Override
     public AbstractAuthenticationToken convert(Jwt token) {

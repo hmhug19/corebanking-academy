@@ -22,11 +22,15 @@ public record FinishedAnswer(String answer, List<CitationView> citations, boolea
         this(answer, citations, true);
     }
 
+    /** The same sources and counts with another text. */
+    public FinishedAnswer withAnswer(String text) {
+        return new FinishedAnswer(text, citations, grounded, checkedMarkers, removedMarkers);
+    }
+
     /** The same answer without the markers that name none of its sources, the literal [n] included. */
     public FinishedAnswer withoutStrayMarkers() {
         Set<Integer> shown = citations.stream().map(CitationView::n).collect(Collectors.toSet());
 
-        return new FinishedAnswer(CitationSelector.keepMarkers(answer, shown), citations, grounded, checkedMarkers,
-            removedMarkers);
+        return withAnswer(CitationSelector.keepMarkers(answer, shown));
     }
 }

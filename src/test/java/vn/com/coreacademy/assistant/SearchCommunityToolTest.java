@@ -135,6 +135,20 @@ class SearchCommunityToolTest {
     }
 
     @Test
+    void aDocumentRefusalIsNotFollowedByCommunityLinks() {
+        finds(source(1, "Đối soát cuối ngày"));
+        RetrievedChunks chunks = turn.chunks();
+        chunks.add(List.of(CIF));
+        turn.finishWith(chunks::finish);
+        tool.run(JSON.createObjectNode().put("query", "eod"), CONTEXT, turn);
+
+        var finished = turn.finisher().orElseThrow().finish("Không tìm thấy thông tin này trong tài liệu.");
+
+        assertThat(finished.answer()).isEqualTo("Không tìm thấy thông tin này trong tài liệu.");
+        assertThat(finished.citations()).isEmpty();
+    }
+
+    @Test
     void aDocumentSearchAfterTheCommunitySearchKeepsTheLinksToo() {
         finds(source(1, "Đối soát cuối ngày"));
         tool.run(JSON.createObjectNode().put("query", "eod"), CONTEXT, turn);

@@ -1,5 +1,7 @@
 package vn.com.coreacademy.security;
 
+import java.time.Instant;
+
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -48,13 +50,13 @@ public final class SecurityContextUtils {
         return number.longValue();
     }
 
-    /** The session id of the current token; null for a token issued before sessions had one. */
+    /** Mã phiên (claim sid) của token hiện tại; null với token phát trước khi có mã phiên. */
     public static String getSessionId() {
         return requireJwt().getClaimAsString(SecurityConstants.SESSION_ID_CLAIM);
     }
 
-    /** When the current token expires. */
-    public static java.time.Instant getExpiresAt() {
+    /** Thời điểm token hiện tại hết hạn. */
+    public static Instant getExpiresAt() {
         return requireJwt().getExpiresAt();
     }
 

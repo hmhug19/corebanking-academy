@@ -33,7 +33,8 @@ public final class CitationRule {
      */
     public static Outcome apply(String answer, List<ChunkHit> numberedHits) {
         Set<Integer> cited = CitationSelector.citedNumbers(answer, numberedHits.size());
-        if (numberedHits.isEmpty() || NotFoundAnswer.isNotFound(answer) || NotFoundAnswer.refusesInFirstParagraph(answer)
+        if (numberedHits.isEmpty() || NotFoundAnswer.isNotFound(answer)
+            || NotFoundAnswer.refusesInFirstParagraph(answer)
             || cited.isEmpty() && NotFoundAnswer.saysNothingWasFound(answer)) {
             return new Outcome(NotFoundAnswer.TEXT, false, true, List.of());
         }

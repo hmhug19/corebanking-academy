@@ -3,7 +3,7 @@ package vn.com.coreacademy.security;
 public final class SecurityConstants {
     public static final String JWT_ISSUER = "core-academy";
     public static final String AUTH_VERSION_CLAIM = "av";
-    /** One sign-in: logout ends this session only. Tokens issued before it existed have none. */
+    /** Mã một lần đăng nhập: đăng xuất chỉ kết thúc phiên này. Token phát trước thay đổi này không có. */
     public static final String SESSION_ID_CLAIM = "sid";
     public static final String AUTHENTICATED_AUTHORITY = "USER";
     public static final String TOKEN_TYPE = "Bearer";

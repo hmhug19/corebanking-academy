@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import vn.com.coreacademy.assistant.config.AssistantBudget;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 /**
  * Scratch space of one user turn, shared by the tools called in it. It lives and dies with the stream body and is
@@ -70,9 +71,9 @@ public final class TurnState {
 
         return Optional.of(answer -> {
             FinishedAnswer finished = chunks.finish(answer);
-            String extra = after.appended();
-            return extra.isEmpty() ? finished : new FinishedAnswer(finished.answer() + "\n\n" + extra,
-                finished.citations(), finished.grounded(), finished.checkedMarkers(), finished.removedMarkers());
+            // A refusal stands alone: links under "not found" would contradict it.
+            String extra = NotFoundAnswer.TEXT.equals(finished.answer()) ? "" : after.appended();
+            return extra.isEmpty() ? finished : finished.withAnswer(finished.answer() + "\n\n" + extra);
         });
     }
 

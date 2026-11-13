@@ -51,9 +51,17 @@ public class CourseGenerationWorker {
         this.chat = chat;
     }
 
-    /** A previous run that stopped mid-step leaves it running; it goes back to pending and the job resumes there. */
+    /**
+     * A previous run that stopped mid-step leaves it running; it goes back to pending and the job resumes there. A
+     * step that has used every attempt fails instead: a step that brings the server down would loop forever.
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void requeueInterrupted() {
+        for (StepRow step : jobs.interruptedAtCap(CourseDraftService.MAX_STEP_ATTEMPTS)) {
+            log.warn("Interrupted course generation step used every attempt, giving up stepId={} attempt={}",
+                step.id(), step.attempts());
+            fail(step, TOO_SLOW);
+        }
         int requeued = jobs.requeueInterrupted();
         if (requeued > 0) {
             log.info("Requeued interrupted course generation steps count={}", requeued);
@@ -109,7 +117,8 @@ public class CourseGenerationWorker {
             // author sees the failure and can retry, instead of the step starting over forever.
             if (step.attempts() >= TIMEOUT_ATTEMPTS) {
                 outcome = "failed";
-                log.warn("Course generation step timed out, giving up stepId={} attempt={}", step.id(), step.attempts());
+                log.warn("Course generation step timed out, giving up stepId={} attempt={}", step.id(),
+                    step.attempts());
                 fail(step, TOO_SLOW);
             } else {
                 outcome = "waiting";

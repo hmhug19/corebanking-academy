@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Sessions ended by logout, kept until their token would have expired (table {@code revoked_sessions}). */
+/** Phiên đã đăng xuất, giữ đến khi token của phiên hết hạn (bảng {@code revoked_sessions}). */
 @Repository
 @RequiredArgsConstructor
 public class RevokedSessionRepository {
@@ -22,8 +22,8 @@ public class RevokedSessionRepository {
     }
 
     /**
-     * Ends the session; false when it had already ended. Rows of expired tokens are deleted on the way, so the table
-     * holds at most the sessions logged out within one token lifetime.
+     * Kết thúc phiên; false nếu phiên đã kết thúc trước đó. Dòng của token đã hết hạn được xóa luôn, nên bảng chỉ
+     * giữ các phiên đăng xuất trong một vòng đời token.
      */
     public boolean revoke(String sessionId, String userId, Instant expiresAt) {
         jdbc.update("delete from learning_hub.revoked_sessions where expires_at < CURRENT_TIMESTAMP");

@@ -304,6 +304,12 @@ public class CourseJobRepository {
             """, errorMessage, stepId);
     }
 
+    /** Steps that ran when the server stopped and have already used {@code maxAttempts} attempts. */
+    public List<StepRow> interruptedAtCap(int maxAttempts) {
+        return jdbc.query("SELECT " + STEP_COLUMNS + " FROM learning_hub.course_generation_steps "
+            + "WHERE status = 'running' AND attempts >= ?", STEP, maxAttempts);
+    }
+
     /** A step that ran when the server stopped goes back to pending; finished steps keep their output. */
     public int requeueInterrupted() {
         return jdbc.update("UPDATE learning_hub.course_generation_steps SET status = 'pending' WHERE status = 'running'");
@@ -357,7 +363,7 @@ public class CourseJobRepository {
             """, jobId, maxAttempts);
     }
 
-    /** A step whose model call timed out goes back to pending; the attempt it used is kept and counts toward the cap. */
+    /** A step whose model call timed out goes back to pending; the attempt it used still counts toward the cap. */
     public void retryStep(long stepId) {
         jdbc.update("""
             UPDATE learning_hub.course_generation_steps SET status = 'pending'

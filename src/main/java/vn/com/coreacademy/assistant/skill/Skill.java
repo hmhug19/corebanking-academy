@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assistant.skill;
 
+import java.util.Collection;
 import java.util.List;
 
 import vn.com.coreacademy.assistant.agent.AgentContext;
@@ -19,7 +20,7 @@ public record Skill(String id, String description, List<String> tools, List<Stri
     }
 
     /** True when a turn of this skill must end with a call of {@link #requiredTool()}, offered in {@code tools}. */
-    public boolean mustCall(java.util.Collection<String> offered) {
+    public boolean mustCall(Collection<String> offered) {
         return requiredTool != null && offered.contains(requiredTool);
     }
 

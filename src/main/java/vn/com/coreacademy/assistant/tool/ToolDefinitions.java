@@ -48,7 +48,8 @@ public final class ToolDefinitions {
 
         return new ToolDefinition(SEARCH_COURSES,
             "Tìm trong nội dung các bài học của khóa học mà người dùng đang học hoặc được quản lý. Dùng khi câu hỏi "
-                + "về nội dung khóa học, bài học hoặc kiến thức được dạy trong khóa. Kết quả là các đoạn đánh số [1], [2]…; "
+                + "về nội dung khóa học, bài học hoặc kiến thức được dạy trong khóa. "
+                + "Kết quả là các đoạn đánh số [1], [2]…; "
                 + "chỉ trả lời từ các đoạn đó và ghi số đoạn sau mỗi ý, ví dụ [1].", parameters);
     }
 
@@ -59,8 +60,8 @@ public final class ToolDefinitions {
 
         return new ToolDefinition(READ_LESSON,
             "Đọc nội dung bài học mà người dùng đang xem (không cần tham số). Dùng khi người dùng muốn tóm tắt hoặc "
-                + "hỏi bài này nói gì. Kết quả là các đoạn đánh số [1], [2]… theo thứ tự trong bài; chỉ trả lời từ các đoạn "
-                + "đó và ghi số đoạn sau mỗi ý, ví dụ [1].", parameters);
+                + "hỏi bài này nói gì. Kết quả là các đoạn đánh số [1], [2]… theo thứ tự trong bài; "
+                + "chỉ trả lời từ các đoạn đó và ghi số đoạn sau mỗi ý, ví dụ [1].", parameters);
     }
 
     public static ToolDefinition searchCommunity() {
