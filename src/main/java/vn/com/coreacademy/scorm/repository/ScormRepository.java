@@ -139,6 +139,14 @@ public class ScormRepository {
             """, hash, java.sql.Timestamp.from(expires), authVersion, sessionId, r.id());
     }
 
+    /** Chỉ gọi sau khi khóa registration; lượt mới không khôi phục đáp án hoặc điểm của lượt trượt. */
+    public void restart(Registration registration) {
+        jdbc.update("""
+            UPDATE learning_hub.scorm_registrations SET cmi = '{}'::jsonb, total_seconds = 0,
+              session_seconds = 0, update_time = now() WHERE registration_id = ?
+            """, registration.id());
+    }
+
     public void runtime(Registration r, Map<String, String> cmi, BigDecimal seconds, long sequence, String hash) {
         jdbc.update("""
             UPDATE learning_hub.scorm_registrations SET cmi = ?::jsonb, session_seconds = ?, last_sequence = ?,

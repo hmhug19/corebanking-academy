@@ -79,6 +79,7 @@ public class ScormController {
         description = "Mỗi lần mở thay vé cũ; dữ liệu xem thử tách khỏi kết quả học viên. Vé hết hạn/revoke không được ghi.")
     public BaseResponse<ScormDtos.LaunchView> launch(@PathVariable @Positive long id,
         @Valid @RequestBody ScormDtos.LaunchRequest request) {
-        return BaseResponse.ok(service.launch(id, request.preview(), request.enrollmentId(), request.lessonId()));
+        return BaseResponse.ok(service.launch(id, request.preview(), request.enrollmentId(), request.lessonId(),
+            request.restart()));
     }
 }

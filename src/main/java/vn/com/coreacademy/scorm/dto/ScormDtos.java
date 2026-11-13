@@ -21,8 +21,11 @@ public final class ScormDtos {
                                String lessonLocation, boolean resumable, Instant updateTime) { }
     public record PackagePage(List<PackageView> items, int page, int size, long totalElements, int totalPages) { }
     public record LaunchRequest(boolean preview, @Positive Long enrollmentId,
-                                @Positive Long lessonId) {
-        public LaunchRequest(boolean preview) { this(preview, null, null); }
+                                @Positive Long lessonId, boolean restart) {
+        public LaunchRequest(boolean preview) { this(preview, null, null, false); }
+        public LaunchRequest(boolean preview, Long enrollmentId, Long lessonId) {
+            this(preview, enrollmentId, lessonId, false);
+        }
     }
     public record VersionRequest(@NotNull @Min(0) Long expectedVersion) { }
     public record LaunchView(String launchUrl, Instant expiresAt, boolean preview, ProgressView progress) { }

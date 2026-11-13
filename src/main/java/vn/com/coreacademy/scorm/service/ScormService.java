@@ -168,6 +168,12 @@ public class ScormService {
 
     @Transactional
     public ScormDtos.LaunchView launch(long id, boolean preview, Long enrollmentId, Long lessonId) {
+        return launch(id, preview, enrollmentId, lessonId, false);
+    }
+
+    /** Học lại chỉ đặt lại lượt trượt của chính người học, không giới hạn lần; lưu dấu kết quả cũ vào audit. */
+    @Transactional
+    public ScormDtos.LaunchView launch(long id, boolean preview, Long enrollmentId, Long lessonId, boolean restart) {
         learningLock.acquire();
         Actor actor = access.actor();
         PackageRow lecture = repository.require(id);
@@ -178,6 +184,17 @@ public class ScormService {
         if (player.equals(lms)) throw new IllegalStateException("SCORM player must use a separate origin");
         repository.ensureRegistration(id, actor.person().id(), preview, enrollmentId, lessonId);
         var registration = repository.registration(id, actor.person().id(), preview, enrollmentId, lessonId, true);
+        if (restart) {
+            if (preview || !"failed".equals(registration.cmi().get("cmi.core.lesson_status"))) {
+                throw invalid("restart", "Chỉ có thể học và thi lại bài SCORM đang chưa đạt.");
+            }
+            audit.record(actor.person().id(), "SCORM_RESTARTED", "scorm_registration",
+                Long.toString(registration.id()), lecture.orgId(), Map.of("packageId", id,
+                    "previousProgress", progress(registration), "totalSeconds",
+                    registration.totalSeconds().add(registration.sessionSeconds())));
+            repository.restart(registration);
+            registration = repository.registration(id, actor.person().id(), preview, enrollmentId, lessonId, true);
+        }
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
