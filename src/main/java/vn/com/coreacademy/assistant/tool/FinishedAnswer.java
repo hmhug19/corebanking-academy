@@ -1,8 +1,11 @@
 package vn.com.coreacademy.assistant.tool;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.service.CitationSelector;
 
 /**
  * The final text of a turn and the sources it shows. {@code grounded} is false for an answer that used retrieved
@@ -17,5 +20,17 @@ public record FinishedAnswer(String answer, List<CitationView> citations, boolea
 
     public FinishedAnswer(String answer, List<CitationView> citations) {
         this(answer, citations, true);
+    }
+
+    /** The same sources and counts with another text. */
+    public FinishedAnswer withAnswer(String text) {
+        return new FinishedAnswer(text, citations, grounded, checkedMarkers, removedMarkers);
+    }
+
+    /** The same answer without the markers that name none of its sources, the literal [n] included. */
+    public FinishedAnswer withoutStrayMarkers() {
+        Set<Integer> shown = citations.stream().map(CitationView::n).collect(Collectors.toSet());
+
+        return withAnswer(CitationSelector.keepMarkers(answer, shown));
     }
 }

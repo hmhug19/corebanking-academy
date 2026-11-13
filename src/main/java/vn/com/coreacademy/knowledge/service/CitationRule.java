@@ -34,20 +34,24 @@ public final class CitationRule {
     public static Outcome apply(String answer, List<ChunkHit> numberedHits) {
         Set<Integer> cited = CitationSelector.citedNumbers(answer, numberedHits.size());
         if (numberedHits.isEmpty() || NotFoundAnswer.isNotFound(answer)
+            || NotFoundAnswer.refusesInFirstParagraph(answer)
             || cited.isEmpty() && NotFoundAnswer.saysNothingWasFound(answer)) {
             return new Outcome(NotFoundAnswer.TEXT, false, true, List.of());
         }
         if (cited.isEmpty()) {
-            return new Outcome(answer, true, false, List.of());
+            return new Outcome(withoutMarkers(answer), true, false, List.of());
         }
 
         // A marker on a sentence its chunk does not support is taken out; an answer left with none is ungrounded.
         CitationSupport.Checked checked = CitationSupport.check(answer, numberedHits);
-        if (CitationSelector.citedNumbers(checked.answer(), numberedHits.size()).isEmpty()) {
-            return new Outcome(checked.answer(), true, false, List.of(), checked.checked(), checked.removed());
+        Set<Integer> kept = CitationSelector.citedNumbers(checked.answer(), numberedHits.size());
+        if (kept.isEmpty()) {
+            return new Outcome(withoutMarkers(checked.answer()), true, false, List.of(), checked.checked(),
+                checked.removed());
         }
 
-        return new Outcome(checked.answer(), true, true,
+        // Markers outside the chunks, and the literal [n], open no source: they are not shown.
+        return new Outcome(CitationSelector.keepMarkers(checked.answer(), kept), true, true,
             CitationSelector.select(checked.answer(), numberedHits, checked.citingWords()), checked.checked(),
             checked.removed());
     }

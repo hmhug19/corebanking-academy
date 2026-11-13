@@ -117,6 +117,10 @@ public class CourseGenerationRunner implements GenerationStepRunner {
             section.put("lastPiece", group.get(group.size() - 1).index());
             sections.add(section);
             hash.append(user.length()).append(':');
+            if (number < groups.size()) {
+                // A long source takes many calls: the status line moves with each group instead of only at the end.
+                jobs.setProgress(step.jobId(), SUMMARISE, Math.max(1, FIRST_PROGRESS * number / groups.size()));
+            }
         }
         ObjectNode output = json.createObjectNode();
         output.set("sections", sections);

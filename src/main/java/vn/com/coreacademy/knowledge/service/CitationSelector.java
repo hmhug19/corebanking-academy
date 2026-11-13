@@ -22,7 +22,8 @@ public final class CitationSelector {
     // [1], [2][3] and [1, 2] all name chunks; anything else in brackets is ignored.
     private static final Pattern MARKER = Pattern.compile("\\[(\\d+(?:\\s*,\\s*\\d+)*)]");
 
-    private static final Pattern MARKER_WITH_SPACE = Pattern.compile("[ \\t]*\\[\\d+(?:\\s*,\\s*\\d+)*]");
+    // A marker with the space before it, or the literal placeholder [n] a model copies from its instructions.
+    private static final Pattern MARKER_WITH_SPACE = Pattern.compile("([ \\t]*)\\[(\\d+(?:\\s*,\\s*\\d+)*|[nN])]");
 
     private CitationSelector() {
     }
@@ -72,7 +73,32 @@ public final class CitationSelector {
 
     /** The text without its [n] markers and the space before them, for earlier answers replayed as history. */
     static String stripMarkers(String text) {
-        return MARKER_WITH_SPACE.matcher(text).replaceAll("");
+        return keepMarkers(text, Set.of());
+    }
+
+    /**
+     * The text with only the marker numbers in {@code kept}: a marker naming none of them goes with the space before
+     * it, and so does the literal placeholder [n], so the reader never sees a number that opens no source.
+     */
+    public static String keepMarkers(String text, Set<Integer> kept) {
+        Matcher matcher = MARKER_WITH_SPACE.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            List<String> numbers = new ArrayList<>();
+            if (!matcher.group(2).equalsIgnoreCase("n")) {
+                for (String part : matcher.group(2).split(",")) {
+                    String digits = part.strip();
+                    if (digits.length() <= 3 && kept.contains(Integer.parseInt(digits))) {
+                        numbers.add(digits);
+                    }
+                }
+            }
+            String replacement = numbers.isEmpty() ? "" : matcher.group(1) + "[" + String.join(", ", numbers) + "]";
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(out);
+
+        return out.toString();
     }
 
     private static CitationView citation(int n, ChunkHit hit, Set<String> citingWords) {

@@ -42,6 +42,39 @@ class SkillCatalogTest {
     }
 
     @Test
+    void theNavigationSkillsNameTheToolTheyMustCall() {
+        SkillCatalog catalog = new SkillCatalog();
+
+        assertThat(catalog.find("dieu_huong").orElseThrow().requiredTool()).isEqualTo("open_screen");
+        assertThat(catalog.find("tao_khoa_hoc").orElseThrow().requiredTool()).isEqualTo("open_course_form");
+        assertThat(catalog.find("qa_tai_lieu").orElseThrow().requiredTool()).isNull();
+        catalog.all().stream().filter(skill -> skill.requiredTool() != null).forEach(skill ->
+            assertThat(skill.tools()).as(skill.id()).contains(skill.requiredTool()));
+    }
+
+    @Test
+    void noExampleReplyClaimsAnActionTheAppDoes() {
+        java.util.regex.Pattern claim = java.util.regex.Pattern.compile(
+            "(?iu)\\b(mình |tôi )?(đã|vừa) (mở|điền|chuyển|tạo|chuẩn bị|đổi|cập nhật)");
+
+        for (Skill skill : new SkillCatalog().all()) {
+            skill.examples().lines().filter(line -> line.startsWith("Trợ lý:")).forEach(reply ->
+                assertThat(claim.matcher(reply).find()).as(skill.id() + " example: " + reply).isFalse());
+        }
+    }
+
+    @Test
+    void noChatPromptShowsTheLiteralPlaceholderTheModelWouldCopy() {
+        SkillCatalog catalog = new SkillCatalog();
+
+        catalog.all().forEach(skill -> {
+            assertThat(skill.output()).as(skill.id()).doesNotContain("[n]");
+            assertThat(catalog.systemPrompt(skill)).as(skill.id()).doesNotContain("[n]");
+        });
+        assertThat(catalog.explainPrompt()).doesNotContain("[n]");
+    }
+
+    @Test
     void everySkillWithToolsSaysTheToolCallIsMandatory() {
         new SkillCatalog().all().stream().filter(skill -> !skill.tools().isEmpty()).forEach(skill ->
             assertThat(skill.output().toLowerCase()).as(skill.id()).contains("bắt buộc gọi công cụ"));

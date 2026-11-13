@@ -6,3 +6,4 @@ roles:
   - ADMIN
   - SUPER_ADMIN
 output: Báo đã mở form Khóa học mới và nhắc bấm "Tạo bằng AI" sau khi chọn chương trình và năng lực. Bắt buộc gọi công cụ mở form trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
+requiredTool: open_course_form

@@ -55,7 +55,7 @@ Tài khoản không tồn tại, mật khẩu sai hoặc tài khoản LOCAL khô
 
 Cờ bắt buộc đổi mật khẩu được bật khi tạo user LOCAL qua API hoặc tạo root qua bootstrap. Riêng 7 tài khoản seed demo trong learning_hub_identity.sql có must_change_password=false để sử dụng ngay sau đăng nhập. Đổi mật khẩu thành công đặt cờ về false. Hiện chưa có cơ chế hết hạn mật khẩu định kỳ, reset mật khẩu qua quản trị hoặc gửi email khôi phục. Tài khoản không có role vẫn có thể xem hồ sơ, đổi mật khẩu và đăng xuất; không có quyền gọi API quản trị.
 
-`POST /auth/logout` không cần body, yêu cầu token còn hiệu lực và thu hồi mọi phiên của tài khoản qua auth_ver. FE xóa token/cache khi thành công hoặc nhận 401. Request đang xử lý trước thời điểm thu hồi có thể hoàn tất; token mới phát sau khi thu hồi vẫn hợp lệ. Chưa có thao tác kết thúc phiên trên hệ thống SSO bên ngoài.
+`POST /auth/logout` không cần body, yêu cầu token còn hiệu lực và chỉ thu hồi phiên của token đó (claim `sid`, bảng `revoked_sessions`); phiên ở trình duyệt khác vẫn dùng được, phòng học và trình chạy SCORM của phiên đó dừng. Token cũ chưa có `sid` thì thu hồi mọi phiên qua auth_ver. Đổi mật khẩu, vai trò hoặc trạng thái vẫn thu hồi mọi phiên. FE xóa token/cache khi thành công hoặc nhận 401. Request đang xử lý trước thời điểm thu hồi có thể hoàn tất; token mới phát sau khi thu hồi vẫn hợp lệ. Chưa có thao tác kết thúc phiên trên hệ thống SSO bên ngoài.
 
 ### Hiển thị lỗi nghiệp vụ trên form
 
@@ -294,7 +294,7 @@ SUPER_ADMIN GLOBAL là quản trị gốc, quản lý cả nghiệp vụ toàn h
 | # | Method và path dưới /api/v1 | Body/filter chính | data thành công |
 |---|---|---|---|
 | 1 | POST /auth/login | username,password | TokenResponse, HTTP 200 |
-| 2 | POST /auth/logout | Không body | null, 200; thu hồi mọi phiên |
+| 2 | POST /auth/logout | Không body | null, 200; thu hồi phiên hiện tại (sid) |
 | 3 | GET /auth/me | Không body | MeResponse, 200 |
 | 4 | PATCH /auth/me | fullName,email,positionName | MeResponse, 200 |
 | 5 | PUT /auth/password | currentPassword,newPassword | null, 200; login lại |

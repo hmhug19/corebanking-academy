@@ -1,7 +1,7 @@
 -- COREBANKING ACADEMY - IDENTITY / ORGANIZATION / RBAC
 -- PostgreSQL 14+. Chạy TOÀN BỘ file một lần trên database/schema mới hoặc vừa được tạo lại.
 -- Script không tạo/xóa database, không DROP dữ liệu và không phải migration cho DB đang có dữ liệu.
--- Gồm 8 bảng, comment/index, 5 vai trò, 17 chức năng, cây tổ chức và tài khoản demo.
+-- Gồm 9 bảng (thêm revoked_sessions), comment/index, 5 vai trò, 17 chức năng, cây tổ chức và tài khoản demo.
 -- Không dùng extension, Flyway, tham số bind hoặc script SQL phụ. Không có FOREIGN KEY vật lý.
 -- Backend kiểm tra role + scope + hành động; functions chỉ là danh mục màn hình hiện có.
 -- Tài khoản gốc demo: 000001 / super.admin; mật khẩu công khai của dữ liệu demo: Demo@123.
@@ -236,6 +236,20 @@ COMMENT ON COLUMN learning_hub.audit_log.entity_id IS 'ID tài nguyên dạng ch
 COMMENT ON COLUMN learning_hub.audit_log.details IS 'Chi tiết JSONB đã chọn lọc; không chứa mật khẩu, hash hoặc token.';
 COMMENT ON COLUMN learning_hub.audit_log.create_time IS
     'Thời điểm tạo do database mặc định sinh; ứng dụng không ghi đè.';
+
+-- 08b. Phiên đã đăng xuất: đăng xuất chỉ kết thúc phiên (claim sid) đang dùng.
+-- DB đã triển khai dùng upgrade/2026-11-23-revoked-sessions.sql (cùng định nghĩa).
+CREATE TABLE learning_hub.revoked_sessions (
+    session_id  varchar(36)  PRIMARY KEY,
+    user_id     varchar(20)  NOT NULL,
+    revoked_at  timestamptz  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at  timestamptz  NOT NULL
+);
+CREATE INDEX revoked_sessions_expires_at_idx ON learning_hub.revoked_sessions (expires_at);
+COMMENT ON TABLE learning_hub.revoked_sessions IS 'Phiên đã đăng xuất; giữ đến khi token của phiên hết hạn.';
+COMMENT ON COLUMN learning_hub.revoked_sessions.session_id IS 'Claim sid của token (UUID).';
+COMMENT ON COLUMN learning_hub.revoked_sessions.user_id IS 'Mã cán bộ của phiên, để tra cứu.';
+COMMENT ON COLUMN learning_hub.revoked_sessions.expires_at IS 'Lúc token của phiên hết hạn; dòng quá hạn được xóa.';
 
 -- 09. Index phục vụ tra cứu cây, membership, quyền và audit.
 CREATE INDEX idx_compact_orgs_parent ON learning_hub.orgs(parent_id);

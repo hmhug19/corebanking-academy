@@ -76,6 +76,58 @@ class CitationRuleTest {
     }
 
     @Test
+    void aRefusalLaterInTheFirstParagraphIsTheFixedSentenceWithNoSources() {
+        CitationRule.Outcome outcome = CitationRule.apply(
+            "EOD là quy trình cuối ngày [1]. Không tìm thấy thông tin này trong tài liệu [n].", List.of(CIF, GL));
+
+        assertThat(outcome.found()).isFalse();
+        assertThat(outcome.answer()).isEqualTo(NotFoundAnswer.TEXT);
+        assertThat(outcome.citations()).isEmpty();
+    }
+
+    @Test
+    void aRefusalWithAMarkerAtTheStartIsStillTheFixedSentence() {
+        CitationRule.Outcome outcome = CitationRule.apply("Không tìm thấy thông tin này trong tài liệu [1].",
+            List.of(CIF, GL));
+
+        assertThat(outcome.answer()).isEqualTo(NotFoundAnswer.TEXT);
+        assertThat(outcome.citations()).isEmpty();
+    }
+
+    @Test
+    void aMarkerThatMatchesNoChunkIsRemovedAndTheOthersStay() {
+        CitationRule.Outcome outcome = CitationRule.apply("CIF là mã khách hàng [1][7].", List.of(CIF, GL));
+
+        assertThat(outcome.answer()).isEqualTo("CIF là mã khách hàng [1].");
+        assertThat(outcome.citations()).extracting(CitationView::n).containsExactly(1);
+    }
+
+    @Test
+    void theLiteralPlaceholderIsNeverShownAsText() {
+        CitationRule.Outcome outcome = CitationRule.apply("CIF là mã khách hàng [n].", List.of(CIF, GL));
+
+        assertThat(outcome.answer()).isEqualTo("CIF là mã khách hàng.");
+        assertThat(outcome.grounded()).isFalse();
+    }
+
+    @Test
+    void anUngroundedAnswerKeepsNoMarkerOutOfRange() {
+        assertThat(CitationRule.apply("Xem [9].", List.of(CIF, GL)).answer()).isEqualTo("Xem.");
+    }
+
+    @Test
+    void aFinishedAnswerDropsMarkersOfNoShownSource() {
+        RetrievedChunks chunks = new RetrievedChunks();
+        chunks.add(List.of(CIF, GL));
+        FinishedAnswer cited = chunks.finish("CIF là mã khách hàng [1].");
+        FinishedAnswer stray = new FinishedAnswer("Một ý [2] và [n] khác [1].", cited.citations());
+
+        assertThat(stray.withoutStrayMarkers().answer()).isEqualTo("Một ý và khác [1].");
+        assertThat(new FinishedAnswer("Không nguồn [1].", List.of()).withoutStrayMarkers().answer())
+            .isEqualTo("Không nguồn.");
+    }
+
+    @Test
     void markersAreStrippedFromHistoryText() {
         assertThat(CitationRule.withoutMarkers("A [1]. B [2][3] và C [1, 2].")).isEqualTo("A. B và C.");
         assertThat(CitationRule.withoutMarkers("Không có marker")).isEqualTo("Không có marker");

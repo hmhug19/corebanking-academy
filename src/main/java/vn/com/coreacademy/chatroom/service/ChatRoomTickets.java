@@ -24,7 +24,7 @@ public class ChatRoomTickets {
     private final LearningIdentityService identity;
     private final Map<String, Entry> pending = new HashMap<>();
 
-    public record Access(String userId, long version, Instant tokenExpiresAt) {
+    public record Access(String userId, long version, String sessionId, Instant tokenExpiresAt) {
     }
 
     public record Ticket(String ticket, Instant expiresAt) {
@@ -40,7 +40,8 @@ public class ChatRoomTickets {
     public synchronized Ticket issue() {
         String userId = SecurityContextUtils.getUserId();
         long version = SecurityContextUtils.getAuthorizationVersion();
-        identity.requireChatRoomSession(userId, version);
+        String sessionId = SecurityContextUtils.getSessionId();
+        identity.requireChatRoomSession(userId, version, sessionId);
         var authentication = (JwtAuthenticationToken) SecurityContextHolder.getContext().getAuthentication();
         Instant tokenExpiresAt = authentication.getToken().getExpiresAt();
         if (tokenExpiresAt == null || !tokenExpiresAt.isAfter(Instant.now())) {
@@ -54,7 +55,7 @@ public class ChatRoomTickets {
         }
         String ticket = UUID.randomUUID().toString() + UUID.randomUUID();
         Instant expiresAt = Instant.now().plus(properties.ticketTtl());
-        pending.put(ticket, new Entry(new Access(userId, version, tokenExpiresAt), expiresAt));
+        pending.put(ticket, new Entry(new Access(userId, version, sessionId, tokenExpiresAt), expiresAt));
         return new Ticket(ticket, expiresAt);
     }
 
@@ -71,6 +72,6 @@ public class ChatRoomTickets {
         if (!access.tokenExpiresAt().isAfter(Instant.now())) {
             throw new BusinessException(ResponseCode.UNAUTHORIZED);
         }
-        identity.requireChatRoomSession(access.userId(), access.version());
+        identity.requireChatRoomSession(access.userId(), access.version(), access.sessionId());
     }
 }

@@ -26,7 +26,7 @@ public class SearchDocumentsTool implements AgentTool {
     static final int MAX_QUERY_LENGTH = 300;
     static final String INVALID_QUERY = "Câu tìm kiếm phải từ 1 đến 300 ký tự.";
     // qwen3:8b paraphrases a softer wording ("không được đề cập…") and then the finisher cannot tell it is a not-found.
-    static final String INSTRUCTION = "Chỉ trả lời từ các đoạn trên, ghi [n] sau mỗi ý. "
+    static final String INSTRUCTION = "Chỉ trả lời từ các đoạn trên, ghi số đoạn sau mỗi ý, ví dụ [1]. "
         + "Nếu các đoạn không trả lời trực tiếp câu hỏi của người dùng, hãy trả lời CHÍNH XÁC một câu này, "
         + "không thêm gì khác: \"" + NotFoundAnswer.TEXT + "\"";
     public static final String NOTHING_FOUND = "Không có đoạn tài liệu nào liên quan. "

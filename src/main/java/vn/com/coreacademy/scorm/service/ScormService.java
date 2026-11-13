@@ -183,7 +183,7 @@ public class ScormService {
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         Instant expires = Instant.now().plus(properties.getLaunchTtl());
         repository.launch(registration, ScormPackageReader.hash(token), expires,
-            SecurityContextUtils.getAuthorizationVersion());
+            SecurityContextUtils.getAuthorizationVersion(), SecurityContextUtils.getSessionId());
         if (course != null) synchronize(registration, registration.cmi());
         return new ScormDtos.LaunchView(player + "/scorm-player/" + token + "/launch", expires, preview,
             progress(registration));
@@ -253,7 +253,7 @@ public class ScormService {
         if (!token.matches("[A-Za-z0-9_-]{43}")) throw denied();
         var registration = repository.token(ScormPackageReader.hash(token), locked);
         if (registration == null || registration.expiresAt() == null || !registration.expiresAt().isAfter(Instant.now())) throw denied();
-        identity.requireSession(registration.userId(), registration.authVersion());
+        identity.requireSession(registration.userId(), registration.authVersion(), registration.sessionId());
         Actor actor = identity.actor(registration.userId());
         var lecture = repository.require(registration.packageId());
         var course = context(registration.packageId(), registration.enrollmentId(), registration.lessonId(), actor);

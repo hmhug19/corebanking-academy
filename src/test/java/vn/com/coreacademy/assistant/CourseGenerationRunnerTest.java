@@ -255,6 +255,24 @@ class CourseGenerationRunnerTest {
     }
 
     @Test
+    void theSummariseStepReportsProgressAfterEachGroupSoTheStatusLineMoves() {
+        StepRow step = summariseStep();
+        List<SourceTextRepository.Piece> pieces = new java.util.ArrayList<>();
+        for (int i = 0; i < 600; i++) {
+            pieces.add(new SourceTextRepository.Piece(i, "Nội dung ".repeat(160), i / 2 + 1, i * 10 + 1, i * 10 + 10));
+        }
+        when(sources.pieces(9L)).thenReturn(pieces);
+        when(ollama.chat(anyList(), any(), any(), any()))
+            .thenReturn("{\"title\":\"Phần\",\"summary\":\"Ý chính.\",\"keyPoints\":[\"a\"]}");
+
+        runner.run(step);
+
+        ArgumentCaptor<Integer> progress = ArgumentCaptor.forClass(Integer.class);
+        verify(jobs, org.mockito.Mockito.atLeast(2)).setProgress(eq(5L), eq("summarise_sections"), progress.capture());
+        assertThat(progress.getAllValues()).isSorted().allMatch(value -> value > 0 && value < 15);
+    }
+
+    @Test
     void aSourceNoteOutsideTheGivenPagesAndLinesIsNotStored() {
         JobRow job = new JobRow(5, "000004", 1, 9L, "{}", "running", "lesson", 40, null, null, null, null, 70L, 71L);
         when(jobs.job(5)).thenReturn(Optional.of(job));

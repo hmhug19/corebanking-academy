@@ -123,7 +123,7 @@ Use case cần user hiện tại tự lấy userId tại service, controller kh�
 
 SecurityConfig ở cấp ứng dụng wiring các bean xác thực và UserJwtAuthenticationConverter của Identity. JwtProperties vẫn bind app.jwt như trước. Identity giữ LocalUserDetailsService, kiểm tra tài khoản/status/auth_ver, phát token và policy role/scope. constants kỹ thuật, mã role và giá trị môi trường có chủ sở hữu riêng, không gom thành một registry toàn cục.
 
-21 endpoint giữ URL, body và response contract; controller không còn Authentication parameter nên không cần @Parameter(hidden=true) để ẩn caller trong Swagger. Logout vẫn thu hồi mọi phiên bằng auth_ver của token hiện tại.
+21 endpoint giữ URL, body và response contract; controller không còn Authentication parameter nên không cần @Parameter(hidden=true) để ẩn caller trong Swagger. Logout chỉ thu hồi phiên của token hiện tại (claim sid, bảng revoked_sessions); đổi mật khẩu/vai trò/trạng thái vẫn thu hồi mọi phiên bằng auth_ver.
 
 Chính sách HTTP cache chung đặt tại SecurityConfig qua cache-control header writer của Spring Security: Cache-Control: no-cache, no-store, max-age=0, must-revalidate; Pragma: no-cache; Expires: 0. Controller và exception handler không lặp chính sách này. Endpoint có nhu cầu cache khác có thể khai báo header riêng; phải kiểm chứng response thực tế khi thêm override.
 

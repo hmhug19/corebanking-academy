@@ -7,12 +7,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.tool.FinishedAnswer;
+import vn.com.coreacademy.assistant.tool.RetrievedChunks;
 import vn.com.coreacademy.assistant.tool.SearchCommunityTool;
 import vn.com.coreacademy.assistant.tool.ToolOutcome;
 import vn.com.coreacademy.assistant.tool.TurnState;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.community.service.CommunityAssistantAdapter;
 import vn.com.coreacademy.community.service.CommunityAssistantAdapter.Source;
+import vn.com.coreacademy.knowledge.dto.ChatViews.CitationView;
+import vn.com.coreacademy.knowledge.repository.DocumentChunkRepository.ChunkHit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,6 +30,7 @@ class SearchCommunityToolTest {
     private final CommunityAssistantAdapter community = mock(CommunityAssistantAdapter.class);
     private final SearchCommunityTool tool = new SearchCommunityTool(community);
     private final TurnState turn = new TurnState();
+    private static final ChunkHit CIF = new ChunkHit(1, 42, "Quy-trinh-EOD.pdf", 3, 13, 27, "CIF là mã khách hàng.", 0.9);
 
     private static Source source(long id, String title) {
         return new Source(id, id + 100, title, "/community/contents/" + id + "?revisionId=" + (id + 100),
@@ -95,6 +99,67 @@ class SearchCommunityToolTest {
         var answer = searchThenFinish("eod", "   ").answer();
 
         assertThat(answer).startsWith("Các nguồn Community phù hợp:\n\n- [Đối soát cuối ngày]");
+    }
+
+    @Test
+    void aSummaryThatRefusesShowsNoLinks() {
+        finds(source(1, "Đối soát cuối ngày"));
+
+        var answer = searchThenFinish("eod", "Không tìm thấy bài nào nói về quy trình EOD [n].").answer();
+
+        assertThat(answer).isEqualTo("Chưa tìm thấy bài phù hợp trong cộng đồng.").doesNotContain("](");
+    }
+
+    @Test
+    void markersOfTheModelAreDroppedFromTheSummary() {
+        finds(source(1, "Đối soát cuối ngày"));
+
+        var answer = searchThenFinish("eod", "Có một bài về đối soát cuối ngày [1][n].").answer();
+
+        assertThat(answer).startsWith("Có một bài về đối soát cuối ngày.\n\n");
+    }
+
+    @Test
+    void documentSourcesAndCommunityLinksOfOneTurnAreBothKept() {
+        finds(source(1, "Đối soát cuối ngày"));
+        RetrievedChunks chunks = turn.chunks();
+        chunks.add(List.of(CIF));
+        turn.finishWith(chunks::finish);
+        tool.run(JSON.createObjectNode().put("query", "eod"), CONTEXT, turn);
+
+        var finished = turn.finisher().orElseThrow().finish("CIF là mã khách hàng [1].");
+
+        assertThat(finished.citations()).extracting(CitationView::n).containsExactly(1);
+        assertThat(finished.answer()).startsWith("CIF là mã khách hàng [1].")
+            .contains("- [Đối soát cuối ngày](/community/contents/1?revisionId=101)");
+    }
+
+    @Test
+    void aDocumentRefusalIsNotFollowedByCommunityLinks() {
+        finds(source(1, "Đối soát cuối ngày"));
+        RetrievedChunks chunks = turn.chunks();
+        chunks.add(List.of(CIF));
+        turn.finishWith(chunks::finish);
+        tool.run(JSON.createObjectNode().put("query", "eod"), CONTEXT, turn);
+
+        var finished = turn.finisher().orElseThrow().finish("Không tìm thấy thông tin này trong tài liệu.");
+
+        assertThat(finished.answer()).isEqualTo("Không tìm thấy thông tin này trong tài liệu.");
+        assertThat(finished.citations()).isEmpty();
+    }
+
+    @Test
+    void aDocumentSearchAfterTheCommunitySearchKeepsTheLinksToo() {
+        finds(source(1, "Đối soát cuối ngày"));
+        tool.run(JSON.createObjectNode().put("query", "eod"), CONTEXT, turn);
+        RetrievedChunks chunks = turn.chunks();
+        chunks.add(List.of(CIF));
+        turn.finishWith(chunks::finish);
+
+        var finished = turn.finisher().orElseThrow().finish("CIF là mã khách hàng [1].");
+
+        assertThat(finished.citations()).hasSize(1);
+        assertThat(finished.answer()).contains("(/community/contents/1?revisionId=101)");
     }
 
     @Test

@@ -35,8 +35,8 @@ public final class ToolDefinitions {
 
         return new ToolDefinition(SEARCH_DOCUMENTS,
             "Tìm trong kho tài liệu nội bộ dùng chung (quy trình, nghiệp vụ, thuật ngữ Core Banking). "
-                + "Dùng cho mọi câu hỏi cần thông tin từ tài liệu. Kết quả là các đoạn đánh số [n]; "
-                + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
+                + "Dùng cho mọi câu hỏi cần thông tin từ tài liệu. Kết quả là các đoạn đánh số [1], [2]…; "
+                + "chỉ trả lời từ các đoạn đó và ghi số đoạn sau mỗi ý, ví dụ [1].", parameters);
     }
 
     public static ToolDefinition searchCourses() {
@@ -48,8 +48,9 @@ public final class ToolDefinitions {
 
         return new ToolDefinition(SEARCH_COURSES,
             "Tìm trong nội dung các bài học của khóa học mà người dùng đang học hoặc được quản lý. Dùng khi câu hỏi "
-                + "về nội dung khóa học, bài học hoặc kiến thức được dạy trong khóa. Kết quả là các đoạn đánh số [n]; "
-                + "chỉ trả lời từ các đoạn đó và ghi [n] sau mỗi ý.", parameters);
+                + "về nội dung khóa học, bài học hoặc kiến thức được dạy trong khóa. "
+                + "Kết quả là các đoạn đánh số [1], [2]…; "
+                + "chỉ trả lời từ các đoạn đó và ghi số đoạn sau mỗi ý, ví dụ [1].", parameters);
     }
 
     public static ToolDefinition readLesson() {
@@ -59,8 +60,8 @@ public final class ToolDefinitions {
 
         return new ToolDefinition(READ_LESSON,
             "Đọc nội dung bài học mà người dùng đang xem (không cần tham số). Dùng khi người dùng muốn tóm tắt hoặc "
-                + "hỏi bài này nói gì. Kết quả là các đoạn đánh số [n] theo thứ tự trong bài; chỉ trả lời từ các đoạn "
-                + "đó và ghi [n] sau mỗi ý.", parameters);
+                + "hỏi bài này nói gì. Kết quả là các đoạn đánh số [1], [2]… theo thứ tự trong bài; "
+                + "chỉ trả lời từ các đoạn đó và ghi số đoạn sau mỗi ý, ví dụ [1].", parameters);
     }
 
     public static ToolDefinition searchCommunity() {

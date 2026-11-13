@@ -90,7 +90,8 @@ public class SkillCatalog {
         return new Skill(id, String.valueOf(yaml.getOrDefault("description", id)),
             List.copyOf((List<String>) yaml.getOrDefault("tools", List.of())),
             List.copyOf((List<String>) yaml.getOrDefault("roles", List.of())), system, examples,
-            String.valueOf(yaml.getOrDefault("output", "")));
+            String.valueOf(yaml.getOrDefault("output", "")),
+            yaml.get("requiredTool") == null ? null : String.valueOf(yaml.get("requiredTool")));
     }
 
     private static String read(Resource resource, MessageDigest digest) {

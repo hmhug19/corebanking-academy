@@ -23,6 +23,7 @@ import vn.com.coreacademy.identity.dto.TokenResponse;
 import vn.com.coreacademy.identity.entity.UserAccount;
 import vn.com.coreacademy.identity.exception.IdentityResponseCode;
 import vn.com.coreacademy.identity.mapper.UserMapper;
+import vn.com.coreacademy.identity.repository.RevokedSessionRepository;
 import vn.com.coreacademy.identity.repository.UserRepository;
 import vn.com.coreacademy.organization.repository.OrganizationRepository;
 import vn.com.coreacademy.organization.repository.TeamRepository;
@@ -40,6 +41,7 @@ public class AuthService {
     private final TeamRepository teams;
     private final IdentityWriteLock writeLock;
     private final IdentityAuditService audit;
+    private final RevokedSessionRepository sessions;
 
     /**
      * Xác thực tên đăng nhập hoặc mã cán bộ qua AuthenticationManager rồi phát token cho mã cán bộ chuẩn.
@@ -61,7 +63,9 @@ public class AuthService {
     }
 
     /**
-     * Thu hồi mọi phiên của tài khoản hiện tại và ghi audit trong cùng transaction.
+     * Kết thúc phiên của token hiện tại và ghi audit trong cùng transaction; các phiên khác của tài khoản (trình
+     * duyệt, máy khác) vẫn dùng được. Token phát trước khi có sid không có phiên riêng: đăng xuất bằng token đó
+     * thu hồi mọi phiên như trước.
      *
      * <p>So sánh auth_ver của token với database khi cập nhật để một yêu cầu dùng token cũ không thu hồi nhầm
      * phiên mới; token đã bị thu hồi trả lỗi xác thực.
@@ -70,15 +74,19 @@ public class AuthService {
     public void logout() {
         String userId = SecurityContextUtils.getUserId();
         long tokenVersion = SecurityContextUtils.getAuthorizationVersion();
+        String sessionId = SecurityContextUtils.getSessionId();
         writeLock.acquire();
 
-        if (users.revokeTokens(userId, tokenVersion) != 1) {
+        boolean revoked = sessionId == null ? users.revokeTokens(userId, tokenVersion) == 1
+            : sessions.revoke(sessionId, userId, SecurityContextUtils.getExpiresAt());
+        if (!revoked) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token already revoked");
         }
 
         UserAccount user = users.findById(userId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
-        audit.record(userId, "USER_LOGOUT", "USER", userId, user.getOrgId(), Map.of("allSessions", true));
+        audit.record(userId, "USER_LOGOUT", "USER", userId, user.getOrgId(),
+            Map.of("allSessions", sessionId == null));
     }
 
     /**

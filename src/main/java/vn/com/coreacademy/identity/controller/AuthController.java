@@ -63,13 +63,15 @@ public class AuthController {
 
     @StandardApiErrors
     @ApiResponse(responseCode = "200",
-        description = "Đăng xuất thành công; mọi token cũ của tài khoản đã bị thu hồi.", useReturnTypeSchema = true)
+        description = "Đăng xuất thành công; phiên của token này đã bị thu hồi.", useReturnTypeSchema = true)
     @PostMapping("/logout")
     @Operation(
-        summary = "Đăng xuất khỏi tất cả phiên đăng nhập",
+        summary = "Đăng xuất phiên hiện tại",
         description = """
-            Đăng xuất tài khoản hiện tại trên mọi thiết bị; không cần body.
+            Kết thúc phiên đăng nhập của token này (claim sid); phiên ở trình duyệt khác vẫn dùng được. Không cần body.
             - Yêu cầu token còn hiệu lực.
+            - Phòng học và trình chạy SCORM mở từ phiên này cũng dừng.
+            - Token phát trước khi có sid: đăng xuất thu hồi mọi phiên của tài khoản (auth_ver).
             - Frontend xóa token khi thành công hoặc khi nhận HTTP 401.
             """
     )

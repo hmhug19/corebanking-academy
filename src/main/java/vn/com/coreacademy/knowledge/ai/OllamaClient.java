@@ -3,11 +3,13 @@ package vn.com.coreacademy.knowledge.ai;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -21,6 +23,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 
@@ -319,11 +322,31 @@ public class OllamaClient {
         try {
             return http.post().uri(path).contentType(MediaType.APPLICATION_JSON).body(body).retrieve()
                 .body(type);
-        } catch (ResourceAccessException exception) {
-            throw new OllamaUnavailableException("Ollama is not reachable", exception);
         } catch (RestClientResponseException exception) {
             throw new OllamaException("Ollama answered HTTP " + exception.getStatusCode().value());
+        } catch (RestClientException exception) {
+            // A read timeout surfaces as ResourceAccessException, or while the body is read as a plain
+            // RestClientException: either way the call was accepted and is too slow, which is not "unreachable".
+            if (readTimedOut(exception)) {
+                throw new OllamaTimeoutException("Ollama did not answer within the read timeout", exception);
+            }
+            if (exception instanceof ResourceAccessException) {
+                throw new OllamaUnavailableException("Ollama is not reachable", exception);
+            }
+            throw exception;
         }
+    }
+
+    /** "Read timed out" anywhere in the causes; "Connect timed out" stays unreachable. */
+    private static boolean readTimedOut(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SocketTimeoutException timeout && timeout.getMessage() != null
+                && timeout.getMessage().toLowerCase(Locale.ROOT).contains("read")) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private RestClient restClient(Duration connectTimeout, Duration readTimeout) {

@@ -13,12 +13,15 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.community.service.CommunityAssistantAdapter;
 import vn.com.coreacademy.community.service.CommunityAssistantAdapter.Source;
 import vn.com.coreacademy.knowledge.ai.ToolDefinition;
+import vn.com.coreacademy.knowledge.service.CitationRule;
+import vn.com.coreacademy.knowledge.service.NotFoundAnswer;
 
 /** Tìm và dẫn người dùng đến nguồn Community; kết quả cuối dựng từ server, không nhận URL do model sinh. */
 @Component
 @RequiredArgsConstructor
 public class SearchCommunityTool implements AgentTool {
     private static final int MAX_SUMMARY = 400;
+    private static final String NOTHING_FOUND = "Chưa tìm thấy bài phù hợp trong cộng đồng.";
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^\\]]*)]\\([^)]*\\)");
     private static final Pattern URL = Pattern.compile("(https?://|/community/)\\S*");
     private static final Pattern PARAGRAPH_BREAK = Pattern.compile("\\R\\s*\\R");
@@ -62,7 +65,17 @@ public class SearchCommunityTool implements AgentTool {
             }
         }
         // Không dùng CitationView.documentId của Knowledge để gán nhầm ID Community sang download tài liệu.
-        turn.finishWith(summary -> finish(context.userId(), state.values, summary));
+        turn.linkWith(new TurnState.TurnLinks() {
+            @Override
+            public FinishedAnswer alone(String summary) {
+                return finish(context.userId(), state.values, summary);
+            }
+
+            @Override
+            public String appended() {
+                return readableLinks(context.userId(), state.values);
+            }
+        });
         if (state.values.isEmpty()) {
             return new ToolOutcome.Result("Không có bài nào phù hợp trong cộng đồng. Không liệt kê hay gợi ý bài nào.");
         }
@@ -86,19 +99,41 @@ public class SearchCommunityTool implements AgentTool {
     private FinishedAnswer finish(String userId, List<Source> sources, String modelSummary) {
         try {
             if (sources.isEmpty()) {
-                return new FinishedAnswer("Chưa tìm thấy bài phù hợp trong cộng đồng.", List.of());
+                return new FinishedAnswer(NOTHING_FOUND, List.of());
             }
             if (!community.stillReadable(userId, sources)) {
                 return new FinishedAnswer("Nguồn hoặc quyền truy cập đã thay đổi. Vui lòng tìm lại.", List.of());
             }
-            String links = sources.stream().map(source -> "- [" + safeTitle(source.title()) + "](" + source.url() + ")")
-                .collect(Collectors.joining("\n"));
             String summary = plainSummary(modelSummary);
+            if (refuses(summary)) {
+                // A summary that says nothing fits must not stand above links that say otherwise.
+                return new FinishedAnswer(NOTHING_FOUND, List.of());
+            }
+            String links = links(sources);
             return new FinishedAnswer((summary.isEmpty() ? "Các nguồn Community phù hợp:" : summary) + "\n\n" + links,
                 List.of());
         } catch (BusinessException exception) {
             return new FinishedAnswer("Nguồn hoặc quyền truy cập đã thay đổi. Vui lòng tìm lại.", List.of());
         }
+    }
+
+    /** The links shown after an answer with its own sources; empty when none is found or still readable. */
+    private String readableLinks(String userId, List<Source> sources) {
+        try {
+            return sources.isEmpty() || !community.stillReadable(userId, sources) ? "" : links(sources);
+        } catch (BusinessException exception) {
+            return "";
+        }
+    }
+
+    private String links(List<Source> sources) {
+        return sources.stream().map(source -> "- [" + safeTitle(source.title()) + "](" + source.url() + ")")
+            .collect(Collectors.joining("\n"));
+    }
+
+    private static boolean refuses(String summary) {
+        return !summary.isEmpty() && (NotFoundAnswer.isNotFound(summary) || NotFoundAnswer.saysNothingWasFound(summary)
+            || NotFoundAnswer.refusesInFirstParagraph(summary));
     }
 
     /** Chỉ giữ chữ của câu tóm tắt do model viết: bỏ liên kết/URL để liên kết chỉ đến từ server. */
@@ -108,6 +143,8 @@ public class SearchCommunityTool implements AgentTool {
         }
         String text = MARKDOWN_LINK.matcher(value).replaceAll("$1");
         text = URL.matcher(text).replaceAll("");
+        // Community posts are not numbered sources: a [1] or [n] here would open nothing.
+        text = CitationRule.withoutMarkers(text);
         text = PARAGRAPH_BREAK.split(text.strip(), 2)[0].replaceAll("\\s+", " ").strip();
         return text.length() > MAX_SUMMARY ? text.substring(0, MAX_SUMMARY).strip() + "…" : text;
     }
