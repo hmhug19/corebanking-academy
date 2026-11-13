@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
@@ -205,7 +206,7 @@ class LearnerCourseQuizzesIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void scormCompletionCountsForTheEnrollmentAndStillRequiresTheFinalExam() {
+    void scormCompletionCountsForTheEnrollmentAndStillRequiresTheFinalExam() throws Exception {
         Course course = fixtures.course(LEARNER);
         long packageId = jdbc.queryForObject("""
             insert into learning_hub.scorm_packages (owner_org_id, uploaded_by, title, original_name,
@@ -221,8 +222,7 @@ class LearnerCourseQuizzesIT extends AssessmentIntegrationTest {
         long exam = quiz(course, "FINAL_EXAM", "Final exam", true);
         jdbc.update("update learning_hub.course_completion_rules set final_quiz_id = ? where revision_id = ?",
             exam, course.revisionId());
-        JsonNode launch = api.ok(LEARNER, api.post(Map.of("preview", false, "enrollmentId", enrollmentId,
-            "lessonId", course.lessonId()), "/api/v1/scorm/packages/{id}/launch", packageId));
+        JsonNode launch = scormLaunch(packageId, enrollmentId, course.lessonId());
         String token = launch.path("launchUrl").asText().split("/scorm-player/")[1].split("/")[0];
         scorm.runtime(token, new RuntimeRequest(1,
             Map.of("cmi.core.lesson_status", "completed"), false));
@@ -246,16 +246,29 @@ class LearnerCourseQuizzesIT extends AssessmentIntegrationTest {
             select course_id, revision_id, user_id, 2, 'self', now(), now(), 'not_started', 0, created_by, updated_by
             from learning_hub.course_enrollments where enrollment_id = ? returning enrollment_id
             """, Long.class, enrollmentId);
-        JsonNode secondLaunch = api.ok(LEARNER, api.post(Map.of("preview", false, "enrollmentId", second,
-            "lessonId", course.lessonId()), "/api/v1/scorm/packages/{id}/launch", packageId));
+        JsonNode secondLaunch = scormLaunch(packageId, second, course.lessonId());
         assertThat(secondLaunch.path("progress").path("lessonStatus").asText()).isEqualTo("not attempted");
-        assertThat(jdbc.queryForObject("select count(*) from learning_hub.scorm_registrations where package_id = ? and enrollment_id = 0",
+        assertThat(jdbc.queryForObject("select count(*) from learning_hub.scorm_registrations where package_id = ? and enrollment_id IS NULL",
             Long.class, packageId)).isZero();
         jdbc.update("update learning_hub.courses set lifecycle_status = 'paused' where course_id = ?", course.id());
         assertThatThrownBy(() -> scorm.runtime(token,
             new RuntimeRequest(2,
                 Map.of("cmi.core.lesson_status", "passed"), true)))
             .isInstanceOf(BusinessException.class);
+    }
+
+    private JsonNode scormLaunch(long packageId, long enrollmentId, long lessonId) throws Exception {
+        long version = jdbc.queryForObject("select auth_ver from learning_hub.users where user_id = ?", Long.class,
+            LEARNER);
+        var response = mvc.perform(api.post(Map.of("preview", false, "enrollmentId", enrollmentId,
+            "lessonId", lessonId), "/api/v1/scorm/packages/{id}/launch", packageId)
+            .with(SecurityMockMvcRequestPostProcessors.jwt()
+                .jwt(jwt -> jwt.subject(LEARNER).claim("av", version))))
+            .andReturn().getResponse();
+        assertThat(response.getStatus()).isEqualTo(200);
+        var envelope = json.readTree(response.getContentAsString());
+        assertThat(envelope.path("status").asText()).as(envelope.toPrettyString()).isEqualTo("SUCCESS");
+        return envelope.path("data");
     }
 
     private Map<String, Object> lessonsRequired(Course course) {

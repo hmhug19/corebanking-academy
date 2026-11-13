@@ -303,6 +303,7 @@ public class LearningContentService {
         }
 
         // Bước 2: đóng băng bản nội dung và chuyển con trỏ; enrollment cũ giữ revision_id cũ.
+        publishLinkedScorm(revisionId, actor.person().id());
         revision.setState(RevisionState.PUBLISHED);
         revision.setPublishedAt(Instant.now());
         revision.setPublishedBy(actor.person().id());
@@ -553,13 +554,15 @@ public class LearningContentService {
     private void validateLessonInput(Course course, LearningRequests.LessonInput lesson) {
         if (LessonType.SCORM.equals(lesson.lessonType())) {
             if (lesson.quizId() != null || !lesson.blocks().isEmpty()) {
-                throw BusinessException.validation("chapters", "INVALID_VALUE", "Bài SCORM không có quiz hoặc khối nhập tay.");
+                throw BusinessException.validation("chapters", "INVALID_VALUE",
+                    "Bài SCORM không chứa đề thi hoặc khối nội dung khác.");
             }
             scorm.validate(lesson.scormPackageId(), course.getOwnerOrgId(), false);
             return;
         }
         if (lesson.scormPackageId() != null) {
-            throw BusinessException.validation("scormPackageId", "INVALID_VALUE", "Chỉ bài SCORM được chọn gói SCORM.");
+            throw BusinessException.validation("scormPackageId", "INVALID_VALUE",
+                "Chỉ bài SCORM được gắn bài giảng SCORM.");
         }
         if (LessonType.CONTENT.equals(lesson.lessonType())) {
             if (lesson.quizId() != null) {
@@ -575,6 +578,15 @@ public class LearningContentService {
             var quiz = quizzes.find(lesson.quizId());
             if (quiz.isEmpty() || quiz.get().deleted() || !course.getId().equals(quiz.get().courseId())) {
                 throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
+            }
+        }
+    }
+
+    /** Xuất bản gói nháp do tác giả được quyền quản lý cùng transaction xuất bản khóa học. */
+    private void publishLinkedScorm(Long revisionId, String actor) {
+        for (var lesson : repository.lessons(revisionId)) {
+            if (LessonType.SCORM.equals(lesson.getLessonType())) {
+                scorm.publish(lesson.getScormPackageId(), revisionId, actor);
             }
         }
     }

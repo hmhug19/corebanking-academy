@@ -149,7 +149,7 @@ class QuizApiIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void configValidationAndSingleFinalExamPerCourse() {
+    void configValidationAndSeparateDraftFinalExamsForCourseRevisions() {
         Course course = fixtures.course();
         Map<String, Object> invalid = quizBody(course.id());
         invalid.put("questionCount", 0);
@@ -167,9 +167,10 @@ class QuizApiIT extends AssessmentIntegrationTest {
 
         Map<String, Object> exam = quizBody(course.id());
         exam.put("quizType", "FINAL_EXAM");
-        api.ok(INSTRUCTOR, api.post(exam, URL));
-        JsonNode duplicate = api.error(INSTRUCTOR, api.post(exam, URL), "ASSESSMENT-DUPLICATE");
-        assertThat(duplicate.path("errors").get(0).path("field").asText()).isEqualTo("quizType");
+        JsonNode first = api.ok(INSTRUCTOR, api.post(exam, URL));
+        JsonNode second = api.ok(INSTRUCTOR, api.post(exam, URL));
+        assertThat(second.path("quiz").path("id").asLong()).isNotEqualTo(first.path("quiz").path("id").asLong());
+        assertThat(second.path("quiz").path("status").asText()).isEqualTo("DRAFT");
     }
 
     @Test

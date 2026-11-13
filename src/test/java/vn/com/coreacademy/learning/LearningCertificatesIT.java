@@ -120,6 +120,8 @@ class LearningCertificatesIT extends AssessmentIntegrationTest {
     @Test
     void oneCertificateCarriesEveryField() {
         Course course = fixtures.course(LEARNER);
+        jdbc.update("update learning_hub.courses set code = ? where course_id = ?", "cert-lower-" + course.id(),
+            course.id());
         long id = complete(course, LEARNER, "2026-05-06T07:08:09Z");
         String code = jdbc.queryForObject("select code from learning_hub.courses where course_id = ?", String.class,
             course.id());

@@ -157,11 +157,11 @@ public final class LearningViews {
         Integer sortNo,
         Long sourceLessonId,
         Long quizId,
+        Long scormPackageId,
         Long rowVersion,
         Instant createTime,
         Instant updateTime,
-        String aiState,
-        Long scormPackageId) {
+        String aiState) {
     }
 
     public record LessonBlockView(

@@ -473,34 +473,41 @@ public class LearningProgressService {
         return true;
     }
 
-    /** Called only by the server-side SCORM runtime after validating its enrollment-bound capability. */
+    /** Đồng bộ từ runtime đã xác thực trên đúng lần học; điểm không được dùng thay trạng thái hoàn thành. */
     @Transactional
-    public void scormProgress(String userId, Long enrollmentId, Long lessonId, boolean completed) {
-        CourseEnrollment enrollment = repository.require(CourseEnrollment.class, enrollmentId);
-        CourseLesson lesson = repository.lessons(enrollment.getRevisionId()).stream()
-            .filter(l -> l.getId().equals(lessonId) && LessonType.SCORM.equals(l.getLessonType()))
-            .findFirst().orElseThrow(() -> new BusinessException(LearningResponseCode.INVALID_REFERENCE));
+    public void synchronizeScorm(String userId, CourseEnrollment enrollment, CourseLesson lesson, boolean complete) {
+        lock.acquire();
         if (!userId.equals(enrollment.getUserId()) || ProgressStatus.WITHDRAWN.equals(enrollment.getStatus())) {
             throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
         }
-        Instant now = Instant.now();
-        LessonProgress value = repository.lessonProgress(enrollmentId).stream()
-            .filter(p -> p.getLessonId().equals(lessonId)).findFirst().orElseGet(LessonProgress::new);
-        value.setEnrollmentId(enrollmentId);
-        value.setLessonId(lessonId);
-        if (value.getStartedAt() == null) {
-            value.setStartedAt(now);
+        if (!LessonType.SCORM.equals(lesson.getLessonType()) || repository.lessons(enrollment.getRevisionId()).stream()
+            .noneMatch(value -> value.getId().equals(lesson.getId()))) {
+            throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
         }
-        value.setLastAccessAt(now);
-        if (completed && value.getCompletedAt() == null) {
-            value.setCompletedAt(now);
+        Instant now = Instant.now();
+        LessonProgress progress = repository.lessonProgress(enrollment.getId()).stream()
+            .filter(p -> p.getLessonId().equals(lesson.getId())).findFirst().orElseGet(LessonProgress::new);
+        progress.setEnrollmentId(enrollment.getId());
+        progress.setLessonId(lesson.getId());
+        if (progress.getStartedAt() == null) {
+            progress.setStartedAt(now);
+        }
+        if (progress.getProgressPercent() == null) {
+            progress.setProgressPercent(BigDecimal.ZERO);
+        }
+        if (complete) {
+            progress.setProgressPercent(HUNDRED);
+        }
+        progress.setStatus(progress.getProgressPercent().compareTo(HUNDRED) >= 0
+            ? ProgressStatus.COMPLETED : ProgressStatus.IN_PROGRESS);
+        if (ProgressStatus.COMPLETED.equals(progress.getStatus()) && progress.getCompletedAt() == null) {
+            progress.setCompletedAt(now);
             xp.lessonCompleted(userId, lessonKey(lesson), now);
         }
-        value.setProgressPercent(value.getCompletedAt() != null ? HUNDRED : BigDecimal.ZERO);
-        value.setStatus(value.getCompletedAt() != null ? ProgressStatus.COMPLETED : ProgressStatus.IN_PROGRESS);
-        repository.save(value, userId);
+        progress.setLastAccessAt(now);
+        repository.save(progress, userId);
         repository.flush();
-        updateEnrollment(enrollment, lessonId, null, now, userId);
+        updateEnrollment(enrollment, lesson.getId(), null, now, userId);
     }
 
     private Long finalQuizId(Long revisionId) {

@@ -92,7 +92,7 @@ class CourseCardScoreIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void aPageCostsOneScoresCall() {
+    void aPageCostsOneEnrollmentScoresCall() {
         fixtures.course(LEARNER);
         fixtures.course(LEARNER);
         Mockito.clearInvocations(directory);
@@ -100,7 +100,7 @@ class CourseCardScoreIT extends AssessmentIntegrationTest {
         JsonNode page = api.ok(LEARNER, get(LEARNING + "/courses?size=100"));
 
         assertThat(page.path("items").size()).isGreaterThanOrEqualTo(2);
-        verify(directory, times(1)).scores(any(), any());
+        verify(directory, times(1)).enrollmentScores(any(), any());
     }
 
     @Test
