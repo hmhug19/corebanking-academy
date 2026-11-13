@@ -7,10 +7,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+
+import jakarta.annotation.PreDestroy;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,9 +50,17 @@ public class LearningMediaWorker {
     private final LearningMediaProbe probe;
     private final PlatformTransactionManager transactions;
     private final ExecutorService learningMediaExecutor;
+    /**
+     * Renews the lease of the file being processed. Not the shared @Scheduled thread: AI course generation and
+     * course indexing hold that one for minutes, the lease lapsed and a finished transcode was thrown away. Not a
+     * bean either: a ScheduledExecutorService bean would replace Spring Boot's scheduler for every @Scheduled.
+     */
+    private final ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "learning-media-heartbeat");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final AtomicBoolean running = new AtomicBoolean();
-    private final AtomicReference<Job> currentJob = new AtomicReference<>();
-    private final AtomicLong heartbeatAfter = new AtomicLong();
 
     private record Job(LearningAsset asset, UUID claim, List<MultipartObjectStorage.CommittedPart> parts) {
     }
@@ -57,7 +69,6 @@ public class LearningMediaWorker {
         initialDelayString = "#{@learningMediaProperties.initialDelay.toMillis()}")
     public void poll() {
         if (!running.compareAndSet(false, true)) {
-            heartbeat();
             return;
         }
         try {
@@ -65,14 +76,18 @@ public class LearningMediaWorker {
                 try {
                     Job job = claim();
                     if (job != null) {
-                        currentJob.set(job);
-                        heartbeatAfter.set(System.currentTimeMillis() + properties.getProcessingHeartbeat().toMillis());
-                        process(job);
+                        long every = properties.getProcessingHeartbeat().toMillis();
+                        ScheduledFuture<?> beat = heartbeats.scheduleWithFixedDelay(
+                            () -> heartbeat(job), every, every, TimeUnit.MILLISECONDS);
+                        try {
+                            process(job);
+                        } finally {
+                            beat.cancel(false);
+                        }
                     }
                 } catch (RuntimeException exception) {
                     log.error("Media worker cycle failed type={}", exception.getClass().getSimpleName());
                 } finally {
-                    currentJob.set(null);
                     running.set(false);
                 }
             });
@@ -82,20 +97,29 @@ public class LearningMediaWorker {
         }
     }
 
-    private void heartbeat() {
-        Job job = currentJob.get();
-        if (job == null || System.currentTimeMillis() < heartbeatAfter.get()) {
-            return;
+    @PreDestroy
+    void stopHeartbeats() {
+        heartbeats.shutdownNow();
+    }
+
+    /** Keeps the claim while `process` runs; a lease that lapsed is not taken back (another claim may own it). */
+    private void heartbeat(Job job) {
+        try {
+            write(() -> {
+                LearningAsset asset = current(job);
+                if (asset == null) {
+                    log.warn("Media lease lost while processing assetId={}", job.asset().getId());
+                } else {
+                    asset.setProcessingLeaseExpiresAt(Instant.now().plus(properties.getProcessingLease()));
+                    repository.save(asset, asset.getUploadedBy());
+                }
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            // A throwing task would stop every later heartbeat of this job.
+            log.error("Media heartbeat failed assetId={} type={}", job.asset().getId(),
+                exception.getClass().getSimpleName());
         }
-        write(() -> {
-            LearningAsset asset = current(job);
-            if (asset != null) {
-                asset.setProcessingLeaseExpiresAt(Instant.now().plus(properties.getProcessingLease()));
-                repository.save(asset, asset.getUploadedBy());
-            }
-            return null;
-        });
-        heartbeatAfter.set(System.currentTimeMillis() + properties.getProcessingHeartbeat().toMillis());
     }
 
     private Job claim() {
