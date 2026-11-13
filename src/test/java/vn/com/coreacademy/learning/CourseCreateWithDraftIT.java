@@ -185,6 +185,22 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
             request.setLocalPort(8020);
             return request;
         })).andReturn().getResponse().getContentAsString()).contains("page-4", "cmi.suspend_data", "resume");
+        var failed = Map.of("cmi.core.lesson_status", "failed", "cmi.core.score.raw", "73");
+        assertThat(mvc.perform(api.post(Map.of("sequence", 1, "values", failed, "finished", true),
+            resumed.replace("/launch", "/runtime")).with(request -> {
+                request.setLocalPort(8020); return request;
+            })).andReturn().getResponse().getStatus()).isEqualTo(200);
+        var retry = mvc.perform(api.post(Map.of("preview", false, "restart", true),
+            "/api/v1/scorm/packages/{id}/launch", packageId)
+            .with(SecurityMockMvcRequestPostProcessors.jwt().jwt(jwt -> jwt.subject(LEARNER).claim("av", av))))
+            .andReturn().getResponse();
+        assertThat(retry.getStatus()).isEqualTo(200);
+        var retried = json.readTree(retry.getContentAsString());
+        assertThat(retried.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(retried.path("data").path("progress").path("scoreRaw").isNull()).isTrue();
+        assertThat(retried.path("data").path("progress").path("lessonStatus").asText()).isEqualTo("not attempted");
+        api.error(INSTRUCTOR, api.post(Map.of("preview", true, "restart", true),
+            "/api/v1/scorm/packages/{id}/launch", packageId), "CORE-VALIDATION_FAILED");
     }
 
     @Test
@@ -255,6 +271,8 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
         var halfway = api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment));
         assertThat(halfway.path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("50");
         assertThat(halfway.path("enrollment").path("status").asText()).isEqualTo("in_progress");
+        api.error(LEARNER, api.post(Map.of("preview", false, "restart", true, "enrollmentId", enrollment,
+            "lessonId", first), "/api/v1/scorm/packages/{id}/launch", packageId), "CORE-VALIDATION_FAILED");
         assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}/progress", packageId))
             .path("lessonStatus").asText()).isEqualTo("not attempted");
         String resumed = courseScormLaunch(packageId, enrollment, first);
@@ -266,6 +284,28 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
         assertThat(mvc.perform(ApiClient.get(secondPath).with(request -> {
             request.setLocalPort(8020); return request;
         })).andReturn().getResponse().getContentAsString()).doesNotContain("page-4");
+        for (int attempt = 0; attempt < 5; attempt++) {
+            var failed = Map.of("cmi.core.lesson_status", "failed", "cmi.core.score.raw", "73",
+                "cmi.core.lesson_location", "failed-page", "cmi.suspend_data", "{\"score\":73,\"answers\":[1]}");
+            assertThat(mvc.perform(api.post(Map.of("sequence", 1, "values", failed, "finished", true),
+                secondPath.replace("/launch", "/runtime")).with(request -> {
+                    request.setLocalPort(8020); return request;
+                })).andReturn().getResponse().getStatus()).isEqualTo(200);
+            String previousPath = secondPath;
+            secondPath = courseScormLaunch(packageId, enrollment, second, true);
+            assertThat(mvc.perform(ApiClient.get(previousPath).with(request -> {
+                request.setLocalPort(8020); return request;
+            })).andReturn().getResponse().getStatus()).isEqualTo(403);
+            assertThat(mvc.perform(ApiClient.get(secondPath).with(request -> {
+                request.setLocalPort(8020); return request;
+            })).andReturn().getResponse().getContentAsString()).doesNotContain("failed-page", "answers", "73");
+            var fresh = api.ok(LEARNER, ApiClient.get("/api/v1/scorm/packages/{id}/progress", packageId)
+                .param("enrollmentId", Long.toString(enrollment)).param("lessonId", Long.toString(second)));
+            assertThat(fresh.path("lessonStatus").asText()).isEqualTo("not attempted");
+            assertThat(fresh.path("scoreRaw").isNull()).isTrue();
+            assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment))
+                .path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("50");
+        }
         assertThat(mvc.perform(api.post(Map.of("sequence", 1, "values", values, "finished", true),
             secondPath.replace("/launch", "/runtime")).with(request -> {
                 request.setLocalPort(8020); return request;
@@ -278,10 +318,14 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
     }
 
     private String courseScormLaunch(long packageId, long enrollmentId, long lessonId) throws Exception {
+        return courseScormLaunch(packageId, enrollmentId, lessonId, false);
+    }
+
+    private String courseScormLaunch(long packageId, long enrollmentId, long lessonId, boolean restart) throws Exception {
         long version = jdbc.queryForObject("SELECT auth_ver FROM learning_hub.users WHERE user_id = ?",
             Long.class, LEARNER);
         var response = mvc.perform(api.post(Map.of("preview", false, "enrollmentId", enrollmentId,
-            "lessonId", lessonId), "/api/v1/scorm/packages/{id}/launch", packageId)
+            "lessonId", lessonId, "restart", restart), "/api/v1/scorm/packages/{id}/launch", packageId)
             .with(SecurityMockMvcRequestPostProcessors.jwt().jwt(jwt -> jwt.subject(LEARNER).claim("av", version))))
             .andReturn().getResponse();
         assertThat(response.getStatus()).isEqualTo(200);

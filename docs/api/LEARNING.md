@@ -17,6 +17,11 @@ không đổi điều kiện hoàn thành các khóa học hiện có. SCO tự 
 LMS kiểm hợp đồng rồi lưu theo `(packageId, userId, preview)`. Xem thử không ghi vào kết quả học viên.
 
 GET package/progress nhận query `enrollmentId`, `lessonId`; POST launch nhận thêm hai ID này trong body.
+Học viên trượt gửi thêm `restart:true` để học và thi lại không giới hạn số lần. BE chỉ đặt lại registration
+`failed` của chính người học sau khi kiểm scope; preview và trạng thái khác bị từ chối. Điểm, đáp án,
+bookmark và thời gian lượt hiện tại được đặt lại, kết quả trước được ghi audit. Vé cũ mất hiệu lực cùng
+transaction nên không ghi đè được lượt mới. Không đặt lại tiến độ bài khác, chứng nhận hoặc điều kiện bài thi cuối.
+Không gửi restart (hoặc false) vẫn tiếp tục từ vị trí đã lưu. Cần deploy BE/FE cùng bản; không thêm migration.
 Cả hai phải cùng có hoặc cùng vắng. BE kiểm người sở hữu lần học, lịch mở học, revision/bài/gói và quyền hiện hành
 trên cả launch lẫn mọi lần đọc/ghi runtime; vé của thư viện không thể được dùng để hoàn thành một bài học.
 
