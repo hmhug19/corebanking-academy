@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipException;
 import java.util.zip.ZipFile;
@@ -27,6 +29,11 @@ import org.springframework.http.MediaType;
 @Slf4j
 @RequiredArgsConstructor
 public class MediaProbe {
+    /** Ffprobe JSON and ffmpeg errors stay far below this; more means the tool is not reading a media file. */
+    private static final long MAX_OUTPUT_BYTES = 1_000_000L;
+    /** How much of a failed tool's output reaches the log. */
+    private static final int LOG_OUTPUT_CHARS = 500;
+
     private final Settings properties;
 
     public record Settings(String ffprobe, String ffmpeg, Duration probeTimeout, Duration transcodeTimeout) {
@@ -134,7 +141,10 @@ public class MediaProbe {
     private List<String> mp4Command(Path source, Path destination, JsonNode video, JsonNode audio,
                                    BigDecimal duration, long maxBytes, boolean copy) {
         List<String> command = new ArrayList<>(List.of(properties.ffmpeg(), "-v", "error", "-nostdin", "-y",
-            "-protocol_whitelist", "file,pipe", "-i", source.toString(), "-map", "0:" + video.path("index").asInt()));
+            // Decoder threads otherwise follow the host's core count (AV1 keeps a frame buffer per thread),
+            // which is memory the container may not have.
+            "-protocol_whitelist", "file,pipe", "-threads", "2", "-i", source.toString(),
+            "-map", "0:" + video.path("index").asInt()));
         if (audio != null) command.addAll(List.of("-map", "0:" + audio.path("index").asInt()));
         command.addAll(List.of("-map_metadata", "-1", "-map_chapters", "-1", "-sn", "-dn"));
         if (copy) {
@@ -175,16 +185,38 @@ public class MediaProbe {
         return run(command, properties.probeTimeout());
     }
 
-    private String run(List<String> command, Duration timeout) throws IOException {
+    /**
+     * Exit codes that say the machine failed, not the file: the kernel killed the tool (SIGKILL, as the
+     * container's OOM killer does, or SIGTERM), or ffmpeg ran out of memory (ENOMEM) or disk (ENOSPC).
+     * Java reports a process killed by a signal as 128 + signal; ffmpeg exits with its negative AVERROR
+     * truncated to a byte.
+     */
+    private static final Set<Integer> INFRASTRUCTURE_EXITS = Set.of(128 + 9, 128 + 15, 256 - 12, 256 - 28);
+
+    /** Whether a failed run should be retried rather than reported as a bad file. */
+    static boolean infrastructureFailure(int exitValue) {
+        return INFRASTRUCTURE_EXITS.contains(exitValue);
+    }
+
+    String run(List<String> command, Duration timeout) throws IOException {
         Path output = Files.createTempFile("academy-probe-", ".log");
         Process process = null;
+        String tool = Path.of(command.get(0)).getFileName().toString();
         try {
             process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start();
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly();
+                log.warn("Media tool timed out tool={} timeout={}", tool, timeout);
                 throw new IllegalStateException("Media probe timed out");
             }
-            if (Files.size(output) > 1_000_000L || process.exitValue() != 0) {
+            int exit = process.exitValue();
+            if (infrastructureFailure(exit)) {
+                // An OOM-killed ffmpeg must not turn a good video into a permanently "invalid" file.
+                log.warn("Media tool stopped by the system tool={} exit={} output={}", tool, exit, tail(output));
+                throw new IllegalStateException("Media tool stopped by the system");
+            }
+            if (Files.size(output) > MAX_OUTPUT_BYTES || exit != 0) {
+                log.warn("Media tool rejected the file tool={} exit={} output={}", tool, exit, tail(output));
                 throw new Rejected("ASSET_INVALID");
             }
             return Files.readString(output);
@@ -196,6 +228,22 @@ public class MediaProbe {
                 process.destroyForcibly();
             }
             deleteTemporaryFile(output);
+        }
+    }
+
+    private static String tail(Path output) {
+        try (var channel = Files.newByteChannel(output)) {
+            long size = channel.size();
+            var buffer = ByteBuffer.allocate((int) Math.min(size, LOG_OUTPUT_CHARS));
+            channel.position(size - buffer.capacity());
+            while (buffer.hasRemaining() && channel.read(buffer) >= 0) {
+                // Read the whole tail.
+            }
+            String text = new String(buffer.array(), 0, buffer.position(), StandardCharsets.UTF_8)
+                .replaceAll("\\s+", " ").strip();
+            return size > buffer.capacity() ? "..." + text : text;
+        } catch (IOException | RuntimeException exception) {
+            return "<unreadable>";
         }
     }
 
