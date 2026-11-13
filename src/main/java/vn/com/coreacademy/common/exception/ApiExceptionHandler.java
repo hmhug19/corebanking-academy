@@ -1,8 +1,9 @@
 package vn.com.coreacademy.common.exception;
 
-import java.util.Arrays;
 import java.util.List;
+import java.util.Arrays;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 
@@ -25,6 +26,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
@@ -36,20 +38,28 @@ import vn.com.coreacademy.common.validation.ValidationErrors;
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<BaseResponse<Void>> forbidden(AccessDeniedException exception) {
+    public ResponseEntity<BaseResponse<Void>> forbidden(AccessDeniedException exception, HttpServletRequest request) {
+        log.warn("Handled API security error method={} path={} messageCode={}", request.getMethod(),
+            request.getRequestURI(), ResponseCode.FORBIDDEN.getCode());
         return error(ResponseCode.FORBIDDEN);
     }
 
     @ExceptionHandler(AuthenticationException.class)
-    public ResponseEntity<BaseResponse<Void>> unauthorized(AuthenticationException exception) {
+    public ResponseEntity<BaseResponse<Void>> unauthorized(AuthenticationException exception,
+                                                             HttpServletRequest request) {
         if (exception instanceof AuthenticationServiceException) {
-            return internalError(exception);
+            return internalError(exception, request);
         }
+        log.warn("Handled API authentication error method={} path={} messageCode={}", request.getMethod(),
+            request.getRequestURI(), ResponseCode.UNAUTHORIZED.getCode());
         return error(ResponseCode.UNAUTHORIZED);
     }
 
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<BaseResponse<Void>> business(BusinessException exception) {
+    public ResponseEntity<BaseResponse<Void>> business(BusinessException exception, HttpServletRequest request) {
+        log.warn("Handled API business error method={} path={} httpStatus={} messageCode={} errorCount={}",
+            request.getMethod(), request.getRequestURI(), exception.getResponseCode().getHttpStatus().value(),
+            exception.getResponseCode().getCode(), exception.getErrors().size());
         return ResponseEntity.status(exception.getResponseCode().getHttpStatus())
             .contentType(MediaType.APPLICATION_JSON)
             .body(BaseResponse.fail(exception.getResponseCode(), exception.getErrors()));
@@ -57,6 +67,8 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<BaseResponse<Void>> status(ResponseStatusException exception) {
+        log.warn("Handled API HTTP error httpStatus={} messageCode={}", exception.getStatusCode().value(),
+            ResponseCode.forHttpStatus(exception.getStatusCode().value()).getCode());
         return ResponseEntity.status(exception.getStatusCode()).headers(exception.getHeaders())
             .contentType(MediaType.APPLICATION_JSON)
             .body(BaseResponse.fail(ResponseCode.forHttpStatus(exception.getStatusCode().value())));
@@ -95,6 +107,8 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             .map(v -> ValidationErrors.fromConstraint(v.getPropertyPath().toString(),
                 v.getConstraintDescriptor().getAnnotation().annotationType().getSimpleName()))
             .toList();
+        log.info("Handled API validation error messageCode={} errorCount={}",
+            ResponseCode.VALIDATION_FAILED.getCode(), fields.size());
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON)
             .body(BaseResponse.fail(ResponseCode.VALIDATION_FAILED, fields));
     }
@@ -145,6 +159,14 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         Object envelope = body instanceof BaseResponse<?> ? body
             : BaseResponse.fail(ResponseCode.forHttpStatus(status.value()));
+        if (envelope instanceof BaseResponse<?> apiResponse && apiResponse.status().name().equals("ERROR")) {
+            String method = request instanceof ServletWebRequest servletRequest
+                ? servletRequest.getRequest().getMethod() : "UNKNOWN";
+            String path = request instanceof ServletWebRequest servletRequest
+                ? servletRequest.getRequest().getRequestURI() : "UNKNOWN";
+            log.info("Handled API request error method={} path={} httpStatus={} messageCode={} exceptionType={}",
+                method, path, status.value(), apiResponse.messageCode(), exception.getClass().getName());
+        }
         HttpHeaders safeHeaders = new HttpHeaders();
         safeHeaders.putAll(headers);
         safeHeaders.setContentType(MediaType.APPLICATION_JSON);
@@ -152,10 +174,12 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<BaseResponse<Void>> unexpected(Exception exception, HttpServletResponse response) {
+    public ResponseEntity<BaseResponse<Void>> unexpected(Exception exception, HttpServletRequest request,
+                                                           HttpServletResponse response) {
         if (response.isCommitted()) {
             // Không ghép JSON lỗi vào binary đã bắt đầu; Content-Length cho client nhận biết tải chưa đủ.
-            log.warn("Response stream interrupted; exceptionType={}", exception.getClass().getName());
+            log.warn("Response stream interrupted method={} path={} exceptionType={} stack={}", request.getMethod(),
+                request.getRequestURI(), exception.getClass().getName(), Arrays.toString(exception.getStackTrace()));
             return null;
         }
         response.resetBuffer();
@@ -164,13 +188,13 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         response.setHeader(HttpHeaders.CONTENT_RANGE, null);
         response.setHeader(HttpHeaders.ACCEPT_RANGES, null);
         response.setHeader(HttpHeaders.ETAG, null);
-        return internalError(exception);
+        return internalError(exception, request);
     }
 
-    private ResponseEntity<BaseResponse<Void>> internalError(Exception exception) {
+    private ResponseEntity<BaseResponse<Void>> internalError(Exception exception, HttpServletRequest request) {
         // Message/cause có thể chứa dữ liệu request; chỉ log loại exception và vị trí lỗi.
-        log.error("Unhandled API exception type={} stack={}", exception.getClass().getName(),
-            Arrays.toString(exception.getStackTrace()));
+        log.error("Unhandled API exception method={} path={} exceptionType={} stack={}", request.getMethod(),
+            request.getRequestURI(), exception.getClass().getName(), Arrays.toString(exception.getStackTrace()));
         return error(ResponseCode.INTERNAL_ERROR);
     }
 
