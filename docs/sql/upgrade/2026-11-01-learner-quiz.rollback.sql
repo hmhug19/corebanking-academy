@@ -1,6 +1,6 @@
 -- Rollback of 2026-11-01-learner-quiz.sql. Stops if any lesson of type 'quiz' exists, so no quiz link is lost.
 -- Remove or convert those lessons through the course editor first.
---   psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.rollback.sql.
+--   psql -h <host> -U <user> -d <database> -v ON_ERROR_STOP=1 -f docs/sql/upgrade/2026-11-01-learner-quiz.rollback.sql
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
