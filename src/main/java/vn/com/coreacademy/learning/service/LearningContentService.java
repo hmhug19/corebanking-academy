@@ -82,6 +82,7 @@ public class LearningContentService {
     private final IdentityAuditService audit;
     private final List<LearningResourceExtension> resourceExtensions;
     private final LearningQuizDirectory quizzes;
+    private final LearningScormDirectory scorm;
     private final LearningAiOwnership aiOwnership;
 
     /**
@@ -515,16 +516,20 @@ public class LearningContentService {
         TrainingProgram program = repository.require(TrainingProgram.class, programId);
         TrainingField field = repository.require(TrainingField.class, program.getFieldId());
         if (!program.getOwnerOrgId().equals(course.getOwnerOrgId())
-            || !field.getOwnerOrgId().equals(course.getOwnerOrgId())
-            || (published && (!CatalogStatus.PUBLISHED.equals(program.getStatus())
-                || !CatalogStatus.PUBLISHED.equals(field.getStatus())))) {
+            || !field.getOwnerOrgId().equals(course.getOwnerOrgId())) {
             throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+        }
+        if (published && (!CatalogStatus.PUBLISHED.equals(program.getStatus())
+            || !CatalogStatus.PUBLISHED.equals(field.getStatus()))) {
+            throw new BusinessException(LearningResponseCode.CATALOG_UNAVAILABLE);
         }
         if (moduleId != null) {
             BusinessModule module = repository.require(BusinessModule.class, moduleId);
-            if (!module.getFieldId().equals(program.getFieldId())
-                || (published && !CatalogStatus.PUBLISHED.equals(module.getStatus()))) {
+            if (!module.getFieldId().equals(program.getFieldId())) {
                 throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+            }
+            if (published && !CatalogStatus.PUBLISHED.equals(module.getStatus())) {
+                throw new BusinessException(LearningResponseCode.CATALOG_UNAVAILABLE);
             }
         }
     }
@@ -546,6 +551,16 @@ public class LearningContentService {
      * Bản nháp được phép chưa chọn đề: việc đó chỉ bị chặn khi xuất bản.
      */
     private void validateLessonInput(Course course, LearningRequests.LessonInput lesson) {
+        if (LessonType.SCORM.equals(lesson.lessonType())) {
+            if (lesson.quizId() != null || !lesson.blocks().isEmpty()) {
+                throw BusinessException.validation("chapters", "INVALID_VALUE", "Bài SCORM không có quiz hoặc khối nhập tay.");
+            }
+            scorm.validate(lesson.scormPackageId(), course.getOwnerOrgId(), false);
+            return;
+        }
+        if (lesson.scormPackageId() != null) {
+            throw BusinessException.validation("scormPackageId", "INVALID_VALUE", "Chỉ bài SCORM được chọn gói SCORM.");
+        }
         if (LessonType.CONTENT.equals(lesson.lessonType())) {
             if (lesson.quizId() != null) {
                 throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
@@ -699,6 +714,10 @@ public class LearningContentService {
                 if (lesson.lesson().isRequired()) {
                     requiredLessons++;
                 }
+                if (LessonType.SCORM.equals(lesson.lesson().lessonType())) {
+                    scorm.validate(lesson.lesson().scormPackageId(), course.getOwnerOrgId(), true);
+                    continue;
+                }
                 if (LessonType.QUIZ.equals(lesson.lesson().lessonType())) {
                     Optional<LearningQuizDirectory.QuizRef> quiz = lesson.lesson().quizId() == null
                         ? Optional.empty() : quizzes.find(lesson.lesson().quizId());
@@ -781,6 +800,7 @@ public class LearningContentService {
                 lesson.setIsRequired(lessonInput.isRequired());
                 lesson.setSortNo(li);
                 lesson.setQuizId(lessonInput.quizId());
+                lesson.setScormPackageId(lessonInput.scormPackageId());
                 repository.save(lesson, actor);
                 for (int bi = 0; bi < lessonInput.blocks().size(); bi++) {
                     writeBlock(lesson.getId(), lessonInput.blocks().get(bi), bi, actor);
@@ -873,7 +893,7 @@ public class LearningContentService {
                         b.block().videoChapters().stream().map(ch -> new LearningRequests.VideoChapterInput(
                             ch.startSeconds(), ch.title())).toList(), b.block().transcript().stream()
                             .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList()))
-                    .toList()))
+                    .toList(), l.lesson().scormPackageId()))
                 .toList())).toList();
         var payload = new LearningRequests.DraftContent(source.getProgramId(), source.getModuleId(),
             source.getTitle(), source.getSummary(), source.getLevel(), source.getDefaultRequirement(),

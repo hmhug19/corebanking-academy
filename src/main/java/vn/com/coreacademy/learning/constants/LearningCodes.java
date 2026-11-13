@@ -61,7 +61,8 @@ public final class LearningCodes {
     public static final class LessonType {
         public static final String CONTENT = "content";
         public static final String QUIZ = "quiz";
-        public static final String PATTERN = CONTENT + "|" + QUIZ;
+        public static final String SCORM = "scorm";
+        public static final String PATTERN = CONTENT + "|" + QUIZ + "|" + SCORM;
 
         private LessonType() {
         }

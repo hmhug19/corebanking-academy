@@ -271,6 +271,17 @@ public class AssessmentRepository {
             "graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED)));
     }
 
+    public List<QuizAttempt> gradedEnrollmentAttempts(String userId, Collection<Long> enrollmentIds) {
+        if (enrollmentIds.isEmpty()) {
+            return List.of();
+        }
+        return query("""
+            select a from QuizAttempt a
+            where a.userId = :user and a.enrollmentId in :enrollments and a.status in :graded
+            """, QuizAttempt.class, Map.of("user", userId, "enrollments", enrollmentIds,
+            "graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED)));
+    }
+
     public List<Long> inProgressAttemptIds(Long quizId) {
         return query("""
             select a.id

@@ -160,7 +160,8 @@ public final class LearningViews {
         Long rowVersion,
         Instant createTime,
         Instant updateTime,
-        String aiState) {
+        String aiState,
+        Long scormPackageId) {
     }
 
     public record LessonBlockView(

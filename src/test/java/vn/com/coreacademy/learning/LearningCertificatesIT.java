@@ -205,6 +205,8 @@ class LearningCertificatesIT extends AssessmentIntegrationTest {
     void theScoreIsTheCardsBestFinalExamScoreAndNullWithoutOne() {
         Course scored = fixtures.course(LEARNER);
         long exam = quiz(scored, "FINAL_EXAM");
+        jdbc.update("update learning_hub.course_completion_rules set final_quiz_id = ? where revision_id = ?",
+            exam, scored.revisionId());
         attempt(LEARNER, exam, 1);
         attempt(LEARNER, exam, 2);
         attempt(LEARNER, exam, 0);
@@ -259,7 +261,7 @@ class LearningCertificatesIT extends AssessmentIntegrationTest {
         JsonNode page = api.ok(LEARNER, get(LIST));
 
         assertThat(page.path("items")).hasSize(3);
-        verify(directory, times(1)).scores(any(), any());
+        verify(directory, times(1)).enrollmentScores(any(), any());
         verify(identity, times(1)).fullNames(any());
     }
 
@@ -268,6 +270,28 @@ class LearningCertificatesIT extends AssessmentIntegrationTest {
         api.http(ADMIN, get(LIST), 403, "CORE-ACCESS_DENIED");
         api.http(ADMIN, get(ONE, 1L), 403, "CORE-ACCESS_DENIED");
         api.http(null, get(LIST), 401, "CORE-UNAUTHENTICATED");
+    }
+
+    @Test
+    void historicalScoreSurvivesClosingTheExamAndDoesNotLeakIntoAnotherCycle() {
+        Course course = fixtures.course(LEARNER);
+        long exam = quiz(course, "FINAL_EXAM");
+        jdbc.update("update learning_hub.course_completion_rules set final_quiz_id = ? where revision_id = ?",
+            exam, course.revisionId());
+        attempt(LEARNER, exam, 1);
+        long first = complete(course, LEARNER, "2026-01-10T08:00:00Z");
+        long second = jdbc.queryForObject("""
+            insert into learning_hub.course_enrollments (course_id, revision_id, user_id, cycle_no,
+                enrollment_origin, enrolled_at, completed_at, status, progress_percent, created_by, updated_by)
+            select course_id, revision_id, user_id, 2, enrollment_origin, now(), now(), 'completed',
+                100, created_by, updated_by
+            from learning_hub.course_enrollments where enrollment_id = ? returning enrollment_id
+            """, Long.class, first);
+        jdbc.update("update learning_hub.quizzes set status = 'CLOSED' where quiz_id = ?", exam);
+
+        assertThat(api.ok(LEARNER, get(ONE, first)).path("bestScorePercent").decimalValue())
+            .isEqualByComparingTo("50");
+        assertThat(api.ok(LEARNER, get(ONE, second)).path("bestScorePercent").isNull()).isTrue();
     }
 
     private long enrollment(Course course, String user) {

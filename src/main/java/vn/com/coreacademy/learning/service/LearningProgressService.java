@@ -473,6 +473,36 @@ public class LearningProgressService {
         return true;
     }
 
+    /** Called only by the server-side SCORM runtime after validating its enrollment-bound capability. */
+    @Transactional
+    public void scormProgress(String userId, Long enrollmentId, Long lessonId, boolean completed) {
+        CourseEnrollment enrollment = repository.require(CourseEnrollment.class, enrollmentId);
+        CourseLesson lesson = repository.lessons(enrollment.getRevisionId()).stream()
+            .filter(l -> l.getId().equals(lessonId) && LessonType.SCORM.equals(l.getLessonType()))
+            .findFirst().orElseThrow(() -> new BusinessException(LearningResponseCode.INVALID_REFERENCE));
+        if (!userId.equals(enrollment.getUserId()) || ProgressStatus.WITHDRAWN.equals(enrollment.getStatus())) {
+            throw new BusinessException(LearningResponseCode.NOT_AVAILABLE);
+        }
+        Instant now = Instant.now();
+        LessonProgress value = repository.lessonProgress(enrollmentId).stream()
+            .filter(p -> p.getLessonId().equals(lessonId)).findFirst().orElseGet(LessonProgress::new);
+        value.setEnrollmentId(enrollmentId);
+        value.setLessonId(lessonId);
+        if (value.getStartedAt() == null) {
+            value.setStartedAt(now);
+        }
+        value.setLastAccessAt(now);
+        if (completed && value.getCompletedAt() == null) {
+            value.setCompletedAt(now);
+            xp.lessonCompleted(userId, lessonKey(lesson), now);
+        }
+        value.setProgressPercent(value.getCompletedAt() != null ? HUNDRED : BigDecimal.ZERO);
+        value.setStatus(value.getCompletedAt() != null ? ProgressStatus.COMPLETED : ProgressStatus.IN_PROGRESS);
+        repository.save(value, userId);
+        repository.flush();
+        updateEnrollment(enrollment, lessonId, null, now, userId);
+    }
+
     private Long finalQuizId(Long revisionId) {
         return repository.finalAssessment(revisionId).map(exam -> exam.getAssessmentRevisionId())
             .orElseGet(() -> repository.rules(revisionId).stream().findFirst()

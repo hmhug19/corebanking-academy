@@ -517,3 +517,5 @@ script này không tự mở khóa, đổi đơn vị hay cấp thêm quyền ch
   bảo trì để lập bản xóa chọn lọc được duyệt. Bản sao DB thử nghiệm có thể hủy/tạo lại theo cơ chế vận hành;
   khôi phục snapshot prod chỉ được thực hiện theo kế hoạch phục hồi đã duyệt, tránh mất giao dịch mới.
 
+
+Course SCORM lessons: after `upgrade/2026-11-12-scorm12.sql`, apply [`upgrade/2026-11-13-course-scorm.sql`](upgrade/2026-11-13-course-scorm.sql) before deploying the corresponding backend/frontend. This adds a nullable package link on lessons and enrollment/lesson context on runtime registrations; existing standalone registrations retain context 0/0. It does not rewrite existing lesson content or progress.

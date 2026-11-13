@@ -210,7 +210,7 @@ public class LearningAssessmentAccess {
             .collect(Collectors.toMap(LessonProgress::getLessonId, LessonProgress::getProgressPercent,
                 BigDecimal::max));
         return repository.lessons(revisionId).stream()
-            .filter(l -> l.getIsRequired() && LessonType.CONTENT.equals(l.getLessonType()))
+            .filter(l -> l.getIsRequired() && !LessonType.QUIZ.equals(l.getLessonType()))
             .allMatch(l -> values.getOrDefault(l.getId(), BigDecimal.ZERO).compareTo(HUNDRED) >= 0);
     }
 

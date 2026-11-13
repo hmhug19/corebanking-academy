@@ -221,6 +221,7 @@ CREATE TABLE learning_hub.course_lessons (
     sort_no integer NOT NULL,
     source_lesson_id bigint,
     quiz_id bigint,
+    scorm_package_id bigint,
     created_by varchar(20) NOT NULL,
     updated_by varchar(20) NOT NULL,
     row_version bigint NOT NULL DEFAULT 0,

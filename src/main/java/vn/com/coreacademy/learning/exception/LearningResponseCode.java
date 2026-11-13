@@ -43,6 +43,9 @@ public enum LearningResponseCode implements ApiResponseCode {
         "Tham chiếu chưa hợp lệ"),
     NOT_PUBLISHABLE("LEARNING-NOT_PUBLISHABLE", "Khóa học chưa đủ nội dung hoặc tài nguyên để xuất bản.",
         "Chưa thể xuất bản"),
+    CATALOG_UNAVAILABLE("LEARNING-CATALOG_UNAVAILABLE",
+        "Lĩnh vực, chương trình hoặc phân hệ của khóa học chưa xuất bản, đang tạm dừng hoặc đã lưu trữ. "
+            + "Vui lòng liên hệ người quản lý đào tạo.", "Danh mục chưa mở học"),
     NOT_AVAILABLE("LEARNING-NOT_AVAILABLE", "Khóa học chưa mở hoặc hiện không được phép học.", "Chưa thể học"),
     EMPTY_TARGET("LEARNING-EMPTY_TARGET", "Đối tượng giao không có học viên hợp lệ hoặc vượt giới hạn %d người."
             .formatted(LearningLimits.MAX_LEARNERS_PER_ASSIGNMENT),

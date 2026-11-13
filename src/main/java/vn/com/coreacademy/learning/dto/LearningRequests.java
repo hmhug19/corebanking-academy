@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -18,6 +17,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import vn.com.coreacademy.learning.constants.LearningCodes.AssetUsage;
 import vn.com.coreacademy.learning.constants.LearningCodes.BlockType;
 import vn.com.coreacademy.learning.constants.LearningCodes.BodyFormat;
@@ -164,7 +164,12 @@ public final class LearningRequests {
         BigDecimal estimatedDurationSeconds,
         boolean isRequired,
         @Positive Long quizId,
-        @NotNull @Size(max = 100) List<@Valid BlockInput> blocks) {
+        @NotNull @Size(max = 100) List<@Valid BlockInput> blocks,
+        @Positive Long scormPackageId) {
+        public LessonInput(String title, String lessonType, BigDecimal estimatedDurationSeconds,
+                           boolean isRequired, Long quizId, List<BlockInput> blocks) {
+            this(title, lessonType, estimatedDurationSeconds, isRequired, quizId, blocks, null);
+        }
     }
 
     public record BlockInput(

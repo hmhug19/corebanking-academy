@@ -58,6 +58,9 @@ public class CourseLesson extends LearningRecord {
     @Column(name = "quiz_id")
     private Long quizId;
 
+    @Column(name = "scorm_package_id")
+    private Long scormPackageId;
+
     /**
      * Bài do AI viết: pending | writing | written | user_edited (người dùng đã sửa, job không ghi đè); null nếu bài
      * không do AI quản lý. Không được nhân bản sang phiên bản khác.

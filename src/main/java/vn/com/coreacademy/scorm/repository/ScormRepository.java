@@ -32,7 +32,8 @@ public class ScormRepository {
                              int fileCount, BigDecimal mastery, boolean published, long version, Instant createdAt) { }
     public record Registration(long id, long packageId, String userId, boolean preview, Map<String, String> cmi,
                                BigDecimal totalSeconds, BigDecimal sessionSeconds, Instant expiresAt,
-                               long authVersion, long sequence, String payloadHash, Instant updatedAt) { }
+                               long authVersion, long sequence, String payloadHash, Instant updatedAt,
+                               long enrollmentId, long lessonId) { }
 
     public long insert(long orgId, String userId, String name, long size, PackageData data) {
         return jdbc.queryForObject("""
@@ -92,16 +93,27 @@ public class ScormRepository {
     }
 
     public void ensureRegistration(long packageId, String userId, boolean preview) {
+        ensureRegistration(packageId, userId, preview, 0, 0);
+    }
+
+    public void ensureRegistration(long packageId, String userId, boolean preview, long enrollmentId, long lessonId) {
         jdbc.update("""
-            INSERT INTO learning_hub.scorm_registrations (package_id, user_id, preview) VALUES (?, ?, ?)
-            ON CONFLICT (package_id, user_id, preview) DO NOTHING
-            """, packageId, userId, preview);
+            INSERT INTO learning_hub.scorm_registrations (package_id, user_id, preview, enrollment_id, lesson_id)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (package_id, user_id, preview, enrollment_id, lesson_id) DO NOTHING
+            """, packageId, userId, preview, enrollmentId, lessonId);
     }
 
     public Registration registration(long packageId, String userId, boolean preview, boolean locked) {
+        return registration(packageId, userId, preview, locked, 0, 0);
+    }
+
+    public Registration registration(long packageId, String userId, boolean preview, boolean locked,
+                                     long enrollmentId, long lessonId) {
         return jdbc.query("""
-            SELECT * FROM learning_hub.scorm_registrations WHERE package_id = ? AND user_id = ? AND preview = ?
-            """ + (locked ? " FOR UPDATE" : ""), registrationMapper(), packageId, userId, preview)
+            SELECT * FROM learning_hub.scorm_registrations
+            WHERE package_id = ? AND user_id = ? AND preview = ? AND enrollment_id = ? AND lesson_id = ?
+            """ + (locked ? " FOR UPDATE" : ""), registrationMapper(), packageId, userId, preview, enrollmentId, lessonId)
             .stream().findFirst().orElse(null);
     }
 
@@ -109,7 +121,7 @@ public class ScormRepository {
         if (ids.isEmpty()) return Map.of();
         return named.query("""
             SELECT * FROM learning_hub.scorm_registrations
-            WHERE package_id IN (:ids) AND user_id = :user AND NOT preview
+            WHERE package_id IN (:ids) AND user_id = :user AND NOT preview AND enrollment_id = 0 AND lesson_id = 0
             """, Map.of("ids", ids, "user", userId), registrationMapper()).stream()
             .collect(java.util.stream.Collectors.toMap(Registration::packageId, java.util.function.Function.identity()));
     }
@@ -158,7 +170,7 @@ public class ScormRepository {
             r.getString("user_id"), r.getBoolean("preview"), decode(r.getString("cmi"), new TypeReference<>() { }),
             r.getBigDecimal("total_seconds"), r.getBigDecimal("session_seconds"), time(r, "launch_expires_at"),
             r.getLong("authorization_version"), r.getLong("last_sequence"), r.getString("last_payload_hash"),
-            time(r, "update_time"));
+            time(r, "update_time"), r.getLong("enrollment_id"), r.getLong("lesson_id"));
     }
 
     private static Instant time(ResultSet result, String column) throws SQLException {

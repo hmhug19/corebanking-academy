@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.repository;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -543,6 +544,27 @@ public class LearningRepository {
             from CourseRevision r
             where r.coverAssetId = :id
             """, CourseRevision.class, Map.of("id", assetId));
+    }
+
+    /** Selected final exams for a page of revisions; explicit links override legacy completion rules. */
+    public Map<Long, Long> finalQuizIds(Collection<Long> revisionIds) {
+        Map<Long, Long> result = new HashMap<>();
+        if (revisionIds.isEmpty()) {
+            return result;
+        }
+        for (CourseCompletionRule rule : query("""
+            select r from CourseCompletionRule r where r.revisionId in :ids
+            """, CourseCompletionRule.class, Map.of("ids", revisionIds))) {
+            if (rule.getFinalQuizId() != null) {
+                result.put(rule.getRevisionId(), rule.getFinalQuizId());
+            }
+        }
+        for (CourseAssessment exam : query("""
+            select a from CourseAssessment a where a.revisionId in :ids and a.placement = :placement
+            """, CourseAssessment.class, Map.of("ids", revisionIds, "placement", CourseAssessment.PLACEMENT_FINAL))) {
+            result.put(exam.getRevisionId(), exam.getAssessmentRevisionId());
+        }
+        return result;
     }
 
     public List<CourseEnrollment> userEnrollments(String userId) {

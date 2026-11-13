@@ -2,7 +2,7 @@
 
 ## Thư viện bài giảng SCORM 1.2
 
-Module `scorm` phục vụ **bài giảng độc lập, một SCO**, tại FE `/admin/lessons`,
+Module `scorm` phục vụ **bài giảng một SCO, độc lập hoặc gắn vào bài học của khóa**, tại FE `/admin/lessons`,
 thư viện học viên `/scorm` và player `/scorm/:id`. Không tự cộng điểm/chứng nhận,
 không đổi điều kiện hoàn thành các khóa học hiện có. SCO tự báo điểm và trạng thái;
 LMS kiểm hợp đồng rồi lưu theo `(packageId, userId, preview)`. Xem thử không ghi vào kết quả học viên.
@@ -1140,3 +1140,20 @@ Báo cáo có kỳ/đơn vị không dùng kết quả suốt lịch sử của 
 Native query áp scope/filter trước aggregate và phân trang; không gọi GET danh sách từng người. CSV có giới hạn,
 BOM/escape và bảo vệ công thức. Hai bảng read model không có JPA entity: repository native đọc/ghi projection,
 không auto DDL. Không kết luận throughput/latency production từ kiểm thử dữ liệu nhỏ; cần EXPLAIN và đo tải đại diện.
+
+### Learning access and historical scores
+
+Learner course details validate the same enrollment access policy as the player before returning blocks.
+An existing enrollment alone does not authorize reading content after a pause, revocation, or before the assignment start.
+Unpublished, paused, or archived catalog parents return `LEARNING-CATALOG_UNAVAILABLE`; invalid ownership and parent relations retain `LEARNING-INVALID_REFERENCE`.
+Course cards and certificates use the best graded score for the exact enrollment and the final exam selected by its revision (including the legacy completion-rule fallback). Closed historical exams remain eligible for certificate scores; other cycles and unselected final exams do not contribute. No database migration is required.
+
+### SCORM lessons inside courses
+
+The course editor keeps manual content and quiz lessons and adds `lessonType: "scorm"` with `scormPackageId`. A SCORM lesson has no manual blocks and no quizId; a course can mix all lesson types. The package must belong to the course owner organization and be manageable by the author. Publishing requires a published package. Cloning a revision preserves its immutable package ID.
+
+Learner package get/progress accept `enrollmentId` and `lessonId` query parameters; launch accepts both in its body alongside `preview:false`. Both IDs must be supplied together. The server checks enrollment ownership, assignment start/revocation, catalog availability, and the exact lesson/package/revision relation on launch and every capability use. Course sharing grants access through the enrollment, independently of the standalone package catalog.
+
+Runtime registrations are isolated by package/user/preview/enrollment/lesson. Existing standalone registrations use enrollment_id=lesson_id=0 and never contribute to course completion. SCORM `completed` or `passed` completes that lesson; other statuses keep it in progress. Completion is monotonic and the configured final exam remains required. Progress updates and runtime snapshots commit atomically.
+
+Apply `docs/sql/upgrade/2026-11-13-course-scorm.sql` after the SCORM library migration, before deploying backend and frontend. No migration is executed automatically. Existing manual lessons and independent runtime data are preserved.

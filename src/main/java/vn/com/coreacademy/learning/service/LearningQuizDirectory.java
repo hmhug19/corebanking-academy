@@ -69,4 +69,8 @@ public interface LearningQuizDirectory {
      * Hai truy vấn bất kể số khóa; courseIds rỗng trả danh sách rỗng mà không truy vấn.
      */
     List<QuizScore> scores(String userId, Collection<Long> courseIds);
+
+    /** Best graded score per enrollment for its selected final exam, including closed historical exams. */
+    Map<Long, BigDecimal> enrollmentScores(String userId, Map<Long, Long> quizIdsByEnrollment);
+
 }
