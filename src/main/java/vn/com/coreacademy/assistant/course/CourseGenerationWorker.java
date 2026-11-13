@@ -16,6 +16,7 @@ import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationExcept
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.NextStep;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.Result;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
+import vn.com.coreacademy.knowledge.ai.OllamaTimeoutException;
 import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 
 /**
@@ -28,6 +29,9 @@ import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 public class CourseGenerationWorker {
     static final String GENERIC_FAILURE = "Không tạo được khóa học. Vui lòng thử lại hoặc liên hệ quản trị.";
     static final String NOT_SUPPORTED = "Bước này chưa được hỗ trợ.";
+    public static final String TOO_SLOW = "Mô hình phản hồi quá chậm ở bước này. Hãy thử lại.";
+    /** Model calls of one step that may time out before the step fails; each attempt waits the full call timeout. */
+    public static final int TIMEOUT_ATTEMPTS = 2;
 
     private final CourseJobRepository jobs;
     private final ObjectProvider<GenerationStepRunner> runner;
@@ -100,11 +104,24 @@ public class CourseGenerationWorker {
             // The source document is still being read: try this step again at the next poll.
             outcome = "waiting";
             jobs.releaseStep(step.id());
+        } catch (OllamaTimeoutException exception) {
+            // The model answered too slowly: that costs an attempt, and the step fails once the cap is reached so the
+            // author sees the failure and can retry, instead of the step starting over forever.
+            if (step.attempts() >= TIMEOUT_ATTEMPTS) {
+                outcome = "failed";
+                log.warn("Course generation step timed out, giving up stepId={} attempt={}", step.id(), step.attempts());
+                fail(step, TOO_SLOW);
+            } else {
+                outcome = "waiting";
+                jobs.retryStep(step.id());
+                log.warn("Course generation step timed out, requeued stepId={} attempt={}", step.id(), step.attempts());
+            }
         } catch (OllamaUnavailableException exception) {
-            // The model went away mid-step: nothing is lost, the step is tried again later.
+            // The model went away mid-step: nothing is lost, only this step goes back and it costs no attempt.
             outcome = "waiting";
-            jobs.requeueInterrupted();
-            log.warn("Course generation step waits for the model stepId={}", step.id());
+            jobs.releaseStep(step.id());
+            log.warn("Course generation step waits for the model, requeued stepId={} attempt={}", step.id(),
+                step.attempts());
         } catch (GenerationException exception) {
             outcome = "failed";
             fail(step, exception.getMessage());

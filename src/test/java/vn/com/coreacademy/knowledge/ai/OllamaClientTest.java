@@ -323,6 +323,24 @@ class OllamaClientTest {
             OllamaClient.Options.AGENT, delta -> { })).isInstanceOf(OllamaUnavailableException.class);
     }
 
+    @Test
+    void aReadTimeoutIsATimeoutAndARefusedConnectionIsNot() throws IOException {
+        handler = exchange -> {
+            try {
+                Thread.sleep(1_500);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+            return new Reply(200, "{\"message\":{\"content\":\"late\"}}");
+        };
+
+        assertThatThrownBy(() -> client().chat(List.of(OllamaClient.Message.user("u")), OllamaClient.Options.GROUNDED,
+            null, Duration.ofMillis(200))).isInstanceOf(OllamaTimeoutException.class);
+        assertThatThrownBy(() -> clientOn(closedPort()).chat(List.of(OllamaClient.Message.user("u")),
+            OllamaClient.Options.GROUNDED, null, Duration.ofMillis(200)))
+            .isInstanceOf(OllamaUnavailableException.class).isNotInstanceOf(OllamaTimeoutException.class);
+    }
+
     private OllamaClient client() {
         return clientOn(server.getAddress().getPort());
     }

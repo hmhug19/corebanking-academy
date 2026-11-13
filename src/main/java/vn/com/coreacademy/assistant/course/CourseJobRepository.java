@@ -357,6 +357,14 @@ public class CourseJobRepository {
             """, jobId, maxAttempts);
     }
 
+    /** A step whose model call timed out goes back to pending; the attempt it used is kept and counts toward the cap. */
+    public void retryStep(long stepId) {
+        jdbc.update("""
+            UPDATE learning_hub.course_generation_steps SET status = 'pending'
+             WHERE step_id = ? AND status = 'running'
+            """, stepId);
+    }
+
     /** A step the source was not ready for goes back without costing an attempt. */
     public void releaseStep(long stepId) {
         jdbc.update("""
