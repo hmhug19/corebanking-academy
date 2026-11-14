@@ -36,6 +36,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
 import vn.com.coreacademy.learning.constants.LearningCodes.MediaMime;
 import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
 import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
+import vn.com.coreacademy.learning.constants.LearningCodes.ScormCompletion;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningDetails;
 import vn.com.coreacademy.learning.dto.LearningRequests;
@@ -564,6 +565,10 @@ public class LearningContentService {
             throw BusinessException.validation("scormPackageId", "INVALID_VALUE",
                 "Chỉ bài SCORM được gắn bài giảng SCORM.");
         }
+        if (lesson.scormCompletionRule() != null) {
+            throw BusinessException.validation("scormCompletionRule", "INVALID_VALUE",
+                "Chỉ bài SCORM được cấu hình điều kiện hoàn thành SCORM.");
+        }
         if (LessonType.CONTENT.equals(lesson.lessonType())) {
             if (lesson.quizId() != null) {
                 throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
@@ -813,6 +818,10 @@ public class LearningContentService {
                 lesson.setSortNo(li);
                 lesson.setQuizId(lessonInput.quizId());
                 lesson.setScormPackageId(lessonInput.scormPackageId());
+                lesson.setScormCompletionRule(LessonType.SCORM.equals(lessonInput.lessonType())
+                    ? (lessonInput.scormCompletionRule() == null
+                        ? ScormCompletion.COMPLETED_OR_PASSED
+                        : lessonInput.scormCompletionRule()) : null);
                 repository.save(lesson, actor);
                 for (int bi = 0; bi < lessonInput.blocks().size(); bi++) {
                     writeBlock(lesson.getId(), lessonInput.blocks().get(bi), bi, actor);
@@ -905,7 +914,7 @@ public class LearningContentService {
                         b.block().videoChapters().stream().map(ch -> new LearningRequests.VideoChapterInput(
                             ch.startSeconds(), ch.title())).toList(), b.block().transcript().stream()
                             .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList()))
-                    .toList(), l.lesson().scormPackageId()))
+                    .toList(), l.lesson().scormPackageId(), l.lesson().scormCompletionRule()))
                 .toList())).toList();
         var payload = new LearningRequests.DraftContent(source.getProgramId(), source.getModuleId(),
             source.getTitle(), source.getSummary(), source.getLevel(), source.getDefaultRequirement(),

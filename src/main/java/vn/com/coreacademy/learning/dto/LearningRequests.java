@@ -30,6 +30,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.Level;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressEvent;
 import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
 import vn.com.coreacademy.learning.constants.LearningCodes.RevisionChangeMode;
+import vn.com.coreacademy.learning.constants.LearningCodes.ScormCompletion;
 import vn.com.coreacademy.learning.constants.LearningCodes.TargetType;
 import vn.com.coreacademy.learning.constants.LearningLimits;
 
@@ -192,7 +193,16 @@ public final class LearningRequests {
         boolean isRequired,
         @Positive Long quizId,
         @NotNull @Size(max = 100) List<@Valid BlockInput> blocks,
-        @Positive Long scormPackageId) {
+        @Positive Long scormPackageId,
+        @Schema(description = "Điều kiện SCORM: completed_or_passed (mặc định khi bỏ trống) hoặc passed. "
+            + "Chỉ gửi cho bài SCORM; trạng thái do SCO cung cấp, không suy từ điểm raw.")
+        @Pattern(regexp = ScormCompletion.PATTERN)
+        String scormCompletionRule) {
+        public LessonInput(String title, String lessonType, BigDecimal estimatedDurationSeconds,
+                           boolean isRequired, Long quizId, List<BlockInput> blocks, Long scormPackageId) {
+            this(title, lessonType, estimatedDurationSeconds, isRequired, quizId, blocks, scormPackageId, null);
+        }
+
         public LessonInput(String title, String lessonType, BigDecimal estimatedDurationSeconds,
                            boolean isRequired, Long quizId, List<BlockInput> blocks) {
             this(title, lessonType, estimatedDurationSeconds, isRequired, quizId, blocks, null);

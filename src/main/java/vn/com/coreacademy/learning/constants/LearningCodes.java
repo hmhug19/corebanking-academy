@@ -68,6 +68,15 @@ public final class LearningCodes {
         }
     }
 
+    public static final class ScormCompletion {
+        public static final String COMPLETED_OR_PASSED = "completed_or_passed";
+        public static final String PASSED = "passed";
+        public static final String PATTERN = COMPLETED_OR_PASSED + "|" + PASSED;
+
+        private ScormCompletion() {
+        }
+    }
+
     public static final class BlockType {
         public static final String VIDEO = "video";
         public static final String PDF = "pdf";

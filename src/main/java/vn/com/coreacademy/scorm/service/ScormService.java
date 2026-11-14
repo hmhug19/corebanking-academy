@@ -29,6 +29,7 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
+import vn.com.coreacademy.learning.constants.LearningCodes.ScormCompletion;
 import vn.com.coreacademy.learning.entity.CourseChapter;
 import vn.com.coreacademy.learning.entity.CourseEnrollment;
 import vn.com.coreacademy.learning.entity.CourseLesson;
@@ -171,7 +172,7 @@ public class ScormService {
         return launch(id, preview, enrollmentId, lessonId, false);
     }
 
-    /** Học lại chỉ đặt lại lượt trượt của chính người học, không giới hạn lần; lưu dấu kết quả cũ vào audit. */
+    /** Học lại lượt trượt hoặc lượt kết thúc chưa đủ điều kiện đạt; giữ lịch sử kết quả trong audit. */
     @Transactional
     public ScormDtos.LaunchView launch(long id, boolean preview, Long enrollmentId, Long lessonId, boolean restart) {
         learningLock.acquire();
@@ -185,7 +186,11 @@ public class ScormService {
         repository.ensureRegistration(id, actor.person().id(), preview, enrollmentId, lessonId);
         var registration = repository.registration(id, actor.person().id(), preview, enrollmentId, lessonId, true);
         if (restart) {
-            if (preview || !"failed".equals(registration.cmi().get("cmi.core.lesson_status"))) {
+            String status = registration.cmi().get("cmi.core.lesson_status");
+            boolean needsPass = course != null
+                && ScormCompletion.PASSED.equals(course.lesson().getScormCompletionRule());
+            if (preview || !("failed".equals(status)
+                || needsPass && Set.of("completed", "browsed").contains(status == null ? "" : status))) {
                 throw invalid("restart", "Chỉ có thể học lại bài SCORM đang chưa đạt.");
             }
             audit.record(actor.person().id(), "SCORM_RESTARTED", "scorm_registration",
@@ -309,7 +314,8 @@ public class ScormService {
             identity.actor(registration.userId()));
         String status = values.getOrDefault("cmi.core.lesson_status", "not attempted");
         courseProgress.synchronizeScorm(registration.userId(), course.enrollment(), course.lesson(),
-            "completed".equals(status) || "passed".equals(status));
+            "passed".equals(status) || "completed".equals(status)
+                && !ScormCompletion.PASSED.equals(course.lesson().getScormCompletionRule()));
     }
 
     private ScormDtos.PackageView view(PackageRow p, Actor actor) {

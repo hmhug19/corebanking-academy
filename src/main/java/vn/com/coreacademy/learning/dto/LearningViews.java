@@ -158,6 +158,7 @@ public final class LearningViews {
         Long sourceLessonId,
         Long quizId,
         Long scormPackageId,
+        String scormCompletionRule,
         Long rowVersion,
         Instant createTime,
         Instant updateTime,

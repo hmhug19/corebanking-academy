@@ -113,7 +113,7 @@ app:
       model-call-timeout: ${ASSISTANT_GENERATION_CALL_TIMEOUT:90s}
   jwt:
     secret: ${JWT_SECRET}
-    expiry-minutes: 60
+    expiry-minutes: 600
   chat-room:
     ticket-ttl: ${CHAT_ROOM_TICKET_TTL:20s}
     idle-timeout: ${CHAT_ROOM_IDLE_TIMEOUT:60s}

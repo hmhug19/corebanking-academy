@@ -44,7 +44,17 @@ Học viên học trong `/lesson/:courseId/:lessonId`, giữ cây khóa học v�
 cho xem thử thư viện và đường dẫn cũ. Runtime khóa học lưu theo `(packageId,userId,preview,enrollmentId,lessonId)`.
 Scope thư viện/preview có enrollmentId và lessonId NULL; cùng gói trong hai bài hoặc hai lần học không dùng chung kết quả.
 Runtime cập nhật lesson_progress và course_enrollments trong cùng transaction khi lưu thành công.
-`completed`/`passed` làm bài đạt 100%; các trạng thái còn lại là đang học, không suy % học từ điểm quiz.
+`lesson.scormCompletionRule` trên request lưu cây và response bài học nhận:
+- `completed_or_passed`: mặc định tương thích bài cũ; `completed` hoặc `passed` đủ điều kiện.
+- `passed`: chỉ `passed` đủ điều kiện; `completed`/`browsed` chưa đủ và có thể học lại để làm đánh giá.
+Các trạng thái còn lại không hoàn thành bài, không suy % hoặc đạt/trượt từ `scoreRaw`.
+Điểm hiển thị theo `scoreRaw/scoreMax` khi có thang điểm, không mặc định mọi gói dùng thang 100.
+Chính sách thuộc revision bài học, được giữ khi sao chép; thay đổi bản nháp không ghi đè lần học cũ.
+Bài không phải SCORM không nhận `scormCompletionRule`. Bỏ trống trong bài SCORM mặc định `completed_or_passed`.
+Chạy `docs/sql/upgrade/2026-11-14-scorm-completion-rule.sql` bằng `dev_user` trước khi deploy BE,
+sau đó deploy FE tương ứng. Script idempotent, không tính lại kết quả hay hạ trạng thái hoàn thành cũ.
+Script cũng đổi tên menu chuẩn “Quản lý bài thi” thành “Quản lý bài kiểm tra”; không đổi code/quyền,
+không ghi đè tên menu đã tùy chỉnh. Đăng nhập lại để đọc nhãn mới.
 XP, điều kiện bài thi cuối và chứng nhận dùng quy tắc hoàn thành khóa hiện hành. Preview không tăng tiến độ khóa.
 Module `scorm` phục vụ **bài giảng một SCO, độc lập hoặc gắn vào bài học của khóa**, tại FE `/admin/lessons`,
 thư viện học viên `/scorm` và player `/scorm/:id`. Không tự cộng điểm/chứng nhận,
@@ -53,7 +63,8 @@ LMS kiểm hợp đồng rồi lưu theo `(packageId, userId, preview)`. Xem th�
 
 GET package/progress nhận query `enrollmentId`, `lessonId`; POST launch nhận thêm hai ID này trong body.
 Học viên trượt gửi thêm `restart:true` để học và thi lại không giới hạn số lần. BE chỉ đặt lại registration
-`failed` của chính người học sau khi kiểm scope; preview và trạng thái khác bị từ chối. Điểm, đáp án,
+`failed` của chính người học sau khi kiểm scope; với bài yêu cầu `passed`, cho đặt lại cả `completed`/`browsed`.
+Preview và các trạng thái khác bị từ chối. Điểm, đáp án,
 bookmark và thời gian lượt hiện tại được đặt lại, kết quả trước được ghi audit. Vé cũ mất hiệu lực cùng
 transaction nên không ghi đè được lượt mới. Không đặt lại tiến độ bài khác, chứng nhận hoặc điều kiện bài thi cuối.
 Không gửi restart (hoặc false) vẫn tiếp tục từ vị trí đã lưu. Cần deploy BE/FE cùng bản; không thêm migration.

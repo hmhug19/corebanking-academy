@@ -62,6 +62,10 @@ public class CourseLesson extends LearningRecord {
     @Column(name = "scorm_package_id")
     private Long scormPackageId;
 
+    /** Điều kiện theo trạng thái SCO, không suy từ điểm raw; null ở bài không phải SCORM. */
+    @Column(name = "scorm_completion_rule", length = 24)
+    private String scormCompletionRule;
+
     /**
      * Bài do AI viết: pending | writing | written | user_edited (người dùng đã sửa, job không ghi đè); null nếu bài
      * không do AI quản lý. Không được nhân bản sang phiên bản khác.
