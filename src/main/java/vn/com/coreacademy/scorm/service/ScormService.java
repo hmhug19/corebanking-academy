@@ -186,7 +186,7 @@ public class ScormService {
         var registration = repository.registration(id, actor.person().id(), preview, enrollmentId, lessonId, true);
         if (restart) {
             if (preview || !"failed".equals(registration.cmi().get("cmi.core.lesson_status"))) {
-                throw invalid("restart", "Chỉ có thể học và thi lại bài SCORM đang chưa đạt.");
+                throw invalid("restart", "Chỉ có thể học lại bài SCORM đang chưa đạt.");
             }
             audit.record(actor.person().id(), "SCORM_RESTARTED", "scorm_registration",
                 Long.toString(registration.id()), lecture.orgId(), Map.of("packageId", id,
