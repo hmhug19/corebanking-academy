@@ -48,6 +48,32 @@ public final class LearningRequests {
         @Min(0) int sortNo) {
     }
 
+    /** modules bỏ trống giữ nguyên; mỗi dòng gửi thao tác cụ thể, không xóa ngầm các dòng không có trong request. */
+    public record FieldSaveRequest(
+        @NotNull @Positive Long ownerOrgId,
+        @Positive Long fieldId,
+        @NotBlank @Size(max = 50) String code,
+        @NotBlank @Size(max = 255) String name,
+        @Size(max = 10000) String description,
+        @NotNull @Pattern(regexp = CatalogStatus.PATTERN) String status,
+        @Min(0) int sortNo,
+        @Size(max = 200) List<@Valid @NotNull ModuleChange> modules) {
+
+        public CatalogRequest catalog() {
+            return new CatalogRequest(ownerOrgId, fieldId, code, name, description, status, sortNo);
+        }
+    }
+
+    public record ModuleChange(
+        @Positive Long id,
+        @Min(0) Long expectedVersion,
+        @NotBlank @Size(max = 50) String code,
+        @NotBlank @Size(max = 255) String name,
+        @NotNull @Pattern(regexp = CatalogStatus.PATTERN) String status,
+        @Min(0) int sortNo,
+        boolean deleted) {
+    }
+
     /** {@code draft} (tùy chọn) là nội dung nháp ghi cùng lúc với khóa mới; bỏ trống thì tạo bản nháp rỗng. */
     public record CreateCourse(
         @NotNull @Positive Long ownerOrgId,

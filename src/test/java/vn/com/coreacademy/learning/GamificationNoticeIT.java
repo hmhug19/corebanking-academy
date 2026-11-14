@@ -203,6 +203,37 @@ class GamificationNoticeIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void deadlineContextBelongsToTheRecipientAndSurvivesReadAndRevocation() {
+        long recipient = jdbc.queryForObject("select recipient_id from learning_hub.assignment_recipients "
+            + "where enrollment_id in (select enrollment_id from learning_hub.course_enrollments where course_id = ? and user_id = ?) limit 1",
+            Long.class, course.id(), LEARNER);
+        long reminder = jdbc.queryForObject("""
+            insert into learning_hub.learning_reminders (user_id, recipient_id, kind, scheduled_at, due_at_snapshot,
+                channel, status, attempt_count, idempotency_key, created_by, updated_by)
+            values (?, ?, 'DEADLINE', now(), now() + interval '1 day', 'in_app', 'pending', 0, ?, 'SYSTEM', 'SYSTEM')
+            returning reminder_id
+            """, Long.class, LEARNER, recipient, "ux-deadline:" + SEQUENCE.incrementAndGet());
+        JsonNode seen = api.ok(LEARNER, api.post(Map.of(), REMINDERS + "/" + reminder + "/seen"));
+        assertThat(seen.path("courseId").asLong()).isEqualTo(course.id());
+        assertThat(seen.path("courseTitle").asText()).isEqualTo("Khóa kiểm thử Quiz");
+        assertThat(seen.path("enrollmentId").asLong()).isPositive();
+        assertThat(seen.path("courseAvailable").asBoolean()).isTrue();
+        JsonNode read = api.ok(LEARNER, api.post(Map.of(), REMINDERS + "/" + reminder + "/read"));
+        assertThat(read.path("courseId").asLong()).isEqualTo(course.id());
+        assertThat(api.ok(LEARNER, get(REMINDERS + "/inbox")).findValuesAsText("courseTitle"))
+            .contains("Khóa kiểm thử Quiz");
+        api.http(LEARNER_2, api.post(Map.of(), REMINDERS + "/" + reminder + "/read"), 403, "CORE-ACCESS_DENIED");
+        jdbc.update("update learning_hub.assignment_recipients set status = 'revoked' where recipient_id = ?", recipient);
+        try {
+            JsonNode revoked = api.ok(LEARNER, api.post(Map.of(), REMINDERS + "/" + reminder + "/read"));
+            assertThat(revoked.path("courseAvailable").asBoolean()).isFalse();
+            assertThat(revoked.path("courseTitle").asText()).isEqualTo("Khóa kiểm thử Quiz");
+        } finally {
+            jdbc.update("update learning_hub.assignment_recipients set status = 'active' where recipient_id = ?", recipient);
+        }
+    }
+
+    @Test
     void onlyTheOwnerOfANoticeCanMarkItSeenOrRead() {
         notice(LEARNER, ReminderKind.LEVEL_UP, "Giao dịch viên", "level:" + LEARNER + ":9");
         long id = jdbc.queryForObject("select reminder_id from learning_hub.learning_reminders where user_id = ?"

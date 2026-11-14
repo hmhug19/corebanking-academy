@@ -162,6 +162,71 @@ class CatalogCardIT extends AssessmentIntegrationTest {
         return fixtures.quiz(body, List.of(question), true);
     }
 
+    @Test
+    void unfinishedCoursesComeBeforeCompletedCoursesBeforePagination() {
+        String marker = AssessmentFixtures.unique("PRIORITY");
+        Course done = fixtures.course(LEARNER);
+        Course untouched = fixtures.course(LEARNER);
+        Course ongoing = fixtures.course(LEARNER);
+        for (var entry : Map.of(done, "A", untouched, "B", ongoing, "C").entrySet()) {
+            jdbc.update("update learning_hub.course_revisions set title = ? where revision_id = ?",
+                marker + entry.getValue(), entry.getKey().revisionId());
+        }
+        jdbc.update("update learning_hub.course_enrollments set status = 'completed', progress_percent = 100 "
+            + "where course_id = ?", done.id());
+        jdbc.update("update learning_hub.course_enrollments set status = 'in_progress', progress_percent = 100 "
+            + "where course_id = ?", ongoing.id());
+        for (String list : List.of("/catalog", "/courses?assigned=true", "/courses?requirement=mandatory")) {
+            String path = LEARNING + list + (list.contains("?") ? "&" : "?") + "q=" + marker
+                + "&size=1&sort=title,asc&page=";
+            assertThat(api.ok(LEARNER, get(path + "0")).path("items").get(0).path("courseId").asLong())
+                .isEqualTo(untouched.id());
+            assertThat(api.ok(LEARNER, get(path + "1")).path("items").get(0).path("courseId").asLong())
+                .isEqualTo(ongoing.id());
+            assertThat(api.ok(LEARNER, get(path + "2")).path("items").get(0).path("courseId").asLong())
+                .isEqualTo(done.id());
+        }
+    }
+
+    @Test
+    void neverOpenedCoursesSortAfterAccessedCoursesInBothDirectionsBeforePagination() {
+        String marker = AssessmentFixtures.unique("ACCESS");
+        Course never = fixtures.course(LEARNER);
+        Course older = fixtures.course(LEARNER);
+        Course newer = fixtures.course(LEARNER);
+        for (Course item : List.of(never, older, newer)) {
+            jdbc.update("update learning_hub.course_revisions set title = ? where revision_id = ?",
+                marker + item.id(), item.revisionId());
+        }
+        jdbc.update("update learning_hub.course_enrollments set last_access_at = null where course_id = ?", never.id());
+        jdbc.update("update learning_hub.course_enrollments set last_access_at = '2026-01-01T00:00:00Z' where course_id = ?", older.id());
+        jdbc.update("update learning_hub.course_enrollments set last_access_at = '2026-02-01T00:00:00Z' where course_id = ?", newer.id());
+        for (String direction : List.of("asc", "desc")) {
+            List<Course> expected = "asc".equals(direction) ? List.of(older, newer, never) : List.of(newer, older, never);
+            for (int page = 0; page < expected.size(); page++) {
+                JsonNode rows = api.ok(LEARNER, get(LEARNING + "/courses?q=" + marker
+                    + "&size=1&sort=lastAccessAt," + direction + "&page=" + page));
+                assertThat(rows.path("totalElements").asInt()).isEqualTo(3);
+                assertThat(rows.path("items").get(0).path("courseId").asLong()).isEqualTo(expected.get(page).id());
+            }
+        }
+    }
+
+    @Test
+    void enrolledCoursesSupportTheUnclassifiedModuleFilter() {
+        String marker = AssessmentFixtures.unique("NO-MODULE");
+        Course classified = fixtures.course(LEARNER);
+        Course unclassified = fixtures.course(LEARNER);
+        for (Course item : List.of(classified, unclassified)) {
+            jdbc.update("update learning_hub.course_revisions set title = ? where revision_id = ?",
+                marker + item.id(), item.revisionId());
+        }
+        jdbc.update("update learning_hub.course_revisions set module_id = null where revision_id = ?", unclassified.revisionId());
+        JsonNode rows = api.ok(LEARNER, get(LEARNING + "/courses?q=" + marker + "&withoutModule=true"));
+        assertThat(rows.path("totalElements").asInt()).isEqualTo(1);
+        assertThat(rows.path("items").get(0).path("courseId").asLong()).isEqualTo(unclassified.id());
+    }
+
     /** Một lượt thi một câu: chọn đúng (A) khi pass, bỏ trống khi không; nộp ngay. */
     private void attempt(String user, long quizId, boolean pass) {
         JsonNode session = api.ok(user, api.post(Map.of(), "/api/v1/me/quizzes/{id}/attempts", quizId));

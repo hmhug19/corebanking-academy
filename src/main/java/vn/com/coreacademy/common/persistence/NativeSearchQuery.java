@@ -99,7 +99,12 @@ public final class NativeSearchQuery {
             if (column == null) {
                 throw BusinessException.validation("sort", "INVALID_VALUE", "Trường sắp xếp không được hỗ trợ.");
             }
-            return column + (order.isAscending() ? " asc" : " desc");
+            String nulls = switch (order.getNullHandling()) {
+                case NULLS_FIRST -> " nulls first";
+                case NULLS_LAST -> " nulls last";
+                case NATIVE -> "";
+            };
+            return column + (order.isAscending() ? " asc" : " desc") + nulls;
         }).collect(Collectors.joining(", "));
 
         if (orderBy.isEmpty()) {

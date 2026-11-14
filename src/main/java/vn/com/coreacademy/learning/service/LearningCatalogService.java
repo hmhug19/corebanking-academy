@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -92,6 +93,39 @@ public class LearningCatalogService {
         access.requireManage(actor, field.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
         return PageResponse.from(modules.findByFieldId(fieldId,
             PageQuery.of(page, size, "id,asc", Set.of("id"))).map(mapper::view));
+    }
+
+    @Transactional
+    public LearningViews.TrainingFieldView saveFieldWithModules(Long id, Long version,
+                                                               LearningRequests.FieldSaveRequest request) {
+        var saved = saveField(id, version, request.catalog());
+        if (request.modules() == null) {
+            return saved;
+        }
+
+        Set<Long> seen = new HashSet<>();
+        for (var change : request.modules()) {
+            if (change.id() != null) {
+                if (!seen.add(change.id()) || change.expectedVersion() == null || id == null) {
+                    throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+                }
+                BusinessModule module = repository.require(BusinessModule.class, change.id());
+                if (!module.getFieldId().equals(saved.id())) {
+                    throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+                }
+            }
+            if (change.deleted()) {
+                if (change.id() == null) {
+                    throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
+                }
+                deleteModule(change.id(), change.expectedVersion());
+            } else {
+                saveModule(change.id(), change.expectedVersion(), new LearningRequests.CatalogRequest(
+                    request.ownerOrgId(), saved.id(), change.code(), change.name(), null,
+                    change.status(), change.sortNo()));
+            }
+        }
+        return saved;
     }
 
     @Transactional
@@ -264,5 +298,22 @@ public class LearningCatalogService {
         if (!source.equals(target)) {
             throw new BusinessException(LearningResponseCode.INVALID_REFERENCE);
         }
+    }
+
+    @Transactional
+    public void deleteModule(Long id, Long version) {
+        var actor = access.actor();
+        lock.acquire();
+        BusinessModule value = repository.require(BusinessModule.class, id);
+        TrainingField field = repository.require(TrainingField.class, value.getFieldId());
+        access.requireManage(actor, field.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        LearningContentService.version(value, version);
+        if (repository.moduleInUse(id)) {
+            throw new BusinessException(LearningResponseCode.CATALOG_IN_USE);
+        }
+        repository.remove(value);
+        audit.record(actor.person().id(), AuditAction.MODULE_DELETED, "business_module", id.toString(),
+            field.getOwnerOrgId(), Map.of());
+        repository.flush();
     }
 }

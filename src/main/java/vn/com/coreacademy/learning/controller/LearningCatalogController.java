@@ -41,7 +41,7 @@ public class LearningCatalogController {
     @Operation(
         summary = "Cây danh mục đào tạo",
         description = """
-            Lĩnh vực, chương trình và khóa học của một đơn vị trong một lần gọi, sắp theo sortNo rồi id.
+            Lĩnh vực, chương trình và khóa học của một đơn vị, sắp theo thời gian tạo tăng dần rồi id.
             Mỗi lĩnh vực và chương trình trả đủ trường (kể cả rowVersion) để cập nhật trạng thái bằng PUT.
             Khóa chưa xếp chương trình không có trong cây.
             """
@@ -70,12 +70,13 @@ public class LearningCatalogController {
     @Operation(
         summary = "Tạo fields",
         description = """
-            Mã được kiểm tra trùng trong transaction; các ID cha phải tồn tại và thuộc đúng tổ chức.
+            Tạo lĩnh vực và các phân hệ tùy chọn trong cùng transaction.
+            - modules[] chỉ chứa dòng mới (không có id); mã phân hệ không trùng trong lĩnh vực.
             """
     )
     public BaseResponse<LearningViews.TrainingFieldView> createField(
-        @Valid @RequestBody LearningRequests.CatalogRequest request) {
-        return BaseResponse.ok(catalog.saveField(null, null, request));
+        @Valid @RequestBody LearningRequests.FieldSaveRequest request) {
+        return BaseResponse.ok(catalog.saveFieldWithModules(null, null, request));
     }
 
     @PutMapping("/fields/{id}")
@@ -84,12 +85,14 @@ public class LearningCatalogController {
     @Operation(
         summary = "Cập nhật fields",
         description = """
-            Thay thông tin danh mục, không chuyển tổ chức/lĩnh vực; paused chặn học theo danh mục.
+            Cập nhật lĩnh vực và các thao tác modules[] tùy chọn trong cùng transaction.
+            - Dòng cũ cần id và expectedVersion; deleted=true để xóa phân hệ chưa được dùng.
+            - Bỏ modules không thay đổi phân hệ; lỗi một dòng rollback cả lĩnh vực và các dòng khác.
             """
     )
     public BaseResponse<LearningViews.TrainingFieldView> updateField(@PathVariable @Positive Long id,
-        @RequestParam @Min(0) Long expectedVersion, @Valid @RequestBody LearningRequests.CatalogRequest request) {
-        return BaseResponse.ok(catalog.saveField(id, expectedVersion, request));
+        @RequestParam @Min(0) Long expectedVersion, @Valid @RequestBody LearningRequests.FieldSaveRequest request) {
+        return BaseResponse.ok(catalog.saveFieldWithModules(id, expectedVersion, request));
     }
 
     @DeleteMapping("/fields/{id}")
@@ -221,6 +224,17 @@ public class LearningCatalogController {
     public BaseResponse<LearningViews.BusinessModuleView> updateModule(@PathVariable @Positive Long id,
         @RequestParam @Min(0) Long expectedVersion, @Valid @RequestBody LearningRequests.CatalogRequest request) {
         return BaseResponse.ok(catalog.saveModule(id, expectedVersion, request));
+    }
+
+    @DeleteMapping("/modules/{id}")
+    @Operation(summary = "Xóa phân hệ nghiệp vụ", description = """
+        Xóa phân hệ chưa được sử dụng trong bất kỳ phiên bản khóa học nào.
+        - Kiểm tra phạm vi quản lý và expectedVersion; đang dùng trả LEARNING-CATALOG_IN_USE.
+        """)
+    public BaseResponse<Void> deleteModule(@PathVariable @Positive Long id,
+                                          @RequestParam @Min(0) Long expectedVersion) {
+        catalog.deleteModule(id, expectedVersion);
+        return BaseResponse.ok(null);
     }
 
 }

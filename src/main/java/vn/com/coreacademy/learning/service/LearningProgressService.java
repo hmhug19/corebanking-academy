@@ -179,7 +179,7 @@ public class LearningProgressService {
     public List<LearningViews.LearningReminderView> reminders() {
         var actor = access.actor();
         access.requireLearner(actor);
-        return unreadReminders(actor.person().id()).map(mapper::view).toList();
+        return reminderViews(actor.person().id(), unreadReminders(actor.person().id()).toList());
     }
 
     @Transactional(readOnly = true)
@@ -187,8 +187,15 @@ public class LearningProgressService {
         var actor = access.actor();
         access.requireLearner(actor);
         String userId = actor.person().id();
-        return java.util.stream.Stream.concat(unreadReminders(userId), repository.readReminders(userId).stream())
-            .distinct().map(mapper::view).toList();
+        return reminderViews(userId, java.util.stream.Stream.concat(unreadReminders(userId),
+            repository.readReminders(userId).stream()).distinct().toList());
+    }
+
+    private List<LearningViews.LearningReminderView> reminderViews(String userId, List<LearningReminder> rows) {
+        var ids = rows.stream().map(LearningReminder::getRecipientId).filter(Objects::nonNull).distinct().toList();
+        var courses = repository.reminderCourses(userId, ids).stream()
+            .collect(Collectors.toMap(LearningViews.ReminderCourse::recipientId, Function.identity()));
+        return rows.stream().map(row -> mapper.view(row, courses.get(row.getRecipientId()))).toList();
     }
 
     private java.util.stream.Stream<LearningReminder> unreadReminders(String userId) {
@@ -210,7 +217,7 @@ public class LearningProgressService {
             repository.save(reminder, actor.person().id());
             repository.flush();
         }
-        return mapper.view(reminder);
+        return reminderViews(actor.person().id(), List.of(reminder)).get(0);
     }
 
     private void requireOwner(LearningReminder reminder, String userId) {
@@ -238,7 +245,7 @@ public class LearningProgressService {
         LearningReminder reminder = repository.require(LearningReminder.class, id);
         requireOwner(reminder, actor.person().id());
         if (status.equals(reminder.getStatus()) || ReminderStatus.CANCELLED.equals(reminder.getStatus())) {
-            return mapper.view(reminder);
+            return reminderViews(actor.person().id(), List.of(reminder)).get(0);
         }
         reminder.setStatus(status);
         if (ReminderStatus.SENT.equals(status)) {
@@ -246,7 +253,7 @@ public class LearningProgressService {
         }
         repository.save(reminder, actor.person().id());
         repository.flush();
-        return mapper.view(reminder);
+        return reminderViews(actor.person().id(), List.of(reminder)).get(0);
     }
 
     private BigDecimal blockPercentage(CourseEnrollment enrollment, LessonBlock block, BlockProgress progress,

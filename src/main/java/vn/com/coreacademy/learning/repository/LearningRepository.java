@@ -14,6 +14,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.learning.constants.LearningCodes.AssignmentStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.CatalogStatus;
+import vn.com.coreacademy.learning.constants.LearningCodes.CourseStatus;
+import vn.com.coreacademy.learning.dto.LearningViews;
 import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.RecipientStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.ReminderKind;
@@ -154,7 +157,7 @@ public class LearningRepository {
             select f
             from TrainingField f
             where f.ownerOrgId = :org
-            order by f.sortNo, f.id
+            order by f.createTime, f.id
             """, TrainingField.class, Map.of("org", orgId));
     }
 
@@ -163,7 +166,7 @@ public class LearningRepository {
             select p
             from TrainingProgram p
             where p.ownerOrgId = :org
-            order by p.sortNo, p.id
+            order by p.createTime, p.id
             """, TrainingProgram.class, Map.of("org", orgId));
     }
 
@@ -177,7 +180,7 @@ public class LearningRepository {
               and r.programId is not null
               and r.id = coalesce(c.publishedRevisionId,
                   (select max(x.id) from CourseRevision x where x.courseId = c.id))
-            order by c.id
+            order by c.createTime, c.id
             """, Object[].class, Map.of("org", orgId));
     }
 
@@ -195,6 +198,12 @@ public class LearningRepository {
             select exists (select 1 from learning_hub.course_revisions where program_id = :id)
                 or exists (select 1 from learning_hub.questions where program_id = :id and not is_deleted)
             """).setParameter("id", programId).getSingleResult());
+    }
+
+    public boolean moduleInUse(Long moduleId) {
+        return Boolean.TRUE.equals(entityManager.createNativeQuery("""
+            select exists (select 1 from learning_hub.course_revisions where module_id = :id)
+            """).setParameter("id", moduleId).getSingleResult());
     }
 
     public List<BusinessModule> modules(Long fieldId) {
@@ -563,6 +572,35 @@ public class LearningRepository {
                 or m.recipientId in (select r.id from AssignmentRecipient r where r.userId = :user))
             order by m.sentAt desc, m.id desc
             """, LearningReminder.class, Map.of("user", userId, "sent", ReminderStatus.SENT));
+    }
+
+    /** Nhãn và liên kết thông báo chỉ từ recipient thuộc caller; tải gộp, không query theo từng thông báo. */
+    public List<LearningViews.ReminderCourse> reminderCourses(String userId, Collection<Long> recipientIds) {
+        if (recipientIds.isEmpty()) {
+            return List.of();
+        }
+        return entityManager.createNativeQuery("""
+            select r.recipient_id, a.course_id, coalesce(v.title, c.code), e.enrollment_id,
+                   (r.status = :recipientActive and a.status = :assignmentActive
+                    and c.lifecycle_status = :courseActive
+                    and (p.program_id is null or p.status = :published)
+                    and (f.field_id is null or f.status = :published)
+                    and (m.module_id is null or m.status = :published))
+            from learning_hub.assignment_recipients r
+            join learning_hub.course_assignments a on a.assignment_id = r.assignment_id
+            join learning_hub.course_enrollments e on e.enrollment_id = r.enrollment_id and e.user_id = r.user_id
+            join learning_hub.courses c on c.course_id = a.course_id and c.course_id = e.course_id
+            join learning_hub.course_revisions v on v.revision_id = e.revision_id
+            left join learning_hub.training_programs p on p.program_id = v.program_id
+            left join learning_hub.training_fields f on f.field_id = p.field_id
+            left join learning_hub.business_modules m on m.module_id = v.module_id
+            where r.user_id = :user and r.recipient_id in (:recipients)
+            """, LearningViews.ReminderCourse.class)
+            .setParameter("user", userId).setParameter("recipients", recipientIds)
+            .setParameter("recipientActive", RecipientStatus.ACTIVE)
+            .setParameter("assignmentActive", AssignmentStatus.ACTIVE)
+            .setParameter("courseActive", CourseStatus.ACTIVE)
+            .setParameter("published", CatalogStatus.PUBLISHED).getResultList();
     }
 
     public List<BlockAsset> assetUses(Long assetId) {
