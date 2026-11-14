@@ -16,7 +16,10 @@
   const notify = (state, progress) => {
     const element = document.getElementById('statusText');
     if (element) element.textContent = state === 'error' ? 'Chưa lưu được tiến độ. Kiểm tra mạng rồi thử lại.'
-      : state === 'saving' ? 'Đang lưu tiến độ…' : boot.preview ? 'Đang xem thử · dữ liệu tách khỏi học viên' : 'Đã lưu tiến độ';
+      : boot.preview ? 'Đang xem thử · dữ liệu tách khỏi học viên' : '';
+    const status = document.getElementById('status');
+    if (status) status.hidden = state !== 'error' && !boot.preview;
+    document.body?.classList.toggle('has-status', state === 'error' || boot.preview);
     const retry = document.getElementById('retry');
     if (retry) retry.hidden = state !== 'error';
     window.parent.postMessage({type:'scorm:state',state,progress}, boot.origin);
