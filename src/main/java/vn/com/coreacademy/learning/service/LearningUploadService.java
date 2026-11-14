@@ -55,6 +55,7 @@ public class LearningUploadService {
     private final LearningAccessPolicy access;
     private final LearningWriteLock lock;
     private final MultipartObjectStorage multipart;
+    private final ObjectStorage storage;
     private final UploadStaging staging;
     private final S3Properties s3;
     private final PlatformTransactionManager transactions;
@@ -72,6 +73,10 @@ public class LearningUploadService {
                 asset.setUploadedBy(actor.person().id());
                 asset.setUploadId(request.requestId());
                 asset.setOriginalName(request.originalName());
+                asset.setDisplayName(request.displayName() == null || request.displayName().isBlank()
+                    ? request.originalName() : request.displayName().trim());
+                asset.setDescription(request.description() == null || request.description().isBlank()
+                    ? null : request.description().trim());
                 asset.setMimeType(request.mimeType());
                 asset.setMediaType(LearningMediaProbe.type(request.mimeType()));
                 asset.setSizeBytes(request.sizeBytes());
@@ -319,6 +324,72 @@ public class LearningUploadService {
         return status(id);
     }
 
+    public void updateMetadata(Long id, MediaRequests.AssetMetadata request) {
+        write(() -> {
+            LearningAsset asset = repository.require(LearningAsset.class, id);
+            var actor = access.actor();
+            access.requireManage(actor, asset.getOwnerOrgId(),
+                actor.person().id().equals(asset.getUploadedBy()) ? actor.person().teamId() : null,
+                asset.getUploadedBy());
+            if (Boolean.TRUE.equals(asset.getIsDeleted())) {
+                throw new BusinessException(LearningResponseCode.NOT_FOUND);
+            }
+            asset.setDisplayName(request.displayName().trim());
+            asset.setDescription(request.description() == null || request.description().isBlank()
+                ? null : request.description().trim());
+            repository.save(asset, actor.person().id());
+            return null;
+        });
+    }
+
+    /** Khóa asset trước khi xóa S3; khi lỗi giữ trạng thái deleting để người dùng thử lại. */
+    public void deletePermanently(Long id) {
+        write(() -> {
+            LearningAsset asset = repository.require(LearningAsset.class, id);
+            var actor = access.actor();
+            access.requireManage(actor, asset.getOwnerOrgId(),
+                actor.person().id().equals(asset.getUploadedBy()) ? actor.person().teamId() : null,
+                asset.getUploadedBy());
+            return null;
+        });
+        storage.requireUnversionedBucket();
+        LearningAsset snapshot = write(() -> {
+            LearningAsset asset = repository.require(LearningAsset.class, id);
+            var actor = access.actor();
+            access.requireManage(actor, asset.getOwnerOrgId(),
+                actor.person().id().equals(asset.getUploadedBy()) ? actor.person().teamId() : null,
+                asset.getUploadedBy());
+            if (Boolean.TRUE.equals(asset.getIsDeleted()) || media.referenced(id)) {
+                throw new BusinessException(LearningResponseCode.ASSET_IN_USE);
+            }
+            if (!Set.of(AssetStatus.READY, AssetStatus.DELETING).contains(asset.getStatus())
+                || !ObjectStorage.TYPE.equals(asset.getStorageType()) || asset.getStorageKey() == null) {
+                throw new BusinessException(LearningResponseCode.ASSET_PROCESSING);
+            }
+            if ((asset.getStorageKey() != null && media.sharedObject(id, asset.getStorageKey()))
+                || (asset.getPlaybackKey() != null && media.sharedObject(id, asset.getPlaybackKey()))) {
+                throw new BusinessException(LearningResponseCode.ASSET_IN_USE);
+            }
+            asset.setStatus(AssetStatus.DELETING);
+            repository.save(asset, actor.person().id());
+            return asset;
+        });
+        if (snapshot.getPlaybackKey() != null) storage.delete(snapshot.getPlaybackKey());
+        if (snapshot.getStorageKey() != null) storage.delete(snapshot.getStorageKey());
+        write(() -> {
+            LearningAsset asset = repository.require(LearningAsset.class, id);
+            if (!Boolean.TRUE.equals(asset.getIsDeleted())) {
+                asset.setIsDeleted(true);
+                asset.setDeletedAt(Instant.now());
+                asset.setStatus(AssetStatus.DELETED);
+                repository.save(asset, access.actor().person().id());
+                audit.record(access.actor().person().id(), AuditAction.ASSET_DELETED, "asset", id.toString(),
+                    asset.getOwnerOrgId(), Map.of("permanent", true));
+            }
+            return null;
+        });
+    }
+
     public void delete(Long id) {
         write(() -> {
             LearningAsset asset = repository.require(LearningAsset.class, id);
@@ -347,7 +418,8 @@ public class LearningUploadService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<MediaViews.Asset> list(String q, String type, String status, int page, int size, String sort) {
+    public PageResponse<MediaViews.Asset> list(String q, String type, String status, int page, int size, String sort,
+                                               boolean includeDeleting) {
         var actor = access.actor();
         if (type != null && !MediaKind.VALUES.contains(type)) {
             throw BusinessException.validation("mediaType", "INVALID_VALUE", "Loại tài nguyên chưa hợp lệ.");
@@ -356,8 +428,21 @@ public class LearningUploadService {
             throw BusinessException.validation("status", "INVALID_VALUE", "Trạng thái chưa hợp lệ.");
         }
         return PageResponse.from(assets.search(new LearningAssetRepositoryCustom.Filter(actor.person().id(),
-            actor.person().orgId(), actor.person().teamId(), access.searchScope(actor), q, type, status),
+            actor.person().orgId(), actor.person().teamId(), access.searchScope(actor), q, type, status,
+            includeDeleting, null, null, null),
             PageQuery.of(page, size, sort, Set.of("id", "name", "createTime"))));
+    }
+
+    /** Chỉ trả tài nguyên ready cùng loại, đơn vị khóa và scope của caller. */
+    @Transactional(readOnly = true)
+    public List<MediaViews.Asset> duplicates(MediaRequests.DuplicateCheck request) {
+        var actor = access.actor();
+        access.requireManage(actor, request.ownerOrgId(), actor.person().teamId(), actor.person().id());
+        return assets.search(new LearningAssetRepositoryCustom.Filter(actor.person().id(), actor.person().orgId(),
+            actor.person().teamId(), access.searchScope(actor), null,
+            request.mediaType() == null ? MediaKind.VIDEO : request.mediaType(), AssetStatus.READY, false,
+            request.ownerOrgId(), request.checksumSha256(), request.sizeBytes()),
+            PageQuery.of(0, 10, "id,desc", Set.of("id", "name", "createTime"))).getContent();
     }
 
     private LearningAsset own(UUID id) {

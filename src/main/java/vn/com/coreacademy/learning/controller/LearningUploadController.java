@@ -1,6 +1,7 @@
 package vn.com.coreacademy.learning.controller;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,10 +50,25 @@ public class LearningUploadController {
     public BaseResponse<PageResponse<MediaViews.Asset>> list(@RequestParam(required = false) String q,
                                                              @RequestParam(required = false) String mediaType,
                                                              @RequestParam(required = false) String status,
+                                                             @RequestParam(defaultValue = "false") boolean includeDeleting,
                                                              @RequestParam(defaultValue = "0") int page,
                                                              @RequestParam(defaultValue = "20") int size,
                                                              @RequestParam(defaultValue = "id,desc") String sort) {
-        return BaseResponse.ok(uploads.list(q, mediaType, status, page, size, sort));
+        return BaseResponse.ok(uploads.list(q, mediaType, status, page, size, sort, includeDeleting));
+    }
+
+    @PutMapping("/{assetId}/metadata")
+    @Operation(summary = "Cập nhật tên và mô tả tài nguyên")
+    public BaseResponse<Void> metadata(@PathVariable @Positive Long assetId,
+                                       @Valid @RequestBody MediaRequests.AssetMetadata request) {
+        uploads.updateMetadata(assetId, request);
+        return BaseResponse.ok();
+    }
+
+    @PostMapping("/duplicates")
+    @Operation(summary = "Tìm tài nguyên trùng trong thư viện được phép sử dụng")
+    public BaseResponse<List<MediaViews.Asset>> duplicates(@Valid @RequestBody MediaRequests.DuplicateCheck request) {
+        return BaseResponse.ok(uploads.duplicates(request));
     }
 
     @PostMapping("/uploads")
@@ -129,6 +145,13 @@ public class LearningUploadController {
     )
     public BaseResponse<Void> delete(@PathVariable @Positive Long assetId) {
         uploads.delete(assetId);
+        return BaseResponse.ok();
+    }
+
+    @DeleteMapping("/{assetId}/content")
+    @Operation(summary = "Xóa vĩnh viễn tài nguyên chưa được sử dụng khỏi kho")
+    public BaseResponse<Void> deletePermanently(@PathVariable @Positive Long assetId) {
+        uploads.deletePermanently(assetId);
         return BaseResponse.ok();
     }
 }

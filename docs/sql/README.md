@@ -86,6 +86,17 @@ bản đã xuất bản để `hocvien` thấy bài quiz ngay mà không cần n
 
 ## Nâng cấp schema (upgrade)
 
+Metadata thư viện Learning: baseline `learning_hub_learning.sql` có `assets.display_name` (tối đa 255 ký tự)
+và `assets.description` (tối đa 2000 ký tự). DB đã có dữ liệu chạy
+[`2026-11-14-learning-asset-metadata.sql`](upgrade/2026-11-14-learning-asset-metadata.sql) bằng `dev_user`
+khi role này là chủ sở hữu bảng; nếu không, chủ sở hữu thực hiện và xác minh `dev_user` vẫn có quyền SELECT/INSERT/UPDATE
+trên bảng. Upgrade điền tên còn NULL từ `original_name`, chạy lại không ghi đè tên đã sửa. Hai cột để NULL nhằm tương thích
+BE hiện tại khi tạo asset; BE mới cần đặt tên từ file nếu người dùng chưa nhập và đọc fallback `original_name` khi NULL.
+BE hỗ trợ nhập/sửa và tìm tên, mô tả; chưa có thẻ. Script không thay file S3 hay liên kết bài học.
+Rollback [`2026-11-14-learning-asset-metadata.rollback.sql`](upgrade/2026-11-14-learning-asset-metadata.rollback.sql)
+chỉ chạy sau khi lùi BE; script từ chối nếu có tên khác tên gốc hoặc mô tả để tránh mất metadata. Cần sao lưu và xử lý
+riêng nếu muốn rollback khi có dữ liệu đó. Không tự chạy SQL trên DB dùng chung.
+
 Bộ thẻ cá nhân cần chạy thêm [2026-11-07-personal-flashcards.sql](upgrade/2026-11-07-personal-flashcards.sql) sau script flashcard. Script tạo hai bảng mới, chạy một lần, giữ dữ liệu thẻ đã công bố.
 
 Chạy [2026-11-07-flashcards.sql](upgrade/2026-11-07-flashcards.sql) một lần sau Assessment để tạo bảng flashcard và tiến độ ôn. Script khởi tạo local đã chạy file này. Khi quay về bản ứng dụng cũ, giữ hai bảng để bảo toàn tiến độ và lịch sử công bố đáp án.

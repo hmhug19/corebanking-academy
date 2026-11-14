@@ -7,7 +7,8 @@ import vn.com.coreacademy.learning.service.LearningAccessPolicy.SearchScope;
 
 public interface LearningAssetRepositoryCustom {
     record Filter(String actorId, Long orgId, Long teamId, SearchScope scope,
-                  String q, String mediaType, String status) {
+                  String q, String mediaType, String status, boolean includeDeleting,
+                  Long ownerOrgFilter, String checksum, Long sizeBytes) {
     }
 
     Page<MediaViews.Asset> search(Filter filter, Pageable page);

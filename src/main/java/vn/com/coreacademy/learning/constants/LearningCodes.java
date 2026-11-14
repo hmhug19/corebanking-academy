@@ -123,6 +123,7 @@ public final class LearningCodes {
         public static final String CANCELING = "canceling";
         public static final String CANCELED = "canceled";
         public static final String EXPIRED = "expired";
+        public static final String DELETING = "deleting";
         public static final String DELETED = "deleted";
         public static final Set<String> SEARCHABLE_VALUES = Set.of(UPLOADING, COMPLETING, PROCESSING, READY, FAILED,
             CANCELING, CANCELED, EXPIRED);

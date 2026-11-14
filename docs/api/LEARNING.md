@@ -81,6 +81,29 @@ Triển khai backend cho danh mục, tạo/sửa/sao chép/xuất bản khóa h�
 
 ## Trạng thái kho tài nguyên
 
+Thư viện Learning hỗ trợ tìm không phân biệt hoa/thường trên tên hiển thị, tên file gốc và mô tả;
+kết quả vẫn áp dụng scope hiện hành. `displayName` mặc định theo tên file, `description` tùy chọn.
+`PUT /api/v1/learning-assets/{assetId}/metadata` nhận `displayName` (bắt buộc, tối đa 255 ký tự),
+`description` (tùy chọn, tối đa 2000 ký tự), yêu cầu quyền quản lý asset. Khởi tạo upload nhận thêm
+`displayName` và `description` tùy chọn; tên rỗng/missing dùng tên tệp. Khi retry cùng requestId,
+metadata ban đầu được giữ, không tự ghi đè. Giao diện mặc định dùng tên file khi tải lên; người dùng
+có thể sửa tên và mô tả trong thư viện sau khi tài nguyên sẵn sàng. Thông tin này dùng chung giữa các khóa.
+Chạy upgrade `2026-11-14-learning-asset-metadata.sql` trước BE mới. Trước khi tải video, PDF, hình ảnh
+hoặc tệp đính kèm mới, FE tính SHA-256 và gọi `POST /api/v1/learning-assets/duplicates` với `ownerOrgId`,
+`checksumSha256`, `sizeBytes`, `mediaType` (`video`, `document`, `image`, `attachment`; thiếu thì mặc định
+`video` để tương thích client cũ). PDF trong khối đính kèm dùng `document`. API yêu cầu quyền quản lý đơn vị
+và chỉ trả tài nguyên READY cùng loại, cùng đơn vị, còn hiệu lực và trong phạm vi truy cập.
+Nếu có kết quả, người dùng chọn dùng tài nguyên có sẵn hoặc tiếp tục tải mới; phiên upload tiếp tục không kiểm tra lại.
+So khớp là trùng nội dung byte, không xác định nội dung giống nhau nhưng khác bản mã hóa. Nếu kiểm tra lỗi,
+upload không tự bắt đầu. DELETE `/{id}` vẫn xóa mềm. DELETE `/{id}/content` xóa vĩnh viễn bản gốc và bản phát cho asset READY
+chưa được tham chiếu, sau khi kiểm quyền, khóa ghi và kiểm tra không có asset khác trỏ tới cùng object.
+Chỉ hỗ trợ bucket chưa từng bật versioning (status trống); cần quyền `s3:GetBucketVersioning` và
+`s3:DeleteObject`. Bucket bật hoặc tạm dừng versioning bị từ chối vì xóa object thông thường không đảm bảo
+xóa các version cũ. Không tự thay đổi cấu hình bucket, quyền hoặc object lock.
+Trạng thái `deleting` ngăn attach/đọc trong khi xóa. Lỗi giữa DB và S3 giữ trạng thái này để gửi lại cùng lệnh;
+thư viện dùng `includeDeleting=true` để thấy và thử lại. Sau khi xóa thành công chỉ giữ metadata xóa mềm/audit;
+thao tác không xóa bản sao lưu độc lập. Không tự động xóa tệp S3 khi bỏ liên kết bài học.
+
 ### Tiến độ học và điều kiện hoàn thành
 
 `progressPercent` của lần học/thẻ khóa là trung bình tiến độ các bài bắt buộc, làm tròn xuống ba chữ số;
@@ -285,6 +308,11 @@ Init ví dụ (ID và hash chỉ minh họa, phải lấy theo file/đơn vị t
 - Phiên 24 giờ, phần 8 MiB, phần cuối đúng số byte còn lại. File gốc tối đa video 500.000.000 byte,
   PDF 20.000.000 byte, ảnh 5.000.000 byte, Office attachment 10.000.000 byte. FE tính SHA-256 tăng dần,
   không nạp cả video vào RAM. PUT part dùng application/octet-stream, không bọc JSON/form-data.
+- Đo thời gian trên trình duyệt bằng Performance API: các measure `learning-upload.hash`,
+  `learning-upload.duplicates`, `learning-upload.transfer`, `learning-upload.complete` và
+  `learning-upload.processing` được tạo khi giai đoạn tương ứng kết thúc, kể cả thất bại/hủy.
+  Thời gian transfer gồm retry/chờ mạng; processing gồm polling/chờ phản hồi, không riêng CPU server.
+  Các measure chỉ ở trình duyệt, không gồm tên file, mã người dùng hay thông tin xác thực.
 - Mỗi part có hash/size bất biến. ACK sau S3 + commit manifest; retry không cộng uploadedBytes lần hai.
   Part đang truyền có reservation; nếu BE chết, thử lại sau giới hạn timeout/reservation thay vì gửi song song cùng part.
 - GET upload trả parts đã ACK; reconnect chỉ gửi phần thiếu. Mở browser lại có thể phải chọn lại đúng file;

@@ -20,7 +20,18 @@ public final class MediaRequests {
                          @NotBlank @Size(max = 255) String originalName,
                          @NotBlank @Size(max = 100) String mimeType,
                          @Min(1) @Max(LearningLimits.MAX_VIDEO_BYTES) long sizeBytes,
-                         @NotBlank @Pattern(regexp = "[0-9a-f]{64}") String checksumSha256) {
+                         @NotBlank @Pattern(regexp = "[0-9a-f]{64}") String checksumSha256,
+                         @Size(max = 255) String displayName, @Size(max = 2000) String description) {
+    }
+
+    public record AssetMetadata(@NotBlank @Size(max = 255) String displayName,
+                                @Size(max = 2000) String description) {
+    }
+
+    public record DuplicateCheck(@NotNull @Positive Long ownerOrgId,
+                                 @NotBlank @Pattern(regexp = "[0-9a-f]{64}") String checksumSha256,
+                                 @Min(1) @Max(LearningLimits.MAX_VIDEO_BYTES) long sizeBytes,
+                                 @Pattern(regexp = "video|document|image|attachment") String mediaType) {
     }
 
     public record Session(@NotNull @Positive Long enrollmentId, @NotNull @Positive Long blockId,

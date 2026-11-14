@@ -36,21 +36,32 @@ public class LearningAssetRepositoryCustomImpl implements LearningAssetRepositor
         }
         String term = NativeSearchQuery.containsPattern(filter.q());
         if (term != null) {
-            sql.and("lower(a.original_name) like :term escape '!'");
+            sql.and("""
+                (lower(a.original_name) like :term escape '!'
+                  or lower(a.display_name) like :term escape '!'
+                  or lower(a.description) like :term escape '!')
+                """);
             sql.bind("term", term);
         }
         if (filter.mediaType() != null) {
             sql.and("a.media_type = :type");
             sql.bind("type", filter.mediaType());
         }
+        if (filter.checksum() != null) {
+            sql.and("a.owner_org_id = :owner and a.checksum_sha256 = :checksum and a.size_bytes = :bytes");
+            sql.bind("owner", filter.ownerOrgFilter());
+            sql.bind("checksum", filter.checksum());
+            sql.bind("bytes", filter.sizeBytes());
+        }
         if (filter.status() != null) {
-            sql.and("a.status = :status");
+            sql.and(filter.includeDeleting() && "ready".equals(filter.status())
+                ? "(a.status = :status or a.status = 'deleting')" : "a.status = :status");
             sql.bind("status", filter.status());
         }
         return sql.page(entityManager, """
             select a.asset_id, a.owner_org_id, a.original_name, a.mime_type, a.size_bytes,
-                   a.media_type, a.status, a.create_time
-            """, MediaViews.Asset.class, page, Map.of("id", "a.asset_id", "name", "a.original_name",
+                   a.media_type, a.status, a.create_time, coalesce(a.display_name, a.original_name), a.description
+            """, MediaViews.Asset.class, page, Map.of("id", "a.asset_id", "name", "coalesce(a.display_name, a.original_name)",
                 "createTime", "a.create_time"));
     }
 }

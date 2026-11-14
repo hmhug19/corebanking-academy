@@ -49,6 +49,12 @@ public class LearningAsset extends LearningRecord {
     @Column(name = "original_name", length = 255, nullable = false)
     private String originalName;
 
+    @Column(name = "display_name", length = 255)
+    private String displayName;
+
+    @Column(name = "description", length = 2000)
+    private String description;
+
     @Column(name = "mime_type", length = 100, nullable = false)
     private String mimeType;
 

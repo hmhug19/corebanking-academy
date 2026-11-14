@@ -2,6 +2,20 @@
 
 Tài liệu này giúp nhóm theo dõi phạm vi đã kiểm, các lỗi và phần cần kiểm tiếp. Đây là tài liệu chia sẻ, không lưu mật khẩu, token, cookie, dữ liệu cá nhân hay URL ký truy cập media.
 
+## Thay đổi source 14/11/2026 — metadata video và xóa kho
+
+- Metadata: tên/mô tả nhập trước chọn tệp, gửi lúc khởi tạo upload; tìm thư viện theo tên hiển thị, tên gốc hoặc mô tả.
+  Tên trống dùng tên file. Lỗi tạm trong giai đoạn xử lý được hiển thị thay vì chỉ báo đang xử lý.
+- Có thêm thao tác xóa vĩnh viễn riêng với xóa mềm; BE kiểm quyền, tham chiếu, key dùng chung, trạng thái bucket
+  versioning, đánh dấu `deleting` trước IO và cho thử lại khi lỗi. Không tự xóa bản sao lưu.
+- PASS: BE compile; FE typecheck/build; 42 test FE hiện có của thư viện/upload; đây không phải test riêng cho xóa vật lý hay metadata mới.
+  Bộ test soạn khóa, thư viện và upload trước chỉnh cuối: 163 test pass. Có cảnh báo focus trong stderr.
+- NOT_RUN: chưa chạy upgrade trên PostgreSQL, chưa kiểm chứng luồng mới với DB/S3 thật hoặc đối chiếu IAM bucket.
+  Test BE `MediaProbeTest,LearningMediaWorkerHeartbeatTest` không hoàn tất sau bước Mockito self-attach và đã dừng;
+  không tính test BE là pass. Chưa kiểm thử tình huống S3 lỗi giữa hai object, đồng thời attach/delete, hoặc bucket versioning.
+- Không chạy SQL trên DB dùng chung và chưa deploy. Cần chạy upgrade metadata bằng role đủ quyền và kiểm thử
+  end-to-end trên bucket test có quyền `s3:GetBucketVersioning`/`s3:DeleteObject` trước khi sử dụng xóa vật lý.
+
 ## Thay đổi source 06/11/2026 — tiến độ học và hoàn thành khóa
 
 - Phạm vi: tiến độ khóa là trung bình tiến độ bài bắt buộc, không cộng bài thi cuối riêng; API chi tiết lần học
