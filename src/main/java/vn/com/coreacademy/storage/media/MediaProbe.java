@@ -224,7 +224,12 @@ public class MediaProbe {
         Process process = null;
         String tool = Path.of(command.get(0)).getFileName().toString();
         try {
-            process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start();
+            try {
+                process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start();
+            } catch (IOException exception) {
+                log.error("Cannot start media tool tool={} type={}", tool, exception.getClass().getSimpleName());
+                throw exception;
+            }
             if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly();
                 log.warn("Media tool timed out tool={} timeout={}", tool, timeout);

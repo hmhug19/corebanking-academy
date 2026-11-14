@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import io.minio.GetObjectArgs;
+import io.minio.GetBucketVersioningArgs;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.Http.Method;
 import io.minio.MinioClient;
@@ -15,6 +16,7 @@ import io.minio.RemoveObjectArgs;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
 import io.minio.errors.MinioException;
+import io.minio.messages.VersioningConfiguration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import vn.com.coreacademy.storage.config.S3Properties;
@@ -106,6 +108,18 @@ public class ObjectStorage {
             client.removeObject(RemoveObjectArgs.builder().bucket(properties.bucket()).object(key).build());
         } catch (MinioException exception) {
             throw new IllegalStateException("Object storage delete failed", exception);
+        }
+    }
+
+    /** Versioned/suspended buckets may retain old bytes after an ordinary DELETE. */
+    public void requireUnversionedBucket() {
+        try {
+            if (client.getBucketVersioning(GetBucketVersioningArgs.builder().bucket(properties.bucket()).build())
+                .status() != VersioningConfiguration.Status.OFF) {
+                throw new IllegalStateException("Permanent deletion requires an unversioned bucket");
+            }
+        } catch (MinioException exception) {
+            throw new IllegalStateException("Cannot verify bucket versioning", exception);
         }
     }
 

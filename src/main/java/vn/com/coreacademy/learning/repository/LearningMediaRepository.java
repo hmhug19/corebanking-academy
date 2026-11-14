@@ -44,6 +44,14 @@ public class LearningMediaRepository {
             """).setParameter("id", assetId).getSingleResult());
     }
 
+    /** Không xóa object nếu metadata của asset khác còn trỏ tới cùng key. */
+    public boolean sharedObject(Long assetId, String key) {
+        return Boolean.TRUE.equals(entityManager.createQuery("""
+            select count(a) > 0 from LearningAsset a
+            where a.id <> :id and (a.storageKey = :key or a.playbackKey = :key)
+            """, Boolean.class).setParameter("id", assetId).setParameter("key", key).getSingleResult());
+    }
+
     /** Chỉ đánh dấu metadata hết hạn; không abort hoặc xóa object trên S3. */
     public void expireUploads() {
         entityManager.createNativeQuery("""

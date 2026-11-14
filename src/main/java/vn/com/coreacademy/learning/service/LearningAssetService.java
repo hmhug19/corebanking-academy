@@ -64,6 +64,7 @@ public class LearningAssetService {
                 asset.setStorageType(ObjectStorage.TYPE);
                 asset.setStorageKey(stored.key());
                 asset.setOriginalName(stored.name());
+                asset.setDisplayName(stored.name());
                 asset.setMimeType(stored.mime());
                 asset.setSizeBytes(stored.size());
                 asset.setChecksumSha256(stored.checksum());

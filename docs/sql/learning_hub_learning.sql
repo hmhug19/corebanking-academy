@@ -316,6 +316,8 @@ CREATE TABLE learning_hub.assets (
     storage_key varchar(255),
     external_url text,
     original_name varchar(255) NOT NULL,
+    display_name varchar(255),
+    description varchar(2000),
     mime_type varchar(100) NOT NULL,
     size_bytes bigint NOT NULL,
     checksum_sha256 varchar(64),
@@ -338,6 +340,8 @@ COMMENT ON COLUMN learning_hub.assets.storage_type IS 'Thuộc tính storageType
 COMMENT ON COLUMN learning_hub.assets.storage_key IS 'Thuộc tính storageKey; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.assets.external_url IS 'Thuộc tính externalUrl; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.assets.original_name IS 'Thuộc tính originalName; xem docs/api/LEARNING.md.';
+COMMENT ON COLUMN learning_hub.assets.display_name IS 'Tên tài nguyên trong thư viện; NULL dùng original_name khi backend cũ tạo asset.';
+COMMENT ON COLUMN learning_hub.assets.description IS 'Mô tả tài nguyên dùng chung, tối đa 2000 ký tự; không chứa nội dung file.';
 COMMENT ON COLUMN learning_hub.assets.mime_type IS 'Thuộc tính mimeType; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.assets.size_bytes IS 'Thuộc tính sizeBytes; xem docs/api/LEARNING.md.';
 COMMENT ON COLUMN learning_hub.assets.checksum_sha256 IS 'Thuộc tính checksumSha256; xem docs/api/LEARNING.md.';

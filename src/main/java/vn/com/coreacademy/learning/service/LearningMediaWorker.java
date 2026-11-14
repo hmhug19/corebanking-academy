@@ -151,6 +151,7 @@ public class LearningMediaWorker {
 
     private void process(Job job) {
         LearningAsset source = job.asset();
+        String stage = "complete_upload";
         try {
             if (AssetStatus.COMPLETING.equals(source.getStatus())) {
                 if (!storage.exists(source.getStorageKey())) {
@@ -166,6 +167,7 @@ public class LearningMediaWorker {
                     return null;
                 });
             }
+            stage = "read_original";
             var object = storage.stat(source.getStorageKey());
             if (object.size() != source.getUploadTotalBytes()) {
                 throw new BusinessException(LearningResponseCode.UPLOAD_FILE_MISMATCH);
@@ -175,11 +177,13 @@ public class LearningMediaWorker {
                 if (!source.getUploadExpectedSha256().equals(original.checksum())) {
                     throw new BusinessException(LearningResponseCode.UPLOAD_FILE_MISMATCH);
                 }
+                stage = "probe_and_prepare";
                 try (var checked = probe.check(original.path(), source.getOriginalName(), source.getMimeType())) {
                     String playbackKey = null;
                     Long playbackSize = null;
                     String playbackChecksum = null;
                     if (checked.playback() != null) {
+                        stage = "store_playback";
                         playbackKey = "learning/" + source.getId() + "/" + job.claim();
                         try (InputStream rendition = Files.newInputStream(checked.playback());
                              var ready = staging.stage(rendition, LearningLimits.MAX_RENDITION_BYTES)) {
@@ -191,6 +195,7 @@ public class LearningMediaWorker {
                     String finalKey = playbackKey;
                     Long finalSize = playbackSize;
                     String finalChecksum = playbackChecksum;
+                    stage = "save_metadata";
                     write(() -> {
                         LearningAsset asset = current(job);
                         if (asset == null) {
@@ -223,7 +228,7 @@ public class LearningMediaWorker {
                 }
             }
         } catch (IOException | RuntimeException exception) {
-            log.error("Media processing failed assetId={} type={}", source.getId(),
+            log.error("Media processing failed assetId={} stage={} type={}", source.getId(), stage,
                 exception.getClass().getSimpleName());
             write(() -> {
                 LearningAsset asset = current(job);

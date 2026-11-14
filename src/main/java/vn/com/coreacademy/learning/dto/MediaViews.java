@@ -27,6 +27,7 @@ public final class MediaViews {
     }
 
     public record Asset(Long id, Long ownerOrgId, String originalName, String mimeType, long sizeBytes,
-                        String mediaType, String status, Instant createTime) {
+                        String mediaType, String status, Instant createTime, String displayName,
+                        String description) {
     }
 }
