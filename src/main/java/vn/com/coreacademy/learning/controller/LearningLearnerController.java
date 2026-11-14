@@ -79,9 +79,10 @@ public class LearningLearnerController {
         @Parameter(description = "true chỉ lấy khóa đang được giao cho caller (có đợt giao còn hiệu lực), false chỉ "
             + "lấy khóa không được giao.") @RequestParam(required = false) Boolean assigned,
         @Parameter(description = "true chỉ lấy khóa caller đã thi cuối khóa nhưng chưa đạt lượt nào, false loại các "
-            + "khóa đó.") @RequestParam(required = false) Boolean failed) {
+            + "khóa đó.") @RequestParam(required = false) Boolean failed,
+        @RequestParam(defaultValue = "false") boolean withoutModule) {
         return BaseResponse.ok(search.search(SearchMode.MINE, q, fieldId, programId, moduleId, level, requirement,
-            learningStatus, state, page, size, sort, overdue, assigned, failed));
+            learningStatus, state, page, size, sort, overdue, assigned, failed, withoutModule));
     }
 
     @GetMapping("/catalog")

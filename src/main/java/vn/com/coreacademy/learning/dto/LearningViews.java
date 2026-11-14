@@ -377,7 +377,15 @@ public final class LearningViews {
         String subject,
         Long rowVersion,
         Instant createTime,
-        Instant updateTime) {
+        Instant updateTime,
+        Long courseId,
+        String courseTitle,
+        Long enrollmentId,
+        Boolean courseAvailable) {
+    }
+
+    public record ReminderCourse(Long recipientId, Long courseId, String courseTitle, Long enrollmentId,
+                                 Boolean courseAvailable) {
     }
 
     public record LessonProgressView(

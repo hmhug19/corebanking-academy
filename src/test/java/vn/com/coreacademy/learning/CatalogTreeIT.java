@@ -1,6 +1,8 @@
 package vn.com.coreacademy.learning;
 
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -99,7 +101,7 @@ class CatalogTreeIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void emptyFieldsAndProgramsAreListedWithEmptyChildrenAndOrderFollowsSortNo() {
+    void emptyFieldsAndProgramsAreListedWithEmptyChildrenAndOrderFollowsCreationTime() {
         long emptyField = api.ok(INSTRUCTOR, api.post(item(null, unique("TF"), "draft"),
             "/api/v1/training-catalog/fields")).path("id").asLong();
         long programOfEmpty = api.ok(INSTRUCTOR, api.post(item(emptyField, unique("TP"), "paused"),
@@ -114,12 +116,13 @@ class CatalogTreeIT extends AssessmentIntegrationTest {
         assertThat(program.path("status").asText()).isEqualTo("paused");
         assertThat(program.path("courses")).isEmpty();
 
-        long previous = Long.MIN_VALUE;
+        List<Long> actual = new ArrayList<>();
         for (JsonNode f : fields) {
-            long order = f.path("sortNo").asLong() * 1_000_000_000L + f.path("id").asLong();
-            assertThat(order).isGreaterThanOrEqualTo(previous);
-            previous = order;
+            actual.add(f.path("id").asLong());
         }
+        assertThat(actual).containsExactlyElementsOf(jdbc.queryForList(
+            "select field_id from learning_hub.training_fields where owner_org_id = ? order by create_time, field_id",
+            Long.class, org));
     }
 
     @Test

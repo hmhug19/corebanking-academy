@@ -8,7 +8,9 @@ import jakarta.persistence.EntityManager;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.common.persistence.NativeSearchQuery;
 import vn.com.coreacademy.learning.constants.LearningCodes.AssignmentStatus;
@@ -194,6 +196,14 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
         sql.bindProjection("codeCompletedOnTime", DeadlineStatus.COMPLETED_ON_TIME);
         sql.bindProjection("codeOverdueActive", DeadlineStatus.OVERDUE_ACTIVE);
         sql.bindProjection("codeOnTimeActive", DeadlineStatus.ON_TIME_ACTIVE);
+        // Ưu tiên khóa chưa hoàn thành trên toàn tập dữ liệu, trước OFFSET/LIMIT; không suy từ % nội dung.
+        boolean unfinishedFirst = SearchMode.CATALOG.equals(filter.mode())
+            || (SearchMode.MINE.equals(filter.mode()) && filter.learningStatus() == null
+                && (Requirement.MANDATORY.equals(filter.requirement()) || Boolean.TRUE.equals(filter.assigned())));
+        Sort order = Sort.by(pageable.getSort().stream()
+            .map(item -> "lastAccessAt".equals(item.getProperty()) ? item.nullsLast() : item).toList());
+        Pageable ordered = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+            unfinishedFirst ? Sort.by("completionPriority").and(order) : order);
         return sql.page(entityManager, """
             select c.course_id, r.revision_id, c.code, r.title, r.program_id, r.module_id, r.level,
                    case when obligations.mandatory then :codeMandatory else r.default_requirement end,
@@ -213,9 +223,11 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                    resume.media_asset_id, resume.last_pdf_page, resume.last_video_position_seconds,
                    f.field_id, f.name, p.name, m.name, c.course_id in (:failedIds), cast(null as numeric),
                    r.cover_asset_id
-            """, CourseCard.class, pageable, Map.of("id", "c.course_id", "title", "r.title",
+            """, CourseCard.class, ordered, Map.of("id", "c.course_id", "title", "r.title",
+                "completionPriority", "case when e.status = :codeCompleted then 1 else 0 end",
                 "updateTime", "r.update_time", "dueAt", "obligations.due_at", "progressPercent", "e.progress_percent",
-                "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at", "completedAt", "e.completed_at"));
+                "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at",
+                "completedAt", "e.completed_at"));
     }
 
     /** Lĩnh vực, chương trình, phân hệ của các khóa học viên thấy trong danh mục; filter là mode CATALOG. */

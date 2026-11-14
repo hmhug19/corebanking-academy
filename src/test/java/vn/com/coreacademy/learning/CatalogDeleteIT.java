@@ -1,6 +1,7 @@
 package vn.com.coreacademy.learning;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -74,6 +75,45 @@ class CatalogDeleteIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void fieldAndModuleChangesAreAtomicAndVersioned() {
+        String fieldCode = unique("AGG");
+        Map<String, Object> body = new HashMap<>(Map.of("ownerOrgId", org, "code", fieldCode,
+            "name", "Lĩnh vực kèm phân hệ", "status", "draft"));
+        body.put("modules", List.of(
+            Map.of("code", "M1", "name", "Phân hệ 1", "status", "published"),
+            Map.of("code", "M2", "name", "Phân hệ 2", "status", "published")));
+        JsonNode field = api.ok(INSTRUCTOR, api.post(body, FIELDS));
+        long id = field.path("id").asLong();
+        JsonNode rows = api.ok(INSTRUCTOR,
+            ApiClient.get("/api/v1/training-catalog/modules?fieldId={id}", id)).path("items");
+        assertThat(rows).hasSize(2);
+
+        body.put("name", "Đã sửa lĩnh vực");
+        body.put("modules", List.of(
+            Map.of("id", rows.get(0).path("id").asLong(), "expectedVersion", 0,
+                "code", "M1", "name", "Phân hệ đã sửa", "status", "published"),
+            Map.of("id", rows.get(1).path("id").asLong(), "expectedVersion", 0,
+                "code", "M2", "name", "Phân hệ 2", "status", "published", "deleted", true)));
+        field = api.ok(INSTRUCTOR, api.put(body, FIELDS + "/{id}?expectedVersion={v}", id,
+            field.path("rowVersion").asLong()));
+        rows = api.ok(INSTRUCTOR,
+            ApiClient.get("/api/v1/training-catalog/modules?fieldId={id}", id)).path("items");
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).path("name").asText()).isEqualTo("Phân hệ đã sửa");
+
+        body.put("name", "Không được lưu một phần");
+        body.put("modules", List.of(
+            Map.of("code", "M3", "name", "Phân hệ 3", "status", "published"),
+            Map.of("code", "M1", "name", "Trùng mã", "status", "published")));
+        api.error(INSTRUCTOR, api.put(body, FIELDS + "/{id}?expectedVersion={v}", id,
+            field.path("rowVersion").asLong()), "LEARNING-DUPLICATE");
+        assertThat(jdbc.queryForObject("select name from learning_hub.training_fields where field_id = ?",
+            String.class, id)).isEqualTo("Đã sửa lĩnh vực");
+        assertThat(jdbc.queryForObject("select count(*) from learning_hub.business_modules where field_id = ?",
+            Long.class, id)).isEqualTo(1L);
+    }
+
+    @Test
     void anEmptyProgramAndThenItsEmptyFieldAreDeleted() {
         JsonNode field = create(FIELDS, null);
         JsonNode program = create(PROGRAMS, field.path("id").asLong());
@@ -135,5 +175,25 @@ class CatalogDeleteIT extends AssessmentIntegrationTest {
         api.error(INSTRUCTOR, ApiClient.delete(PROGRAMS + "/{id}?expectedVersion=0", 999_999_999L),
             "LEARNING-NOT_FOUND");
         assertThat(inTree("field", id)).isTrue();
+    }
+
+    @Test
+    void deletingModulesChecksUsageVersionAndManagementPermission() {
+        Course course = fixtures.course();
+        long moduleId = jdbc.queryForObject(
+            "select module_id from learning_hub.course_revisions where revision_id = ?", Long.class,
+            course.revisionId());
+        long version = jdbc.queryForObject(
+            "select row_version from learning_hub.business_modules where module_id = ?", Long.class, moduleId);
+        String path = "/api/v1/training-catalog/modules/{id}?expectedVersion={v}";
+        api.error(INSTRUCTOR, ApiClient.delete(path, moduleId, version), IN_USE);
+        api.error(INSTRUCTOR, ApiClient.delete(path, moduleId, version + 1), "LEARNING-CONFLICT");
+        api.http(LEARNER, ApiClient.delete(path, moduleId, version), 403, "CORE-ACCESS_DENIED");
+
+        JsonNode field = create(FIELDS, null);
+        JsonNode module = create("/api/v1/training-catalog/modules", field.path("id").asLong());
+        api.ok(INSTRUCTOR, ApiClient.delete(path, module.path("id").asLong(), module.path("rowVersion").asLong()));
+        assertThat(jdbc.queryForObject("select count(*) from learning_hub.business_modules where module_id = ?",
+            Long.class, module.path("id").asLong())).isZero();
     }
 }

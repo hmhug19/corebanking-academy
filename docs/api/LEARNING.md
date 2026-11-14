@@ -1,5 +1,40 @@
 # API và dữ liệu Learning
 
+## Lĩnh vực và phân hệ nghiệp vụ
+
+POST `/api/v1/training-catalog/fields` và PUT `/api/v1/training-catalog/fields/{id}?expectedVersion=...`
+nhận các trường danh mục hiện hành và tùy chọn `modules[]`. Lưu lĩnh vực và mọi thao tác phân hệ trong một
+transaction; lỗi mã trùng, quyền, phiên bản hoặc phân hệ đang dùng rollback toàn bộ lần lưu. Không thêm migration.
+Mỗi dòng gồm `{id?,expectedVersion?,code,name,status,sortNo?,deleted:false}`. Bỏ `id` để thêm mới;
+sửa/xóa gửi `id` cùng `expectedVersion` (rowVersion đã đọc). Xóa gửi `deleted:true`, giữ mã/tên/trạng thái của dòng.
+Phân hệ phải thuộc đúng lĩnh vực; không được chuyển phân hệ sang lĩnh vực khác. Bỏ `modules` hoặc gửi `[]` giữ
+nguyên các phân hệ, không xóa ngầm. Mỗi request tối đa 200 thao tác. Response giữ `TrainingFieldView` hiện hành;
+đọc phân hệ bằng GET `/modules?fieldId&page&size` và đọc đủ các trang khi mở form sửa.
+
+DELETE `/api/v1/training-catalog/modules/{id}?expectedVersion=...` dùng cùng quyền quản lý danh mục,
+trả `data:null` khi thành công. Có bất kỳ `course_revisions.module_id` tham chiếu thì trả
+`LEARNING-CATALOG_IN_USE`; có thể chuyển sang trạng thái lưu trữ thay vì xóa. Không cấp quyền mới cho học viên.
+Cây GET `/training-catalog/tree` sắp lĩnh vực, chương trình và khóa học theo thời gian tạo tăng dần, ID tăng dần
+khi trùng thời gian; `sortNo` không quyết định thứ tự cây. Mục mới nằm cuối các mục cùng cấp.
+
+Danh mục GET `/me/learning/catalog` luôn ưu tiên `learningStatus != completed` trước khóa đã hoàn thành,
+sau đó áp dụng tiêu chí `sort` hiện hành trong mỗi nhóm. `/me/learning/courses` áp dụng tương tự với
+`requirement=mandatory` hoặc `assigned=true` khi không lọc riêng `learningStatus`. Ưu tiên thực hiện tại SQL
+trước phân trang, không suy hoàn thành từ `progressPercent=100` vì còn điều kiện thi. Tổng/bộ lọc giữ nguyên.
+
+GET `/me/learning/courses` cũng nhận `withoutModule=true` như danh mục, không gửi cùng `moduleId`.
+Đây là phạm vi tất cả khóa đã tham gia, gồm khóa tự đăng ký; chỉ thêm `assigned=true` khi cần riêng khóa được giao.
+Khi sort `lastAccessAt`, giá trị null luôn xuống cuối ở cả hai chiều, trước OFFSET/LIMIT; thứ tự phụ ổn định giữ nguyên.
+
+Các API thông báo `/me/learning/reminders`, `/inbox`, `/{id}/seen`, `/{id}/read` và DELETE `/{id}`
+trả thêm `courseId`, `courseTitle`, `enrollmentId`, `courseAvailable` (nullable). Nhắc hạn lấy tên bản khóa
+đã giao và lần học của chính recipient thuộc caller; tải gộp ngữ cảnh để tránh query theo từng thông báo.
+Thông báo huy hiệu/cấp độ không có ngữ cảnh khóa học. `courseAvailable=false` khi lượt giao bị thu hồi,
+khóa ngừng hoạt động hoặc danh mục ngừng xuất bản: vẫn giữ tên lịch sử, FE không đưa liên kết học.
+Đây là thông tin điều hướng, không thay thế kiểm tra quyền tại endpoint khóa/nội dung.
+BE cũ chưa có các field này: FE dùng liên kết danh sách tiến độ làm fallback, không đoán tên/ID từ trang hiện tại.
+Các thay đổi UX này không yêu cầu migration SQL.
+
 ## Thư viện bài giảng SCORM 1.2
 
 Module `scorm` phục vụ gói SCORM 1.2 một SCO. Giảng viên quản lý ở **Thư viện bài giảng** `/admin/lessons`,

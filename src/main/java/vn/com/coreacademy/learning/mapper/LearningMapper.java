@@ -77,7 +77,18 @@ public interface LearningMapper {
 
     LearningViews.CourseEnrollmentView view(CourseEnrollment value);
 
+    @Mapping(target = "courseId", ignore = true)
+    @Mapping(target = "courseTitle", ignore = true)
+    @Mapping(target = "enrollmentId", ignore = true)
+    @Mapping(target = "courseAvailable", ignore = true)
     LearningViews.LearningReminderView view(LearningReminder value);
+
+    @Mapping(target = "recipientId", source = "value.recipientId")
+    @Mapping(target = "courseId", source = "course.courseId")
+    @Mapping(target = "courseTitle", source = "course.courseTitle")
+    @Mapping(target = "enrollmentId", source = "course.enrollmentId")
+    @Mapping(target = "courseAvailable", source = "course.courseAvailable")
+    LearningViews.LearningReminderView view(LearningReminder value, LearningViews.ReminderCourse course);
 
     LearningViews.LessonProgressView view(LessonProgress value);
 

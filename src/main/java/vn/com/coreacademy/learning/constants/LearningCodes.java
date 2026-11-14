@@ -487,6 +487,7 @@ public final class LearningCodes {
         public static final String GROUP_MEMBERS_CHANGED = "LEARNING_GROUP_MEMBERS_CHANGED";
         public static final String MEDIA_RETRY_REQUESTED = "LEARNING_MEDIA_RETRY_REQUESTED";
         public static final String MODULE_SAVED = "LEARNING_MODULE_SAVED";
+        public static final String MODULE_DELETED = "LEARNING_MODULE_DELETED";
         public static final String PROGRAM_COPIED = "LEARNING_PROGRAM_COPIED";
         public static final String PROGRAM_DELETED = "LEARNING_PROGRAM_DELETED";
         public static final String PROGRAM_SAVED = "LEARNING_PROGRAM_SAVED";
