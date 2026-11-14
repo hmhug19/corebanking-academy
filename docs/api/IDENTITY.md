@@ -14,6 +14,10 @@ Tài liệu bàn giao tích hợp cho FE, đối chiếu controller/DTO/service 
 
 ### Luồng xác thực và hồ sơ
 
+JWT mặc định có thời hạn **600 phút (36.000 giây)** qua `app.jwt.expiry-minutes` trong `application.yml`.
+Token đã cấp giữ hạn cũ; đăng nhập lại sau khi deploy để nhận thời hạn mới. FE dùng hạn từ token/response,
+không tự kéo dài phiên. Đăng xuất, khóa tài khoản và thu hồi phiên vẫn có hiệu lực trước hạn này.
+
 `POST /auth/login` nhận `{"username":"super.admin","password":"<password>"}` và trả `data={accessToken,tokenType,expiresInSeconds}`. JWT nằm tại `data.accessToken`, `tokenType` là `Bearer`, `expiresInSeconds` là thời hạn tính bằng giây. Login không trả hồ sơ, quyền hoặc cờ đổi mật khẩu; FE gọi `/auth/me` tiếp theo. Không gửi Authorization cũ khi đăng nhập. Chưa có refresh token hoặc đăng nhập SSO; tài khoản SSO không xác thực bằng mật khẩu LOCAL.
 
 | HTTP / messageCode | Ý nghĩa | FE xử lý |

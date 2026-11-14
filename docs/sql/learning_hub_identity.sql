@@ -285,7 +285,7 @@ INSERT INTO learning_hub.functions(code, name, route_pattern, sort_no) VALUES
     ('TRAINING_CATALOG'       , 'Lĩnh vực và chương trình'     , '/admin/catalog'    ,  55),
     ('LESSON_MANAGEMENT'      , 'Thư viện bài giảng'           , '/admin/lessons'    ,  60),
     ('QUESTION_BANK'          , 'Ngân hàng câu hỏi'            , '/admin/questions'  ,  70),
-    ('QUIZ_MANAGEMENT'        , 'Quản lý bài thi'              , '/admin/quizzes'    ,  80),
+    ('QUIZ_MANAGEMENT'        , 'Quản lý bài kiểm tra'         , '/admin/quizzes'    ,  80),
     ('USER_MANAGEMENT'        , 'Quản lý người dùng'           , '/admin/users'      ,  90),
     ('ORGANIZATION_MANAGEMENT', 'Quản lý đơn vị và nhóm'       , '/admin/org'        , 100),
     ('ROLE_MANAGEMENT'        , 'Quản lý vai trò và phân quyền', '/admin/roles'      , 110),

@@ -232,7 +232,10 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
             "estimatedDurationSeconds", 300, "isRequired", true, "blocks", List.of(), "scormPackageId", packageId);
         Map<String, Object> content = draft("Khóa học SCORM", block("text"));
         content.put("programId", program);
-        content.put("chapters", List.of(Map.of("title", "Nội dung tương tác", "lessons", List.of(lesson, lesson))));
+        var assessedLesson = new HashMap<>(lesson);
+        assessedLesson.put("scormCompletionRule", "passed");
+        content.put("chapters", List.of(Map.of("title", "Nội dung tương tác", "lessons",
+            List.of(lesson, assessedLesson))));
         var created = api.ok(INSTRUCTOR, api.post(create(unique("SCORM"), "Khóa học SCORM", content), COURSES));
         long courseId = created.path("course").path("id").asLong();
         long revision = created.path("revision").path("id").asLong();
@@ -240,6 +243,18 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
         long second = created.path("chapters").get(0).path("lessons").get(1).path("lesson").path("id").asLong();
         assertThat(created.path("chapters").get(0).path("lessons").get(0).path("lesson")
             .path("scormPackageId").asLong()).isEqualTo(packageId);
+        assertThat(created.path("chapters").get(0).path("lessons").get(0).path("lesson")
+            .path("scormCompletionRule").asText()).isEqualTo("completed_or_passed");
+        assertThat(created.path("chapters").get(0).path("lessons").get(1).path("lesson")
+            .path("scormCompletionRule").asText()).isEqualTo("passed");
+        for (int run = 0; run < 2; run++) {
+            jdbc.execute(java.nio.file.Files.readString(java.nio.file.Path.of(
+                "docs/sql/upgrade/2026-11-14-scorm-completion-rule.sql")));
+        }
+        assertThat(jdbc.queryForObject("SELECT scorm_completion_rule FROM learning_hub.course_lessons"
+            + " WHERE lesson_id = ?", String.class, second)).isEqualTo("passed");
+        assertThat(jdbc.queryForObject("SELECT name FROM learning_hub.functions WHERE code = 'QUIZ_MANAGEMENT'",
+            String.class)).isEqualTo("Quản lý bài kiểm tra");
         api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", created.path("revision").path("rowVersion").asLong()),
             "/api/v1/courses/{c}/revisions/{r}/publish", courseId, revision));
         assertThat(api.ok(INSTRUCTOR, ApiClient.get("/api/v1/scorm/packages/{id}", packageId))
@@ -263,7 +278,7 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
         assertThat(incomplete.getStatus()).isEqualTo(200);
         assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment))
             .path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("0");
-        values.put("cmi.core.lesson_status", "passed");
+        values.put("cmi.core.lesson_status", "completed");
         assertThat(mvc.perform(api.post(Map.of("sequence", 2, "values", values, "finished", true),
             firstPath.replace("/launch", "/runtime")).with(request -> {
                 request.setLocalPort(8020); return request;
@@ -279,7 +294,7 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
         String html = mvc.perform(ApiClient.get(resumed).with(request -> {
             request.setLocalPort(8020); return request;
         })).andReturn().getResponse().getContentAsString();
-        assertThat(html).contains("page-4", "resume", "passed");
+        assertThat(html).contains("page-4", "resume", "completed");
         String secondPath = courseScormLaunch(packageId, enrollment, second);
         assertThat(mvc.perform(ApiClient.get(secondPath).with(request -> {
             request.setLocalPort(8020); return request;
@@ -306,6 +321,16 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
             assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment))
                 .path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("50");
         }
+        assertThat(mvc.perform(api.post(Map.of("sequence", 1, "values", values, "finished", true),
+            secondPath.replace("/launch", "/runtime")).with(request -> {
+                request.setLocalPort(8020); return request;
+            })).andReturn().getResponse().getStatus()).isEqualTo(200);
+        assertThat(api.ok(LEARNER, ApiClient.get("/api/v1/me/learning/enrollments/{id}", enrollment))
+            .path("enrollment").path("progressPercent").decimalValue()).isEqualByComparingTo("50");
+        secondPath = courseScormLaunch(packageId, enrollment, second, true);
+        values.put("cmi.core.lesson_status", "passed");
+        values.put("cmi.core.score.raw", "146");
+        values.put("cmi.core.score.max", "200");
         assertThat(mvc.perform(api.post(Map.of("sequence", 1, "values", values, "finished", true),
             secondPath.replace("/launch", "/runtime")).with(request -> {
                 request.setLocalPort(8020); return request;

@@ -222,6 +222,7 @@ CREATE TABLE learning_hub.course_lessons (
     source_lesson_id bigint,
     quiz_id bigint,
     scorm_package_id bigint,
+    scorm_completion_rule varchar(24),
     created_by varchar(20) NOT NULL,
     updated_by varchar(20) NOT NULL,
     row_version bigint NOT NULL DEFAULT 0,
