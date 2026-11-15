@@ -1,5 +1,36 @@
 # Khởi tạo Identity / Organization / RBAC
 
+## Chuẩn hóa nhóm showcase demo
+
+- Chạy [`upgrade/2026-11-15-demo-team-preflight.sql`](upgrade/2026-11-15-demo-team-preflight.sql) ở bản sao để rà nguồn, đích, thành viên, grant, khóa, chương trình và snapshot.
+- [`upgrade/2026-11-15-demo-team-normalize.sql`](upgrade/2026-11-15-demo-team-normalize.sql) là migration giới hạn cho nhóm `DEMO-SHOWCASE-TEAM` sang phòng `DEMO-SHOWCASE-OPS`: giữ ID nhóm, khóa, người dùng; chuyển quyền sở hữu khóa/lĩnh vực/chương trình trong tập hợp an toàn; không sửa snapshot giao/học lịch sử. Dữ liệu lịch sử có thể tiếp tục hiển thị đơn vị cũ.
+- Script dừng khi có quyền đang hoạt động khác OWN, mã ngoài demo, chương trình/lĩnh vực dùng chung hoặc tệp media được tham chiếu. Các kiểm tra này không thay thế việc rà Community, SCORM, Knowledge, chia sẻ, tích hợp và JSON/text. Dừng backend/worker, backup và xác nhận restore, diễn tập trên bản sao rồi đối chiếu quyền, khóa, danh mục, báo cáo và tiến độ trước khi dùng.
+- Không tự chạy script trên DB dùng chung; rollback bằng backup toàn bộ đã kiểm tra, không rollback chọn lọc sau khi phát sinh dữ liệu. Script chưa được kiểm thử PostgreSQL hoặc xác nhận phù hợp với DB thực tế.
+
+## Chuẩn hóa cây tổ chức demo
+
+[`upgrade/2026-11-15-demo-org-hierarchy.sql`](upgrade/2026-11-15-demo-org-hierarchy.sql) thêm một UNIT
+`[DEMO] Trụ sở chính - BIDV`, chuyển Ban `BIDV110B803` thành DEPARTMENT và **giữ nguyên org_id Ban**;
+nhóm và các bản ghi khóa học không bị cập nhật. Mã Trụ sở chính là mã giả lập, phải xác nhận trước khi chạy.
+Script kiểm tra node `TEST-20261101`, chỉ xóa nếu đúng cha/loại/tên và không phát hiện tham chiếu tại các
+cột số đặt tên liên quan tổ chức; từ chối nếu Ban còn node con khác. Bộ quét có thể dừng nhầm và không bao phủ
+JSON, text, schema khác hay tham chiếu đặt tên khác. DBA bắt buộc rà các tham chiếu đó và các integration trước;
+không coi script là bằng chứng đầy đủ rằng node không còn được sử dụng. Audit lịch sử phải được lưu giữ.
+
+Dừng toàn bộ backend, worker và tiến trình ghi; backup và xác nhận khôi phục, sau đó thử trên bản sao cùng schema,
+quyền dev_user và dữ liệu. Ghi lại số liệu, ID, grant, cây và node phòng trước khi chạy; kiểm tra sau chạy cả quyền,
+danh sách/chi tiết/giao khóa, học tiếp, báo cáo và tác động scope Trụ sở chính. Test pass mới xem xét thực thi
+trên môi trường đích. Cú pháp `psql -X -v ON_ERROR_STOP=1 -f <đường-dẫn-file>`. Không chạy baseline Identity
+trên DB hiện hữu. Migration tạo bảng `demo_org_hierarchy_migration_backup` và lưu snapshot Ban, phòng cũ và trạng thái
+Trụ sở cùng transaction; không ghi đè snapshot hiện có. Chỉ khi migration đã commit và cần quay lại, chạy
+[`upgrade/2026-11-15-demo-org-hierarchy.rollback.sql`](upgrade/2026-11-15-demo-org-hierarchy.rollback.sql)
+trong thời gian mọi tiến trình ghi vẫn dừng. Rollback trả Ban về trạng thái cũ, khôi phục phòng đúng ID nếu có,
+xóa Trụ sở chỉ nếu migration tạo và không phát hiện tham chiếu số. Bảng snapshot vẫn tồn tại nhưng dòng đã dùng bị xóa.
+Bắt buộc rà JSON/text, schema khác, tích hợp và thay đổi phát sinh; kiểm tra tự động không bao phủ hết. Nếu đã có ghi
+mới, có xung đột, hoặc không chứng minh được an toàn, dừng rollback và khôi phục backup theo quy trình đã thử.
+Snapshot không thay thế backup toàn bộ. Cả hai script phải được thử trên bản sao trước khi áp dụng; dừng ngay khi có lỗi.
+
+
 SCORM 1.2: trước khi dùng thư viện bài giảng mới, chạy
 [`upgrade/2026-11-12-scorm12.sql`](upgrade/2026-11-12-scorm12.sql) trên schema hiện hữu.
 Script chỉ thêm hai bảng và index SCORM, không sửa dữ liệu Identity/khóa học; không tự chạy ở startup.
@@ -435,6 +466,7 @@ Nguồn SQL duy nhất: [learning_hub_identity.sql](learning_hub_identity.sql), 
 - 8 bảng: orgs, teams, users, roles, functions, role_functions, user_roles, audit_log; kèm comment cho từng bảng/cột và 12 index.
 - 5 vai trò: SUPER_ADMIN, ADMIN, LEARNER, INSTRUCTOR, REPORT_VIEWER; 19 chức năng (gồm AI_ASSISTANT, route /assistant, cấp cho mọi vai trò; AI_FEEDBACK_REVIEW không cấp cho vai trò nào, người vận hành cấp tay cho người xem phản hồi) và mapping màn hình hiện có. Danh mục màn hình không có nghĩa backend đã triển khai API khóa học/thi/báo cáo.
 - Một tổ chức gốc trong phạm vi demo: BIDV110B803 — Ban Quản lý và phát triển Core Banking (UNIT). 15 nhóm/bộ phận giữ nguyên mã và tên từ dữ liệu nguồn; gồm Ban Giám đốc, BA&QC, phát triển Core/Kênh, tích hợp, quản trị và hỗ trợ. Không tạo phòng trung gian hoặc node cha ngoài phạm vi; HO/WORK_LOGIC là loại nguồn, không thay trực tiếp org_type nội bộ.
+- Đây là baseline seed cũ: các nhóm trực thuộc UNIT vẫn đọc được nhưng backend mới chỉ cho tạo nhóm trong DEPARTMENT. Môi trường mới muốn theo cơ cấu Trụ sở chính → Ban → nhóm cần lập kế hoạch khởi tạo/nâng cấp tương ứng; không chạy đè baseline lên DB có dữ liệu.
 - 7 tài khoản LOCAL, 8 phân quyền theo đúng cặp role/scope và một audit khởi tạo. ID số tự tăng được database sinh; dữ liệu tham chiếu bằng mã, không cần chỉnh sequence.
 - Không có FOREIGN KEY vật lý. Service kiểm tra quan hệ logic, cây active, org/team và scope. users.must_change_password đã nằm trong schema; không cần nâng cột sau tạo.
 

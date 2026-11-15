@@ -183,6 +183,10 @@ public class OrganizationImportService {
             if (!incoming.containsKey(orgCode) && !existingAllowed) {
                 issue(errors, prefix + ".orgCode", "INVALID_REFERENCE",
                     "Không tìm thấy tổ chức đang hoạt động trong phạm vi quản lý.");
+            } else if ((incoming.containsKey(orgCode) && !"DEPARTMENT".equals(incoming.get(orgCode).orgType()))
+                || (existingAllowed && !"DEPARTMENT".equals(org.getOrgType()))) {
+                issue(errors, prefix + ".orgCode", "INVALID_REFERENCE",
+                    "Nhóm chỉ được tạo trong ban hoặc phòng.");
             }
             if (existingAllowed && existingCodes.getOrDefault(org.getId(), Set.of()).contains(normalize(row.code()))) {
                 issue(errors, prefix + ".code", "ALREADY_EXISTS", "Mã nhóm đã được sử dụng trong tổ chức này.");
