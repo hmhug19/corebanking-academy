@@ -79,8 +79,12 @@ public class TeamAdministrationService {
     public TeamInfo create(Long orgId, CreateTeamRequest request) {
         String actorId = SecurityContextUtils.getUserId();
         writeLock.acquire();
-        organizations.visible(actorId, orgId);
+        var org = organizations.visible(actorId, orgId);
         access.requireActiveOrg(orgId);
+        if (!"DEPARTMENT".equals(org.getOrgType())) {
+            throw BusinessException.validation("orgId", "INVALID_REFERENCE",
+                "Nhóm chỉ được tạo trong ban hoặc phòng.");
+        }
         uniqueCode(orgId, request.code(), -1L);
 
         Team team = new Team();

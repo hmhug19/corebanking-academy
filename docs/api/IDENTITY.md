@@ -126,7 +126,7 @@ Chuyển membership: FE cảnh báo **mọi grant khác OWN của target sẽ b�
 ## 3. Cây tổ chức và nhóm
 
 - `orgs` gồm UNIT (đơn vị) và DEPARTMENT (phòng). UNIT có thể là root hoặc dưới UNIT; DEPARTMENT bắt buộc có parent UNIT. Không bắt buộc đơn vị phải có phòng trung gian.
-- `teams` là nhóm chuyên môn thuộc một node org, ví dụ tiền gửi/tiền vay/core/tích hợp. Không dùng teams làm phòng ban. Team của user phải có `team.orgId == user.orgId`.
+- `teams` là nhóm chuyên môn thuộc node DEPARTMENT (ban/phòng), ví dụ tiền gửi/tiền vay/core/tích hợp. Không tạo nhóm mới trực tiếp dưới UNIT; nhóm cũ ở UNIT vẫn đọc và quản lý được trong khi chờ chuẩn hóa dữ liệu. Team của user phải có `team.orgId == user.orgId`.
 - Không suy cây từ BRN/BRCD/CRA; đó là thông tin nguồn trên hồ sơ.
 - Tree dùng `GET /orgs/tree` để tải gốc trong scope; mở node bằng `/orgs/tree?parentId=<id>`. Trả PageResponse<OrganizationTreeNode>, mỗi node có `id,parentId,orgType,code,name,status,sortNo,hasChildren`. Mỗi cấp có phân trang, sortNo rồi ID tăng dần; FE tải tiếp khi còn trang. hasChildren chỉ xét con trong scope, không tải trước toàn bộ cây. Global admin xem cả node inactive; ADMIN ORG chỉ thấy nhánh active được cấp. Node gốc trong scope có thể có parentId ở ngoài scope, FE không tự tải cha đó.
 - Selector/search tiếp tục dùng `/orgs`; kết quả tìm kiếm là danh sách phẳng có parentId. API `/orgs/tree` phục vụ cây lazy-load và hasChildren; không thêm API departments riêng hoặc lấy ancestor ngoài scope.
@@ -135,7 +135,7 @@ Chuyển membership: FE cảnh báo **mọi grant khác OWN của target sẽ b�
 - ORG scope gồm node được gán và **cây con active**. Node inactive, ancestor inactive hoặc đường cha bị hỏng không cấp quyền quản trị ORG. Vô hiệu hóa org không tự sửa trạng thái từng user; global admin vẫn thấy node và có thể kích hoạt lại.
 - Counts `memberCount`, `teamCount` tại `/orgs` là số lượng trực tiếp của node, không phải cộng toàn cây. `/users?orgId=...` lọc node và cây con active; dùng teamId khi xem thành viên nhóm.
 - `/orgs/{id}` trả `{organization: OrganizationInfo, administrators:[...]}`. Administrators là tối đa 20 ADMIN ORG gán trực tiếp tại node, không gộp global admin hoặc quyền kế thừa. Quản trị chi tiết qua user/role-grants.
-- Khi chọn Ban/Phòng, gọi `GET /orgs/{id}/contents?page=0&size=6&sort=name,asc`: trả `{organization, administrators, teams}`. organization/administrators giữ cùng cấu trúc với GET chi tiết; teams là PageResponse<TeamInfo> gồm đúng nhóm có orgId=node được chọn, tối đa 5 thành viên xem trước mỗi nhóm. Không cộng nhóm/thành viên từ phòng con và không tự mở rộng xuống cây con. Danh sách nhân sự không nằm trong response này; `/users?orgId=...` hiện có ngữ nghĩa cả cây con active, không dùng thay danh sách nhân sự trực tiếp. Nhóm và thống kê có thể thay đổi giữa các request; không coi preview là danh sách đầy đủ.
+- Khi chọn Ban/Phòng, gọi `GET /orgs/{id}/contents?page=0&size=10&sort=name,asc`: trả `{organization, administrators, teams}`. organization/administrators giữ cùng cấu trúc với GET chi tiết; teams là PageResponse<TeamInfo> gồm đúng nhóm có orgId=node được chọn, tối đa 5 thành viên xem trước mỗi nhóm. Không cộng nhóm/thành viên từ phòng con và không tự mở rộng xuống cây con. Danh sách nhân sự không nằm trong response này; `/users?orgId=...` hiện có ngữ nghĩa cả cây con active, không dùng thay danh sách nhân sự trực tiếp. Nhóm và thống kê có thể thay đổi giữa các request; không coi preview là danh sách đầy đủ.
 - TeamInfo: `{id,orgId,code,name,description,status,memberCount,memberPreview:[{userId,fullName}]}`; preview tối đa 5, nút “Xem tất cả” dùng `/users?teamId=...`.
 - Form team có code/name/description. Không chuyển org hoặc đổi trạng thái team trong demo. Xóa chỉ khi không có member, role grant hoặc dữ liệu Learning tham chiếu, kể cả grant đã thu hồi và snapshot học tập (HTTP 200/ERROR, mã ORGANIZATION-TEAM_IN_USE nếu còn tham chiếu lịch sử). Không tự xóa user/grant/tiến độ theo cascade.
 
@@ -223,7 +223,8 @@ user/password, thành viên hoặc role/grant trong tệp này. Tổ chức/nhó
 
 - UNIT được bỏ trống parentCode; DEPARTMENT phải có cha UNIT. Cha có thể có sẵn trong DB hoặc trong cùng tệp,
   kể cả nằm sau con. Không chấp nhận chu trình, tham chiếu đứt hoặc đường cha có node inactive.
-- orgCode của Teams trỏ tới tổ chức đang hoạt động hoặc tổ chức mới của cùng tệp. Nhóm được tạo sau tổ chức.
+- orgCode của Teams phải trỏ tới DEPARTMENT đang hoạt động hoặc DEPARTMENT mới của cùng tệp, không nhận UNIT.
+  Nhóm được tạo sau tổ chức.
   Nếu Ban/Phòng đã có, không khai báo lại trong Organizations; dùng mã đó làm parentCode/orgCode. Chỉ nhập nhóm thì để Organizations trống.
 - Mã so sánh không phân biệt hoa/thường, được trim; mã phải là text để giữ số 0 đầu.
 - Chỉ tạo mới: mã tổ chức trùng DB/tệp hoặc mã nhóm trùng trong cùng tổ chức đều báo lỗi; không ghi đè/bỏ qua im lặng.
@@ -334,7 +335,7 @@ Không thêm `/members`, `/membership`, `/admins`, `/departments`, `/functions`,
 3. Profile: phân biệt field tự sửa với thông tin tổ chức/quyền và metadata nguồn readonly. LOCAL/SSO hiển thị theo authProvider.
 4. User list/detail: ba trạng thái canonical; thao tác tạm dừng/kích hoạt riêng với khóa/mở. Không có hard-delete user. Role tab nhiều grant và nhãn scope rõ ràng.
 5. Membership editor: cảnh báo thu hồi scoped grants khi chuyển; tải lại detail sau lưu; actor không tự chuyển hoặc tự sửa role.
-6. Org screen: tải cây bằng `/orgs/tree`, khi mở node truyền parentId; dùng hasChildren để hiện nút mở rộng và totalPages để tải tiếp. Khi chọn node, gọi `/orgs/{id}/contents` để cập nhật panel và phân trang nhóm. Phân biệt node UNIT/DEPARTMENT với team; disable thao tác global-only đối với ADMIN ORG. Hiển thị loading/empty và bỏ qua response cũ nếu người dùng đã chuyển node khác.
+6. Org screen: tải cây đơn vị/phòng bằng `/orgs/tree`, khi mở node truyền parentId; dùng hasChildren và totalPages để tải các cấp tiếp theo. Khi mở DEPARTMENT, tải các nhóm trực thuộc bằng `/orgs/{id}/teams` có phân trang; chọn nhóm gọi `/users?teamId=...` để xem thành viên theo scope, tìm kiếm và phân trang. Chọn node tổ chức gọi `/orgs/{id}/contents` để cập nhật panel và phân trang nhóm. Phân biệt node UNIT/DEPARTMENT với team; disable thao tác global-only đối với ADMIN ORG. Hiển thị loading/empty và bỏ qua response cũ nếu người dùng đã chuyển node khác.
 7. Team card: preview 5 người + số lượng thật, “Xem tất cả” mở list `/users?teamId=...`; hiển thị lỗi ORGANIZATION-TEAM_IN_USE khi xóa nhóm còn tham chiếu.
 8. Quyền: dựng selector theo assignableScopes, không single-role/adminScope; không cho UI tự đoán quyền theo positionName hoặc org của actor.
 9. Xử lý loading/empty, HTTP 200/ERROR, validation và lỗi HTTP bảo mật/giao thức; hiển thị responseId để hỗ trợ tra cứu. Đổi role/status/membership/password có thể làm phiên target hết hiệu lực.
