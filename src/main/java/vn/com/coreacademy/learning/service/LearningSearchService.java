@@ -78,7 +78,7 @@ public class LearningSearchService {
             throw BusinessException.validation("moduleId", "INVALID_VALUE", "Chỉ chọn một tiêu chí phân hệ.");
         }
         var pageable = PageQuery.of(page, size, sort, Set.of("id", "title", "updateTime", "dueAt", "progressPercent",
-            "startedAt", "lastAccessAt", "completedAt"));
+            "startedAt", "lastAccessAt", "completedAt", "publishedAt"));
         return PageResponse.from(withRatings(withBestScores(mode, query(mode, q, fieldId, programId, moduleId, level,
             requirement, learningStatus, state, overdue, assigned, failed, withoutModule, pageable))));
     }

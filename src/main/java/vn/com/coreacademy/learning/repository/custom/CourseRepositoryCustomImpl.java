@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.repository.custom;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 import jakarta.persistence.EntityManager;
@@ -77,6 +78,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
     @Override
     public Page<CourseCard> search(CourseSearch filter, Pageable pageable) {
         NativeSearchQuery sql = new NativeSearchQuery(COURSE_BASE + """
+            left join learning_hub.course_revisions published on published.revision_id = c.published_revision_id
             left join lateral (
                 select min(ar.effective_due_at) as due_at,
                        bool_or(ar.requirement = :codeMandatory and ar.effective_start_at <= current_timestamp) as
@@ -201,7 +203,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
             || (SearchMode.MINE.equals(filter.mode()) && filter.learningStatus() == null
                 && (Requirement.MANDATORY.equals(filter.requirement()) || Boolean.TRUE.equals(filter.assigned())));
         Sort order = Sort.by(pageable.getSort().stream()
-            .map(item -> "lastAccessAt".equals(item.getProperty()) ? item.nullsLast() : item).toList());
+            .map(item -> Set.of("lastAccessAt", "publishedAt").contains(item.getProperty()) ? item.nullsLast() : item).toList());
         Pageable ordered = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
             unfinishedFirst ? Sort.by("completionPriority").and(order) : order);
         return sql.page(entityManager, """
@@ -227,7 +229,7 @@ public class CourseRepositoryCustomImpl implements CourseRepositoryCustom {
                 "completionPriority", "case when e.status = :codeCompleted then 1 else 0 end",
                 "updateTime", "r.update_time", "dueAt", "obligations.due_at", "progressPercent", "e.progress_percent",
                 "startedAt", "e.started_at", "lastAccessAt", "e.last_access_at",
-                "completedAt", "e.completed_at"));
+                "completedAt", "e.completed_at", "publishedAt", "published.published_at"));
     }
 
     /** Lĩnh vực, chương trình, phân hệ của các khóa học viên thấy trong danh mục; filter là mode CATALOG. */
