@@ -209,7 +209,7 @@ vẫn là văn bản thuần. Đoạn khóa học dùng `khóa học › chươn
 `content_hash` (SHA-256), `chunker_version`, `embed_model`; số chiều vector và tên mô hình lấy từ cấu hình
 (`app.knowledge.ollama.embed-dimensions`, `embed-model`) và backend không khởi động nếu số chiều khác cột `vector(n)`.
 Khi trả lời, đoạn kề (`chunk_index ± 1`, cùng tài liệu hoặc cùng bài, cùng quy tắc quyền đọc) của mỗi đoạn tìm được được
-thêm vào sau các đoạn chính khi ngân sách `app.assistant.budget.retrieved` còn chỗ; top-k mặc định 6.
+thêm vào sau các đoạn chính khi ngân sách `app.assistant.budget.retrieved` còn chỗ; top-k mặc định 4.
 
 - `POST /api/v1/admin/knowledge/reindex`: chạy nền việc lập chỉ mục lại mọi tài liệu và revision khóa học có đoạn khác
   `chunker_version` hoặc `embed_model` so với cấu hình; mỗi mục được thay trong một transaction nên đoạn cũ vẫn trả lời

@@ -23,10 +23,11 @@ backend xử lý nền (trích xuất theo trang/dòng, chia đoạn, nhúng vec
 | `app.knowledge.worker.concurrency`    | `1`                      | Số tài liệu xử lý đồng thời                      |
 | `app.knowledge.worker.max-attempts`   | `3`                      | Số lần thử khi Ollama không phản hồi             |
 | `app.knowledge.chunk.*`               | 600 / 800 / 80           | Token mục tiêu / tối đa / chồng lấn (ước lượng)  |
-| `app.knowledge.retrieval.*`           | `top-k 5`, `0.35`        | Số đoạn lấy về và ngưỡng cosine tối thiểu        |
+| `app.knowledge.retrieval.*`           | `top-k 4`, `0.45`        | Số đoạn lấy về và ngưỡng cosine tối thiểu        |
 | `app.knowledge.ollama.base-url`       | `http://localhost:11434` | Địa chỉ Ollama                                   |
 | `app.knowledge.ollama.chat-model`     | `qwen3:8b`               | Mô hình trả lời                                  |
 | `app.knowledge.ollama.embed-model`    | `bge-m3`                 | Mô hình nhúng (1024 chiều)                       |
+| `app.knowledge.ollama.keep-alive`     | `-1s`                    | Thời gian Ollama giữ model; âm là giữ đến khi tắt |
 
 ## Tài liệu
 

@@ -79,8 +79,10 @@ app:
       max-tokens: 550
       overlap-tokens: 60
     retrieval:
-      top-k: 6
-      min-similarity: 0.35
+      # Fewer, closer chunks keep the prompt short: on a single Mac the model's prompt read is most of the wait.
+      # Not yet measured with RetrievalEval; tune per environment through the variables.
+      top-k: ${KNOWLEDGE_RETRIEVAL_TOP_K:4}
+      min-similarity: ${KNOWLEDGE_RETRIEVAL_MIN_SIMILARITY:0.45}
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat-model: ${OLLAMA_CHAT_MODEL:qwen3:8b}
@@ -89,7 +91,8 @@ app:
       embed-dimensions: ${OLLAMA_EMBED_DIMENSIONS:1024}
       connect-timeout: 5s
       read-timeout: 180s
-      keep-alive: 10m
+      # A negative value keeps the models loaded until Ollama restarts, so no question pays for a reload.
+      keep-alive: ${KNOWLEDGE_OLLAMA_KEEP_ALIVE:-1s}
   assistant:
     agent:
       max-steps: ${ASSISTANT_AGENT_MAX_STEPS:4}
@@ -100,7 +103,7 @@ app:
       num-ctx: ${ASSISTANT_BUDGET_NUM_CTX:8192}
       system-and-tools: ${ASSISTANT_BUDGET_SYSTEM:1200}
       history: ${ASSISTANT_BUDGET_HISTORY:2000}
-      retrieved: ${ASSISTANT_BUDGET_RETRIEVED:3500}
+      retrieved: ${ASSISTANT_BUDGET_RETRIEVED:2000}
       answer: ${ASSISTANT_BUDGET_ANSWER:1000}
     limits:
       questions-per-hour: ${ASSISTANT_QUESTIONS_PER_HOUR:60}
