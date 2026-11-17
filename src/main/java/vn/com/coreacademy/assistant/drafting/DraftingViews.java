@@ -35,7 +35,7 @@ public final class DraftingViews {
     }
 
     @Schema(description = "Một bước đã tới của phiên; proposal theo từng bước (bước 1: BasicsProposal, bước 2: "
-        + "OutlineProposal, bước 3: RulesProposal). lessonNotes chỉ có ở bước 2 đã chốt: mô tả và phần nguồn của từng bài theo id bài đã lưu.")
+        + "OutlineProposal, bước 3: RulesProposal, bước 4: AudienceProposal gồm targets và publishBlockers). lessonNotes chỉ có ở bước 2 đã chốt: mô tả và phần nguồn của từng bài theo id bài đã lưu.")
     public record StepView(int step, String state, JsonNode proposal, List<String> notes, String error,
                            OffsetDateTime updateTime,
                            @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode lessonNotes) {

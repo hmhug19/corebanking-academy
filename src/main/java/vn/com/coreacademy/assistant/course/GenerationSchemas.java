@@ -43,6 +43,11 @@ public final class GenerationSchemas {
     public static final int MAX_DRAFT_QUESTIONS = 15;
     /** The bonus points the model may propose; the course itself accepts more. */
     public static final int MAX_DRAFT_REWARD = 1000;
+    /** Step 4 of Soạn cùng trợ lý: who the course is assigned to, picked from the units the author may assign. */
+    public static final String DRAFT_AUDIENCE = "draft_audience";
+    /** The assignment targets the model may propose. */
+    public static final int MAX_DRAFT_TARGETS = 10;
+    static final int MAX_TARGET_KEY = 20;
     /** The step 1 fields the model may say it is unsure of. */
     public static final List<String> BASICS_FIELDS = List.of("title", "summary", "objectives", "level",
         "defaultRequirement", "programId", "moduleId");
@@ -104,6 +109,9 @@ public final class GenerationSchemas {
                     "section", string(MAX_SECTION_KEY)),
                     "type", "content", "difficulty", "options", "section"), 1, MAX_DRAFT_QUESTIONS)),
                 "rewardPoints", "questions");
+            case DRAFT_AUDIENCE -> object(Map.of("targets", array(object(Map.of("key", string(MAX_TARGET_KEY),
+                "includeDescendants", MAPPER.createObjectNode().put("type", "boolean")), "key"), 0,
+                MAX_DRAFT_TARGETS)), "targets");
             default -> throw new IllegalArgumentException("No schema for step " + stepKind);
         };
     }
@@ -371,6 +379,28 @@ public final class GenerationSchemas {
             text(question, "section", MAX_SECTION_KEY, problems, "question");
         }
         noLinks(node, problems, "rules");
+        return problems;
+    }
+
+    /**
+     * Step 4 of Soạn cùng trợ lý as the model wrote it: 0 to {@value #MAX_DRAFT_TARGETS} targets, each the key of a
+     * unit from the list it was given (checked against that list by the proposer, not here) and an optional
+     * "include the units below" flag.
+     */
+    public static List<String> draftAudience(JsonNode node) {
+        List<String> problems = new ArrayList<>();
+        JsonNode targets = node.path("targets");
+        if (!targets.isArray() || targets.size() > MAX_DRAFT_TARGETS) {
+            problems.add("audience.targets must have 0 to " + MAX_DRAFT_TARGETS + " items");
+            return problems;
+        }
+        for (JsonNode target : targets) {
+            text(target, "key", MAX_TARGET_KEY, problems, "audience.target");
+            JsonNode descendants = target.path("includeDescendants");
+            if (!descendants.isMissingNode() && !descendants.isNull() && !descendants.isBoolean()) {
+                problems.add("audience.target.includeDescendants must be true, false or absent");
+            }
+        }
         return problems;
     }
 

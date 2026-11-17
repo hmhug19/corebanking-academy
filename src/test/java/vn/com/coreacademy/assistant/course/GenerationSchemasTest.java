@@ -205,4 +205,40 @@ class GenerationSchemasTest {
         assertThat(schema.path("properties").path("questions").path("maxItems").asInt())
             .isEqualTo(GenerationSchemas.MAX_DRAFT_QUESTIONS);
     }
+
+    // ---- step 4, audience (ticket 07) -------------------------------------------------------------------------------
+
+    @Test
+    void aStepFourProposalNamesUnitKeysOrNothing() throws Exception {
+        assertThat(GenerationSchemas.draftAudience(json.readTree("""
+            {"targets": [{"key": "o12", "includeDescendants": true}, {"key": "t5"}]}
+            """))).isEmpty();
+        // no unit fits: an empty list is an answer, not a failure
+        assertThat(GenerationSchemas.draftAudience(json.readTree("{\"targets\": []}"))).isEmpty();
+    }
+
+    @Test
+    void aStepFourProposalWithoutKeysOrWithTooManyTargetsIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftAudience(json.readTree("{}"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftAudience(json.readTree("{\"targets\": [{\"key\": \"\"}]}")))
+            .isNotEmpty();
+        assertThat(GenerationSchemas.draftAudience(json.readTree(
+            "{\"targets\": [{\"key\": \"o1\", \"includeDescendants\": \"có\"}]}"))).isNotEmpty();
+        ObjectNode many = json.createObjectNode();
+        var targets = many.putArray("targets");
+        for (int i = 0; i <= GenerationSchemas.MAX_DRAFT_TARGETS; i++) {
+            targets.addObject().put("key", "o" + i);
+        }
+        assertThat(GenerationSchemas.draftAudience(many)).isNotEmpty();
+    }
+
+    @Test
+    void theStepFourSchemaAsksForUnitKeysOnly() {
+        JsonNode schema = GenerationSchemas.format(GenerationSchemas.DRAFT_AUDIENCE);
+        JsonNode target = schema.path("properties").path("targets").path("items");
+
+        assertThat(schema.path("required")).extracting(JsonNode::asText).containsExactly("targets");
+        assertThat(target.path("required")).extracting(JsonNode::asText).containsExactly("key");
+        assertThat(target.path("properties").has("orgId")).isFalse();
+    }
 }

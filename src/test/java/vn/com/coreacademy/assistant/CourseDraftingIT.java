@@ -26,6 +26,8 @@ import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationExcept
 import vn.com.coreacademy.assistant.course.SourceSummariser;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingWorker;
+import vn.com.coreacademy.assistant.drafting.DraftingPublishCheck;
+import vn.com.coreacademy.assistant.drafting.DraftingTargets;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer.Proposal;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
@@ -63,6 +65,11 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
            "sourceSection":"Hồ sơ và giấy tờ"}]}
         """;
 
+    private static final String AUDIENCE = """
+        {"targets":[{"targetType":"org","orgId":%d,"includeDescendants":false,"label":"Đơn vị"}],
+         "publishBlockers":["1 bài chưa có nội dung"]}
+        """;
+
     @MockitoBean
     private OllamaClient ollama;
     @MockitoBean
@@ -76,6 +83,10 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     private JdbcTemplate jdbc;
     @Autowired
     private CourseDraftingWorker worker;
+    @Autowired
+    private DraftingPublishCheck publishCheck;
+    @Autowired
+    private DraftingTargets targets;
 
     private ApiClient api;
     private long ownOrg;
@@ -109,6 +120,10 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
             }
             if (step.stepNo() == 3) {
                 return new Proposal(json.readTree(RULES), List.of("Đã đề xuất 3 câu hỏi nháp."), null);
+            }
+            if (step.stepNo() == 4) {
+                return new Proposal(json.readTree(AUDIENCE.formatted(ownOrg)), List.of("Đề xuất giao cho: Đơn vị."),
+                    null);
             }
             return new Proposal(json.readTree("""
                 {"title":"Mở tài khoản","summary":"Quy trình.","objectives":["Thực hiện được"],"level":"basic",
@@ -587,6 +602,101 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         assertThat(finalExams(ids[1])).isZero();
         assertThat(jdbc.queryForObject("SELECT reward_points FROM learning_hub.course_completion_rules "
             + "WHERE revision_id = ?", Integer.class, ids[2])).isEqualTo(20);
+    }
+
+    // ---- step 4, audience and publish check (ticket 07) -----------------------------------------------------------------
+
+    /** A session at step 4 with its audience proposed; returns {sessionId, courseId, revisionId}. */
+    private long[] audienceProposed(String code) {
+        long[] ids = rulesProposed(code);
+        List<JsonNode> kept = List.of(api.ok(INSTRUCTOR, session(ids[0])).path("steps").get(2).path("proposal")
+            .path("questions").get(0));
+        api.ok(INSTRUCTOR, confirm(ids[0], 3, rulesBody(ids[2], 20, competency, kept)));
+        assertThat(worker.runOnce()).isTrue();
+        return ids;
+    }
+
+    @Test
+    void confirmingStepFourEndsTheFlowAndAssignsSharesAndPublishesNothing() {
+        long[] ids = audienceProposed("AI-AUDIENCE1");
+        JsonNode proposed = api.ok(INSTRUCTOR, session(ids[0])).path("steps").get(3);
+        assertThat(proposed.path("state").asText()).isEqualTo("proposed");
+        assertThat(proposed.path("proposal").path("targets").get(0).path("orgId").asLong()).isEqualTo(ownOrg);
+        assertThat(proposed.path("proposal").path("publishBlockers")).hasSize(1);
+        Map<String, Object> before = courseState(ids[1], ids[2]);
+
+        JsonNode confirmed = api.ok(INSTRUCTOR, confirm(ids[0], 4, Map.of()));
+
+        assertThat(confirmed.path("status").asText()).isEqualTo("finished");
+        assertThat(confirmed.path("currentStep").asInt()).isEqualTo(4);
+        assertThat(confirmed.path("steps")).hasSize(4);
+        assertThat(confirmed.path("steps").get(3).path("state").asText()).isEqualTo("confirmed");
+        assertThat(courseState(ids[1], ids[2])).isEqualTo(before)
+            .containsEntry("assignments", 0L).containsEntry("shares", 0L)
+            .containsEntry("published_revision_id", null).containsEntry("state", "draft");
+        // the flow is over: nothing more to confirm or propose
+        api.error(INSTRUCTOR, confirm(ids[0], 4, Map.of()), "CORE-VALIDATION_FAILED");
+        assertThat(worker.runOnce()).isFalse();
+    }
+
+    @Test
+    void stepFourIsConfirmedOnlyOnceProposedAndOnlyByItsAuthor() {
+        long[] ids = rulesProposed("AI-AUDIENCE2");
+        api.ok(INSTRUCTOR, confirm(ids[0], 3, rulesBody(ids[2], 20, null, List.of())));
+
+        api.error(INSTRUCTOR, confirm(ids[0], 4, Map.of()), "CORE-VALIDATION_FAILED");
+        worker.runOnce();
+        api.error(ADMIN, confirm(ids[0], 4, Map.of()), "CORE-RESOURCE_NOT_FOUND");
+        api.http(LEARNER, confirm(ids[0], 4, Map.of()), 403, "CORE-ACCESS_DENIED");
+        assertThat(api.ok(INSTRUCTOR, session(ids[0])).path("status").asText()).isEqualTo("active");
+    }
+
+    @Test
+    void thePublishCheckOfADraftFromTheFlowNamesItsEmptyLessonsLikeThePage() {
+        long[] ids = audienceProposed("AI-AUDIENCE3");
+
+        // the saved draft has one empty lesson, a programme, a level and the step 3 exam (a draft, published with
+        // the course): only the lessons block publishing
+        assertThat(publishCheck.blockers(ids[2])).containsExactly(
+            "Mọi bài học có nội dung, đủ tệp hoặc đã chọn bài kiểm tra", "1 bài chưa có nội dung");
+    }
+
+    @Test
+    void theAudienceIsOfferedOnlyUnitsTheAuthorMayAssign() {
+        long root = jdbc.queryForObject("""
+            WITH RECURSIVE up(org_id, parent_id) AS (
+                SELECT org_id, parent_id FROM learning_hub.orgs WHERE org_id = ?
+                UNION SELECT o.org_id, o.parent_id FROM learning_hub.orgs o JOIN up ON o.org_id = up.parent_id)
+            SELECT org_id FROM up WHERE parent_id IS NULL
+            """, Long.class, ownOrg);
+
+        List<DraftingTargets.Target> own = targets.assignable(INSTRUCTOR, ownOrg, 100);
+        assertThat(own).anySatisfy(target -> {
+            assertThat(target.targetType()).isEqualTo("org");
+            assertThat(target.id()).isEqualTo(ownOrg);
+            assertThat(target.withDescendants()).isTrue();
+        });
+        // the instructor manages their own unit only: from the top unit down, the top one is not offered
+        List<DraftingTargets.Target> fromRoot = targets.assignable(INSTRUCTOR, root, 1000);
+        assertThat(fromRoot).extracting(DraftingTargets.Target::id).contains(ownOrg);
+        if (root != ownOrg) {
+            assertThat(fromRoot).noneMatch(target -> "org".equals(target.targetType()) && target.id() == root);
+        }
+        // a learner may assign nothing
+        assertThat(targets.assignable(LEARNER, ownOrg, 100)).isEmpty();
+    }
+
+    /** What step 4 must leave alone: the course's assignments, shares, published pointer and draft state. */
+    private Map<String, Object> courseState(long courseId, long revisionId) {
+        Map<String, Object> state = new HashMap<>(jdbc.queryForMap("""
+            SELECT c.published_revision_id, r.state, r.ai_generated, r.row_version,
+                   (SELECT count(*) FROM learning_hub.course_assignments a WHERE a.course_id = c.course_id)
+                       AS assignments,
+                   (SELECT count(*) FROM learning_hub.course_shares s WHERE s.course_id = c.course_id) AS shares
+              FROM learning_hub.courses c JOIN learning_hub.course_revisions r ON r.revision_id = ?
+             WHERE c.course_id = ?
+            """, revisionId, courseId));
+        return state;
     }
 
     /** What the page sends for step 3: the draft with the outline, the rules and the kept questions. */

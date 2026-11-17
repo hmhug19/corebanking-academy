@@ -51,9 +51,11 @@ class CourseDraftingProposerTest {
     private final SourceTextRepository sources = mock(SourceTextRepository.class);
     private final OllamaClient ollama = mock(OllamaClient.class);
     private final CourseDraftingRepository drafting = mock(CourseDraftingRepository.class);
+    private final DraftingTargets targets = mock(DraftingTargets.class);
+    private final DraftingPublishCheck publishCheck = mock(DraftingPublishCheck.class);
     private final CourseDraftingProposer proposer = new CourseDraftingProposer(new SourceSummariser(sources, ollama,
         new SkillCatalog(), AssistantModels.defaults(), json, AssistantBudget.defaults(),
-        new GenerationProperties(3, Duration.ofSeconds(3))), drafting, json);
+        new GenerationProperties(3, Duration.ofSeconds(3))), drafting, json, targets, publishCheck);
 
     @BeforeEach
     void aReadableDocumentAndTheUnitsLists() {
@@ -218,9 +220,11 @@ class CourseDraftingProposerTest {
     }
 
     @Test
-    void aStepNotBuiltYetFailsReadably() {
-        assertThatThrownBy(() -> proposer.propose(session("{}", null), step(4)))
+    void anUnknownStepOrAnAudienceWithoutADraftFailsReadably() {
+        assertThatThrownBy(() -> proposer.propose(session("{}", null), step(5)))
             .isInstanceOf(GenerationException.class).hasMessage(CourseDraftingProposer.NOT_SUPPORTED);
+        assertThatThrownBy(() -> proposer.propose(session("{}", null), step(4)))
+            .isInstanceOf(GenerationException.class).hasMessage(CourseDraftingProposer.NO_DRAFT);
     }
 
     // ---- step 2 ----------------------------------------------------------------------------------------------------
@@ -402,5 +406,86 @@ class CourseDraftingProposerTest {
         verify(ollama, times(2)).chat(anyList(), any(), any(), any());
         assertThat(result.proposal().path("questions").get(0).path("sourceSection").asText())
             .isEqualTo("Điều kiện mở tài khoản");
+    }
+
+    // ---- step 4 ----------------------------------------------------------------------------------------------------
+
+    private static SessionRow audienceSession() {
+        return new SessionRow(5, "000005", ORG, DOCUMENT, null, 70L, 71L, 4, "active", null,
+            "{\"targetLearners\":\"Giao dịch viên chi nhánh\"}", SECTIONS, null, null);
+    }
+
+    private void theAssignableUnits() {
+        when(targets.assignable("000005", ORG, 100)).thenReturn(List.of(
+            new DraftingTargets.Target("org", 1, "Chi nhánh Hà Nội", true),
+            new DraftingTargets.Target("org", 2, "Phòng giao dịch Ba Đình", false),
+            new DraftingTargets.Target("team", 5, "Tổ giao dịch viên", false)));
+        when(drafting.courseBrief(71L)).thenReturn(Optional.of(new CourseBrief("Mở tài khoản thanh toán",
+            "Quy trình tại quầy.", "basic", List.of())));
+        when(publishCheck.blockers(71L)).thenReturn(List.of(DraftingPublishCheck.LESSONS_COMPLETE,
+            "3 bài chưa có nội dung"));
+    }
+
+    @Test
+    void theAudienceKeepsOnlyUnitsTheAuthorMayAssignAsPageRowsWithThePublishBlockers() {
+        theAssignableUnits();
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn("""
+            {"targets":[{"key":"t5"},{"key":"o1","includeDescendants":true},{"key":"o2","includeDescendants":true},
+                        {"key":"o999"},{"key":"t5"}]}
+            """);
+
+        Proposal result = proposer.propose(audienceSession(), step(4));
+
+        JsonNode picks = result.proposal().path("targets");
+        // o999 is not a unit the author may assign: dropped; the second t5 is the same pick
+        assertThat(picks).hasSize(3);
+        assertThat(picks.get(0).path("targetType").asText()).isEqualTo("team");
+        assertThat(picks.get(0).path("teamId").asLong()).isEqualTo(5);
+        assertThat(picks.get(0).has("orgId")).isFalse();
+        assertThat(picks.get(0).path("label").asText()).isEqualTo("Tổ giao dịch viên");
+        assertThat(picks.get(1).path("orgId").asLong()).isEqualTo(1);
+        assertThat(picks.get(1).path("includeDescendants").asBoolean()).isTrue();
+        // the author may not assign every unit below unit 2: the flag is dropped, the unit kept
+        assertThat(picks.get(2).path("orgId").asLong()).isEqualTo(2);
+        assertThat(picks.get(2).path("includeDescendants").asBoolean()).isFalse();
+        assertThat(result.proposal().path("publishBlockers")).extracting(JsonNode::asText)
+            .containsExactly(DraftingPublishCheck.LESSONS_COMPLETE, "3 bài chưa có nội dung");
+        assertThat(result.notes()).containsExactly(
+            "Đề xuất giao cho: Tổ giao dịch viên, Chi nhánh Hà Nội, Phòng giao dịch Ba Đình.",
+            "Trước khi xuất bản còn: " + DraftingPublishCheck.LESSONS_COMPLETE + "; 3 bài chưa có nội dung.",
+            CourseDraftingProposer.NOTHING_ASSIGNED);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<OllamaClient.Message>> calls = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<JsonNode> formats = ArgumentCaptor.forClass(JsonNode.class);
+        verify(ollama).chat(calls.capture(), any(), formats.capture(), any());
+        assertThat(calls.getValue().get(1).content()).contains("Giao dịch viên chi nhánh", "o1: Chi nhánh Hà Nội",
+            "t5: Tổ giao dịch viên", "Mở tài khoản thanh toán");
+        assertThat(formats.getValue()).isEqualTo(GenerationSchemas.format(GenerationSchemas.DRAFT_AUDIENCE));
+    }
+
+    @Test
+    void noFittingUnitLeavesTheAudienceEmptyWithANote() {
+        theAssignableUnits();
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn("{\"targets\":[{\"key\":\"o999\"}]}");
+
+        Proposal result = proposer.propose(audienceSession(), step(4));
+
+        assertThat(result.proposal().path("targets")).isEmpty();
+        assertThat(result.notes()).startsWith(CourseDraftingProposer.NO_AUDIENCE);
+    }
+
+    @Test
+    void anAuthorWhoMayAssignNothingGetsNoModelCallAndStillTheBlockers() {
+        when(targets.assignable(anyString(), anyLong(), anyInt())).thenReturn(List.of());
+        when(publishCheck.blockers(71L)).thenReturn(List.of());
+
+        Proposal result = proposer.propose(audienceSession(), step(4));
+
+        verify(ollama, never()).chat(anyList(), any(), any(), any());
+        assertThat(result.proposal().path("targets")).isEmpty();
+        assertThat(result.proposal().path("publishBlockers")).isEmpty();
+        assertThat(result.notes()).containsExactly(CourseDraftingProposer.NO_AUDIENCE,
+            CourseDraftingProposer.PUBLISHABLE, CourseDraftingProposer.NOTHING_ASSIGNED);
     }
 }

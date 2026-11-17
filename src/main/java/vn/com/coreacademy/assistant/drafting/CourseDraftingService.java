@@ -139,7 +139,7 @@ public class CourseDraftingService {
                 RulesConfirm rules = checked(body, RulesConfirm.class, "draft");
                 yield view(transaction.execute(status -> confirmRules(sessionId, rules)));
             }
-            // Step 4 is confirmed by the ticket that proposes it.
+            case DraftingStates.LAST_STEP -> view(transaction.execute(status -> confirmAudience(sessionId)));
             default -> throw notReady();
         };
     }
@@ -259,6 +259,24 @@ public class CourseDraftingService {
         drafting.confirmStep(sessionId, step);
         drafting.advance(sessionId, step + 1);
         drafting.insertStep(sessionId, step + 1);
+
+        return drafting.session(sessionId).orElseThrow();
+    }
+
+    /**
+     * Chốt bước 4 ends the flow and stores nothing on the course: the proposed targets only filled the page's assign
+     * form, and assigning, sharing and publishing stay the author's own actions (publishing still asks to confirm the
+     * review of AI content). The body is ignored: whatever the page holds for step 4 is saved by publishing, not here.
+     */
+    private SessionRow confirmAudience(long sessionId) {
+        int step = DraftingStates.LAST_STEP;
+        SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != step
+            || session.courseId() == null || !confirmable(stepRow(sessionId, step))) {
+            throw notReady();
+        }
+        drafting.confirmStep(sessionId, step);
+        drafting.finish(sessionId);
 
         return drafting.session(sessionId).orElseThrow();
     }

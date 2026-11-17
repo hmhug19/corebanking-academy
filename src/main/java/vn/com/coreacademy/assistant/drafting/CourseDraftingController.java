@@ -100,6 +100,7 @@ public class CourseDraftingController {
             - Chỉ chốt được bước hiện tại khi đã đề xuất xong (proposed), lỗi (failed) hoặc tự điền (manual); khác đi trả             CORE-VALIDATION_FAILED trường step mã INVALID_STATE.
             - Bước 1 tạo bản nháp khóa học qua đường tạo khóa học thông thường, gắn vào phiên rồi chuyển sang bước 2             (proposing). Chốt lại bước 1 khi đã có khóa học trả phiên như hiện tại, không tạo khóa thứ hai.
             - Mã khóa học đã có trả LEARNING-DUPLICATE trường course.code; phiên đề xuất mã mới ở bước 1.
+            - Bước 4 ({}) chỉ kết thúc phiên (status finished): không giao, không chia sẻ, không xuất bản gì.
             """
     )
     public BaseResponse<SessionView> confirm(@PathVariable @Positive Long sessionId,

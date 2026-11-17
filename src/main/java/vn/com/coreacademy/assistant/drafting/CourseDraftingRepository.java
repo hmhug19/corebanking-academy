@@ -1,11 +1,16 @@
 package vn.com.coreacademy.assistant.drafting;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
@@ -40,6 +45,23 @@ public class CourseDraftingRepository {
     }
 
     public record DocumentInfo(long id, String fileName, String status) {
+    }
+
+    /** A unit or team of the course's owner unit: {@code org} or {@code team}, with the unit a team belongs to. */
+    public record Unit(String targetType, long id, String name, long orgId) {
+    }
+
+    /** The saved draft as the pre-publish check reads it; {@code finalQuizId} is the selected final exam, if any. */
+    public record DraftSnapshot(String title, Long programId, String level, boolean hasObjective,
+                                List<LessonSnapshot> lessons, Long finalQuizId) {
+    }
+
+    /** A lesson and its blocks, in outline order. */
+    public record LessonSnapshot(String lessonType, Long quizId, Long scormPackageId, List<BlockSnapshot> blocks) {
+    }
+
+    /** A block with what makes it complete: its text, its process steps and its files. */
+    public record BlockSnapshot(String blockType, String body, int steps, int assets) {
     }
 
     private static final String SESSION_COLUMNS = """
@@ -192,6 +214,14 @@ public class CourseDraftingRepository {
     }
 
     // ---- steps -----------------------------------------------------------------------------------------------------
+
+    /** The last step is confirmed: the assistant's part of the session is over. */
+    public void finish(long sessionId) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_sessions SET status = 'finished', update_time = now()
+             WHERE session_id = ? AND status = 'active'
+            """, sessionId);
+    }
 
     /** The step starts being proposed; the worker picks it up. */
     public void insertStep(long sessionId, int stepNo) {
@@ -349,5 +379,76 @@ public class CourseDraftingRepository {
             SELECT document_id, file_name, status FROM learning_hub.knowledge_documents WHERE document_id = ?
             """, (rs, row) -> new DocumentInfo(rs.getLong(1), rs.getString(2), rs.getString(3)), documentId)
             .stream().findFirst();
+    }
+
+    /**
+     * The active units of the subtree under {@code ownerOrgId} (the unit itself first) and their active teams, what a
+     * course of that unit may be assigned to before the author's own scope is checked. At most {@code limit} of each.
+     */
+    public List<Unit> units(long ownerOrgId, int limit) {
+        List<Unit> units = new ArrayList<>(jdbc.query("""
+            WITH RECURSIVE subtree(org_id, depth) AS (
+                SELECT org_id, 0 FROM learning_hub.orgs WHERE org_id = ? AND status = 'active'
+                UNION
+                SELECT o.org_id, s.depth + 1 FROM learning_hub.orgs o JOIN subtree s ON o.parent_id = s.org_id
+                 WHERE o.status = 'active'
+            )
+            SELECT o.org_id, o.name FROM subtree s JOIN learning_hub.orgs o ON o.org_id = s.org_id
+             ORDER BY s.depth, o.sort_no, o.name, o.org_id
+             LIMIT ?
+            """, (rs, row) -> new Unit("org", rs.getLong(1), rs.getString(2), rs.getLong(1)), ownerOrgId, limit));
+        List<Long> orgIds = units.stream().map(Unit::id).toList();
+        if (orgIds.isEmpty()) {
+            return units;
+        }
+        String marks = String.join(",", Collections.nCopies(orgIds.size(), "?"));
+        List<Object> arguments = new ArrayList<>(orgIds);
+        arguments.add(limit);
+        units.addAll(jdbc.query("SELECT team_id, name, org_id FROM learning_hub.teams WHERE status = 'active' "
+            + "AND org_id IN (" + marks + ") ORDER BY name, team_id LIMIT ?",
+            (rs, row) -> new Unit("team", rs.getLong(1), rs.getString(2), rs.getLong(3)), arguments.toArray()));
+
+        return units;
+    }
+
+    /** The draft revision as the pre-publish check reads it; empty when the revision is gone. */
+    public Optional<DraftSnapshot> draftSnapshot(long revisionId) {
+        boolean objective = Boolean.TRUE.equals(jdbc.queryForObject("""
+            SELECT EXISTS (SELECT 1 FROM learning_hub.course_objectives
+                            WHERE revision_id = ? AND btrim(description) <> '')
+            """, Boolean.class, revisionId));
+        Map<Long, List<BlockSnapshot>> blocks = new HashMap<>();
+        jdbc.query("""
+            SELECT b.lesson_id, b.block_type, b.body,
+                   (SELECT count(*) FROM learning_hub.process_steps s WHERE s.block_id = b.block_id),
+                   (SELECT count(*) FROM learning_hub.block_assets a WHERE a.block_id = b.block_id)
+              FROM learning_hub.lesson_blocks b
+              JOIN learning_hub.course_lessons l ON l.lesson_id = b.lesson_id
+              JOIN learning_hub.course_chapters c ON c.chapter_id = l.chapter_id
+             WHERE c.revision_id = ?
+             ORDER BY b.sort_no, b.block_id
+            """, (RowCallbackHandler) rs -> blocks
+            .computeIfAbsent(rs.getLong(1), id -> new ArrayList<>())
+            .add(new BlockSnapshot(rs.getString(2), rs.getString(3), rs.getInt(4), rs.getInt(5))), revisionId);
+        List<LessonSnapshot> lessons = jdbc.query("""
+            SELECT l.lesson_id, l.lesson_type, l.quiz_id, l.scorm_package_id
+              FROM learning_hub.course_lessons l
+              JOIN learning_hub.course_chapters c ON c.chapter_id = l.chapter_id
+             WHERE c.revision_id = ?
+             ORDER BY c.sort_no, l.sort_no, l.lesson_id
+            """, (rs, row) -> new LessonSnapshot(rs.getString(2), rs.getObject(3, Long.class),
+            rs.getObject(4, Long.class), blocks.getOrDefault(rs.getLong(1), List.of())), revisionId);
+        // The final exam as the course detail reads it: the exam link overrides the completion rule's legacy column.
+        Long finalQuizId = jdbc.query("""
+            SELECT COALESCE(
+                (SELECT assessment_revision_id FROM learning_hub.course_assessments
+                  WHERE revision_id = ? AND placement = 'final' ORDER BY link_id DESC LIMIT 1),
+                (SELECT final_quiz_id FROM learning_hub.course_completion_rules WHERE revision_id = ? LIMIT 1))
+            """, (rs, row) -> rs.getObject(1, Long.class), revisionId, revisionId).stream().findFirst().orElse(null);
+
+        return jdbc.query("""
+            SELECT title, program_id, level FROM learning_hub.course_revisions WHERE revision_id = ?
+            """, (rs, row) -> new DraftSnapshot(rs.getString(1), rs.getObject(2, Long.class), rs.getString(3),
+            objective, lessons, finalQuizId), revisionId).stream().findFirst();
     }
 }

@@ -40,6 +40,12 @@ public class CourseDraftingProposer implements DraftingStepProposer {
     static final String NOT_SUPPORTED = "Bước này chưa được hỗ trợ.";
     static final String NO_PROGRAMME = "Chưa chọn được chương trình đào tạo phù hợp; hãy chọn trong danh sách.";
     static final String NO_MODULE = "Chưa chọn được phân hệ nghiệp vụ; hãy chọn trong danh sách nếu cần.";
+    static final String NO_DRAFT = "Phiên soạn chưa có bản nháp khóa học.";
+    static final String NO_AUDIENCE = "Chưa chọn được đối tượng giao học phù hợp; hãy chọn ở bước Đối tượng & xuất "
+        + "bản nếu cần.";
+    static final String NOTHING_ASSIGNED = "Trợ lý không giao, không chia sẻ và không xuất bản khóa học; bạn tự làm "
+        + "khi đã sẵn sàng.";
+    static final String PUBLISHABLE = "Kiểm tra trước khi xuất bản: không còn mục bắt buộc nào chưa đạt.";
     static final String NO_COMPETENCY = "Chưa chọn được năng lực cho câu hỏi; hãy chọn trong danh sách trước khi chốt.";
     private static final int CANDIDATES = 100;
     private static final int CODE_TRIES = 20;
@@ -51,6 +57,8 @@ public class CourseDraftingProposer implements DraftingStepProposer {
     private final SourceSummariser summariser;
     private final CourseDraftingRepository drafting;
     private final ObjectMapper json;
+    private final DraftingTargets targets;
+    private final DraftingPublishCheck publishCheck;
 
     @Override
     public Proposal propose(SessionRow session, DraftingStepRow step) {
@@ -58,6 +66,7 @@ public class CourseDraftingProposer implements DraftingStepProposer {
             case 1 -> basics(session);
             case 2 -> outline(session);
             case 3 -> rules(session);
+            case 4 -> audience(session);
             default -> throw new GenerationException(NOT_SUPPORTED);
         };
     }
@@ -413,6 +422,103 @@ public class CourseDraftingProposer implements DraftingStepProposer {
         }
 
         return new Proposal(proposal, List.copyOf(notes), madeSummary);
+    }
+
+    // ---- step 4 ----------------------------------------------------------------------------------------------------
+
+    /**
+     * Who the course is assigned to and what still blocks publishing. The model picks targets by key from the units
+     * and teams the author may assign to now ({@link DraftingTargets}), reading the author's hint and the source; a key
+     * outside that list is dropped, never asked again. The blockers are the page's own pre-publish check on the saved
+     * draft ({@link DraftingPublishCheck}). Nothing is assigned, shared or published here or when the step is confirmed.
+     */
+    private Proposal audience(SessionRow session) {
+        if (session.revisionId() == null) {
+            throw new GenerationException(NO_DRAFT);
+        }
+        List<String> blockers = publishCheck.blockers(session.revisionId());
+        List<DraftingTargets.Target> assignable = targets.assignable(session.ownerUserId(), session.ownerOrgId(),
+            CANDIDATES);
+        JsonNode answer = json.createArrayNode();
+        JsonNode made = null;
+        if (!assignable.isEmpty()) {
+            Source source = source(session);
+            made = source.made();
+            Optional<CourseBrief> course = drafting.courseBrief(session.revisionId());
+            answer = summariser.ask(GenerationSchemas.DRAFT_AUDIENCE, audienceMessage(source.summary(),
+                parse(session.hints()), course, assignable), GenerationSchemas::draftAudience).path("targets");
+        }
+
+        Proposal checked = checkedAudience(answer, assignable, blockers);
+        return new Proposal(checked.proposal(), checked.notes(), made);
+    }
+
+    private static String targetKey(DraftingTargets.Target target) {
+        return ("org".equals(target.targetType()) ? "o" : "t") + target.id();
+    }
+
+    private static String audienceMessage(JsonNode summary, JsonNode hints, Optional<CourseBrief> course,
+                                          List<DraftingTargets.Target> assignable) {
+        StringBuilder user = new StringBuilder("DỮ LIỆU\n");
+        course.ifPresent(brief -> {
+            user.append("Tên khóa học: ").append(brief.title()).append('\n');
+            if (brief.summary() != null && !brief.summary().isBlank()) {
+                user.append("Mô tả ngắn: ").append(brief.summary().strip()).append('\n');
+            }
+            if (brief.level() != null) {
+                user.append("Mức độ: ").append(brief.level()).append('\n');
+            }
+        });
+        appendHint(user, hints, "targetLearners", "Đối tượng học viên người dùng nêu");
+        user.append("\nCÁC PHẦN CỦA TÀI LIỆU NGUỒN:\n");
+        for (JsonNode section : topSections(summary)) {
+            user.append("- ").append(section.path("title").asText().strip()).append(": ")
+                .append(section.path("summary").asText().strip()).append('\n');
+        }
+        user.append("\nĐƠN VỊ VÀ PHÒNG/NHÓM CÓ THỂ GIAO (khóa: tên [loại]):\n");
+        assignable.forEach(target -> user.append("- ").append(targetKey(target)).append(": ").append(target.name())
+            .append("org".equals(target.targetType()) ? " [đơn vị]" : " [phòng/nhóm]").append('\n'));
+
+        return user.toString();
+    }
+
+    /**
+     * The proposal the author sees: each target the model named that is in the list, once, as the page's assign row
+     * takes it ({@code TargetPick}); "include the units below" only where the author may assign to all of them.
+     */
+    Proposal checkedAudience(JsonNode answer, List<DraftingTargets.Target> assignable, List<String> blockers) {
+        Map<String, DraftingTargets.Target> byKey = new LinkedHashMap<>();
+        assignable.forEach(target -> byKey.put(targetKey(target), target));
+        Set<String> seen = new LinkedHashSet<>();
+        ObjectNode proposal = json.createObjectNode();
+        var picks = proposal.putArray("targets");
+        List<String> names = new ArrayList<>();
+        for (JsonNode item : answer) {
+            String key = item.path("key").asText().strip();
+            DraftingTargets.Target target = byKey.get(key);
+            if (target == null || !seen.add(key)) {
+                continue;
+            }
+            ObjectNode pick = picks.addObject().put("targetType", target.targetType());
+            if ("org".equals(target.targetType())) {
+                pick.put("orgId", target.id());
+            } else {
+                pick.put("teamId", target.id());
+            }
+            pick.put("includeDescendants", target.withDescendants() && item.path("includeDescendants").asBoolean());
+            pick.put("label", target.name());
+            names.add(target.name());
+        }
+        var blockerList = proposal.putArray("publishBlockers");
+        blockers.forEach(blockerList::add);
+
+        List<String> notes = new ArrayList<>();
+        notes.add(names.isEmpty() ? NO_AUDIENCE : "Đề xuất giao cho: " + String.join(", ", names) + ".");
+        notes.add(blockers.isEmpty() ? PUBLISHABLE
+            : "Trước khi xuất bản còn: " + String.join("; ", blockers) + ".");
+        notes.add(NOTHING_ASSIGNED);
+
+        return new Proposal(proposal, List.copyOf(notes), null);
     }
 
     /** A course code nobody uses now, in the old flow's shape ({@code AI-} and 8 characters). */
