@@ -25,6 +25,16 @@ public final class GenerationSchemas {
     static final int MAX_TITLE = 255;
     static final int MAX_STEPS = 30;
     static final Set<String> DIFFICULTIES = Set.of("EASY", "MEDIUM", "HARD");
+    /** Step 1 of Soạn cùng trợ lý: the basic information of the course. */
+    public static final String DRAFT_BASICS = "draft_basics";
+    static final int MAX_DRAFT_SUMMARY = 2000;
+    static final int MAX_DRAFT_OBJECTIVES = 10;
+    /** The course's level and kind ("Loại khóa học"), as the course stores them. */
+    public static final List<String> LEVELS = List.of("basic", "intermediate", "advanced");
+    public static final List<String> REQUIREMENTS = List.of("mandatory", "optional");
+    /** The step 1 fields the model may say it is unsure of. */
+    public static final List<String> BASICS_FIELDS = List.of("title", "summary", "objectives", "level",
+        "defaultRequirement", "programId", "moduleId");
 
     /** Links, images and HTML in model text: the skill forbids them, and a source document must not smuggle them in. */
     private static final Pattern LINK = Pattern.compile("(?i)(https?:|ftp:|javascript:)|www\\.|\\]\\(|<\\s*[a-z/!]");
@@ -61,6 +71,13 @@ public final class GenerationSchemas {
                 "options", array(object(Map.of("content", string(1000), "correct", MAPPER.createObjectNode()
                     .put("type", "boolean")), "content", "correct"), 2, 6)),
                 "type", "content", "difficulty", "options"), 1, 8)), "questions");
+            case DRAFT_BASICS -> object(Map.of("title", string(MAX_TITLE), "summary", string(MAX_DRAFT_SUMMARY),
+                "objectives", array(string(2000), 1, MAX_DRAFT_OBJECTIVES),
+                "level", enumOf(LEVELS.toArray(String[]::new)),
+                "defaultRequirement", enumOf(REQUIREMENTS.toArray(String[]::new)),
+                "programId", integer(1, Integer.MAX_VALUE), "moduleId", integer(1, Integer.MAX_VALUE),
+                "unsure", array(enumOf(BASICS_FIELDS.toArray(String[]::new)), 0, BASICS_FIELDS.size())),
+                "title", "summary", "objectives", "level", "defaultRequirement", "unsure");
             default -> throw new IllegalArgumentException("No schema for step " + stepKind);
         };
     }
@@ -224,6 +241,41 @@ public final class GenerationSchemas {
                 problems.add("a MULTIPLE question needs at least two correct options");
             }
         }
+        return problems;
+    }
+
+    /**
+     * Step 1 of Soạn cùng trợ lý as the model wrote it: title, short description, 1 to 10 objectives, a known level and
+     * kind, optional programme and module ids (checked against the lists later, not here) and the fields it is unsure of.
+     */
+    public static List<String> draftBasics(JsonNode node) {
+        List<String> problems = new ArrayList<>();
+        text(node, "title", MAX_TITLE, problems, "basics");
+        text(node, "summary", MAX_DRAFT_SUMMARY, problems, "basics");
+        strings(node.path("objectives"), 1, MAX_DRAFT_OBJECTIVES, problems, "basics.objectives");
+        if (!LEVELS.contains(node.path("level").asText(""))) {
+            problems.add("basics.level must be one of " + LEVELS);
+        }
+        if (!REQUIREMENTS.contains(node.path("defaultRequirement").asText(""))) {
+            problems.add("basics.defaultRequirement must be one of " + REQUIREMENTS);
+        }
+        for (String id : List.of("programId", "moduleId")) {
+            JsonNode value = node.path(id);
+            if (!value.isMissingNode() && !value.isNull() && !(value.canConvertToLong() && value.isIntegralNumber())) {
+                problems.add("basics." + id + " must be a whole number or absent");
+            }
+        }
+        JsonNode unsure = node.path("unsure");
+        if (!unsure.isArray()) {
+            problems.add("basics.unsure must be an array");
+        } else {
+            unsure.forEach(field -> {
+                if (!BASICS_FIELDS.contains(field.asText(""))) {
+                    problems.add("basics.unsure may only name " + BASICS_FIELDS);
+                }
+            });
+        }
+        noLinks(node, problems, "basics");
         return problems;
     }
 

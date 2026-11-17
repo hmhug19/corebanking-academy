@@ -66,4 +66,45 @@ class GenerationSchemasTest {
         assertThat(GenerationSchemas.questions(json.readTree(single.replace("Câu hỏi?", "Xem http://x.y"))))
             .isNotEmpty();
     }
+
+    // ---- Soạn cùng trợ lý, step 1 --------------------------------------------------------------------------------
+
+    private static final String BASICS = """
+        {"title": "Mở tài khoản", "summary": "Quy trình mở tài khoản cho khách hàng cá nhân.",
+         "objectives": ["Thực hiện được việc mở tài khoản"], "level": "basic", "defaultRequirement": "mandatory",
+         "programId": 3, "unsure": ["moduleId"]}
+        """;
+
+    private JsonNode basicsWith(String field, Object value) throws Exception {
+        var node = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(BASICS);
+        node.set(field, json.valueToTree(value));
+        return node;
+    }
+
+    @Test
+    void aStepOneProposalWithKnownValuesIsValidAndIdsMayBeLeftOut() throws Exception {
+        assertThat(GenerationSchemas.draftBasics(json.readTree(BASICS))).isEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("programId", null))).isEmpty();
+    }
+
+    @Test
+    void aStepOneProposalOutsideTheCourseValuesIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftBasics(basicsWith("level", "BEGINNER"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("defaultRequirement", "elective"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("objectives", java.util.List.of()))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("programId", "ba"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("unsure", java.util.List.of("code")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("title", " "))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("summary", "Xem https://evil.example"))).isNotEmpty();
+    }
+
+    @Test
+    void theStepOneSchemaLeavesTheCodeToTheServer() {
+        JsonNode format = GenerationSchemas.format(GenerationSchemas.DRAFT_BASICS);
+
+        assertThat(format.path("properties").has("code")).isFalse();
+        assertThat(format.path("required")).extracting(JsonNode::asText)
+            .contains("title", "summary", "objectives", "level", "defaultRequirement", "unsure")
+            .doesNotContain("programId", "moduleId");
+    }
 }

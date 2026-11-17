@@ -14,7 +14,6 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
-import vn.com.coreacademy.assistant.config.GenerationProperties;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.DocumentInfo;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.JobRow;
 import vn.com.coreacademy.assistant.course.CourseJobViews.Inputs;
@@ -22,7 +21,6 @@ import vn.com.coreacademy.assistant.course.CourseJobViews.JobSummary;
 import vn.com.coreacademy.assistant.course.CourseJobViews.JobView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.SourceView;
 import vn.com.coreacademy.assistant.course.CourseJobViews.StepView;
-import vn.com.coreacademy.assistant.exception.AssistantResponseCode;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.identity.constants.RoleCodes;
@@ -40,14 +38,13 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 /**
  * Starts, shows, cancels and deletes the caller's course generation jobs. Only roles that manage courses may use it,
  * the owner unit is decided here (an instructor's own unit, an admin's choice checked against their scope) and never by
- * the model, and a user starts at most {@code jobs-per-day} jobs in any 24 hours. The model work happens later in
- * {@link CourseGenerationWorker}.
+ * the model, and a user starts at most what {@link GenerationAllowance} allows in any 24 hours. The model work happens
+ * later in {@link CourseGenerationWorker}.
  */
 @Service
 @RequiredArgsConstructor
 public class CourseJobService {
     static final String FIRST_STEP = "summarise_sections";
-    private static final Duration DAY = Duration.ofHours(24);
     private static final Set<String> LEVELS = Set.of("BEGINNER", "INTERMEDIATE", "ADVANCED");
     private static final Set<String> MANAGERS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN, RoleCodes.INSTRUCTOR);
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
@@ -63,11 +60,11 @@ public class CourseJobService {
     private final CourseJobRepository jobs;
     private final KnowledgeDocumentService documents;
     private final LearningAccessPolicy access;
-    private final GenerationProperties properties;
     private final TransactionTemplate transaction;
     private final ObjectMapper json;
     private final LearningContentService courses;
     private final LearningAiDraftService draftWriter;
+    private final GenerationAllowance allowance;
 
     /**
      * Checks who may start a job and for which unit and the day's limit, stores the file as a course source
@@ -93,7 +90,7 @@ public class CourseJobService {
         long ownerOrgId = ownerOrg(actor, requested);
         Inputs inputs = checked(requested, ownerOrgId);
         String userId = SecurityContextUtils.getUserId();
-        requireWithinDailyLimit(userId, jobs.createdSince(userId, OffsetDateTime.now().minus(DAY)));
+        allowance.require(userId);
 
         return new Prepared(userId, ownerOrgId, inputs);
     }
@@ -102,9 +99,8 @@ public class CourseJobService {
         // The draft course and its first revision are made with the job, in one transaction: when either fails, neither
         // exists. The course service decides again whether the caller may create it for that unit.
         long jobId = transaction.execute(status -> {
-            jobs.lockOwner(prepared.userId());
-            requireWithinDailyLimit(prepared.userId(),
-                jobs.createdSince(prepared.userId(), OffsetDateTime.now().minus(DAY)));
+            allowance.lock(prepared.userId());
+            allowance.require(prepared.userId());
             Inputs inputs = prepared.inputs();
             String title = inputs.title() == null || inputs.title().isBlank() ? DEFAULT_TITLE : inputs.title().strip();
             CourseDetail course = courses.create(new CreateCourse(prepared.ownerOrgId(), null, newCode(), title,
@@ -273,19 +269,6 @@ public class CourseJobService {
         }
 
         return code.toString();
-    }
-
-    /** Refuses the job after the day's allowance, telling the user when the oldest one leaves the 24 hours. */
-    private void requireWithinDailyLimit(String userId, List<OffsetDateTime> startedInTheDay) {
-        if (startedInTheDay.size() < properties.jobsPerDay()) {
-            return;
-        }
-        Duration wait = Duration.between(OffsetDateTime.now(),
-            startedInTheDay.get(startedInTheDay.size() - properties.jobsPerDay()).plus(DAY));
-        long minutes = Math.max(1, (wait.toSeconds() + 59) / 60);
-        String text = minutes >= 60 ? (minutes + 59) / 60 + " giờ" : minutes + " phút";
-        throw BusinessException.field(AssistantResponseCode.JOB_RATE_LIMITED, "limit", "DAILY_LIMIT",
-            "Bạn đã tạo " + properties.jobsPerDay() + " khóa học bằng AI trong ngày, thử lại sau " + text + ".");
     }
 
     JobRow owned(long jobId) {

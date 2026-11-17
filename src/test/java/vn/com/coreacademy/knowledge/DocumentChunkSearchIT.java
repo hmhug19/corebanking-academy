@@ -104,6 +104,16 @@ class DocumentChunkSearchIT extends KnowledgeIntegrationTest {
     }
 
     @Test
+    void aCourseSourceAnswersNobodyNotEvenItsUploader() {
+        // Soạn cùng trợ lý keeps the author's document private: search_documents never returns it to anyone.
+        long source = scoped("tai-lieu-khoa-hoc.md", "000005", DocumentScope.COURSE_SOURCE, null);
+        chunks.insertAll(source, List.of(new NewChunk(0, "course source", null, 1, 1, 1, axis(0))));
+
+        assertThat(chunks.search(axis(0), 5, new DocumentVisibility("000004", Set.of(unit)))).isEmpty();
+        assertThat(chunks.search(axis(0), 5, new DocumentVisibility("000005", Set.of(unit)))).isEmpty();
+    }
+
+    @Test
     void aUnitDocumentAnswersTheUnitAndItsChildrenNotASibling() {
         long id = scoped("don-vi.md", "000005", DocumentScope.UNIT, unit);
         chunks.insertAll(id, List.of(new NewChunk(0, "unit", null, 1, 1, 1, axis(0))));

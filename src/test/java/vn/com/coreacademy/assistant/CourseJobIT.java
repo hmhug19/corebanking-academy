@@ -110,6 +110,8 @@ class CourseJobIT extends AssessmentIntegrationTest {
                 : new Result("{\"chapters\":[]}", "h2", List.of(), 40, "waiting_approval");
         });
         jdbc.update("DELETE FROM learning_hub.course_generation_jobs");
+        // Drafting sessions count against the same daily allowance.
+        jdbc.update("DELETE FROM learning_hub.course_drafting_sessions");
     }
 
     private Map<String, Object> inputs(Long ownerOrgId) {
