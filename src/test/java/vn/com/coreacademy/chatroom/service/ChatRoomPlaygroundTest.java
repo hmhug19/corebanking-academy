@@ -65,7 +65,8 @@ class ChatRoomPlaygroundTest {
         room.connect(socket);
         Client client = new Client(socket, events);
         command(client, Map.of("type", "join", "name", user, "color", "teal", "roomGames", true,
-            "interactions", true, "reactions", capabilities, "boardGames", capabilities, "floorGame", capabilities));
+            "interactions", true, "reactions", capabilities, "boardGames", capabilities, "floorGame", capabilities,
+            "presentation", capabilities));
         return client;
     }
 
@@ -147,42 +148,90 @@ class ChatRoomPlaygroundTest {
     }
 
     @Test
-    void movementAfterFloorDeadlineCannotRetroactivelySaveAPlayer() throws Exception {
+    void diceSelectionRoutesToAWalkablePointInsideTheDiceArea() throws Exception {
         var a = join("a", "a", true);
-        var b = join("b", "b", true);
-        var field = ChatRoomService.class.getDeclaredField("colorFloor");
-        field.setAccessible(true);
-        var floor = (RoomColorFloor) field.get(room);
-        floor.join("a", true);
-        floor.join("b", true);
-        long now = System.currentTimeMillis();
-        var present = List.of(new RoomColorFloor.Player("a", "a", 0, 0),
-            new RoomColorFloor.Player("b", "b", 0, 0));
-        floor.tick(now - 11000, present, map.layout().colorTiles());
-        floor.tick(now - 6000, present, map.layout().colorTiles());
-        String target = (String) floor.snapshot("a", now).get("target");
-        var safe = map.layout().colorTiles().stream().filter(tile -> tile.color().equals(target)).findFirst().orElseThrow();
-        var wrong = map.layout().colorTiles().stream().filter(tile -> !tile.color().equals(target)).findFirst().orElseThrow();
-        var guestsField = ChatRoomService.class.getDeclaredField("guests");
-        guestsField.setAccessible(true);
-        Map<?, ?> guests = (Map<?, ?>) guestsField.get(room);
-        for (var client : List.of(a, b)) {
-            Object guest = guests.get(client.socket().getId());
-            var area = client == a ? wrong.area() : safe.area();
-            for (String coordinate : List.of("x", "y")) {
-                var position = guest.getClass().getDeclaredField(coordinate);
-                position.setAccessible(true);
-                position.setDouble(guest, (coordinate.equals("x") ? area.x() : area.y()) + 60);
-            }
-        }
-        command(a, Map.of("type", "move", "x", safe.area().x() + 60, "y", safe.area().y() + 60));
-        assertTrue(a.latest("floor-state").path("eliminated").asBoolean());
-        assertEquals("b", a.latest("floor-state").path("winners").get(0).asText());
-        String result = a.latest("floor-state").toString();
-        command(a, Map.of("type", "ping"));
-        assertEquals(result, a.latest("floor-state").toString());
+        command(a, Map.of("type", "dice-approach"));
+        var points = a.latest("moved").path("route").path("points");
+        assertTrue(points.size() >= 2);
+        var end = points.get(points.size() - 1);
+        assertTrue(map.layout().diceArea().contains(end.path("x").asDouble(), end.path("y").asDouble()));
+        assertTrue(map.walkable(end.path("x").asDouble(), end.path("y").asDouble()));
+        verify(games, never()).settleCaro(anyString(), anyString(), anyLong(), any());
     }
 
+    @Test
+    void onlyPresentationChairCanStartAndLeavingStopsTheSessionWithoutMediaStorage() throws Exception {
+        var host = join("host", "host", true);
+        var viewer = join("viewer", "viewer", true);
+        String id = java.util.UUID.randomUUID().toString();
+        command(viewer, Map.of("type", "media-start", "id", id, "source", "youtube", "videoId", "dQw4w9WgXcQ"));
+        assertEquals("idle", viewer.latest("media-state").path("source").asText());
+        assertNotNull(viewer.latest("media-error"));
+        arrangeSeat(host, map.layout().presentation().chair());
+        command(host, Map.of("type", "media-start", "id", id, "source", "youtube", "videoId", "dQw4w9WgXcQ"));
+        assertEquals(id, viewer.latest("media-state").path("id").asText());
+        assertEquals("host", viewer.latest("media-state").path("controller").asText());
+        command(viewer, Map.of("type", "media-stop"));
+        assertEquals("youtube", viewer.latest("media-state").path("source").asText());
+        command(host, Map.of("type", "seat", "action", "stand"));
+        assertEquals("idle", viewer.latest("media-state").path("source").asText());
+        assertEquals("", viewer.latest("media-state").path("controller").asText());
+        verify(games, never()).settleCaro(anyString(), anyString(), anyLong(), any());
+    }
+
+    @Test
+    void mediaSignalsAreBoundToHostViewerAndConnectionAndRetiredOnDisconnect() throws Exception {
+        var host = join("host", "host", true);
+        var viewer = join("viewer", "viewer", true);
+        var other = join("other", "other", true);
+        var old = join("old", "old", false);
+        arrangeSeat(host, map.layout().presentation().chair());
+        String id = java.util.UUID.randomUUID().toString();
+        String connection = java.util.UUID.randomUUID().toString();
+        command(host, Map.of("type", "media-start", "id", id, "source", "image"));
+        command(viewer, Map.of("type", "media-watch", "id", id, "connection", connection));
+        assertEquals("viewer", host.latest("media-peer").path("peer").asText());
+        var offer = Map.of("type", "media-signal", "id", id, "connection", connection,
+            "to", "viewer", "kind", "offer", "payload", "v=0");
+        command(other, offer);
+        assertFalse(viewer.events().stream().anyMatch(event -> "media-signal".equals(event.path("type").asText())));
+        command(host, offer);
+        assertEquals("host", viewer.latest("media-signal").path("from").asText());
+        assertFalse(old.events().stream().anyMatch(event -> event.path("type").asText().startsWith("media-")));
+        room.disconnect(host.socket());
+        assertEquals("idle", viewer.latest("media-state").path("source").asText());
+        assertNotEquals(id, viewer.latest("media-state").path("id").asText());
+    }
+
+    @Test
+    void delayedDisconnectCannotStopANewPresenterAndMalformedIdsAreIgnored() throws Exception {
+        var oldHost = join("old-host", "old-host", true);
+        var host = join("host", "host", true);
+        var viewer = join("viewer", "viewer", true);
+        int chair = map.layout().presentation().chair();
+        arrangeSeat(oldHost, chair);
+        when(oldHost.socket().isOpen()).thenReturn(false);
+        arrangeSeat(host, chair);
+        String id = java.util.UUID.randomUUID().toString();
+        command(host, Map.of("type", "media-start", "id", id, "source", "image"));
+        room.disconnect(oldHost.socket());
+        assertEquals(id, viewer.latest("media-state").path("id").asText());
+        assertEquals("host", viewer.latest("media-state").path("controller").asText());
+        command(host, Map.of("type", "media-start", "id", "not-a-uuid", "source", "image"));
+        command(viewer, Map.of("type", "media-watch", "id", id, "connection", "not-a-uuid"));
+        assertEquals(id, viewer.latest("media-state").path("id").asText());
+        assertFalse(host.events().stream().anyMatch(event -> "media-peer".equals(event.path("type").asText())));
+    }
+
+    @Test
+    void retiredColorFloorIsNotAdvertisedOrStarted() throws Exception {
+        var a = join("a", "a", true);
+        assertFalse(a.latest("playground-ready").path("floorGame").asBoolean());
+        assertNull(map.layout().colorFloor());
+        assertTrue(map.layout().colorTiles().isEmpty());
+        command(a, Map.of("type", "floor-join"));
+        assertFalse(a.events().stream().anyMatch(event -> "floor-state".equals(event.path("type").asText())));
+    }
     @Test
     void chatPreservesJoinedEmojiAndSanitizesControlCharacters() throws Exception {
         var a = join("a", "a", true);

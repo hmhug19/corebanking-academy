@@ -148,6 +148,9 @@ class RoomBoardPositionTest {
     void mapHasExactlySixTablesWithReachableSeats() throws Exception {
         var map = new ChatRoomMap(new com.fasterxml.jackson.databind.ObjectMapper());
         assertEquals(6, map.layout().boardTables().size());
+        var mediaChair = map.layout().objects().get(map.layout().presentation().chair());
+        assertFalse(map.path(map.layout().spawn(), new ChatRoomMap.Point(mediaChair.x() + mediaChair.w() / 2,
+            mediaChair.y() + mediaChair.h() + 20)).isEmpty());
         assertEquals(3, map.layout().boardTables().stream().filter(table -> table.kind().equals("chess")).count());
         for (var table : map.layout().boardTables()) {
             assertEquals(2, table.chairs().size());
