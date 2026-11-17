@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.drafting;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,7 @@ import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
 import vn.com.coreacademy.assistant.course.SourceSummariser;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.Candidate;
+import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.CourseBrief;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
 
@@ -52,25 +54,34 @@ public class CourseDraftingProposer implements DraftingStepProposer {
     public Proposal propose(SessionRow session, DraftingStepRow step) {
         return switch (step.stepNo()) {
             case 1 -> basics(session);
+            case 2 -> outline(session);
             default -> throw new GenerationException(NOT_SUPPORTED);
         };
     }
 
     // ---- step 1 ----------------------------------------------------------------------------------------------------
 
-    private Proposal basics(SessionRow session) {
-        JsonNode made = null;
-        JsonNode summary;
+    /** The session's source summary, made (and returned for storing) only when the session has none yet. */
+    private record Source(JsonNode summary, JsonNode made) {
+    }
+
+    private Source source(SessionRow session) {
         if (session.sourceSummary() != null) {
-            summary = parse(session.sourceSummary());
-        } else {
-            if (session.sourceDocumentId() == null) {
-                throw new GenerationException("Phiên soạn không còn tài liệu nguồn.");
-            }
-            summary = summariser.summarise(session.sourceDocumentId(), MIN_SOURCE_CHARS, (done, groups) -> { })
-                .output();
-            made = summary;
+            return new Source(parse(session.sourceSummary()), null);
         }
+        if (session.sourceDocumentId() == null) {
+            throw new GenerationException("Phiên soạn không còn tài liệu nguồn.");
+        }
+        JsonNode made = summariser.summarise(session.sourceDocumentId(), MIN_SOURCE_CHARS, (done, groups) -> { })
+            .output();
+
+        return new Source(made, made);
+    }
+
+    private Proposal basics(SessionRow session) {
+        Source source = source(session);
+        JsonNode summary = source.summary();
+        JsonNode made = source.made();
         JsonNode hints = parse(session.hints());
         List<Candidate> programmes = drafting.programmes(session.ownerOrgId(), CANDIDATES);
         List<Candidate> modules = drafting.modules(session.ownerOrgId(), CANDIDATES);
@@ -178,6 +189,117 @@ public class CourseDraftingProposer implements DraftingStepProposer {
         }
 
         return new Proposal(proposal, List.copyOf(notes), madeSummary);
+    }
+
+    // ---- step 2 ----------------------------------------------------------------------------------------------------
+
+    /**
+     * Chapters and lesson titles with one line per lesson, from the source summary and the course as step 1 saved it.
+     * The model names each lesson's source section by its key; the proposal carries the section's title instead, and
+     * an answer naming a section the summary does not have is asked again. Lessons get no content here, ever.
+     */
+    private Proposal outline(SessionRow session) {
+        Source source = source(session);
+        Map<String, String> sections = sectionTitles(source.summary());
+        if (sections.isEmpty()) {
+            throw new GenerationException(SourceSummariser.EMPTY);
+        }
+        JsonNode hints = parse(session.hints());
+        Optional<CourseBrief> course = session.revisionId() == null ? Optional.empty()
+            : drafting.courseBrief(session.revisionId());
+
+        JsonNode answer = summariser.ask(GenerationSchemas.DRAFT_OUTLINE, outlineMessage(source.summary(), sections,
+            hints, course), node -> {
+                List<String> problems = new ArrayList<>(GenerationSchemas.draftOutline(node));
+                if (problems.isEmpty()) {
+                    unknownSections(node, sections.keySet()).forEach(key ->
+                        problems.add("lesson section " + key + " is not one of " + sections.keySet()));
+                }
+                return problems;
+            });
+
+        return checkedOutline(answer, sections, source.made());
+    }
+
+    /**
+     * The sections a lesson may name, key to title: the summary's top level that later calls read (its groups for a
+     * long source, else its sections), keyed {@code s1}, {@code s2}... by position.
+     */
+    private static Map<String, String> sectionTitles(JsonNode summary) {
+        Map<String, String> titles = new LinkedHashMap<>();
+        int number = 0;
+        for (JsonNode section : topSections(summary)) {
+            titles.put("s" + ++number, section.path("title").asText().strip());
+        }
+
+        return titles;
+    }
+
+    private static JsonNode topSections(JsonNode summary) {
+        return summary.path("groups").isArray() && !summary.path("groups").isEmpty()
+            ? summary.path("groups") : summary.path("sections");
+    }
+
+    private static List<String> unknownSections(JsonNode answer, Set<String> keys) {
+        List<String> unknown = new ArrayList<>();
+        answer.path("chapters").forEach(chapter -> chapter.path("lessons").forEach(lesson -> {
+            String key = lesson.path("section").asText().strip();
+            if (!keys.contains(key)) {
+                unknown.add(key);
+            }
+        }));
+
+        return unknown;
+    }
+
+    private static String outlineMessage(JsonNode summary, Map<String, String> sections, JsonNode hints,
+                                         Optional<CourseBrief> course) {
+        StringBuilder user = new StringBuilder("DỮ LIỆU\n");
+        course.ifPresent(brief -> {
+            user.append("Tên khóa học: ").append(brief.title()).append('\n');
+            if (brief.summary() != null && !brief.summary().isBlank()) {
+                user.append("Mô tả ngắn: ").append(brief.summary().strip()).append('\n');
+            }
+            if (brief.level() != null) {
+                user.append("Mức độ: ").append(brief.level()).append('\n');
+            }
+            if (!brief.objectives().isEmpty()) {
+                user.append("Mục tiêu đầu ra:\n");
+                brief.objectives().forEach(objective -> user.append("- ").append(objective).append('\n'));
+            }
+        });
+        appendHint(user, hints, "targetLearners", "Đối tượng học viên");
+        user.append("\nCÁC PHẦN CỦA TÀI LIỆU NGUỒN (khóa: tên — tóm tắt):\n");
+        int number = 0;
+        for (JsonNode section : topSections(summary)) {
+            String key = "s" + ++number;
+            user.append("- ").append(key).append(": ").append(sections.get(key)).append(" — ")
+                .append(section.path("summary").asText().strip()).append('\n');
+        }
+
+        return user.toString();
+    }
+
+    /** The proposal the author sees: the model's outline with each section key replaced by the section's title. */
+    Proposal checkedOutline(JsonNode answer, Map<String, String> sections, JsonNode madeSummary) {
+        ObjectNode proposal = json.createObjectNode();
+        var chapters = proposal.putArray("chapters");
+        int lessons = 0;
+        for (JsonNode chapter : answer.path("chapters")) {
+            ObjectNode outChapter = chapters.addObject();
+            outChapter.put("title", chapter.path("title").asText().strip());
+            var outLessons = outChapter.putArray("lessons");
+            for (JsonNode lesson : chapter.path("lessons")) {
+                lessons++;
+                outLessons.addObject()
+                    .put("title", lesson.path("title").asText().strip())
+                    .put("description", lesson.path("description").asText().strip())
+                    .put("sourceSection", sections.get(lesson.path("section").asText().strip()));
+            }
+        }
+        String note = "Đã đề xuất " + chapters.size() + " chương, " + lessons + " bài; nội dung từng bài để trống.";
+
+        return new Proposal(proposal, List.of(note), madeSummary);
     }
 
     /** A course code nobody uses now, in the old flow's shape ({@code AI-} and 8 characters). */

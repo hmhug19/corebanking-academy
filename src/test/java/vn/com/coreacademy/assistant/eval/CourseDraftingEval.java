@@ -19,6 +19,7 @@ import vn.com.coreacademy.assistant.course.SourceTextRepository.Piece;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingProposer;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.Candidate;
+import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.CourseBrief;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer.Proposal;
@@ -35,10 +36,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Model eval of the step 1 prompt of Soạn cùng trợ lý ({@code skills/tao_khoa_hoc/steps/draft_basics.md}), with the
- * real prompt and the real local model: a short banking source and the unit's lists go in, and the proposal must fit
- * the schema, take its ids from the lists only (the matching programme and module, never an invented one) and be in
- * Vietnamese. It needs Ollama with {@code qwen3:8b} on localhost:11434, so its name keeps it out of the default run
+ * Model eval of the step 1 and step 2 prompts of Soạn cùng trợ lý ({@code skills/tao_khoa_hoc/steps/draft_basics.md}
+ * and {@code draft_outline.md}), with the real prompts and the real local model. Step 1: a short banking source and the
+ * unit's lists go in, and the proposal must fit the schema, take its ids from the lists only (the matching programme
+ * and module, never an invented one) and be in Vietnamese. Step 2: the outline must hold titles and one line per
+ * lesson, name a section of the summary for every lesson and carry no lesson content. It needs Ollama with {@code qwen3:8b} on localhost:11434, so its name keeps it out of the default run
  * (surefire only includes {@code *Test} and {@code *IT}), and it is skipped when the model is not reachable. Run it
  * alone with {@code mvn test -Dtest=CourseDraftingEval}, or every eval with {@code mvn test -Dtest="*Eval"}.
  */
@@ -91,6 +93,43 @@ class CourseDraftingEval {
             .as("module is the payment account one or left empty").isTrue();
         assertThat(proposal.path("title").asText() + proposal.path("summary").asText()).containsPattern(
             "[ăâđêôơưàáạảãèéẹẻẽìíịỉĩòóọỏõùúụủũỳýỵỷỹ]");
+    }
+
+    @Test
+    void theStepTwoOutlineHasNoContentAndNamesKnownSourceSections() {
+        OllamaClient ollama = ollama();
+        assumeTrue(ollama.isAvailable(), "Ollama with qwen3:8b on localhost:11434 is not reachable");
+        CourseDraftingRepository drafting = mock(CourseDraftingRepository.class);
+        when(drafting.courseBrief(2L)).thenReturn(Optional.of(new CourseBrief("Mở tài khoản thanh toán cá nhân",
+            "Quy trình mở tài khoản tại quầy cho giao dịch viên.", "basic",
+            List.of("Thực hiện được quy trình mở tài khoản tại quầy"))));
+        CourseDraftingProposer proposer = new CourseDraftingProposer(new SourceSummariser(
+            mock(SourceTextRepository.class), ollama, new SkillCatalog(), AssistantModels.defaults(), json,
+            AssistantBudget.defaults(),
+            new GenerationProperties(3, Duration.ofSeconds(3), Duration.ofDays(30), Duration.ofSeconds(180))),
+            drafting, json);
+        String summary = """
+            {"sections":[
+              {"key":"s1","title":"Điều kiện và hồ sơ","summary":"Công dân Việt Nam từ đủ 15 tuổi, giấy tờ tùy thân còn hiệu lực; giấy đề nghị kiêm hợp đồng và căn cước bản gốc."},
+              {"key":"s2","title":"Các bước tại quầy","summary":"Tiếp nhận, kiểm tra giấy tờ, xác thực sinh trắc học, nhập thông tin vào core banking, in hợp đồng, kiểm soát viên phê duyệt."},
+              {"key":"s3","title":"Sau khi mở và phòng chống rửa tiền","summary":"Kích hoạt ngân hàng điện tử, đổi mật khẩu lần đầu; nhận biết khách hàng, đối chiếu danh sách cấm vận, báo cáo giao dịch đáng ngờ."}]}
+            """;
+
+        Proposal result = proposer.propose(new SessionRow(1, "000005", 1, 1L, null, 1L, 2L, 2, "active", null,
+            "{\"targetLearners\":\"Giao dịch viên mới\"}", summary, null, null),
+            new DraftingStepRow(2, 1, 2, "proposing", null, "[]", null, 1, null, false, null));
+
+        JsonNode proposal = result.proposal();
+        System.out.println("CourseDraftingEval step 2 proposal: " + proposal.toPrettyString());
+        assertThat(proposal.path("chapters").size()).isBetween(1, 20);
+        List<String> titles = List.of("Điều kiện và hồ sơ", "Các bước tại quầy", "Sau khi mở và phòng chống rửa tiền");
+        proposal.path("chapters").forEach(chapter -> chapter.path("lessons").forEach(lesson -> {
+            assertThat(lesson.path("title").asText()).isNotBlank();
+            assertThat(lesson.path("description").asText()).isNotBlank();
+            assertThat(titles).contains(lesson.path("sourceSection").asText());
+            assertThat(lesson.has("blocks")).isFalse();
+        }));
+        assertThat(proposal.toString()).containsPattern("[ăâđêôơưàáạảãèéẹẻẽìíịỉĩòóọỏõùúụủũỳýỵỷỹ]");
     }
 
     private static OllamaClient ollama() {

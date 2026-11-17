@@ -32,6 +32,11 @@ public final class GenerationSchemas {
     /** The course's level and kind ("Loại khóa học"), as the course stores them. */
     public static final List<String> LEVELS = List.of("basic", "intermediate", "advanced");
     public static final List<String> REQUIREMENTS = List.of("mandatory", "optional");
+    /** Step 2 of Soạn cùng trợ lý: chapters and lesson titles, one line per lesson, no lesson content. */
+    public static final String DRAFT_OUTLINE = "draft_outline";
+    /** One line per lesson: what it teaches. */
+    public static final int MAX_LESSON_DESCRIPTION = 300;
+    static final int MAX_SECTION_KEY = 20;
     /** The step 1 fields the model may say it is unsure of. */
     public static final List<String> BASICS_FIELDS = List.of("title", "summary", "objectives", "level",
         "defaultRequirement", "programId", "moduleId");
@@ -78,6 +83,11 @@ public final class GenerationSchemas {
                 "programId", integer(1, Integer.MAX_VALUE), "moduleId", integer(1, Integer.MAX_VALUE),
                 "unsure", array(enumOf(BASICS_FIELDS.toArray(String[]::new)), 0, BASICS_FIELDS.size())),
                 "title", "summary", "objectives", "level", "defaultRequirement", "unsure");
+            case DRAFT_OUTLINE -> object(Map.of("chapters", array(object(Map.of("title", string(MAX_TITLE),
+                "lessons", array(object(Map.of("title", string(MAX_TITLE),
+                    "description", string(MAX_LESSON_DESCRIPTION), "section", string(MAX_SECTION_KEY)),
+                    "title", "description", "section"), 1, MAX_LESSONS_PER_CHAPTER)), "title", "lessons"), 1,
+                MAX_CHAPTERS)), "chapters");
             default -> throw new IllegalArgumentException("No schema for step " + stepKind);
         };
     }
@@ -276,6 +286,42 @@ public final class GenerationSchemas {
             });
         }
         noLinks(node, problems, "basics");
+        return problems;
+    }
+
+    /**
+     * Step 2 of Soạn cùng trợ lý as the model wrote it: 1 to 20 chapters of 1 to 10 lessons (60 at most), each lesson a
+     * title, one line saying what it teaches and the key of the source section it comes from (checked against the
+     * summary's sections by the proposer, not here). Lessons carry no content.
+     */
+    public static List<String> draftOutline(JsonNode node) {
+        List<String> problems = new ArrayList<>();
+        JsonNode chapters = node.path("chapters");
+        if (!chapters.isArray() || chapters.isEmpty() || chapters.size() > MAX_CHAPTERS) {
+            problems.add("outline.chapters must have 1 to " + MAX_CHAPTERS + " items");
+            return problems;
+        }
+        int number = 0;
+        int totalLessons = 0;
+        for (JsonNode chapter : chapters) {
+            number++;
+            text(chapter, "title", MAX_TITLE, problems, "chapter " + number);
+            JsonNode lessons = chapter.path("lessons");
+            if (!lessons.isArray() || lessons.isEmpty() || lessons.size() > MAX_LESSONS_PER_CHAPTER) {
+                problems.add("chapter " + number + " must have 1 to " + MAX_LESSONS_PER_CHAPTER + " lessons");
+                continue;
+            }
+            totalLessons += lessons.size();
+            for (JsonNode lesson : lessons) {
+                text(lesson, "title", MAX_TITLE, problems, "lesson of chapter " + number);
+                text(lesson, "description", MAX_LESSON_DESCRIPTION, problems, "lesson of chapter " + number);
+                text(lesson, "section", MAX_SECTION_KEY, problems, "lesson of chapter " + number);
+            }
+        }
+        if (totalLessons > MAX_TOTAL_LESSONS) {
+            problems.add("outline must have at most " + MAX_TOTAL_LESSONS + " lessons in total");
+        }
+        noLinks(node, problems, "outline");
         return problems;
     }
 

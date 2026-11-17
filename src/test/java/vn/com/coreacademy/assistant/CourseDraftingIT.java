@@ -43,6 +43,11 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.REPORT_VI
 class CourseDraftingIT extends AssessmentIntegrationTest {
     private static final String SESSIONS = "/api/v1/assistant/drafting-sessions";
     private static final String JOBS = "/api/v1/assistant/course-jobs";
+    private static final String OUTLINE = """
+        {"chapters":[{"title":"Chuẩn bị","lessons":[
+          {"title":"Điều kiện mở tài khoản","description":"Ai được mở tài khoản.","sourceSection":"Điều kiện"},
+          {"title":"Hồ sơ","description":"Giấy tờ khách hàng nộp.","sourceSection":"Hồ sơ và giấy tờ"}]}]}
+        """;
 
     @MockitoBean
     private OllamaClient ollama;
@@ -81,6 +86,9 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
             // Stubbing again calls the earlier answer once, with no arguments.
             if (step == null) {
                 return null;
+            }
+            if (step.stepNo() == 2) {
+                return new Proposal(json.readTree(OUTLINE), List.of("Đã đề xuất 1 chương, 2 bài."), null);
             }
             return new Proposal(json.readTree("""
                 {"title":"Mở tài khoản","summary":"Quy trình.","objectives":["Thực hiện được"],"level":"basic",
@@ -344,6 +352,131 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         api.http(LEARNER, confirm(id, 1, basics("AI-FOREIGN2")), 403, "CORE-ACCESS_DENIED");
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses", Integer.class)).isEqualTo(before);
+    }
+
+    // ---- step 2, the outline (ticket 05) -----------------------------------------------------------------------------
+
+    @Test
+    void confirmingStepTwoSavesEmptyLessonsMarksTheRevisionAndQueuesStepThree() {
+        long id = proposedSession();
+        JsonNode created = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-OUTLINE1")));
+        long revisionId = created.path("revisionId").asLong();
+        assertThat(worker.runOnce()).isTrue();
+        JsonNode proposed = api.ok(INSTRUCTOR, session(id)).path("steps").get(1);
+        assertThat(proposed.path("state").asText()).isEqualTo("proposed");
+        assertThat(proposed.path("proposal").path("chapters").get(0).path("lessons").get(1).path("sourceSection")
+            .asText()).isEqualTo("Hồ sơ và giấy tờ");
+
+        // the page sends the outline as written, plus a lesson the author added: all of them without content
+        JsonNode confirmed = api.ok(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId,
+            lesson("Điều kiện mở tài khoản", List.of()), lesson("Hồ sơ", List.of()),
+            lesson("Bài tác giả thêm", List.of()))));
+
+        assertThat(confirmed.path("currentStep").asInt()).isEqualTo(3);
+        assertThat(confirmed.path("steps")).hasSize(3);
+        JsonNode outline = confirmed.path("steps").get(1);
+        assertThat(outline.path("state").asText()).isEqualTo("confirmed");
+        assertThat(outline.path("proposal").has("lessonNotes")).isFalse();
+        assertThat(confirmed.path("steps").get(2).path("step").asInt()).isEqualTo(3);
+        assertThat(confirmed.path("steps").get(2).path("state").asText()).isEqualTo("proposing");
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM learning_hub.course_lessons l
+              JOIN learning_hub.course_chapters c ON c.chapter_id = l.chapter_id WHERE c.revision_id = ?
+            """, Integer.class, revisionId)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM learning_hub.lesson_blocks b
+              JOIN learning_hub.course_lessons l ON l.lesson_id = b.lesson_id
+              JOIN learning_hub.course_chapters c ON c.chapter_id = l.chapter_id WHERE c.revision_id = ?
+            """, Integer.class, revisionId)).isZero();
+        assertThat(jdbc.queryForObject("SELECT ai_generated FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Boolean.class, revisionId)).isTrue();
+
+        // each proposed lesson keeps its description and source on the session, by saved lesson id
+        JsonNode notes = outline.path("lessonNotes");
+        assertThat(notes).hasSize(2);
+        long savedId = jdbc.queryForObject("""
+            SELECT l.lesson_id FROM learning_hub.course_lessons l
+              JOIN learning_hub.course_chapters c ON c.chapter_id = l.chapter_id
+             WHERE c.revision_id = ? AND l.title = 'Hồ sơ'
+            """, Long.class, revisionId);
+        assertThat(notes.get(1).path("lessonId").asLong()).isEqualTo(savedId);
+        assertThat(notes.get(1).path("description").asText()).isEqualTo("Giấy tờ khách hàng nộp.");
+        assertThat(notes.get(1).path("sourceSection").asText()).isEqualTo("Hồ sơ và giấy tờ");
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("steps").get(1).path("lessonNotes")).isEqualTo(notes);
+
+        // step 2 cannot be confirmed twice, and step 3 waits for its own ticket
+        api.error(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId)), "CORE-VALIDATION_FAILED");
+    }
+
+    @Test
+    void aProposedLessonSentWithContentIsRefusedAndNothingIsSaved() {
+        long id = proposedSession();
+        long revisionId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-OUTLINE2"))).path("revisionId").asLong();
+        worker.runOnce();
+        Map<String, Object> block = new HashMap<>();
+        block.put("blockType", "text");
+        block.put("title", "Giới thiệu");
+        block.put("body", "Nội dung.");
+        block.put("bodyFormat", "markdown");
+        block.put("completionMode", "manual");
+        block.put("isRequired", true);
+        block.put("assets", List.of());
+        block.put("steps", List.of());
+
+        JsonNode refused = api.error(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId,
+            lesson("Điều kiện mở tài khoản", List.of(block)), lesson("Hồ sơ", List.of()))),
+            "CORE-VALIDATION_FAILED");
+
+        assertThat(refused.path("errors").get(0).path("code").asText()).isEqualTo("CONTENT_NOT_EMPTY");
+        JsonNode view = api.ok(INSTRUCTOR, session(id));
+        assertThat(view.path("currentStep").asInt()).isEqualTo(2);
+        assertThat(view.path("steps").get(1).path("state").asText()).isEqualTo("proposed");
+        assertThat(jdbc.queryForObject("""
+            SELECT count(*) FROM learning_hub.course_chapters WHERE revision_id = ?
+            """, Integer.class, revisionId)).isZero();
+        assertThat(jdbc.queryForObject("SELECT ai_generated FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Boolean.class, revisionId)).isFalse();
+    }
+
+    @Test
+    void stepTwoIsConfirmedOnlyOnceProposedAndWithAValidDraft() {
+        long id = proposedSession();
+        long revisionId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-OUTLINE3"))).path("revisionId").asLong();
+
+        // still being proposed
+        api.error(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId)), "CORE-VALIDATION_FAILED");
+        worker.runOnce();
+        api.error(INSTRUCTOR, confirm(id, 2, Map.of()), "CORE-VALIDATION_FAILED");
+        api.error(ADMIN, confirm(id, 2, outlineBody(revisionId)), "CORE-RESOURCE_NOT_FOUND");
+        api.error(INSTRUCTOR, confirm(id, 3, outlineBody(revisionId)), "CORE-VALIDATION_FAILED");
+
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("currentStep").asInt()).isEqualTo(2);
+    }
+
+    private Map<String, Object> lesson(String title, List<Object> blocks) {
+        Map<String, Object> lesson = new HashMap<>();
+        lesson.put("title", title);
+        lesson.put("lessonType", "content");
+        lesson.put("estimatedDurationSeconds", 0);
+        lesson.put("isRequired", true);
+        lesson.put("blocks", blocks);
+        return lesson;
+    }
+
+    /** What the page sends for step 2: the draft as saved by step 1 with the outline's chapter. */
+    private Map<String, Object> outlineBody(long revisionId, Object... lessons) {
+        Map<String, Object> draft = new HashMap<>();
+        draft.put("expectedVersion", jdbc.queryForObject(
+            "SELECT row_version FROM learning_hub.course_revisions WHERE revision_id = ?", Long.class, revisionId));
+        draft.put("title", "Mở tài khoản");
+        draft.put("summary", "Quy trình.");
+        draft.put("level", "basic");
+        draft.put("defaultRequirement", "mandatory");
+        draft.put("objectives", List.of("Thực hiện được"));
+        draft.put("chapters", lessons.length == 0 ? List.of()
+            : List.of(Map.of("title", "Chuẩn bị", "lessons", List.of(lessons))));
+        draft.put("rewardPoints", 0);
+        return Map.of("draft", draft);
     }
 
     private long proposedSession() {

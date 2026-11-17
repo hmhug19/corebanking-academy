@@ -1,12 +1,19 @@
 package vn.com.coreacademy.assistant.drafting;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -21,6 +28,7 @@ import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.BasicsConfirm;
+import vn.com.coreacademy.assistant.drafting.DraftingViews.OutlineConfirm;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SessionView;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SourceView;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.StartFields;
@@ -32,6 +40,8 @@ import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
 import vn.com.coreacademy.learning.dto.LearningDetails.CourseDetail;
+import vn.com.coreacademy.learning.dto.LearningRequests.DraftRequest;
+import vn.com.coreacademy.learning.dto.LearningViews.CourseLessonView;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.service.LearningAccessPolicy;
 import vn.com.coreacademy.learning.service.LearningContentService;
@@ -49,6 +59,8 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 @RequiredArgsConstructor
 public class CourseDraftingService {
     private static final Set<String> MANAGERS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN, RoleCodes.INSTRUCTOR);
+    /** Where a confirmed outline keeps its lesson notes in the step's proposal. */
+    static final String LESSON_NOTES = "lessonNotes";
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
 
     private final CourseDraftingRepository drafting;
@@ -98,11 +110,20 @@ public class CourseDraftingService {
     public SessionView confirm(long sessionId, int step, JsonNode body) {
         requireManager(access.actor());
         owned(sessionId);
-        if (step != DraftingStates.FIRST_STEP) {
-            // Steps 2 to 4 are confirmed by the tickets that propose them.
-            throw notReady();
-        }
-        BasicsConfirm basics = basics(body);
+        return switch (step) {
+            case 1 -> confirmBasicsStep(sessionId, body);
+            case 2 -> {
+                OutlineConfirm outline = checked(body, OutlineConfirm.class, "draft");
+                yield view(transaction.execute(status -> confirmOutline(sessionId, outline)));
+            }
+            // Steps 3 and 4 are confirmed by the tickets that propose them.
+            default -> throw notReady();
+        };
+    }
+
+    private SessionView confirmBasicsStep(long sessionId, JsonNode body) {
+        int step = DraftingStates.FIRST_STEP;
+        BasicsConfirm basics = checked(body, BasicsConfirm.class, "course");
         try {
             return view(transaction.execute(status -> confirmBasics(sessionId, basics)));
         } catch (BusinessException exception) {
@@ -137,6 +158,108 @@ public class CourseDraftingService {
         return drafting.session(sessionId).orElseThrow();
     }
 
+    /**
+     * Chốt bước 2: the page's draft is saved through the course service, so its checks apply as with "Lưu nháp". The
+     * assistant never writes lesson content, so a proposed lesson arriving with content is refused; lessons left empty
+     * never block the step (only publishing checks content). With a proposal in it the revision is marked as AI made,
+     * so publishing asks the author to confirm the review; each proposed lesson's description and source stay on the
+     * session by saved lesson id (lessons have no description of their own). Step 3 is queued.
+     */
+    private SessionRow confirmOutline(long sessionId, OutlineConfirm outline) {
+        int step = DraftingStates.FIRST_STEP + 1;
+        SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+        DraftingStepRow row = stepRow(sessionId, step);
+        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != step
+            || session.courseId() == null || !confirmable(row)) {
+            throw notReady();
+        }
+        JsonNode proposal = row.proposal() == null ? null : read(row.proposal(), new TypeReference<JsonNode>() { });
+        List<JsonNode> proposed = proposedLessons(proposal);
+        requireNoContentIn(proposed, outline.draft());
+
+        CourseDetail saved = courses.saveDraft(session.courseId(), session.revisionId(), outline.draft());
+        if (!proposed.isEmpty()) {
+            drafting.markAiGenerated(session.revisionId());
+        }
+        drafting.confirmOutline(sessionId, step, write(lessonNotes(proposal, proposed, saved)));
+        drafting.advance(sessionId, step + 1);
+        drafting.insertStep(sessionId, step + 1);
+
+        return drafting.session(sessionId).orElseThrow();
+    }
+
+    private static List<JsonNode> proposedLessons(JsonNode proposal) {
+        List<JsonNode> lessons = new ArrayList<>();
+        if (proposal != null) {
+            proposal.path("chapters").forEach(chapter -> chapter.path("lessons").forEach(lessons::add));
+        }
+
+        return lessons;
+    }
+
+    private static void requireNoContentIn(List<JsonNode> proposed, DraftRequest draft) {
+        Set<String> titles = new HashSet<>();
+        proposed.forEach(lesson -> titles.add(lesson.path("title").asText().strip()));
+        boolean filled = draft.chapters().stream().flatMap(chapter -> chapter.lessons().stream())
+            .anyMatch(lesson -> lesson.title() != null && titles.contains(lesson.title().strip())
+                && !lesson.blocks().isEmpty());
+        if (filled) {
+            throw BusinessException.validation("draft.chapters", "CONTENT_NOT_EMPTY",
+                "Bài do trợ lý đề xuất được lưu với nội dung trống; hãy thêm nội dung sau khi chốt bước này.");
+        }
+    }
+
+    /**
+     * Each saved lesson that came from the proposal, with the proposal's description and source section: matched by
+     * title first, then, for a lesson the author renamed, by its place in the outline. Lessons the author added get
+     * none.
+     */
+    private ArrayNode lessonNotes(JsonNode proposal, List<JsonNode> proposed, CourseDetail saved) {
+        ArrayNode notes = json.createArrayNode();
+        if (proposal == null) {
+            return notes;
+        }
+        List<List<JsonNode>> byPlace = new ArrayList<>();
+        proposal.path("chapters").forEach(chapter -> {
+            List<JsonNode> lessons = new ArrayList<>();
+            chapter.path("lessons").forEach(lessons::add);
+            byPlace.add(lessons);
+        });
+        Set<JsonNode> used = Collections.newSetFromMap(new IdentityHashMap<>());
+        Map<Long, JsonNode> matched = new HashMap<>();
+        List<CourseLessonView> savedLessons = new ArrayList<>();
+        saved.chapters().forEach(chapter -> chapter.lessons().forEach(lesson -> savedLessons.add(lesson.lesson())));
+        for (CourseLessonView lesson : savedLessons) {
+            proposed.stream().filter(candidate -> !used.contains(candidate))
+                .filter(candidate -> candidate.path("title").asText().strip().equals(lesson.title().strip()))
+                .findFirst().ifPresent(candidate -> {
+                    used.add(candidate);
+                    matched.put(lesson.id(), candidate);
+                });
+        }
+        for (int c = 0; c < saved.chapters().size() && c < byPlace.size(); c++) {
+            var lessons = saved.chapters().get(c).lessons();
+            for (int l = 0; l < lessons.size() && l < byPlace.get(c).size(); l++) {
+                JsonNode candidate = byPlace.get(c).get(l);
+                long lessonId = lessons.get(l).lesson().id();
+                if (!matched.containsKey(lessonId) && !used.contains(candidate)) {
+                    used.add(candidate);
+                    matched.put(lessonId, candidate);
+                }
+            }
+        }
+        for (CourseLessonView lesson : savedLessons) {
+            JsonNode from = matched.get(lesson.id());
+            if (from != null) {
+                notes.addObject().put("lessonId", lesson.id())
+                    .put("description", from.path("description").asText())
+                    .put("sourceSection", from.path("sourceSection").asText());
+            }
+        }
+
+        return notes;
+    }
+
     private DraftingStepRow stepRow(long sessionId, int step) {
         return drafting.steps(sessionId).stream().filter(row -> row.stepNo() == step).findFirst().orElse(null);
     }
@@ -150,20 +273,20 @@ public class CourseDraftingService {
         return BusinessException.validation("step", "INVALID_STATE", "Bước này chưa sẵn sàng để chốt.");
     }
 
-    /** The step 1 body, checked with the course create rules; errors name the field under {@code course}. */
-    private BasicsConfirm basics(JsonNode body) {
-        BasicsConfirm basics;
+    /** A confirm body, checked with the course rules of what it carries; errors name the field under {@code field}. */
+    private <T> T checked(JsonNode body, Class<T> type, String field) {
+        T value;
         try {
-            basics = json.treeToValue(body == null ? json.createObjectNode() : body, BasicsConfirm.class);
+            value = json.treeToValue(body == null ? json.createObjectNode() : body, type);
         } catch (JsonProcessingException | IllegalArgumentException exception) {
-            throw BusinessException.validation("course", "INVALID_FORMAT", "Kiểu dữ liệu hoặc giá trị không hợp lệ.");
+            throw BusinessException.validation(field, "INVALID_FORMAT", "Kiểu dữ liệu hoặc giá trị không hợp lệ.");
         }
-        Set<ConstraintViolation<BasicsConfirm>> violations = validator.validate(basics);
+        Set<ConstraintViolation<T>> violations = validator.validate(value);
         if (!violations.isEmpty()) {
             throw new ConstraintViolationException(violations);
         }
 
-        return basics;
+        return value;
     }
 
     private Prepared prepare(StartFields requested, Long conversationId) {
@@ -270,8 +393,19 @@ public class CourseDraftingService {
     private StepView stepView(DraftingStepRow step) {
         List<String> notes = step.notes() == null ? List.of() : read(step.notes(), new TypeReference<>() { });
         JsonNode proposal = step.proposal() == null ? null : read(step.proposal(), new TypeReference<>() { });
+        // A confirmed outline keeps its lesson notes beside the proposal; the view sends them as their own field.
+        JsonNode lessonNotes = proposal instanceof ObjectNode object ? object.remove(LESSON_NOTES) : null;
 
-        return new StepView(step.stepNo(), step.state(), proposal, notes, step.errorMessage(), step.updateTime());
+        return new StepView(step.stepNo(), step.state(), proposal, notes, step.errorMessage(), step.updateTime(),
+            lessonNotes);
+    }
+
+    private String write(Object value) {
+        try {
+            return json.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private String hints(StartFields fields) {

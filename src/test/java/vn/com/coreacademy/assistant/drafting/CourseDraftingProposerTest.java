@@ -19,6 +19,7 @@ import vn.com.coreacademy.assistant.course.SourceTextRepository;
 import vn.com.coreacademy.assistant.course.SourceTextRepository.Piece;
 import vn.com.coreacademy.assistant.course.StepNotReadyException;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.Candidate;
+import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.CourseBrief;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer.Proposal;
@@ -217,7 +218,94 @@ class CourseDraftingProposerTest {
 
     @Test
     void aStepNotBuiltYetFailsReadably() {
-        assertThatThrownBy(() -> proposer.propose(session("{}", null), step(2)))
+        assertThatThrownBy(() -> proposer.propose(session("{}", null), step(3)))
             .isInstanceOf(GenerationException.class).hasMessage(CourseDraftingProposer.NOT_SUPPORTED);
+    }
+
+    // ---- step 2 ----------------------------------------------------------------------------------------------------
+
+    private static final String SECTIONS = """
+        {"sections":[{"key":"s1","title":"Điều kiện mở tài khoản","summary":"Ai được mở."},
+                     {"key":"s2","title":"Hồ sơ và giấy tờ","summary":"Giấy đề nghị, căn cước."}]}
+        """;
+
+    private static SessionRow outlineSession(String summary) {
+        return new SessionRow(5, "000005", ORG, DOCUMENT, null, 70L, 71L, 2, "active", null,
+            "{\"targetLearners\":\"Giao dịch viên mới\"}", summary, null, null);
+    }
+
+    private static String outline(String firstSection) {
+        return outline(firstSection, "s2");
+    }
+
+    private static String outline(String firstSection, String secondSection) {
+        return """
+            {"chapters":[{"title":"Chuẩn bị","lessons":[
+              {"title":"Điều kiện","description":"Ai được mở tài khoản.","section":"%s"},
+              {"title":"Hồ sơ","description":"Giấy tờ khách hàng nộp.","section":"%s"}]}]}
+            """.formatted(firstSection, secondSection);
+    }
+
+    @Test
+    void theOutlineNamesEachLessonsSourceSectionAndHasNoLessonContent() {
+        when(drafting.courseBrief(71L)).thenReturn(Optional.of(new CourseBrief("Mở tài khoản thanh toán",
+            "Quy trình tại quầy.", "basic", List.of("Thực hiện được việc mở tài khoản"))));
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(outline("s1"));
+
+        Proposal result = proposer.propose(outlineSession(SECTIONS), step(2));
+
+        JsonNode chapter = result.proposal().path("chapters").get(0);
+        assertThat(chapter.path("title").asText()).isEqualTo("Chuẩn bị");
+        JsonNode first = chapter.path("lessons").get(0);
+        assertThat(first.path("title").asText()).isEqualTo("Điều kiện");
+        assertThat(first.path("description").asText()).isEqualTo("Ai được mở tài khoản.");
+        assertThat(first.path("sourceSection").asText()).isEqualTo("Điều kiện mở tài khoản");
+        assertThat(chapter.path("lessons").get(1).path("sourceSection").asText()).isEqualTo("Hồ sơ và giấy tờ");
+        assertThat(result.proposal().toString()).doesNotContain("blocks").doesNotContain("\"section\"");
+        assertThat(result.notes()).containsExactly("Đã đề xuất 1 chương, 2 bài; nội dung từng bài để trống.");
+        assertThat(result.sourceSummary()).isNull();
+        verify(sources, never()).pieces(anyLong());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<OllamaClient.Message>> calls = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<JsonNode> formats = ArgumentCaptor.forClass(JsonNode.class);
+        verify(ollama).chat(calls.capture(), any(), formats.capture(), any());
+        assertThat(calls.getValue().get(1).content()).contains("s1", "Điều kiện mở tài khoản", "Ai được mở.",
+            "Mở tài khoản thanh toán", "Giao dịch viên mới");
+        assertThat(formats.getValue()).isEqualTo(GenerationSchemas.format(GenerationSchemas.DRAFT_OUTLINE));
+    }
+
+    @Test
+    void aLessonFromASectionTheSummaryDoesNotHaveIsAskedAgain() {
+        when(drafting.courseBrief(71L)).thenReturn(Optional.empty());
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(outline("s9"), outline("s1"));
+
+        Proposal result = proposer.propose(outlineSession(SECTIONS), step(2));
+
+        verify(ollama, times(2)).chat(anyList(), any(), any(), any());
+        assertThat(result.proposal().path("chapters").get(0).path("lessons").get(0).path("sourceSection").asText())
+            .isEqualTo("Điều kiện mở tài khoản");
+    }
+
+    @Test
+    void anOutlineThatNeverNamesKnownSectionsFailsReadably() {
+        when(drafting.courseBrief(71L)).thenReturn(Optional.empty());
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(outline("s9"));
+
+        assertThatThrownBy(() -> proposer.propose(outlineSession(SECTIONS), step(2)))
+            .isInstanceOf(GenerationException.class).hasMessageContaining("không hợp lệ");
+        verify(ollama, times(SourceSummariser.ATTEMPTS)).chat(anyList(), any(), any(), any());
+    }
+
+    @Test
+    void anOutlineWithoutASummaryYetReadsTheDocumentOnce() {
+        when(drafting.courseBrief(71L)).thenReturn(Optional.empty());
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(SUMMARY, outline("s1", "s1"));
+
+        Proposal result = proposer.propose(outlineSession(null), step(2));
+
+        assertThat(result.sourceSummary().path("sections")).hasSize(1);
+        assertThat(result.proposal().path("chapters").get(0).path("lessons").get(0).path("sourceSection").asText())
+            .isEqualTo("Mở tài khoản");
     }
 }

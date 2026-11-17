@@ -31,6 +31,10 @@ public class CourseDraftingRepository {
     public record Candidate(long id, String name, long fieldId) {
     }
 
+    /** The course as step 1 saved it, what the outline is built for. */
+    public record CourseBrief(String title, String summary, String level, List<String> objectives) {
+    }
+
     public record DocumentInfo(long id, String fileName, String status) {
     }
 
@@ -136,6 +140,33 @@ public class CourseDraftingRepository {
                SET state = 'confirmed', claimed_at = NULL, error_message = NULL, update_time = now()
              WHERE session_id = ? AND step_no = ?
             """, sessionId, stepNo);
+    }
+
+    /**
+     * Step 2 is confirmed; a proposed outline keeps the saved lessons' notes ({@code lessonNotes}) beside its chapters.
+     * A step with no proposal (failed, manual) keeps none.
+     */
+    public void confirmOutline(long sessionId, int stepNo, String lessonNotesJson) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET state = 'confirmed', claimed_at = NULL, error_message = NULL, update_time = now(),
+                   proposal = CASE WHEN proposal IS NULL THEN NULL
+                                   ELSE jsonb_set(proposal, '{lessonNotes}', ?::jsonb) END
+             WHERE session_id = ? AND step_no = ?
+            """, lessonNotesJson, sessionId, stepNo);
+    }
+
+    /** The session moves on to the step. */
+    public void advance(long sessionId, int nextStep) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_sessions SET current_step = ?, update_time = now()
+             WHERE session_id = ?
+            """, nextStep, sessionId);
+    }
+
+    /** The draft holds content the assistant proposed, so publishing asks the author to confirm the review. */
+    public void markAiGenerated(long revisionId) {
+        jdbc.update("UPDATE learning_hub.course_revisions SET ai_generated = true WHERE revision_id = ?", revisionId);
     }
 
     /**
@@ -274,6 +305,17 @@ public class CourseDraftingRepository {
              ORDER BY m.sort_no, m.module_id
              LIMIT ?
             """, (rs, row) -> new Candidate(rs.getLong(1), rs.getString(2), rs.getLong(3)), ownerOrgId, limit);
+    }
+
+    /** The draft revision's title, summary, level and objectives; empty when the revision is gone. */
+    public Optional<CourseBrief> courseBrief(long revisionId) {
+        List<String> objectives = jdbc.queryForList("""
+            SELECT description FROM learning_hub.course_objectives WHERE revision_id = ? ORDER BY sort_no
+            """, String.class, revisionId);
+        return jdbc.query("""
+            SELECT title, summary, level FROM learning_hub.course_revisions WHERE revision_id = ?
+            """, (rs, row) -> new CourseBrief(rs.getString(1), rs.getString(2), rs.getString(3), objectives),
+            revisionId).stream().findFirst();
     }
 
     public boolean conversationOwnedBy(long conversationId, String userId) {

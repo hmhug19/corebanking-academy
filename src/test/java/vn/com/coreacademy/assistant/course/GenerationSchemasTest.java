@@ -107,4 +107,47 @@ class GenerationSchemasTest {
             .contains("title", "summary", "objectives", "level", "defaultRequirement", "unsure")
             .doesNotContain("programId", "moduleId");
     }
+
+    // ---- Soạn cùng trợ lý, step 2 --------------------------------------------------------------------------------
+
+    private static final String OUTLINE = """
+        {"chapters": [{"title": "Chuẩn bị", "lessons": [
+            {"title": "Điều kiện mở tài khoản", "description": "Ai được mở tài khoản và cần giấy tờ gì.", "section": "s1"},
+            {"title": "Hồ sơ", "description": "Các giấy tờ khách hàng nộp.", "section": "s2"}]}]}
+        """;
+
+    private JsonNode outlineLessonWith(String field, Object value) throws Exception {
+        var node = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(OUTLINE);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) node.path("chapters").get(0).path("lessons").get(0))
+            .set(field, json.valueToTree(value));
+        return node;
+    }
+
+    @Test
+    void aStepTwoOutlineOfTitlesDescriptionsAndSectionsIsValid() throws Exception {
+        assertThat(GenerationSchemas.draftOutline(json.readTree(OUTLINE))).isEmpty();
+    }
+
+    @Test
+    void aStepTwoOutlineWithoutADescriptionOrSectionOrWithLinksIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("description", " "))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("description",
+            "x".repeat(GenerationSchemas.MAX_LESSON_DESCRIPTION + 1)))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("section", ""))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("title", "Xem https://evil.example")))
+            .isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(json.readTree("{\"chapters\": []}"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(json.readTree(
+            "{\"chapters\": [{\"title\": \"C\", \"lessons\": []}]}"))).isNotEmpty();
+    }
+
+    @Test
+    void theStepTwoSchemaHasNoLessonContent() {
+        JsonNode lesson = GenerationSchemas.format(GenerationSchemas.DRAFT_OUTLINE).path("properties")
+            .path("chapters").path("items").path("properties").path("lessons").path("items");
+
+        assertThat(lesson.path("required")).extracting(JsonNode::asText)
+            .containsExactlyInAnyOrder("title", "description", "section");
+        assertThat(lesson.path("properties").has("blocks")).isFalse();
+    }
 }
