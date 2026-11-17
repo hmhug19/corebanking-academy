@@ -12,6 +12,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.invocation.InvocationOnMock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
@@ -36,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.ADMIN;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
@@ -109,36 +111,39 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     @BeforeEach
     void freshQueue() {
         when(ollama.isAvailable()).thenReturn(true);
-        when(proposer.propose(any(), any())).thenAnswer(invocation -> {
-            DraftingStepRow step = invocation.getArgument(1);
-            // Stubbing again calls the earlier answer once, with no arguments.
-            if (step == null) {
-                return null;
-            }
-            if (step.stepNo() == 2) {
-                return new Proposal(json.readTree(OUTLINE), List.of("Đã đề xuất 1 chương, 2 bài."), null);
-            }
-            if (step.stepNo() == 3) {
-                return new Proposal(json.readTree(RULES), List.of("Đã đề xuất 3 câu hỏi nháp."), null);
-            }
-            if (step.stepNo() == 4) {
-                return new Proposal(json.readTree(AUDIENCE.formatted(ownOrg)), List.of("Đề xuất giao cho: Đơn vị."),
-                    null);
-            }
-            return new Proposal(json.readTree("""
-                {"title":"Mở tài khoản","summary":"Quy trình.","objectives":["Thực hiện được"],"level":"basic",
-                 "defaultRequirement":"mandatory","programId":null,"moduleId":null,"code":"AI-TESTCODE",
-                 "unsure":["programId","moduleId"]}
-                """), List.of("Chưa chọn được chương trình đào tạo phù hợp; hãy chọn trong danh sách."),
-                json.readTree("{\"sections\":[{\"key\":\"s1\",\"title\":\"Mở\",\"summary\":\"Hồ sơ.\"}]}"));
-        });
+        when(proposer.propose(any(), any())).thenAnswer(this::fixtureProposal);
         clear();
+    }
+
+    /** What the stub proposes for each step. Stubbing again calls the earlier answer once, with no arguments. */
+    private Proposal fixtureProposal(InvocationOnMock invocation) throws Exception {
+        DraftingStepRow step = invocation.getArgument(1);
+        if (step == null) {
+            return null;
+        }
+        if (step.stepNo() == 2) {
+            return new Proposal(json.readTree(OUTLINE), List.of("Đã đề xuất 1 chương, 2 bài."), null);
+        }
+        if (step.stepNo() == 3) {
+            return new Proposal(json.readTree(RULES), List.of("Đã đề xuất 3 câu hỏi nháp."), null);
+        }
+        if (step.stepNo() == 4) {
+            return new Proposal(json.readTree(AUDIENCE.formatted(ownOrg)), List.of("Đề xuất giao cho: Đơn vị."),
+                null);
+        }
+        return new Proposal(json.readTree("""
+            {"title":"Mở tài khoản","summary":"Quy trình.","objectives":["Thực hiện được"],"level":"basic",
+             "defaultRequirement":"mandatory","programId":null,"moduleId":null,"code":"AI-TESTCODE",
+             "unsure":["programId","moduleId"]}
+            """), List.of("Chưa chọn được chương trình đào tạo phù hợp; hãy chọn trong danh sách."),
+            json.readTree("{\"sections\":[{\"key\":\"s1\",\"title\":\"Mở\",\"summary\":\"Hồ sơ.\"}]}"));
     }
 
     @AfterAll
     void clear() {
         // Sessions and jobs share the daily allowance: none is left behind for other classes.
         jdbc.update("DELETE FROM learning_hub.course_drafting_sessions");
+        jdbc.update("DELETE FROM learning_hub.course_drafting_reproposals");
         jdbc.update("DELETE FROM learning_hub.course_generation_jobs");
     }
 
@@ -684,6 +689,216 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         }
         // a learner may assign nothing
         assertThat(targets.assignable(LEARNER, ownOrg, 100)).isEmpty();
+    }
+
+    // ---- propose again, stop, fill by hand (ticket 08) ---------------------------------------------------------------
+
+    @Test
+    void proposingAgainRequeuesOnlyThatStepAndLeavesTheOtherStepsAndTheDraftAlone() {
+        long id = proposedSession();
+        long revisionId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-AGAIN001"))).path("revisionId").asLong();
+        assertThat(worker.runOnce()).isTrue();
+        long version = rowVersion(revisionId);
+
+        JsonNode again = api.ok(INSTRUCTOR, proposeAgain(id, 2));
+
+        assertThat(again.path("status").asText()).isEqualTo("active");
+        assertThat(again.path("currentStep").asInt()).isEqualTo(2);
+        assertThat(again.path("steps").get(0).path("state").asText()).isEqualTo("confirmed");
+        assertThat(again.path("steps").get(1).path("state").asText()).isEqualTo("proposing");
+        assertThat(again.path("steps").get(1).path("proposal").isNull()).isTrue();
+        assertThat(rowVersion(revisionId)).isEqualTo(version);
+        assertThat(courses("AI-AGAIN001")).isEqualTo(1);
+
+        assertThat(worker.runOnce()).isTrue();
+        assertThat(worker.runOnce()).isFalse();
+        JsonNode view = api.ok(INSTRUCTOR, session(id));
+        assertThat(view.path("steps").get(0).path("state").asText()).isEqualTo("confirmed");
+        assertThat(view.path("steps").get(1).path("state").asText()).isEqualTo("proposed");
+        assertThat(view.path("steps").get(1).path("proposal").path("chapters")).hasSize(1);
+        assertThat(rowVersion(revisionId)).isEqualTo(version);
+    }
+
+    @Test
+    void aConfirmedStepIsProposedAgainWithoutMovingTheSessionBack() {
+        long id = proposedSession();
+        long courseId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-AGAIN002"))).path("courseId").asLong();
+
+        JsonNode again = api.ok(INSTRUCTOR, proposeAgain(id, 1));
+
+        assertThat(again.path("currentStep").asInt()).isEqualTo(2);
+        assertThat(again.path("courseId").asLong()).isEqualTo(courseId);
+        assertThat(again.path("steps").get(0).path("state").asText()).isEqualTo("proposing");
+        worker.runOnce();
+        worker.runOnce();
+        JsonNode view = api.ok(INSTRUCTOR, session(id));
+        assertThat(view.path("steps").get(0).path("state").asText()).isEqualTo("proposed");
+        assertThat(view.path("steps").get(1).path("state").asText()).isEqualTo("proposed");
+        assertThat(courses("AI-AGAIN002")).isEqualTo(1);
+    }
+
+    @Test
+    void proposingAgainCountsAgainstTheDailyAllowance() {
+        long id = proposedSession();
+        api.ok(INSTRUCTOR, proposeAgain(id, 1));
+        worker.runOnce();
+        api.ok(INSTRUCTOR, proposeAgain(id, 1));
+        worker.runOnce();
+
+        JsonNode refused = api.error(INSTRUCTOR, proposeAgain(id, 1), "ASSISTANT-JOB_RATE_LIMITED");
+
+        assertThat(refused.path("errors").get(0).path("message").asText()).contains("thử lại sau");
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("steps").get(0).path("state").asText())
+            .isEqualTo("proposed");
+        api.error(INSTRUCTOR, start(null), "ASSISTANT-JOB_RATE_LIMITED");
+    }
+
+    @Test
+    void retryingAFailedStepRequeuesItAndTheSessionGoesOn() {
+        when(proposer.propose(any(), any())).thenThrow(new GenerationException(SourceSummariser.TOO_THIN))
+            .thenAnswer(this::fixtureProposal);
+        long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+        worker.runOnce();
+
+        JsonNode retried = api.ok(INSTRUCTOR, proposeAgain(id, 1));
+
+        assertThat(retried.path("status").asText()).isEqualTo("active");
+        assertThat(retried.path("error").isNull()).isTrue();
+        assertThat(retried.path("steps").get(0).path("state").asText()).isEqualTo("proposing");
+        assertThat(retried.path("steps").get(0).path("error").isNull()).isTrue();
+        assertThat(worker.runOnce()).isTrue();
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("steps").get(0).path("state").asText())
+            .isEqualTo("proposed");
+    }
+
+    @Test
+    void onlyItsAuthorProposesAgainAndOnlyAStepNotBeingProposed() {
+        long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+
+        JsonNode busy = api.error(INSTRUCTOR, proposeAgain(id, 1), "CORE-VALIDATION_FAILED");
+        assertThat(busy.path("errors").get(0).path("field").asText()).isEqualTo("step");
+        assertThat(busy.path("errors").get(0).path("code").asText()).isEqualTo("INVALID_STATE");
+        worker.runOnce();
+        api.error(INSTRUCTOR, proposeAgain(id, 2), "CORE-VALIDATION_FAILED");
+        api.error(ADMIN, proposeAgain(id, 1), "CORE-RESOURCE_NOT_FOUND");
+        api.http(LEARNER, proposeAgain(id, 1), 403, "CORE-ACCESS_DENIED");
+        api.error(ADMIN, stop(id), "CORE-RESOURCE_NOT_FOUND");
+        api.http(LEARNER, stop(id), 403, "CORE-ACCESS_DENIED");
+        api.error(ADMIN, manual(id, 1), "CORE-RESOURCE_NOT_FOUND");
+        api.http(LEARNER, manual(id, 1), 403, "CORE-ACCESS_DENIED");
+
+        JsonNode view = api.ok(INSTRUCTOR, session(id));
+        assertThat(view.path("status").asText()).isEqualTo("active");
+        assertThat(view.path("steps").get(0).path("state").asText()).isEqualTo("proposed");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_drafting_reproposals",
+            Integer.class)).isZero();
+    }
+
+    @Test
+    void stoppingAQueuedStepLeavesItToTheAuthorAndTheWorkerSkipsIt() {
+        long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+
+        JsonNode stopped = api.ok(INSTRUCTOR, stop(id));
+
+        assertThat(stopped.path("status").asText()).isEqualTo("active");
+        assertThat(stopped.path("steps").get(0).path("state").asText()).isEqualTo("manual");
+        assertThat(worker.runOnce()).isFalse();
+        // the author fills the step in and confirms it as usual
+        assertThat(api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-STOP0001"))).path("currentStep").asInt())
+            .isEqualTo(2);
+    }
+
+    @Test
+    void stoppingWhileTheAssistantWritesDropsItsLateProposal() {
+        long id = proposedSession();
+        api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-STOP0002")));
+        // the author presses Dừng while the model writes step 2
+        when(proposer.propose(any(), any())).thenAnswer(invocation -> {
+            if (invocation.getArgument(1) == null) {
+                return null;
+            }
+            api.ok(INSTRUCTOR, stop(id));
+            return fixtureProposal(invocation);
+        });
+
+        assertThat(worker.runOnce()).isTrue();
+
+        JsonNode view = api.ok(INSTRUCTOR, session(id));
+        assertThat(view.path("status").asText()).isEqualTo("active");
+        assertThat(view.path("steps").get(1).path("state").asText()).isEqualTo("manual");
+        assertThat(view.path("steps").get(1).path("proposal").isNull()).isTrue();
+        assertThat(worker.runOnce()).isFalse();
+        // nothing is being proposed now: stopping again changes nothing
+        assertThat(api.ok(INSTRUCTOR, stop(id)).path("steps").get(1).path("state").asText()).isEqualTo("manual");
+    }
+
+    @Test
+    void fillingAFailedStepByHandEndsTheAssistantsPartOfTheSession() {
+        when(proposer.propose(any(), any())).thenThrow(new GenerationException(SourceSummariser.TOO_THIN))
+            .thenAnswer(this::fixtureProposal);
+        long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+        worker.runOnce();
+
+        JsonNode manual = api.ok(INSTRUCTOR, manual(id, 1));
+
+        assertThat(manual.path("status").asText()).isEqualTo("manual");
+        assertThat(manual.path("error").isNull()).isTrue();
+        assertThat(manual.path("steps").get(0).path("state").asText()).isEqualTo("manual");
+        assertThat(worker.runOnce()).isFalse();
+        api.error(INSTRUCTOR, proposeAgain(id, 1), "CORE-VALIDATION_FAILED");
+        api.error(INSTRUCTOR, confirm(id, 1, basics("AI-MANUAL01")), "CORE-VALIDATION_FAILED");
+        assertThat(courses("AI-MANUAL01")).isZero();
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("steps")).hasSize(1);
+    }
+
+    @Test
+    void fillingByHandWhileTheAssistantWritesDropsItsLateProposal() {
+        long id = proposedSession();
+        api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-MANUAL02")));
+        when(proposer.propose(any(), any())).thenAnswer(invocation -> {
+            if (invocation.getArgument(1) == null) {
+                return null;
+            }
+            api.ok(INSTRUCTOR, manual(id, 2));
+            return fixtureProposal(invocation);
+        });
+
+        worker.runOnce();
+
+        JsonNode view = api.ok(INSTRUCTOR, session(id));
+        assertThat(view.path("status").asText()).isEqualTo("manual");
+        assertThat(view.path("steps").get(1).path("state").asText()).isEqualTo("manual");
+        assertThat(view.path("steps").get(1).path("proposal").isNull()).isTrue();
+        assertThat(view.path("steps")).hasSize(2);
+        assertThat(worker.runOnce()).isFalse();
+    }
+
+    @Test
+    void onlyTheCurrentStepNotYetConfirmedIsFilledByHand() {
+        long id = proposedSession();
+        api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-MANUAL03")));
+
+        api.error(INSTRUCTOR, manual(id, 1), "CORE-VALIDATION_FAILED");
+        api.error(INSTRUCTOR, manual(id, 3), "CORE-VALIDATION_FAILED");
+
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("status").asText()).isEqualTo("active");
+    }
+
+    private MockHttpServletRequestBuilder proposeAgain(long id, int step) {
+        return post(SESSIONS + "/{id}/steps/{step}/propose-again", id, step);
+    }
+
+    private MockHttpServletRequestBuilder manual(long id, int step) {
+        return post(SESSIONS + "/{id}/steps/{step}/manual", id, step);
+    }
+
+    private MockHttpServletRequestBuilder stop(long id) {
+        return post(SESSIONS + "/{id}/stop", id);
+    }
+
+    private long rowVersion(long revisionId) {
+        return jdbc.queryForObject("SELECT row_version FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Long.class, revisionId);
     }
 
     /** What step 4 must leave alone: the course's assignments, shares, published pointer and draft state. */

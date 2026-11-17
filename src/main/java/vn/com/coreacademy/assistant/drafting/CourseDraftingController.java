@@ -109,4 +109,47 @@ public class CourseDraftingController {
         gate.requireAccess();
         return BaseResponse.ok(sessions.confirm(sessionId, step, body));
     }
+
+    @PostMapping("/{sessionId}/steps/{step}/propose-again")
+    @Operation(
+        summary = "Đề xuất lại một bước (cả Thử lại khi bước lỗi)",
+        description = """
+            Không có thân. Bước quay về proposing, bỏ đề xuất cũ; trợ lý đề xuất lại ở nền.
+            - Chỉ bước đã đề xuất (proposed), đã chốt (confirmed) hoặc lỗi (failed) của phiên chưa kết thúc; bước đang \
+            soạn, tự điền, chưa tới hoặc phiên finished/manual trả CORE-VALIDATION_FAILED trường step mã INVALID_STATE.
+            - Không đổi các bước khác, bước hiện tại hay khóa học nháp. Phiên failed trở lại active.
+            - Tính vào giới hạn app.assistant.generation.jobs-per-day; vượt giới hạn trả ASSISTANT-JOB_RATE_LIMITED.
+            - Bước đã dùng hết số lần thử trả CORE-VALIDATION_FAILED mã REPROPOSE_LIMIT.
+            """
+    )
+    public BaseResponse<SessionView> proposeAgain(@PathVariable @Positive Long sessionId,
+                                                  @PathVariable @Min(1) @Max(4) Integer step) {
+        gate.requireAccess();
+        return BaseResponse.ok(sessions.proposeAgain(sessionId, step));
+    }
+
+    @PostMapping("/{sessionId}/stop")
+    @Operation(
+        summary = "Dừng bước trợ lý đang soạn",
+        description = "Không có thân. Bước đang proposing dừng: còn đề xuất thì giữ (proposed), chưa có gì thì người "
+            + "dùng tự điền (manual) và chốt như thường; phiên vẫn active. Kết quả trợ lý trả về sau đó bị bỏ. "
+            + "Không có bước nào đang soạn thì không đổi gì."
+    )
+    public BaseResponse<SessionView> stop(@PathVariable @Positive Long sessionId) {
+        gate.requireAccess();
+        return BaseResponse.ok(sessions.stop(sessionId));
+    }
+
+    @PostMapping("/{sessionId}/steps/{step}/manual")
+    @Operation(
+        summary = "Tự điền từ bước này",
+        description = "Không có thân. Bước hiện tại chuyển manual và phiên kết thúc phần của trợ lý (status manual): "
+            + "không đề xuất nào tới nữa, người dùng lưu khóa học bằng các nút thường của trang. Bước đã chốt, chưa "
+            + "tới hoặc phiên finished trả CORE-VALIDATION_FAILED trường step mã INVALID_STATE."
+    )
+    public BaseResponse<SessionView> manual(@PathVariable @Positive Long sessionId,
+                                            @PathVariable @Min(1) @Max(4) Integer step) {
+        gate.requireAccess();
+        return BaseResponse.ok(sessions.manual(sessionId, step));
+    }
 }

@@ -117,9 +117,21 @@ public class CourseDraftingRepository {
                     UNION ALL
                     SELECT create_time
                       FROM learning_hub.course_drafting_sessions
+                     WHERE owner_user_id = ? AND create_time > ?
+                    UNION ALL
+                    SELECT create_time
+                      FROM learning_hub.course_drafting_reproposals
                      WHERE owner_user_id = ? AND create_time > ?) starts
              ORDER BY started
-            """, OffsetDateTime.class, ownerUserId, since, ownerUserId, since);
+            """, OffsetDateTime.class, ownerUserId, since, ownerUserId, since, ownerUserId, since);
+    }
+
+    /** "Đề xuất lại" or "Thử lại" on a step: it counts against the daily allowance like a start. */
+    public void recordReproposal(long sessionId, int stepNo, String ownerUserId) {
+        jdbc.update("""
+            INSERT INTO learning_hub.course_drafting_reproposals (session_id, step_no, owner_user_id)
+            VALUES (?, ?, ?)
+            """, sessionId, stepNo, ownerUserId);
     }
 
     /** Stores the summary of the source once; every later step and proposal reads it instead of the document. */
@@ -182,6 +194,22 @@ public class CourseDraftingRepository {
             """, lessonNotesJson, sessionId, stepNo);
     }
 
+    /** A failed session is active again, its error cleared, because the author asked for its step once more. */
+    public void reactivate(long sessionId) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_sessions SET status = 'active', error_message = NULL, update_time = now()
+             WHERE session_id = ? AND status IN ('active', 'failed')
+            """, sessionId);
+    }
+
+    /** "Tự điền": the assistant's part of the session is over; the author fills the rest of the course by hand. */
+    public void endAsManual(long sessionId) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_sessions SET status = 'manual', error_message = NULL, update_time = now()
+             WHERE session_id = ? AND status IN ('active', 'failed')
+            """, sessionId);
+    }
+
     /** The session moves on to the step. */
     public void advance(long sessionId, int nextStep) {
         jdbc.update("""
@@ -231,6 +259,43 @@ public class CourseDraftingRepository {
             """, sessionId, stepNo);
     }
 
+    /**
+     * "Đề xuất lại" or "Thử lại": the step waits for the worker again, its last proposal and error gone. Only a step
+     * that holds a proposal, was confirmed or failed; false for one being proposed or filled by hand. Its attempts
+     * keep counting, so a step is not proposed again without end.
+     */
+    public boolean reopenStep(long sessionId, int stepNo) {
+        return jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET state = 'proposing', proposal = NULL, error_message = NULL, claimed_at = NULL, stopped = false,
+                   update_time = now()
+             WHERE session_id = ? AND step_no = ? AND state IN ('proposed', 'confirmed', 'failed')
+            """, sessionId, stepNo) == 1;
+    }
+
+    /**
+     * "Dừng": the steps being proposed stop. One that still holds a proposal keeps it; one with nothing yet is the
+     * author's to fill. A worker still writing it finds the step changed and drops what it brings.
+     */
+    public void stopProposing(long sessionId) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET state = CASE WHEN proposal IS NULL THEN 'manual' ELSE 'proposed' END, stopped = true,
+                   claimed_at = NULL, update_time = now()
+             WHERE session_id = ? AND state = 'proposing'
+            """, sessionId);
+    }
+
+    /** "Tự điền": the author fills the step by hand; nothing the assistant still brings for it is stored. */
+    public boolean manualStep(long sessionId, int stepNo) {
+        return jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET stopped = (state = 'proposing'), state = 'manual', error_message = NULL, claimed_at = NULL,
+                   update_time = now()
+             WHERE session_id = ? AND step_no = ? AND state <> 'confirmed'
+            """, sessionId, stepNo) == 1;
+    }
+
     /** The steps reached, ascending. */
     public List<DraftingStepRow> steps(long sessionId) {
         return jdbc.query("SELECT " + STEP_COLUMNS + " FROM learning_hub.course_drafting_steps WHERE session_id = ? "
@@ -256,36 +321,40 @@ public class CourseDraftingRepository {
             RETURNING """ + " " + STEP_COLUMNS, STEP).stream().findFirst();
     }
 
-    /** The claimed step holds its proposal; false when it is no longer being proposed (stopped meanwhile). */
-    public boolean storeProposal(long stepId, String proposalJson, String notesJson) {
+    // A worker's writes name the claim they finish ({@code claimedAt}): once the author stopped the step, filled it by
+    // hand or asked for it again, that claim no longer owns the step and its late result changes nothing.
+
+    /** The claimed step holds its proposal; false when the claim no longer owns the step. */
+    public boolean storeProposal(long stepId, OffsetDateTime claimedAt, String proposalJson, String notesJson) {
         return jdbc.update("""
             UPDATE learning_hub.course_drafting_steps
                SET state = 'proposed', proposal = ?::jsonb, notes = ?::jsonb, error_message = NULL, claimed_at = NULL,
                    update_time = now()
-             WHERE step_id = ? AND state = 'proposing'
-            """, proposalJson, notesJson, stepId) == 1;
+             WHERE step_id = ? AND state = 'proposing' AND claimed_at = ?
+            """, proposalJson, notesJson, stepId, claimedAt) == 1;
     }
 
-    public void failStep(long stepId, String errorMessage) {
-        jdbc.update("""
+    /** The claimed step failed; false when the claim no longer owns the step. */
+    public boolean failStep(long stepId, OffsetDateTime claimedAt, String errorMessage) {
+        return jdbc.update("""
             UPDATE learning_hub.course_drafting_steps
                SET state = 'failed', error_message = ?, claimed_at = NULL, update_time = now()
-             WHERE step_id = ? AND state = 'proposing'
-            """, errorMessage, stepId);
+             WHERE step_id = ? AND state = 'proposing' AND claimed_at = ?
+            """, errorMessage, stepId, claimedAt) == 1;
     }
 
     /** A step whose model call timed out waits again; the attempt it used still counts. */
-    public void retryStep(long stepId) {
+    public void retryStep(long stepId, OffsetDateTime claimedAt) {
         jdbc.update("UPDATE learning_hub.course_drafting_steps SET claimed_at = NULL WHERE step_id = ? "
-            + "AND state = 'proposing'", stepId);
+            + "AND state = 'proposing' AND claimed_at = ?", stepId, claimedAt);
     }
 
     /** A step the source or the model was not ready for waits again without costing an attempt. */
-    public void releaseStep(long stepId) {
+    public void releaseStep(long stepId, OffsetDateTime claimedAt) {
         jdbc.update("""
             UPDATE learning_hub.course_drafting_steps SET claimed_at = NULL, attempts = GREATEST(attempts - 1, 0)
-             WHERE step_id = ? AND state = 'proposing'
-            """, stepId);
+             WHERE step_id = ? AND state = 'proposing' AND claimed_at = ?
+            """, stepId, claimedAt);
     }
 
     /** Steps claimed when the server stopped that have already used {@code maxAttempts} attempts. */

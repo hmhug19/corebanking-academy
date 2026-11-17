@@ -109,7 +109,7 @@ public class CourseDraftingWorker {
         } catch (StepNotReadyException exception) {
             // The source document is still being read: the step waits for the next poll.
             outcome = "waiting";
-            drafting.releaseStep(step.id());
+            drafting.releaseStep(step.id(), step.claimedAt());
         } catch (OllamaTimeoutException exception) {
             if (step.attempts() >= CourseGenerationWorker.TIMEOUT_ATTEMPTS) {
                 outcome = "failed";
@@ -117,12 +117,12 @@ public class CourseDraftingWorker {
                 fail(step, CourseGenerationWorker.TOO_SLOW);
             } else {
                 outcome = "waiting";
-                drafting.retryStep(step.id());
+                drafting.retryStep(step.id(), step.claimedAt());
                 log.warn("Drafting step timed out, requeued stepId={} attempt={}", step.id(), step.attempts());
             }
         } catch (OllamaUnavailableException exception) {
             outcome = "waiting";
-            drafting.releaseStep(step.id());
+            drafting.releaseStep(step.id(), step.claimedAt());
             log.warn("Drafting step waits for the model, requeued stepId={} attempt={}", step.id(), step.attempts());
         } catch (GenerationException exception) {
             outcome = "failed";
@@ -137,19 +137,28 @@ public class CourseDraftingWorker {
         }
     }
 
+    /** Stores the proposal unless the author stopped the step, filled it by hand or asked again meanwhile. */
     private void store(DraftingStepRow step, Proposal proposal) {
+        if (!drafting.storeProposal(step.id(), step.claimedAt(), write(proposal.proposal()),
+            write(proposal.notes()))) {
+            log.info("Drafting step changed while proposed, proposal dropped stepId={}", step.id());
+            return;
+        }
         if (proposal.sourceSummary() != null) {
             drafting.setSourceSummary(step.sessionId(), write(proposal.sourceSummary()));
         }
-        drafting.storeProposal(step.id(), write(proposal.proposal()), write(proposal.notes()));
         drafting.touchSession(step.sessionId());
     }
 
-    /** The step fails and so does its session, with a message the chat and the page show as it is. */
+    /**
+     * The step fails and so does its session, with a message the chat and the page show as it is; a step the author
+     * changed meanwhile (stopped, filled by hand, asked again) keeps what they made of it.
+     */
     private void fail(DraftingStepRow step, String message) {
         transaction.executeWithoutResult(status -> {
-            drafting.failStep(step.id(), message);
-            drafting.failSession(step.sessionId(), message);
+            if (drafting.failStep(step.id(), step.claimedAt(), message)) {
+                drafting.failSession(step.sessionId(), message);
+            }
         });
     }
 

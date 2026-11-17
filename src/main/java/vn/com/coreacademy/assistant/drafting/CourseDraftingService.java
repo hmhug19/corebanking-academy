@@ -38,6 +38,7 @@ import vn.com.coreacademy.assessment.dto.AssessmentRequests.QuizRequest;
 import vn.com.coreacademy.assessment.dto.CourseExamRequest;
 import vn.com.coreacademy.assessment.service.CourseExamService;
 import vn.com.coreacademy.assessment.service.QuestionService;
+import vn.com.coreacademy.assistant.course.CourseDraftService;
 import vn.com.coreacademy.assistant.course.GenerationAllowance;
 import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
@@ -279,6 +280,75 @@ public class CourseDraftingService {
         drafting.finish(sessionId);
 
         return drafting.session(sessionId).orElseThrow();
+    }
+
+    /**
+     * "Đề xuất lại" (and "Thử lại" on a failed step): the step is queued again with its last proposal dropped; the
+     * other steps, the session's current step and the draft course stay as they are, and the page writes the new
+     * proposal into that step's fields only. A step being proposed or filled by hand, or one of a session that is
+     * over, cannot be. It counts against the daily course generation allowance, and a step that has used every attempt
+     * is left to the author. A failed session is active again.
+     */
+    public SessionView proposeAgain(long sessionId, int step) {
+        requireManager(access.actor());
+        owned(sessionId);
+        String userId = SecurityContextUtils.getUserId();
+        return view(transaction.execute(status -> {
+            SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+            DraftingStepRow row = stepRow(sessionId, step);
+            boolean open = DraftingStates.ACTIVE.equals(session.status())
+                || DraftingStates.FAILED_SESSION.equals(session.status());
+            if (!open || row == null || !Set.of(DraftingStates.PROPOSED, DraftingStates.CONFIRMED,
+                DraftingStates.FAILED).contains(row.state())) {
+                throw BusinessException.validation("step", "INVALID_STATE",
+                    "Bước này không đề xuất lại được lúc này.");
+            }
+            if (row.attempts() >= CourseDraftService.MAX_STEP_ATTEMPTS) {
+                throw BusinessException.validation("step", "REPROPOSE_LIMIT",
+                    "Bước này đã được đề xuất lại quá nhiều lần, hãy tự điền.");
+            }
+            allowance.lock(userId);
+            allowance.require(userId);
+            drafting.reopenStep(sessionId, step);
+            drafting.recordReproposal(sessionId, step, userId);
+            drafting.reactivate(sessionId);
+            return drafting.session(sessionId).orElseThrow();
+        }));
+    }
+
+    /**
+     * "Dừng": whatever the assistant is proposing stops. A step that still holds a proposal keeps it, one with nothing
+     * yet is the author's to fill (and confirm as usual); the session goes on. What a worker still brings for it is
+     * dropped. With nothing being proposed it changes nothing.
+     */
+    public SessionView stop(long sessionId) {
+        requireManager(access.actor());
+        owned(sessionId);
+        return view(transaction.execute(status -> {
+            drafting.lockSession(sessionId).orElseThrow();
+            drafting.stopProposing(sessionId);
+            return drafting.session(sessionId).orElseThrow();
+        }));
+    }
+
+    /**
+     * "Tự điền": the current step is the author's to fill and the assistant's part of the session ends there, so no
+     * proposal arrives for it any more (the worker takes no step of a session that is not active, and drops what it
+     * was still writing). A confirmed step, a step not reached or a finished session cannot be.
+     */
+    public SessionView manual(long sessionId, int step) {
+        requireManager(access.actor());
+        owned(sessionId);
+        return view(transaction.execute(status -> {
+            SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+            boolean open = DraftingStates.ACTIVE.equals(session.status())
+                || DraftingStates.FAILED_SESSION.equals(session.status());
+            if (!open || session.currentStep() != step || !drafting.manualStep(sessionId, step)) {
+                throw BusinessException.validation("step", "INVALID_STATE", "Bước này không tự điền được lúc này.");
+            }
+            drafting.endAsManual(sessionId);
+            return drafting.session(sessionId).orElseThrow();
+        }));
     }
 
     /** The exam the page would create with its defaults, fixed to the kept questions: 15 minutes, 70 %, 3 attempts. */

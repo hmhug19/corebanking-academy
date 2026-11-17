@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant.drafting;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -43,8 +44,9 @@ class CourseDraftingWorkerTest {
     private final TransactionTemplate transaction = mock(TransactionTemplate.class);
     private final TurnLimiter limiter = new TurnLimiter(new AssistantProperties(4, 20, Duration.ofMinutes(10), 2),
         new AssistantLimits(60));
-    private final DraftingStepRow step = new DraftingStepRow(7, 5, 1, "proposing", null, "[]", null, 1, null, false,
-        null);
+    private final OffsetDateTime claimedAt = OffsetDateTime.parse("2026-11-18T09:00:00.123456+07:00");
+    private final DraftingStepRow step = new DraftingStepRow(7, 5, 1, "proposing", null, "[]", null, 1, claimedAt,
+        false, null);
     private final SessionRow session = new SessionRow(5, "000005", 1, 9L, null, null, null, 1, "active", null, "{}",
         null, null, null);
     private final CourseDraftingWorker worker;
@@ -62,6 +64,8 @@ class CourseDraftingWorkerTest {
         }).when(transaction).executeWithoutResult(any());
         when(drafting.claimNext()).thenReturn(Optional.of(step));
         when(drafting.session(5)).thenReturn(Optional.of(session));
+        when(drafting.storeProposal(anyLong(), any(), anyString(), anyString())).thenReturn(true);
+        when(drafting.failStep(anyLong(), any(), anyString())).thenReturn(true);
         worker = new CourseDraftingWorker(drafting, provider, ollama, transaction, mock(AssistantMetrics.class),
             limiter, json);
     }
@@ -86,7 +90,7 @@ class CourseDraftingWorkerTest {
         worker.runOnce();
 
         verify(drafting).setSourceSummary(eq(5L), anyString());
-        verify(drafting).storeProposal(7, "{\"title\":\"Khóa\"}", "[\"Chưa chọn được chương trình\"]");
+        verify(drafting).storeProposal(7, claimedAt, "{\"title\":\"Khóa\"}", "[\"Chưa chọn được chương trình\"]");
         verify(drafting, never()).failSession(anyLong(), any());
     }
 
@@ -96,7 +100,7 @@ class CourseDraftingWorkerTest {
 
         worker.runOnce();
 
-        verify(drafting).failStep(7, "Tài liệu quá ngắn.");
+        verify(drafting).failStep(7, claimedAt, "Tài liệu quá ngắn.");
         verify(drafting).failSession(5, "Tài liệu quá ngắn.");
     }
 
@@ -115,7 +119,30 @@ class CourseDraftingWorkerTest {
 
         worker.runOnce();
 
-        verify(drafting).releaseStep(7);
-        verify(drafting, never()).failStep(anyLong(), any());
+        verify(drafting).releaseStep(7, claimedAt);
+        verify(drafting, never()).failStep(anyLong(), any(), any());
+    }
+
+    @Test
+    void aProposalThatArrivesAfterTheAuthorStoppedTheStepIsDropped() {
+        // Dừng, Tự điền or Đề xuất lại changed the step while the model wrote: this claim no longer owns it.
+        when(drafting.storeProposal(anyLong(), any(), anyString(), anyString())).thenReturn(false);
+        when(proposer.propose(session, step)).thenReturn(new Proposal(json.createObjectNode(), List.of(),
+            json.createObjectNode()));
+
+        worker.runOnce();
+
+        verify(drafting, never()).setSourceSummary(anyLong(), anyString());
+        verify(drafting, never()).touchSession(anyLong());
+    }
+
+    @Test
+    void aFailureAfterTheAuthorStoppedTheStepLeavesTheSessionAlone() {
+        when(drafting.failStep(anyLong(), any(), anyString())).thenReturn(false);
+        when(proposer.propose(session, step)).thenThrow(new GenerationException("Tài liệu quá ngắn."));
+
+        worker.runOnce();
+
+        verify(drafting, never()).failSession(anyLong(), any());
     }
 }
