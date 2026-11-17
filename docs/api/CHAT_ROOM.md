@@ -68,6 +68,97 @@ Ba bàn Caro 50×50 cạnh Trên/Dưới đều có hai ghế đối diện. C�
 
 ## Cấu hình và triển khai
 
+### Nâng cấp Khu vui chơi ngày 17-11-2026
+
+Nâng cấp này không có migration, không tạo bảng/cột và không cần cấp thêm quyền DB.
+Sáu bàn cờ, nước đi, đồng hồ, lời mời hòa, trạng thái sàn màu và reaction nằm trong RAM của
+một backend instance. Cờ vua/cờ tướng dùng cơ chế giữ CPoint và kết toán ví hiện có của Caro
+qua `ChatRoomGames.settleCaro`. Không đọc/ghi DB theo từng nước cờ. Khởi động lại backend
+xóa các ván chưa kết thúc và giải phóng phần CPoint đang giữ. Ví, điểm danh, XP và Trên/Dưới
+tiếp tục dùng các bảng hiện có. Các bước migration cũ bên dưới chỉ dành cho cài đặt chưa có
+schema ví đã triển khai trước đây.
+
+Capability bổ sung trong `join` là `reactions`, `boardGames`, `floorGame`. Server xác nhận
+bằng `playground-ready` và chỉ gửi từng nhóm event mới cho client có capability tương ứng.
+Client cũ không cần hiểu các event này. Tọa độ sáu bàn và sàn nằm trong cùng `room.json`;
+bàn/ghế có hitbox, các ô sàn đi qua được. Đồng hồ mặc định lấy từ `boardClock` trong map.
+
+| Lệnh/event | Hợp đồng bổ sung |
+|---|---|
+| `reaction` hai chiều | Client `{reaction}`; server `{reaction,playerId}`. ID `hello/laugh/clap/love/celebrate/surprise`, tối thiểu 1.200 ms/lần. Không nằm trong lịch sử chat. |
+| `board-watch` | `{table}`; đăng ký xem snapshot, không cấp quyền chơi. |
+| `board-ready` | `{table,points}`; phải ngồi đúng bàn, hai tài khoản khác nhau cùng sẵn sàng, góp bằng nhau từ 10 CPoint. |
+| `board-move` | `{table,matchId,version,from,to,promotion?}`. Ô đánh số từ góc trái trên, theo hàng; `promotion` là `q/r/b/n` khi phong cấp. |
+| `board-action` | `{table,matchId,version,action,from?,to?,promotion?}` với `resign/offer-draw/accept-draw/claim-draw`. Các ô tùy chọn là nước dự định xin hòa. |
+| `board-tables` | `{tables:[{id,status,players}]}`; trạng thái `empty/waiting/playing`. |
+| `board-state` | Bàn, ghế, hai trạng thái sẵn sàng, mức góp, cấu hình đồng hồ và `match?`. Match gồm ID, version, board, side, turn, clocks, serverTime, legal, lastCells, check, history, result, reason, drawOffer, mustChange. |
+| `board-error` | `{message}` và snapshot mới khi lệnh trùng/sai phiên bản/nước không hợp lệ. |
+| `floor-join` | Không có payload; phải đứng trong vùng sàn và có capability. Người đến giữa ván xếp hàng ván sau. |
+| `floor-state` | `{id,phase,round,target,deadline,serverTime,players,queued,joined,alive,eliminated,winners}`; snapshot riêng theo tài khoản. |
+
+Mọi nước được xác minh dưới cùng monitor của phòng trước khi đổi lượt. Đồng hồ 5 phút mỗi bên,
+cộng 3 giây sau nước hợp lệ, vẫn chạy khi mất mạng hoặc đứng dậy. Cùng tài khoản kết nối lại
+nhận snapshot và trở lại ghế cũ. Người xem không được gửi nước. Kết quả giữ tối đa 120 giây
+sau khi kết toán; không xóa giao dịch đang chờ xử lý lỗi DB.
+
+#### Bộ luật và giới hạn đã biết
+
+Cờ vua đối chiếu [FIDE Laws of Chess, hiệu lực 01-01-2023](https://handbook.fide.com/chapter/e012023),
+điều 3, 5, 6, 9. Có nước hợp lệ/gỡ chiếu/ghim, nhập thành, bắt qua đường, bốn lựa chọn phong cấp,
+chiếu hết, hết nước, xin hòa, đầu hàng, hết giờ. Hòa ba lần/50 nước phải yêu cầu; có thể chọn
+“Xin hòa theo nước dự định”, rồi chọn quân và đích. Yêu cầu đúng không thực hiện nước đó.
+Yêu cầu sai cộng 2 phút cho đối phương và thực hiện nước dự định hợp lệ. Năm lần/75 nước tự hòa,
+ưu tiên chiếu hết. Khóa thế gồm bên đi, quyền nhập thành và bắt qua đường thực sự hợp lệ.
+**Giới hạn:** nhận diện thế chết/khả năng chiếu hết hiện dựa trên các nhóm vật chất thông dụng,
+chưa giải bài toán tồn tại chuỗi nước hợp lệ cho mọi thế khóa tốt hoặc thế chết đặc biệt.
+Vì vậy không công bố tuân thủ FIDE đầy đủ cho mọi thế chết/hết giờ/đầu hàng.
+
+Cờ tướng đối chiếu [World Xiangqi Rules 2018](https://www.wxf-xiangqi.org/images/wxf-rules/2018_World_XiangQi_Rules_English2018.pdf).
+Có nước của bảy loại quân, cung/sông, cản mã, mắt tượng, ngòi pháo, tướng nhìn mặt, gỡ chiếu;
+hết nước là thua. Bộ phân loại chu kỳ ưu tiên chiếu dai trên đuổi dai, theo danh tính quân bị đuổi,
+loại đuổi bằng tướng/tốt, tốt chưa qua sông, đổi quân cùng loại và quân có bảo vệ hợp lệ;
+mã/pháo đuổi xe có ngoại lệ. Một bên vi phạm phải đổi nước; tiếp tục chu kỳ sau cảnh báo thì thua.
+Hai bên cùng mức vi phạm hòa. Lặp không vi phạm cần bốn lần xuất hiện theo 3.2.B.
+“Yêu cầu xác minh hòa” thay yêu cầu trọng tài. Bộ đếm tự xác minh sau 100 lượt đơn không bắt quân
+(50 nước mỗi bên); chỉ 10 lần chiếu đầu tiên mỗi bên tính vào bộ đếm, chiếu dư không tăng số đếm.
+Bắt quân đặt lại bộ đếm. Yêu cầu sai trừ 5 phút và một lỗi kỹ thuật, lỗi thứ hai hoặc hết giờ thì thua.
+**Giới hạn:** mới có fixture hình 1 và các fixture luật tổng quát; chưa chứng nhận đủ 110 hình WXF.
+Các tổ hợp đuổi/đổi quân/bảo vệ thật giả nhiều quân, nhất là hình 39–41 và 108, vẫn cần bổ sung
+fixture và đối chiếu. Không công bố engine WXF đầy đủ.
+
+Sàn màu miễn phí, đếm ngược 5 giây khi đủ hai người, tối đa năm vòng 5 giây. Server chốt bằng
+tọa độ chân đã chấp nhận trước deadline. Ô dùng biên nửa mở `[x,x+w) × [y,y+h)`;
+mép trái/trên thuộc ô, phải/dưới thuộc ô kế tiếp, mép ngoài phải/dưới nằm ngoài sàn.
+Server chốt vòng trước khi nhận gói đi đến muộn, chỉ chốt một lần. Mất mạng được chấm theo
+sự hiện diện/tọa độ tại hạn; nhiều người còn lại vòng cuối đồng thắng, không còn ai thì không có người thắng.
+
+Fixture và lệnh kiểm thử:
+
+| File | Phạm vi |
+|---|---|
+| `RoomBoardPositionTest` | Chess perft 20/400/8902; nhập thành, bắt qua đường bị ghim, khóa thế, phong cấp; vật chất; bảo vệ pháo thật/giả sau nước bắt, nước cờ tướng và đường tới cả 12 ghế mới. |
+| `RoomBoardMatchTest` | Đúng người/version/deadline; ưu tiên chiếu hết, hòa 3/5 lần và 50/75 nước, nước xin hòa dự định, phạt xin hòa sai; WXF hình 1, lặp không vi phạm, đếm 100 lượt. |
+| `ChatRoomPlaygroundTest` | Sáu ván độc lập, hai người sẵn sàng, người xem, hai gói đồng thời, reconnect, capability/rate reaction, emoji ghép và lịch sử. |
+| `RoomColorFloorTest` | Mép ô, hai người, năm vòng, đồng thắng, tất cả trượt, hàng chờ ván sau. |
+
+Chạy `mvn test -Dtest=RoomBoardPositionTest,RoomBoardMatchTest,ChatRoomPlaygroundTest,RoomColorFloorTest`.
+
+Nghiệm thu cục bộ ngày 17-11-2026: 28 test ở bốn lớp trên thành công và đóng gói Maven thành công.
+Chrome desktop dùng ba tài khoản/phiên để chơi xong mỗi loại cờ, xem ván, thử gửi nước từ người xem,
+đồng bộ reaction/chat và chạy sàn màu. Chrome cảm ứng 375px kiểm tra cả hai loại cờ, emoji ghép,
+cận cảnh và không tràn trang. Hồi quy kiểm tra nhảy/vẫy/đập tay, Caro rời rồi vào lại,
+đếm hết 120 giây và kết toán một lần, Trên/Dưới chung kết quả/lịch sử, bàn phím Enter cho reaction.
+Map được kiểm tra đường tới cả 12 ghế mới. Các phiên trình duyệt dùng backend kiểm thử cô lập và
+PostgreSQL kiểm thử, với identity/JWT fixture; không thay thế kiểm thử đăng nhập mật khẩu trên môi trường thật.
+`mvn clean verify` toàn repo chưa xanh trên máy này do Docker/Testcontainers không khả dụng
+(lỗi khởi tạo các test tích hợp ngoài phạm vi phòng). Không dùng DB phát triển dùng chung để thay thế.
+FE kiểm tra lại trên bundle production thành công ở desktop và mobile sau khi chuyển trạng thái
+chọn quân/phong cấp vào store. 45 test phòng chat và guard giao diện qua; contracts 341 test và UI
+564 test qua. Format, lint, typecheck, production/staging build và bundle guard qua.
+Kiểm tra FE toàn repo chưa xanh: 9 test Postman/mock về nhóm/người dùng thất bại; worker của lượt
+toàn LMS dừng bất ngờ. Lượt chia nhỏ xác nhận thêm 7 test thất bại ở route table, migration registry
+và asset library ngoài phạm vi thay đổi; 635 test trong lượt đó qua. Không sửa các module này trong task phòng chat.
+
 Khi nâng cấp từ bản lưu Caro trong DB, dừng backend cũ rồi chạy lại [migration ví và trò chơi](../sql/upgrade/2026-11-09-chat-room-games.sql) bằng tài khoản sở hữu bảng. File hoàn CPoint đã trừ của các ván cũ chưa kết thúc và thêm mã chống ghi trùng giao dịch vào ví. Sau đó triển khai BE rồi FE. Khởi động lại backend xóa phiên trong RAM. CPoint đang giữ của ván chưa chốt trở lại khả dụng trong ví.
 
 Nếu role chạy migration khác `DB_USER` của backend, DBA cấp quyền trên ba bảng trong đúng database.

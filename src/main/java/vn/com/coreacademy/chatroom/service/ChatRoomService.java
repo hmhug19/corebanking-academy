@@ -64,6 +64,9 @@ public class ChatRoomService {
     private final Map<Integer, CaroTableSession> caroTables = new LinkedHashMap<>();
     private final Map<String, ChatRoomCaro> caroMatches = new LinkedHashMap<>();
     private final Deque<Map<String, Object>> chatHistory = new ArrayDeque<>();
+    private final Map<String, BoardSession> boardSessions = new LinkedHashMap<>();
+    private final RoomColorFloor colorFloor = new RoomColorFloor();
+    private static final Set<String> REACTIONS = Set.of("hello", "laugh", "clap", "love", "celebrate", "surprise");
     private long knownDiceRound = -1;
     private long diceClosesAt;
     private long lastWalletRefresh;
@@ -85,6 +88,12 @@ public class ChatRoomService {
         private Guest host;
         private Long stake;
         private CaroInvite invite;
+    }
+
+    private static final class BoardSession {
+        private long points = 10;
+        private final Set<String> ready = new HashSet<>();
+        private RoomBoardMatch match;
     }
 
     private record Approach(Integer chair, Guest partner, Deque<Point> path, double speed) {
@@ -120,6 +129,11 @@ public class ChatRoomService {
         private boolean interactions;
         private boolean roomGames;
         private boolean diceViewing;
+        private boolean reactions;
+        private boolean boardGames;
+        private boolean floorGame;
+        private String watchingBoard;
+        private long lastReaction;
         private long wallet = -1;
         private long shownWallet = -1;
         private UUID activeCaroId;
@@ -210,10 +224,19 @@ public class ChatRoomService {
                 error(guest, "Hãy nhập tên để vào phòng.");
                 return;
             }
+            tickFloor(now);
             switch (type) {
                 case "move" -> move(guest, packet);
                 case "chat" -> chat(guest, packet, now);
                 case "gesture" -> gesture(guest, packet, now);
+                case "reaction" -> reaction(guest, packet, now);
+                case "board-watch", "board-ready", "board-move", "board-action" -> board(guest, type, packet, now);
+                case "floor-join" -> {
+                    if (guest.floorGame && map.layout().colorFloor().contains(guest.x, guest.y)
+                        && guest.seat == null && colorFloor.join(guest.access.userId(), true)) {
+                        publishFloor(now);
+                    }
+                }
                 case "seat" -> seat(guest, packet, now);
                 case "high-five-invite" -> inviteHighFive(guest, now);
                 case "high-five-reply" -> replyHighFive(guest, packet, now);
@@ -248,6 +271,9 @@ public class ChatRoomService {
         guest.activities = packet.path("activities").isBoolean() && packet.path("activities").asBoolean();
         guest.gestures = packet.path("gestures").isBoolean() && packet.path("gestures").asBoolean();
         guest.interactions = packet.path("interactions").isBoolean() && packet.path("interactions").asBoolean();
+        guest.reactions = packet.path("reactions").asBoolean(false);
+        guest.boardGames = packet.path("boardGames").asBoolean(false);
+        guest.floorGame = packet.path("floorGame").asBoolean(false);
         boolean wantsGames = packet.path("roomGames").isBoolean() && packet.path("roomGames").asBoolean();
         guest.avatar = "female".equals(packet.path("avatar").asText()) ? "female" : "male";
         String color = packet.path("color").asText();
@@ -269,6 +295,24 @@ public class ChatRoomService {
             }
         }
         initializeGames(guest, wantsGames);
+        if (guest.reactions || guest.boardGames || guest.floorGame) {
+            sendGame(guest, Map.of("type", "playground-ready", "reactions", guest.reactions,
+                "boardGames", guest.boardGames, "floorGame", guest.floorGame));
+        }
+        if (guest.boardGames) {
+            sendBoardTables(guest);
+            for (var entry : boardSessions.entrySet()) {
+                RoomBoardMatch match = entry.getValue().match;
+                if (match != null && match.side(guest.access.userId()) >= 0 && match.reason == null) {
+                    guest.watchingBoard = entry.getKey();
+                    sendBoard(guest, entry.getKey(), entry.getValue(), System.currentTimeMillis());
+                    break;
+                }
+            }
+        }
+        if (guest.floorGame) {
+            sendGame(guest, colorFloor.snapshot(guest.access.userId(), System.currentTimeMillis()));
+        }
     }
 
     private void initializeGames(Guest guest, boolean wantsGames) throws IOException {
@@ -360,6 +404,17 @@ public class ChatRoomService {
     @Scheduled(fixedDelay = 1000)
     public synchronized void gameTick() throws IOException {
         long now = System.currentTimeMillis();
+        for (var entry : boardSessions.entrySet()) {
+            BoardSession table = entry.getValue();
+            if (table.match != null && table.match.expire(now)) {
+                publishBoard(entry.getKey(), now);
+            }
+            if (table.match != null && table.match.settled && now - table.match.finishedAt > 120_000) {
+                table.match = null;
+                table.ready.clear();
+                publishBoard(entry.getKey(), now);
+            }
+        }
         expireCaroInvites(now);
         for (ChatRoomCaro match : caroMatches.values().stream().distinct().toList()) {
             if (match.expire(now)) {
@@ -371,6 +426,16 @@ public class ChatRoomService {
             return;
         }
         try {
+            for (var entry : boardSessions.entrySet()) {
+                RoomBoardMatch match = entry.getValue().match;
+                if (match != null && match.reason != null && !match.settled) {
+                    games.settleCaro(match.players[match.winner].userId(),
+                        match.players[1 - match.winner].userId(), match.points, match.transfer);
+                    match.settled = true;
+                    refreshWallets();
+                    publishBoard(entry.getKey(), now);
+                }
+            }
             for (ChatRoomCaro match : caroMatches.values().stream().distinct().toList()) {
                 if (match.result != null && !match.settled) {
                     games.settleCaro(match.winner().id(), match.loser().id(), match.points, match.walletTransfer);
@@ -442,7 +507,13 @@ public class ChatRoomService {
 
     private long reserved(String userId) {
         ChatRoomCaro match = caroMatches.get(userId);
-        return match != null && !match.settled ? match.points : 0;
+        long points = match != null && !match.settled ? match.points : 0;
+        for (BoardSession board : boardSessions.values()) {
+            if (board.match != null && !board.match.settled && board.match.side(userId) >= 0) {
+                points += board.match.points;
+            }
+        }
+        return points;
     }
 
     private void sendGame(Guest guest, Object event) {
@@ -875,14 +946,29 @@ public class ChatRoomService {
             return false;
         }
         boolean caro = map.caroTable(index) != 0;
+        ChatRoomMap.BoardTable board = map.boardTable(index);
+        if (board != null) {
+            if (!guest.boardGames || !guest.roomGames || reserved(guest.access.userId()) > 0
+                && !boardParticipant(guest, board.id())) {
+                return false;
+            }
+            BoardSession table = boardSessions.get(board.id());
+            if (table != null && table.match != null && table.match.reason == null) {
+                int side = table.match.side(guest.access.userId());
+                if (side < 0 || board.chairs().get(side) != index) {
+                    return false;
+                }
+            }
+        }
         if (caro && !guest.roomGames) {
             return false;
         }
         return guests.values().stream().filter(other -> other != guest).noneMatch(other -> {
             Integer reserved = other.approach == null ? null : other.approach.chair();
             return Integer.valueOf(index).equals(other.seat) || Integer.valueOf(index).equals(reserved)
-                || caro && guest.access.userId().equals(other.access.userId())
-                    && (map.caroTable(other.seat) != 0 || map.caroTable(reserved) != 0);
+                || (caro || board != null) && guest.access.userId().equals(other.access.userId())
+                    && (map.caroTable(other.seat) != 0 || map.caroTable(reserved) != 0
+                        || map.boardTable(other.seat) != null || map.boardTable(reserved) != null);
         });
     }
 
@@ -903,6 +989,12 @@ public class ChatRoomService {
         if (table != 0) {
             refreshCaroTable(table, System.currentTimeMillis());
         }
+        ChatRoomMap.BoardTable board = map.boardTable(chair);
+        if (board != null) {
+            guest.watchingBoard = board.id();
+            boardSessions.computeIfAbsent(board.id(), key -> new BoardSession());
+            publishBoard(board.id(), System.currentTimeMillis());
+        }
     }
 
     private void leaveSeat(Guest guest) throws IOException {
@@ -910,11 +1002,19 @@ public class ChatRoomService {
             return;
         }
         int table = map.caroTable(guest.seat);
+        ChatRoomMap.BoardTable board = map.boardTable(guest.seat);
         guest.seat = null;
         broadcastPosition(guest);
         if (table != 0) {
             sendGame(guest, Map.of("type", "caro-table"));
             refreshCaroTable(table, System.currentTimeMillis());
+        }
+        if (board != null) {
+            BoardSession session = boardSessions.get(board.id());
+            if (session != null) {
+                session.ready.remove(guest.access.userId());
+                publishBoard(board.id(), System.currentTimeMillis());
+            }
         }
     }
 
@@ -967,6 +1067,7 @@ public class ChatRoomService {
     @Scheduled(fixedDelay = APPROACH_TICK_MILLIS)
     public synchronized void walkApproaches() throws IOException {
         long now = System.currentTimeMillis();
+        tickFloor(now);
         long stepAt = System.nanoTime();
         for (Guest guest : List.copyOf(guests.values())) {
             Approach approach = guest.approach;
@@ -1113,8 +1214,193 @@ public class ChatRoomService {
         return FACINGS.get(octant);
     }
 
+    private void reaction(Guest guest, JsonNode packet, long now) throws IOException {
+        String reaction = packet.path("reaction").asText();
+        if (!guest.reactions || !REACTIONS.contains(reaction) || now - guest.lastReaction < 1200) {
+            return;
+        }
+        guest.lastReaction = now;
+        broadcast(Map.of("type", "reaction", "playerId", guest.session.getId(), "reaction", reaction),
+            viewer -> viewer.reactions);
+    }
+
+    private void tickFloor(long now) throws IOException {
+        List<RoomColorFloor.Player> present = guests.values().stream()
+            .filter(guest -> guest.name != null && guest.session.isOpen() && guest.floorGame)
+            .map(guest -> new RoomColorFloor.Player(guest.access.userId(), guest.name, guest.x, guest.y)).toList();
+        if (colorFloor.tick(now, present, map.layout().colorTiles())) {
+            publishFloor(now);
+        }
+    }
+
+    private void publishFloor(long now) {
+        for (Guest viewer : guests.values()) {
+            if (viewer.floorGame && viewer.name != null) {
+                sendGame(viewer, colorFloor.snapshot(viewer.access.userId(), now));
+            }
+        }
+    }
+
+    private boolean boardParticipant(Guest guest, String table) {
+        BoardSession session = boardSessions.get(table);
+        return session != null && session.match != null && session.match.reason == null
+            && session.match.side(guest.access.userId()) >= 0;
+    }
+
+    private List<Guest> boardOccupants(ChatRoomMap.BoardTable table) {
+        List<Guest> occupants = new ArrayList<>();
+        for (int chair : table.chairs()) {
+            occupants.add(guests.values().stream().filter(guest -> guest.name != null && guest.session.isOpen()
+                && Integer.valueOf(chair).equals(guest.seat)).findFirst().orElse(null));
+        }
+        return occupants;
+    }
+
+    private void board(Guest guest, String type, JsonNode packet, long now) {
+        if (!guest.boardGames) {
+            return;
+        }
+        String tableId = packet.path("table").asText();
+        ChatRoomMap.BoardTable layout = map.layout().boardTables().stream()
+            .filter(table -> table.id().equals(tableId)).findFirst().orElse(null);
+        if (layout == null) {
+            return;
+        }
+        BoardSession session = boardSessions.computeIfAbsent(tableId, key -> new BoardSession());
+        if ("board-watch".equals(type)) {
+            guest.watchingBoard = tableId;
+            sendBoard(guest, tableId, session, now);
+            return;
+        }
+        if (!guest.roomGames || !layout.chairs().contains(guest.seat)) {
+            boardError(guest, "Hãy ngồi vào ghế của bàn để chơi.");
+            return;
+        }
+        if (session.match != null && session.match.expire(now)) {
+            publishBoard(tableId, now);
+            return;
+        }
+        if ("board-ready".equals(type)) {
+            if (session.match != null && (!session.match.settled || session.match.reason == null)) {
+                return;
+            }
+            long points = integer(packet, "points");
+            if (points < ChatRoomGames.MIN_CARO_STAKE || points > ChatRoomGames.MAX_STAKE
+                || reserved(guest.access.userId()) > 0 || available(guest) < points) {
+                boardError(guest, "Mỗi bạn cần góp ít nhất 10 CPoint và đủ số dư.");
+                return;
+            }
+            if (session.ready.isEmpty()) {
+                session.points = points;
+            } else if (session.points != points) {
+                boardError(guest, "Hai bạn cần chọn cùng số CPoint.");
+                return;
+            }
+            session.match = null;
+            session.ready.add(guest.access.userId());
+            List<Guest> occupants = boardOccupants(layout);
+            if (occupants.stream().allMatch(player -> player != null && session.ready.contains(player.access.userId())
+                && available(player) >= points && reserved(player.access.userId()) == 0)
+                && !occupants.get(0).access.userId().equals(occupants.get(1).access.userId())) {
+                Guest first = occupants.get(0);
+                Guest second = occupants.get(1);
+                session.match = new RoomBoardMatch("xiangqi".equals(layout.kind()),
+                    new RoomBoardMatch.Player(first.access.userId(), first.name),
+                    new RoomBoardMatch.Player(second.access.userId(), second.name), points,
+                    map.layout().boardClock().baseMillis(), map.layout().boardClock().incrementMillis(), now);
+                session.ready.clear();
+                guests.values().stream().filter(player -> player.roomGames).forEach(this::showWallet);
+            }
+            publishBoard(tableId, now);
+            return;
+        }
+        RoomBoardMatch match = session.match;
+        if (match == null) {
+            return;
+        }
+        int version = packet.path("version").isIntegralNumber() && packet.path("version").canConvertToInt()
+            ? packet.path("version").intValue() : -1;
+        boolean changed;
+        if ("board-move".equals(type)) {
+            changed = packet.path("from").isIntegralNumber() && packet.path("from").canConvertToInt()
+                && packet.path("to").isIntegralNumber() && packet.path("to").canConvertToInt()
+                && match.move(guest.access.userId(), packet.path("matchId").asText(), version,
+                    packet.path("from").asInt(-1), packet.path("to").asInt(-1),
+                    packet.path("promotion").asText(""), now);
+        } else {
+            for (String cell : List.of("from", "to")) {
+                if (packet.has(cell) && (!packet.path(cell).isIntegralNumber()
+                    || !packet.path(cell).canConvertToInt())) {
+                    boardError(guest, "Ô cờ chưa phù hợp.");
+                    return;
+                }
+            }
+            changed = match.action(guest.access.userId(), packet.path("matchId").asText(), version,
+                packet.path("action").asText(), packet.has("from") ? packet.path("from").asInt(-1) : null,
+                packet.has("to") ? packet.path("to").asInt(-1) : null, packet.path("promotion").asText(""), now);
+        }
+        if (!changed) {
+            boardError(guest, "Nước đi hoặc yêu cầu chưa phù hợp với ván hiện tại.");
+            sendBoard(guest, tableId, session, now);
+            return;
+        }
+        publishBoard(tableId, now);
+    }
+
+    private void boardError(Guest guest, String message) {
+        sendGame(guest, Map.of("type", "board-error", "message", message));
+    }
+
+    private void publishBoard(String table, long now) {
+        BoardSession session = boardSessions.get(table);
+        for (Guest viewer : guests.values()) {
+            if (viewer.boardGames && viewer.name != null) {
+                sendBoardTables(viewer);
+                if (table.equals(viewer.watchingBoard)) {
+                    sendBoard(viewer, table, session, now);
+                }
+            }
+        }
+    }
+
+    private void sendBoardTables(Guest viewer) {
+        List<Map<String, Object>> states = new ArrayList<>();
+        for (ChatRoomMap.BoardTable table : map.layout().boardTables()) {
+            BoardSession session = boardSessions.get(table.id());
+            List<String> names = boardOccupants(table).stream().map(guest -> guest == null ? "" : guest.name).toList();
+            String status = session != null && session.match != null && session.match.reason == null ? "playing"
+                : names.stream().allMatch(String::isEmpty) ? "empty" : "waiting";
+            states.add(Map.of("id", table.id(), "status", status, "players", names));
+        }
+        sendGame(viewer, Map.of("type", "board-tables", "tables", states));
+    }
+
+    private void sendBoard(Guest viewer, String tableId, BoardSession session, long now) {
+        ChatRoomMap.BoardTable table = map.layout().boardTables().stream()
+            .filter(item -> item.id().equals(tableId)).findFirst().orElseThrow();
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("type", "board-state");
+        state.put("table", tableId);
+        state.put("kind", table.kind());
+        state.put("name", table.name());
+        state.put("points", session.points);
+        state.put("seated", table.chairs().contains(viewer.seat));
+        state.put("ready", session.ready.contains(viewer.access.userId()));
+        state.put("readyNames", boardOccupants(table).stream().filter(player -> player != null
+            && session.ready.contains(player.access.userId())).map(player -> player.name).toList());
+        state.put("players", boardOccupants(table).stream().map(player -> player == null ? "" : player.name).toList());
+        state.put("baseMillis", map.layout().boardClock().baseMillis());
+        state.put("incrementMillis", map.layout().boardClock().incrementMillis());
+        if (session.match != null) {
+            state.put("match", session.match.snapshot(viewer.access.userId(), now));
+        }
+        sendGame(viewer, state);
+    }
+
     private void chat(Guest guest, JsonNode packet, long now) throws IOException {
-        String text = clean(packet.path("text").asText());
+        // Giữ ZWJ để emoji ghép vẫn là một grapheme, lọc ký tự điều khiển còn lại.
+        String text = Normalizer.normalize(packet.path("text").asText(), Normalizer.Form.NFC)
+            .replaceAll("[\\p{Cc}\\p{Cf}&&[^\\x{200D}]]", " ").strip();
         if (text.isBlank() || text.length() > ChatRoomLimits.MESSAGE_LENGTH) {
             error(guest, "Tin nhắn cần từ 1 đến " + ChatRoomLimits.MESSAGE_LENGTH + " ký tự.");
             return;
@@ -1169,6 +1455,15 @@ public class ChatRoomService {
     public synchronized void disconnect(WebSocketSession session) throws IOException {
         Guest guest = guests.remove(session.getId());
         if (guest != null && guest.name != null) {
+            colorFloor.leave(guest.access.userId());
+            ChatRoomMap.BoardTable board = map.boardTable(guest.seat);
+            if (board != null) {
+                BoardSession boardSession = boardSessions.get(board.id());
+                if (boardSession != null) {
+                    boardSession.ready.remove(guest.access.userId());
+                    publishBoard(board.id(), System.currentTimeMillis());
+                }
+            }
             String userId = guest.access.userId();
             ChatRoomCaro match = caroMatches.get(userId);
             long now = System.currentTimeMillis();
