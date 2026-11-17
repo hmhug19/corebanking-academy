@@ -80,6 +80,42 @@ class MediaProbeTest {
             Duration.ofHours(6), 0, "veryfast")).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void av1AndH264Mp4ArePlayableAsIsButNotHevcTenBitOrOversized() throws IOException {
+        ObjectMapper json = new ObjectMapper();
+        // ffprobe of a 1080p YouTube download: AV1 reports a low "level" that the H.264 rule must not apply to.
+        assertThat(MediaProbe.playableMp4Video(json.readTree(
+            "{\"codec_name\":\"av1\",\"pix_fmt\":\"yuv420p\",\"width\":1920,\"height\":1080,\"level\":8}"))).isTrue();
+        assertThat(MediaProbe.playableMp4Video(json.readTree(
+            "{\"codec_name\":\"h264\",\"pix_fmt\":\"yuv420p\",\"width\":1920,\"height\":1080,\"level\":42}"))).isTrue();
+        assertThat(MediaProbe.playableMp4Video(json.readTree(
+            "{\"codec_name\":\"av1\",\"pix_fmt\":\"yuv420p10le\",\"width\":1920,\"height\":1080}"))).isFalse();
+        assertThat(MediaProbe.playableMp4Video(json.readTree(
+            "{\"codec_name\":\"av1\",\"pix_fmt\":\"yuv420p\",\"width\":3840,\"height\":2160}"))).isFalse();
+        assertThat(MediaProbe.playableMp4Video(json.readTree(
+            "{\"codec_name\":\"hevc\",\"pix_fmt\":\"yuv420p\",\"width\":1920,\"height\":1080,\"level\":120}")))
+            .isFalse();
+    }
+
+    @Test
+    void transcodeTimeoutFollowsTheVideoLengthWithinTheConfiguredCap() {
+        // 41-minute video: 4x its length instead of a flat 6 hours.
+        assertThat(probe.transcodeTimeout(new BigDecimal("2478"))).isEqualTo(Duration.ofSeconds(4 * 2478));
+        assertThat(probe.transcodeTimeout(new BigDecimal("10"))).isEqualTo(MediaProbe.MIN_TRANSCODE_TIMEOUT);
+        assertThat(probe.transcodeTimeout(new BigDecimal("86400"))).isEqualTo(Duration.ofHours(6));
+    }
+
+    @Test
+    void outputTimeIsTheLatestProgressBlock() throws IOException {
+        Path progress = directory.resolve("progress.txt");
+        assertThat(MediaProbe.outputMicros(progress)).isEqualTo(-1);
+        Files.writeString(progress, "frame=0\nout_time_us=N/A\nprogress=continue\n");
+        assertThat(MediaProbe.outputMicros(progress)).isEqualTo(-1);
+        Files.writeString(progress, "out_time_us=5000000\nprogress=continue\nframe=240\nout_time_us=10000000\n"
+            + "out_time_ms=10000000\nprogress=continue\n");
+        assertThat(MediaProbe.outputMicros(progress)).isEqualTo(10_000_000L);
+    }
+
     /** A stand-in for ffmpeg: a real child process that prints a line and exits with `code`. */
     private List<String> exitWith(int code) throws IOException {
         Path source = directory.resolve("Exit.java");

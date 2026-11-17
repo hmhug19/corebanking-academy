@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.function.DoubleConsumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -61,11 +62,18 @@ public class LearningMediaProbe {
     }
 
     public MediaProbe.Checked check(Path file, String name, String expectedMime) throws IOException {
+        return check(file, name, expectedMime, fraction -> { });
+    }
+
+    /** @param progress how far the playable MP4 is, 0 to 1, while ffmpeg writes it */
+    public MediaProbe.Checked check(Path file, String name, String expectedMime, DoubleConsumer progress)
+        throws IOException {
         try {
             String actualMime = expectedMime == null ? probe.detect(file, name) : expectedMime;
             validateName(name, actualMime, Files.size(file));
             return probe.check(file, name, expectedMime, limit(actualMime),
-                MediaMime.VIDEO_MP4.equals(actualMime) ? Long.MAX_VALUE : LearningLimits.MAX_MEDIA_DURATION_SECONDS);
+                MediaMime.VIDEO_MP4.equals(actualMime) ? Long.MAX_VALUE : LearningLimits.MAX_MEDIA_DURATION_SECONDS,
+                progress);
         } catch (MediaProbe.Rejected exception) {
             throw new BusinessException(LearningResponseCode.valueOf(exception.getMessage()));
         }

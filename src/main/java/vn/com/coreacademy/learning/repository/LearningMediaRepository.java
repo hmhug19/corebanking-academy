@@ -63,6 +63,24 @@ public class LearningMediaRepository {
             .setParameter("uploading", AssetStatus.UPLOADING).executeUpdate();
     }
 
+    /**
+     * Records how far the claim `claim` is, null to clear it. Bypasses the entity version on purpose: the
+     * heartbeat and the result write of the same claim must not conflict with a progress update.
+     */
+    public void reportProgress(Long assetId, UUID claim, Integer percent) {
+        // Two statements: a null bind has no SQL type for PostgreSQL to coerce into integer.
+        var query = percent == null
+            ? entityManager.createNativeQuery("""
+                update learning_hub.assets set processing_progress = null
+                where id = :id and processing_lease_id = :claim
+                """)
+            : entityManager.createNativeQuery("""
+                update learning_hub.assets set processing_progress = :percent
+                where id = :id and processing_lease_id = :claim
+                """).setParameter("percent", percent);
+        query.setParameter("id", assetId).setParameter("claim", claim).executeUpdate();
+    }
+
     public List<Long> pending() {
         return entityManager.createQuery("""
             select a.id from LearningAsset a

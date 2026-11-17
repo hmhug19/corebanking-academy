@@ -135,6 +135,13 @@ public class LearningAsset extends LearningRecord {
     @Column(name = "processing_lease_expires_at")
     private Instant processingLeaseExpiresAt;
 
+    /**
+     * Percent of the playable rendition written by the current claim, null before it starts. Written only by
+     * {@code LearningMediaRepository.reportProgress} so a lease renewal never writes back an older value.
+     */
+    @Column(name = "processing_progress", insertable = false, updatable = false)
+    private Integer processingProgress;
+
     @Column(name = "media_checked_at")
     private Instant mediaCheckedAt;
 

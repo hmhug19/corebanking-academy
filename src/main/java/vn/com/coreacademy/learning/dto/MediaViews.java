@@ -14,7 +14,9 @@ public final class MediaViews {
 
     public record Upload(UUID uploadId, Long assetId, String status, long totalBytes, long uploadedBytes,
                          int partSize, Instant expiresAt, List<Part> parts, String errorCode, String errorMessage,
-                         String mimeType, BigDecimal durationSeconds, Integer pageCount, Instant mediaCheckedAt) {
+                         String mimeType, BigDecimal durationSeconds, Integer pageCount, Instant mediaCheckedAt,
+                         /* Percent of the video conversion while processing; null when not converting (yet). */
+                         Integer processingPercent) {
     }
 
     public record Session(UUID sessionId, long sessionFence, Instant leaseExpiresAt, long lastAcceptedSequence,

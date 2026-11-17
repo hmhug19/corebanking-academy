@@ -476,7 +476,8 @@ public class LearningUploadService {
                 .filter(p -> UploadPartStatus.UPLOADED.equals(p.getPartStatus()))
                 .map(p -> new MediaViews.Part(p.getPartNumber(), p.getSizeBytes(), p.getChecksumSha256())).toList(),
             asset.getProcessingErrorCode(), asset.getProcessingError(), asset.getMimeType(), asset.getDurationSeconds(),
-            asset.getPageCount(), asset.getMediaCheckedAt());
+            asset.getPageCount(), asset.getMediaCheckedAt(),
+            AssetStatus.PROCESSING.equals(asset.getStatus()) ? asset.getProcessingProgress() : null);
     }
 
     private void recover(Runnable recovery, Throwable primary, String operation) {

@@ -3,6 +3,7 @@ package vn.com.coreacademy.learning.service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -12,6 +13,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.DoubleConsumer;
 import java.util.function.Supplier;
 
 import jakarta.annotation.PreDestroy;
@@ -61,6 +63,8 @@ public class LearningMediaWorker {
         return thread;
     });
     private final AtomicBoolean running = new AtomicBoolean();
+    /** The least time between two progress writes of one job. */
+    private static final Duration PROGRESS_WRITE_EVERY = Duration.ofSeconds(5);
 
     private record Job(LearningAsset asset, UUID claim, List<MultipartObjectStorage.CommittedPart> parts) {
     }
@@ -145,6 +149,8 @@ public class LearningMediaWorker {
                 .map(p -> new MultipartObjectStorage.CommittedPart(p.getPartNumber(), p.getEtag(), p.getSizeBytes()))
                 .toList();
             repository.flush();
+            // A new claim starts from nothing; an earlier attempt's percent would make the bar jump back.
+            media.reportProgress(asset.getId(), claim, null);
             return new Job(asset, claim, parts);
         });
     }
@@ -178,7 +184,8 @@ public class LearningMediaWorker {
                     throw new BusinessException(LearningResponseCode.UPLOAD_FILE_MISMATCH);
                 }
                 stage = "probe_and_prepare";
-                try (var checked = probe.check(original.path(), source.getOriginalName(), source.getMimeType())) {
+                try (var checked = probe.check(original.path(), source.getOriginalName(), source.getMimeType(),
+                    progressReporter(job))) {
                     String playbackKey = null;
                     Long playbackSize = null;
                     String playbackChecksum = null;
@@ -247,6 +254,26 @@ public class LearningMediaWorker {
                 return null;
             });
         }
+    }
+
+    /**
+     * Stores the rendition percent the uploader polls, when it grew by a whole percent and at most every
+     * {@link #PROGRESS_WRITE_EVERY}. 100 is left to READY: the rendition still has to reach S3.
+     */
+    private DoubleConsumer progressReporter(Job job) {
+        int[] stored = {-1};
+        long[] storedAt = {0};
+        return fraction -> {
+            int percent = Math.min(99, (int) Math.floor(fraction * 100));
+            long now = System.nanoTime();
+            if (percent <= stored[0] || (stored[0] >= 0 && now - storedAt[0] < PROGRESS_WRITE_EVERY.toNanos())) {
+                return;
+            }
+            new TransactionTemplate(transactions).executeWithoutResult(tx ->
+                media.reportProgress(job.asset().getId(), job.claim(), percent));
+            stored[0] = percent;
+            storedAt[0] = now;
+        };
     }
 
     private LearningAsset current(Job job) {

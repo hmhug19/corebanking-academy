@@ -370,12 +370,19 @@ Init ví dụ (ID và hash chỉ minh họa, phải lấy theo file/đơn vị t
   Nếu failed với LEARNING-MEDIA_PROCESSING_UNAVAILABLE, caller có thể POST complete để thử lại bytes đã lưu.
   Không áp dụng retry này cho checksum/codec/file không hợp lệ.
 - GET upload trả mimeType/durationSeconds/pageCount/mediaCheckedAt sau xác minh; FE không tự suy ready từ uploadedBytes.
+  Khi `status=processing`, `processingPercent` (0-99) là phần trăm chuyển MP4 của lần xử lý hiện tại, cập nhật
+  tối đa 5 giây/lần; null khi đang tải/kiểm file gốc hoặc không cần chuyển. Cột `assets.processing_progress`
+  (upgrade `docs/sql/upgrade/2026-11-17-media-processing-progress.sql`).
 - PDFBox xác định số trang PDF, từ chối PDF mã hóa/lỗi; ffprobe xác định codec/duration.
-  MP4 hợp lệ đến 500 MB được chuẩn hóa để phát trên trình duyệt. H.264/yuv420p + AAC được remux
-  faststart; HEVC, video 10-bit, MPEG-4 hoặc audio khác được chuyển sang H.264/yuv420p + AAC.
+  MP4 hợp lệ đến 500 MB được chuẩn hóa để phát trên trình duyệt. H.264/yuv420p (level ≤ 4.2) hoặc AV1/yuv420p
+  (file tải từ YouTube), tối đa 1920×1080, + AAC ≤ 2 kênh được remux faststart, không chuyển mã; HEVC, video
+  10-bit, MPEG-4 hoặc audio khác được chuyển sang H.264/yuv420p + AAC. AV1 cần trình duyệt có bộ giải mã AV1
+  (Chrome/Edge/Firefox/Cốc Cốc hiện hành; Safari chỉ trên thiết bị có giải mã AV1 phần cứng).
   Audio là tùy chọn, chỉ track hình chính và track audio đầu tiên được dùng. File hỏng/mã hóa hoặc
   không có video vẫn trả lỗi xác minh. MP4 học tập áp dụng giới hạn dung lượng, không giới hạn 24 giờ.
-  Timeout chuyển đổi riêng là `app.learning.media.transcode-timeout` (mặc định 6 giờ); worker tiếp tục
+  Mỗi lần chạy ffmpeg được 4 lần thời lượng video (ít nhất 15 phút), không quá
+  `app.learning.media.transcode-timeout` (mặc định 6 giờ); ffmpeg không tiến thêm trong 10 phút bị dừng và
+  tính là lỗi hạ tầng (được thử lại). Worker tiếp tục
   gia hạn lease trong khi chạy (heartbeat chạy luồng riêng, không phụ thuộc scheduler dùng chung). Số luồng
   giải mã/mã hóa của một lần chuyển đổi là `app.learning.media.transcode-threads` (env
   `APP_LEARNING_MEDIA_TRANSCODE_THREADS`; mặc định 0 = số CPU JVM thấy, tối đa 4) và preset x264 là

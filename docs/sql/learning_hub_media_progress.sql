@@ -50,6 +50,7 @@ ALTER TABLE learning_hub.assets
     ADD COLUMN IF NOT EXISTS processing_attempts integer NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS processing_lease_id uuid,
     ADD COLUMN IF NOT EXISTS processing_lease_expires_at timestamptz,
+    ADD COLUMN IF NOT EXISTS processing_progress integer CHECK (processing_progress IS NULL OR processing_progress BETWEEN 0 AND 100),
     ADD COLUMN IF NOT EXISTS media_checked_at timestamptz,
     ADD COLUMN IF NOT EXISTS page_count_checked_at timestamptz,
     ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
@@ -133,6 +134,7 @@ COMMENT ON COLUMN learning_hub.assets.processing_error_code IS 'Lý do ổn đ�
 COMMENT ON COLUMN learning_hub.assets.processing_attempts IS 'Số lần worker claim; BE giới hạn retry và tài nguyên xử lý.';
 COMMENT ON COLUMN learning_hub.assets.processing_lease_id IS 'UUID lượt claim worker; hoàn tất bằng compare-and-set, worker cũ không được publish ready.';
 COMMENT ON COLUMN learning_hub.assets.processing_lease_expires_at IS 'Hạn phục hồi khi worker chết; không giữ DB lock trong IO S3/ffprobe/ffmpeg.';
+COMMENT ON COLUMN learning_hub.assets.processing_progress IS 'Phần trăm chuyển mã video của lần xử lý hiện tại (0-99); null khi chưa chuyển mã hoặc không cần.';
 COMMENT ON COLUMN learning_hub.assets.media_checked_at IS 'Thời điểm server thực sự kiểm file/probe; không tự điền cho legacy chưa được kiểm chứng.';
 COMMENT ON COLUMN learning_hub.assets.page_count_checked_at IS 'Thời điểm server kiểm số trang PDF bằng parser.';
 COMMENT ON COLUMN learning_hub.assets.is_deleted IS 'Cờ xóa mềm; BE kiểm mọi tham chiếu và serialize attach/delete trước cleanup theo retention.';

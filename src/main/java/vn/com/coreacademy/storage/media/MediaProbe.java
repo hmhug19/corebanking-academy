@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.DoubleConsumer;
 import java.util.zip.ZipException;
 import java.util.zip.ZipFile;
 
@@ -35,6 +36,17 @@ public class MediaProbe {
     private static final int LOG_OUTPUT_CHARS = 500;
 
     private final Settings properties;
+
+    /** Wall time allowed per second of video: 1 thread of a small VPS core runs about 1x real time on AV1 1080p. */
+    static final int TRANSCODE_TIME_PER_VIDEO_SECOND = 4;
+    /** The least time a transcode gets, whatever its length: startup and short clips. */
+    static final Duration MIN_TRANSCODE_TIMEOUT = Duration.ofMinutes(15);
+    /** A transcode whose output time has not moved this long is stuck and stopped (then retried). */
+    static final Duration TRANSCODE_STALL = Duration.ofMinutes(10);
+    /** How often ffmpeg writes its progress and the probe reads it. */
+    static final Duration PROGRESS_PERIOD = Duration.ofSeconds(5);
+    /** The tail of the progress file that holds its latest block. */
+    private static final int PROGRESS_TAIL_BYTES = 2048;
 
     /** The x264 speed/size trade-off when nothing else is configured. */
     public static final String DEFAULT_PRESET = "veryfast";
@@ -76,6 +88,12 @@ public class MediaProbe {
     }
 
     public Checked check(Path file, String name, String expectedMime, long maxBytes, long maxDurationSeconds) throws IOException {
+        return check(file, name, expectedMime, maxBytes, maxDurationSeconds, fraction -> { });
+    }
+
+    /** @param progress told how far the MP4 rendition is, 0 to 1, a few times a minute while ffmpeg runs */
+    public Checked check(Path file, String name, String expectedMime, long maxBytes, long maxDurationSeconds,
+                         DoubleConsumer progress) throws IOException {
         String mime = detect(file, name);
         if (Files.size(file) <= 0 || Files.size(file) > maxBytes) {
             throw new Rejected("ASSET_INVALID");
@@ -118,9 +136,7 @@ public class MediaProbe {
         }
         boolean mp4 = MediaFormats.VIDEO_MP4.equals(mime);
         boolean compatible = mp4
-            ? "h264".equals(video.path("codec_name").asText()) && "yuv420p".equals(video.path("pix_fmt").asText())
-                && video.path("width").asInt() <= 1920 && video.path("height").asInt() <= 1080
-                && video.path("level").asInt() > 0 && video.path("level").asInt() <= 42
+            ? playableMp4Video(video)
                 && (audio == null || "aac".equals(audio.path("codec_name").asText()) && audio.path("channels").asInt() <= 2)
             : List.of("vp8", "vp9").contains(video.path("codec_name").asText())
                 && (audio == null || List.of("opus", "vorbis").contains(audio.path("codec_name").asText()));
@@ -130,15 +146,18 @@ public class MediaProbe {
         Path playback = null;
         if (mp4) {
             playback = Files.createTempFile(file.getParent(), "academy-playback-", ".mp4");
+            Path progressFile = Files.createTempFile(file.getParent(), "academy-progress-", ".txt");
             try {
                 List<String> command = mp4Command(file, playback, video, audio, duration, maxBytes, compatible);
                 try {
-                    run(command, properties.transcodeTimeout());
+                    run(withProgress(command, progressFile), transcodeTimeout(duration), progressFile, duration,
+                        progress);
                 } catch (Rejected exception) {
                     if (!compatible) throw exception;
                     // A valid codec can still have timestamps or stream headers that cannot be remuxed.
-                    run(mp4Command(file, playback, video, audio, duration, maxBytes, false),
-                        properties.transcodeTimeout());
+                    Files.deleteIfExists(progressFile);
+                    run(withProgress(mp4Command(file, playback, video, audio, duration, maxBytes, false),
+                        progressFile), transcodeTimeout(duration), progressFile, duration, progress);
                 }
                 if (Files.size(playback) == 0) throw new Rejected("ASSET_INVALID");
                 JsonNode rendition = json.readTree(run(List.of(properties.ffprobe(), "-v", "error",
@@ -152,9 +171,42 @@ public class MediaProbe {
             } catch (IOException | RuntimeException exception) {
                 deleteTemporaryFile(playback);
                 throw exception;
+            } finally {
+                deleteTemporaryFile(progressFile);
             }
         }
         return new Checked(mime, duration, null, playback);
+    }
+
+    /**
+     * MP4 video every supported browser plays as is: H.264 up to level 4.2, or AV1 (YouTube's default, which a
+     * transcode on a small server turns into tens of minutes of "processing"), both 4:2:0 and at most 1080p.
+     */
+    static boolean playableMp4Video(JsonNode video) {
+        String codec = video.path("codec_name").asText();
+        boolean fits = "yuv420p".equals(video.path("pix_fmt").asText())
+            && video.path("width").asInt() <= 1920 && video.path("height").asInt() <= 1080;
+        if ("h264".equals(codec)) {
+            return fits && video.path("level").asInt() > 0 && video.path("level").asInt() <= 42;
+        }
+        return "av1".equals(codec) && fits;
+    }
+
+    /** The wall time one ffmpeg run of a `duration`-second video may take: a multiple of the video, capped. */
+    Duration transcodeTimeout(BigDecimal duration) {
+        long seconds = duration.multiply(BigDecimal.valueOf(TRANSCODE_TIME_PER_VIDEO_SECOND))
+            .setScale(0, RoundingMode.UP).longValue();
+        Duration scaled = MIN_TRANSCODE_TIMEOUT.compareTo(Duration.ofSeconds(seconds)) > 0
+            ? MIN_TRANSCODE_TIMEOUT : Duration.ofSeconds(seconds);
+        return scaled.compareTo(properties.transcodeTimeout()) < 0 ? scaled : properties.transcodeTimeout();
+    }
+
+    private static List<String> withProgress(List<String> command, Path progressFile) {
+        List<String> result = new ArrayList<>(command);
+        // Output options go before the destination, the last argument.
+        result.addAll(result.size() - 1, List.of("-progress", progressFile.toString(),
+            "-stats_period", Long.toString(PROGRESS_PERIOD.toSeconds())));
+        return result;
     }
 
     List<String> mp4Command(Path source, Path destination, JsonNode video, JsonNode audio,
@@ -220,6 +272,15 @@ public class MediaProbe {
     }
 
     String run(List<String> command, Duration timeout) throws IOException {
+        return run(command, timeout, null, null, null);
+    }
+
+    /**
+     * Runs a media tool. With a progress file (ffmpeg `-progress`), reports the output time against `duration`
+     * and stops a run whose output time has not moved for {@link #TRANSCODE_STALL}.
+     */
+    String run(List<String> command, Duration timeout, Path progressFile, BigDecimal duration,
+               DoubleConsumer progress) throws IOException {
         Path output = Files.createTempFile("academy-probe-", ".log");
         Process process = null;
         String tool = Path.of(command.get(0)).getFileName().toString();
@@ -230,7 +291,7 @@ public class MediaProbe {
                 log.error("Cannot start media tool tool={} type={}", tool, exception.getClass().getSimpleName());
                 throw exception;
             }
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            if (!finished(process, timeout, tool, progressFile, duration, progress)) {
                 process.destroyForcibly();
                 log.warn("Media tool timed out tool={} timeout={}", tool, timeout);
                 throw new IllegalStateException("Media probe timed out");
@@ -254,6 +315,71 @@ public class MediaProbe {
                 process.destroyForcibly();
             }
             deleteTemporaryFile(output);
+        }
+    }
+
+    /** Waits for the tool; false when `timeout` passed first. Throws when a reported transcode stalls. */
+    private boolean finished(Process process, Duration timeout, String tool, Path progressFile, BigDecimal duration,
+                             DoubleConsumer progress) throws InterruptedException {
+        if (progressFile == null) {
+            return process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+        long deadline = System.nanoTime() + timeout.toNanos();
+        long reported = -1;
+        long movedAt = System.nanoTime();
+        for (;;) {
+            long left = deadline - System.nanoTime();
+            if (left <= 0) {
+                return false;
+            }
+            if (process.waitFor(Math.min(left, PROGRESS_PERIOD.toNanos()), TimeUnit.NANOSECONDS)) {
+                return true;
+            }
+            long outputMicros = outputMicros(progressFile);
+            if (outputMicros > reported) {
+                reported = outputMicros;
+                movedAt = System.nanoTime();
+                report(progress, duration, outputMicros);
+            } else if (System.nanoTime() - movedAt >= TRANSCODE_STALL.toNanos()) {
+                log.warn("Media tool stalled tool={} outputSeconds={} stall={}", tool, reported / 1_000_000,
+                    TRANSCODE_STALL);
+                throw new IllegalStateException("Media tool stalled");
+            }
+        }
+    }
+
+    private static void report(DoubleConsumer progress, BigDecimal duration, long outputMicros) {
+        if (progress == null || duration == null || duration.signum() <= 0) {
+            return;
+        }
+        try {
+            progress.accept(Math.min(1.0, outputMicros / 1_000_000.0 / duration.doubleValue()));
+        } catch (RuntimeException exception) {
+            // Showing progress must not stop the transcode it describes.
+            log.warn("Media progress report failed type={}", exception.getClass().getSimpleName());
+        }
+    }
+
+    /** The output time of ffmpeg's latest progress block in microseconds, or -1 before the first one. */
+    static long outputMicros(Path progressFile) {
+        try (var channel = Files.newByteChannel(progressFile)) {
+            long size = channel.size();
+            var buffer = ByteBuffer.allocate((int) Math.min(size, PROGRESS_TAIL_BYTES));
+            channel.position(size - buffer.capacity());
+            while (buffer.hasRemaining() && channel.read(buffer) >= 0) {
+                // Read the whole tail.
+            }
+            String text = new String(buffer.array(), 0, buffer.position(), StandardCharsets.US_ASCII);
+            int at = text.lastIndexOf("out_time_us=");
+            if (at < 0) {
+                return -1;
+            }
+            int end = text.indexOf('\n', at);
+            String value = text.substring(at + "out_time_us=".length(), end < 0 ? text.length() : end).strip();
+            return Long.parseLong(value);
+        } catch (IOException | NumberFormatException exception) {
+            // Not written yet, cut mid-line or "N/A" before the first frame.
+            return -1;
         }
     }
 
