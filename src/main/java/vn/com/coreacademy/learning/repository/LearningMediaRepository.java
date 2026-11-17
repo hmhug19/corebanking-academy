@@ -72,11 +72,11 @@ public class LearningMediaRepository {
         var query = percent == null
             ? entityManager.createNativeQuery("""
                 update learning_hub.assets set processing_progress = null
-                where id = :id and processing_lease_id = :claim
+                where asset_id = :id and processing_lease_id = :claim
                 """)
             : entityManager.createNativeQuery("""
                 update learning_hub.assets set processing_progress = :percent
-                where id = :id and processing_lease_id = :claim
+                where asset_id = :id and processing_lease_id = :claim
                 """).setParameter("percent", percent);
         query.setParameter("id", assetId).setParameter("claim", claim).executeUpdate();
     }
