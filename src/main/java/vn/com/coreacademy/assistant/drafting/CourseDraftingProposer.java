@@ -21,6 +21,7 @@ import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
 import vn.com.coreacademy.assistant.course.SourceSummariser;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.Candidate;
+import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.Choice;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.CourseBrief;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
@@ -39,6 +40,7 @@ public class CourseDraftingProposer implements DraftingStepProposer {
     static final String NOT_SUPPORTED = "Bước này chưa được hỗ trợ.";
     static final String NO_PROGRAMME = "Chưa chọn được chương trình đào tạo phù hợp; hãy chọn trong danh sách.";
     static final String NO_MODULE = "Chưa chọn được phân hệ nghiệp vụ; hãy chọn trong danh sách nếu cần.";
+    static final String NO_COMPETENCY = "Chưa chọn được năng lực cho câu hỏi; hãy chọn trong danh sách trước khi chốt.";
     private static final int CANDIDATES = 100;
     private static final int CODE_TRIES = 20;
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -55,6 +57,7 @@ public class CourseDraftingProposer implements DraftingStepProposer {
         return switch (step.stepNo()) {
             case 1 -> basics(session);
             case 2 -> outline(session);
+            case 3 -> rules(session);
             default -> throw new GenerationException(NOT_SUPPORTED);
         };
     }
@@ -300,6 +303,116 @@ public class CourseDraftingProposer implements DraftingStepProposer {
         String note = "Đã đề xuất " + chapters.size() + " chương, " + lessons + " bài; nội dung từng bài để trống.";
 
         return new Proposal(proposal, List.of(note), madeSummary);
+    }
+
+    // ---- step 3 ----------------------------------------------------------------------------------------------------
+
+    /**
+     * Bonus points, a competency from the list and about ten draft questions for the final exam, from the source
+     * summary and the course as saved. Each question names its source section by key, replaced by the section's title
+     * as in the outline; a competency outside the list, or none, is left empty for the author. Nothing reaches the
+     * question bank here: the questions stay in the proposal until the author confirms the step.
+     */
+    private Proposal rules(SessionRow session) {
+        Source source = source(session);
+        Map<String, String> sections = sectionTitles(source.summary());
+        if (sections.isEmpty()) {
+            throw new GenerationException(SourceSummariser.EMPTY);
+        }
+        Optional<CourseBrief> course = session.revisionId() == null ? Optional.empty()
+            : drafting.courseBrief(session.revisionId());
+        List<Choice> competencies = drafting.competencies(CANDIDATES);
+
+        JsonNode answer = summariser.ask(GenerationSchemas.DRAFT_RULES, rulesMessage(source.summary(), sections,
+            course, competencies), node -> {
+                List<String> problems = new ArrayList<>(GenerationSchemas.draftRules(node));
+                if (problems.isEmpty()) {
+                    node.path("questions").forEach(question -> {
+                        String key = question.path("section").asText().strip();
+                        if (!sections.containsKey(key)) {
+                            problems.add("question section " + key + " is not one of " + sections.keySet());
+                        }
+                    });
+                }
+                return problems;
+            });
+
+        return checkedRules(answer, sections, competencies, source.made());
+    }
+
+    private static String rulesMessage(JsonNode summary, Map<String, String> sections, Optional<CourseBrief> course,
+                                       List<Choice> competencies) {
+        StringBuilder user = new StringBuilder("DỮ LIỆU\n");
+        course.ifPresent(brief -> {
+            user.append("Tên khóa học: ").append(brief.title()).append('\n');
+            if (brief.level() != null) {
+                user.append("Mức độ: ").append(brief.level()).append('\n');
+            }
+            if (!brief.objectives().isEmpty()) {
+                user.append("Mục tiêu đầu ra:\n");
+                brief.objectives().forEach(objective -> user.append("- ").append(objective).append('\n'));
+            }
+        });
+        user.append("\nCÁC PHẦN CỦA TÀI LIỆU NGUỒN (khóa: tên — tóm tắt):\n");
+        int number = 0;
+        for (JsonNode section : topSections(summary)) {
+            String key = "s" + ++number;
+            user.append("- ").append(key).append(": ").append(sections.get(key)).append(" — ")
+                .append(section.path("summary").asText().strip());
+            section.path("keyPoints").forEach(point -> user.append("; ").append(point.asText().strip()));
+            user.append('\n');
+        }
+        user.append("\nNĂNG LỰC (id: tên):\n");
+        competencies.forEach(item -> user.append("- ").append(item.id()).append(": ").append(item.name())
+            .append('\n'));
+
+        return user.toString();
+    }
+
+    /**
+     * The proposal the author sees: points, the competency when it is in the list (else null and a note), and the
+     * questions with each section key replaced by the section's title.
+     */
+    Proposal checkedRules(JsonNode answer, Map<String, String> sections, List<Choice> competencies,
+                          JsonNode madeSummary) {
+        Set<Long> known = competencies.stream().map(Choice::id).collect(Collectors.toSet());
+        Long competency = id(answer, "competencyId").filter(known::contains).orElse(null);
+
+        ObjectNode proposal = json.createObjectNode();
+        int points = answer.path("rewardPoints").asInt();
+        proposal.put("rewardPoints", points);
+        if (competency == null) {
+            proposal.putNull("competencyId");
+        } else {
+            proposal.put("competencyId", competency);
+        }
+        var questions = proposal.putArray("questions");
+        for (JsonNode question : answer.path("questions")) {
+            ObjectNode out = questions.addObject();
+            out.put("type", question.path("type").asText());
+            out.put("content", question.path("content").asText().strip());
+            String explanation = question.path("explanation").asText("").strip();
+            if (explanation.isEmpty()) {
+                out.putNull("explanation");
+            } else {
+                out.put("explanation", explanation);
+            }
+            out.put("difficulty", question.path("difficulty").asText());
+            var options = out.putArray("options");
+            question.path("options").forEach(option -> options.addObject()
+                .put("content", option.path("content").asText().strip())
+                .put("correct", option.path("correct").asBoolean()));
+            out.put("sourceSection", sections.get(question.path("section").asText().strip()));
+        }
+
+        List<String> notes = new ArrayList<>();
+        notes.add("Đã đề xuất " + questions.size() + " câu hỏi nháp và " + points + " điểm thưởng; câu hỏi chỉ vào "
+            + "ngân hàng khi bạn chốt bước này.");
+        if (competency == null) {
+            notes.add(NO_COMPETENCY);
+        }
+
+        return new Proposal(proposal, List.copyOf(notes), madeSummary);
     }
 
     /** A course code nobody uses now, in the old flow's shape ({@code AI-} and 8 characters). */

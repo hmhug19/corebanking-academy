@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assistant.drafting;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -23,12 +24,28 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.ItemStatus;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizType;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.ReviewPolicy;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.ScoreMethod;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.ScoringMode;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.SelectionMode;
+import vn.com.coreacademy.assessment.dto.AssessmentRequests.OptionInput;
+import vn.com.coreacademy.assessment.dto.AssessmentRequests.PoolItem;
+import vn.com.coreacademy.assessment.dto.AssessmentRequests.PoolRequest;
+import vn.com.coreacademy.assessment.dto.AssessmentRequests.QuestionRequest;
+import vn.com.coreacademy.assessment.dto.AssessmentRequests.QuizRequest;
+import vn.com.coreacademy.assessment.dto.CourseExamRequest;
+import vn.com.coreacademy.assessment.service.CourseExamService;
+import vn.com.coreacademy.assessment.service.QuestionService;
 import vn.com.coreacademy.assistant.course.GenerationAllowance;
 import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.BasicsConfirm;
+import vn.com.coreacademy.assistant.drafting.DraftingViews.DraftQuestion;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.OutlineConfirm;
+import vn.com.coreacademy.assistant.drafting.DraftingViews.RulesConfirm;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SessionView;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SourceView;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.StartFields;
@@ -71,6 +88,8 @@ public class CourseDraftingService {
     private final ObjectMapper json;
     private final LearningContentService courses;
     private final Validator validator;
+    private final QuestionService questions;
+    private final CourseExamService exams;
 
     private record Prepared(String userId, long ownerOrgId, StartFields fields, Long conversationId) {
     }
@@ -116,7 +135,11 @@ public class CourseDraftingService {
                 OutlineConfirm outline = checked(body, OutlineConfirm.class, "draft");
                 yield view(transaction.execute(status -> confirmOutline(sessionId, outline)));
             }
-            // Steps 3 and 4 are confirmed by the tickets that propose them.
+            case 3 -> {
+                RulesConfirm rules = checked(body, RulesConfirm.class, "draft");
+                yield view(transaction.execute(status -> confirmRules(sessionId, rules)));
+            }
+            // Step 4 is confirmed by the ticket that proposes it.
             default -> throw notReady();
         };
     }
@@ -186,6 +209,73 @@ public class CourseDraftingService {
         drafting.insertStep(sessionId, step + 1);
 
         return drafting.session(sessionId).orElseThrow();
+    }
+
+    /**
+     * Chốt bước 3, all or nothing: the page's draft is saved (completion rules, bonus points), the kept questions are
+     * created in the course's question bank with the chosen competency, and a new fixed final exam of exactly those
+     * questions is created and selected to complete the course, through the same exam service as the page. Questions
+     * the author removed are never created; before this they lived only in the session. Kept proposals mark the
+     * revision as AI made. Step 4 is queued.
+     */
+    private SessionRow confirmRules(long sessionId, RulesConfirm rules) {
+        int step = DraftingStates.FIRST_STEP + 2;
+        SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+        DraftingStepRow row = stepRow(sessionId, step);
+        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != step
+            || session.courseId() == null || !confirmable(row)) {
+            throw notReady();
+        }
+        DraftRequest draft = rules.draft();
+        List<DraftQuestion> kept = rules.questions();
+        if (!kept.isEmpty() && rules.competencyId() == null) {
+            throw BusinessException.validation("competencyId", "REQUIRED",
+                "Chọn năng lực cho các câu hỏi trước khi chốt bước này.");
+        }
+        if (!kept.isEmpty() && draft.programId() == null) {
+            throw BusinessException.validation("draft.programId", "REQUIRED",
+                "Chọn chương trình đào tạo để tạo bài kiểm tra từ các câu hỏi.");
+        }
+
+        CourseDetail saved = courses.saveDraft(session.courseId(), session.revisionId(), draft);
+        if (!kept.isEmpty()) {
+            // The bank of a course is its saved programme's, so the draft is saved before the questions are created.
+            List<PoolItem> pool = new ArrayList<>();
+            for (DraftQuestion question : kept) {
+                long questionId = questions.create(new QuestionRequest(session.courseId(), null,
+                    rules.competencyId(), null, question.type(), question.content().strip(),
+                    blankToNull(question.explanation()), question.difficulty(), BigDecimal.ONE, ItemStatus.ACTIVE,
+                    question.options().stream().map(option -> new OptionInput(null, option.content().strip(),
+                        option.correct())).toList())).id();
+                pool.add(new PoolItem(questionId, pool.size(), null));
+            }
+            exams.save(new CourseExamRequest(session.courseId(), session.revisionId(), null,
+                withVersion(draft, saved.revision().rowVersion()), null, null,
+                finalExam(session.courseId(), draft.title(), pool.size()), new PoolRequest(pool)));
+            if (row.proposal() != null) {
+                drafting.markAiGenerated(session.revisionId());
+            }
+        }
+        drafting.confirmStep(sessionId, step);
+        drafting.advance(sessionId, step + 1);
+        drafting.insertStep(sessionId, step + 1);
+
+        return drafting.session(sessionId).orElseThrow();
+    }
+
+    /** The exam the page would create with its defaults, fixed to the kept questions: 15 minutes, 70 %, 3 attempts. */
+    private static QuizRequest finalExam(long courseId, String courseTitle, int questionCount) {
+        String title = courseTitle == null || courseTitle.isBlank() ? "Thi cuối khóa"
+            : "Thi cuối khóa: " + courseTitle.strip();
+        return new QuizRequest(courseId, title.substring(0, Math.min(title.length(), 255)), null, QuizType.FINAL_EXAM,
+            SelectionMode.FIXED, questionCount, true, true, 15, null, null, 0, BigDecimal.valueOf(70),
+            ScoringMode.ALL_OR_NOTHING, ScoreMethod.BEST, ReviewPolicy.AFTER_SUBMIT, 3, 0, false, true);
+    }
+
+    private static DraftRequest withVersion(DraftRequest draft, long version) {
+        return new DraftRequest(version, draft.programId(), draft.moduleId(), draft.title(), draft.summary(),
+            draft.level(), draft.defaultRequirement(), draft.coverAssetId(), draft.coverIcon(), draft.coverColor(),
+            draft.objectives(), draft.chapters(), draft.rewardPoints(), draft.finalQuizId());
     }
 
     private static List<JsonNode> proposedLessons(JsonNode proposal) {

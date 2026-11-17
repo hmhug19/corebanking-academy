@@ -19,6 +19,7 @@ import vn.com.coreacademy.assistant.course.SourceTextRepository;
 import vn.com.coreacademy.assistant.course.SourceTextRepository.Piece;
 import vn.com.coreacademy.assistant.course.StepNotReadyException;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.Candidate;
+import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.Choice;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.CourseBrief;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
@@ -218,7 +219,7 @@ class CourseDraftingProposerTest {
 
     @Test
     void aStepNotBuiltYetFailsReadably() {
-        assertThatThrownBy(() -> proposer.propose(session("{}", null), step(3)))
+        assertThatThrownBy(() -> proposer.propose(session("{}", null), step(4)))
             .isInstanceOf(GenerationException.class).hasMessage(CourseDraftingProposer.NOT_SUPPORTED);
     }
 
@@ -307,5 +308,99 @@ class CourseDraftingProposerTest {
         assertThat(result.sourceSummary().path("sections")).hasSize(1);
         assertThat(result.proposal().path("chapters").get(0).path("lessons").get(0).path("sourceSection").asText())
             .isEqualTo("Mở tài khoản");
+    }
+
+    // ---- step 3 ----------------------------------------------------------------------------------------------------
+
+    private static SessionRow rulesSession() {
+        return new SessionRow(5, "000005", ORG, DOCUMENT, null, 70L, 71L, 3, "active", null, "{}", SECTIONS, null,
+            null);
+    }
+
+    private static String rules(String competency, String firstSection) {
+        return """
+            {"rewardPoints":30,%s"questions":[
+              {"type":"SINGLE","content":"Ai được mở tài khoản?","explanation":"Theo điều kiện.","difficulty":"EASY",
+               "section":"%s","options":[{"content":"Cá nhân đủ 15 tuổi","correct":true},
+                                         {"content":"Ai cũng được","correct":false}]},
+              {"type":"MULTIPLE","content":"Hồ sơ gồm?","difficulty":"MEDIUM","section":"s2",
+               "options":[{"content":"Giấy đề nghị","correct":true},{"content":"Căn cước","correct":true},
+                          {"content":"Sổ hộ khẩu","correct":false}]}]}
+            """.formatted(competency, firstSection);
+    }
+
+    private void theCompetencies() {
+        when(drafting.competencies(anyInt())).thenReturn(List.of(new Choice(4, "Giao dịch quầy"),
+            new Choice(5, "Kho quỹ")));
+        when(drafting.courseBrief(71L)).thenReturn(Optional.of(new CourseBrief("Mở tài khoản thanh toán",
+            "Quy trình tại quầy.", "basic", List.of("Thực hiện được việc mở tài khoản"))));
+    }
+
+    @Test
+    void theRulesKeepACompetencyFromTheListAndNameEachQuestionsSourceSection() {
+        theCompetencies();
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(rules("\"competencyId\":4,", "s1"));
+
+        Proposal result = proposer.propose(rulesSession(), step(3));
+
+        JsonNode proposal = result.proposal();
+        assertThat(proposal.path("rewardPoints").asInt()).isEqualTo(30);
+        assertThat(proposal.path("competencyId").asLong()).isEqualTo(4);
+        JsonNode first = proposal.path("questions").get(0);
+        assertThat(first.path("type").asText()).isEqualTo("SINGLE");
+        assertThat(first.path("content").asText()).isEqualTo("Ai được mở tài khoản?");
+        assertThat(first.path("explanation").asText()).isEqualTo("Theo điều kiện.");
+        assertThat(first.path("difficulty").asText()).isEqualTo("EASY");
+        assertThat(first.path("options")).hasSize(2);
+        assertThat(first.path("sourceSection").asText()).isEqualTo("Điều kiện mở tài khoản");
+        JsonNode second = proposal.path("questions").get(1);
+        assertThat(second.path("explanation").isNull()).isTrue();
+        assertThat(second.path("sourceSection").asText()).isEqualTo("Hồ sơ và giấy tờ");
+        assertThat(proposal.toString()).doesNotContain("\"section\"");
+        assertThat(result.notes()).containsExactly("Đã đề xuất 2 câu hỏi nháp và 30 điểm thưởng; câu hỏi chỉ vào "
+            + "ngân hàng khi bạn chốt bước này.");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<OllamaClient.Message>> calls = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<JsonNode> formats = ArgumentCaptor.forClass(JsonNode.class);
+        verify(ollama).chat(calls.capture(), any(), formats.capture(), any());
+        assertThat(calls.getValue().get(1).content()).contains("s2", "Hồ sơ và giấy tờ", "4: Giao dịch quầy",
+            "Mở tài khoản thanh toán");
+        assertThat(formats.getValue()).isEqualTo(GenerationSchemas.format(GenerationSchemas.DRAFT_RULES));
+    }
+
+    @Test
+    void anUnknownCompetencyIsDroppedNotGuessed() {
+        theCompetencies();
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(rules("\"competencyId\":999,", "s1"));
+
+        Proposal result = proposer.propose(rulesSession(), step(3));
+
+        assertThat(result.proposal().path("competencyId").isNull()).isTrue();
+        assertThat(result.notes()).contains(CourseDraftingProposer.NO_COMPETENCY);
+    }
+
+    @Test
+    void aCompetencyTheModelIsUnsureOfStaysEmpty() {
+        theCompetencies();
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(rules("", "s1"));
+
+        Proposal result = proposer.propose(rulesSession(), step(3));
+
+        assertThat(result.proposal().has("competencyId")).isTrue();
+        assertThat(result.proposal().path("competencyId").isNull()).isTrue();
+        assertThat(result.notes()).contains(CourseDraftingProposer.NO_COMPETENCY);
+    }
+
+    @Test
+    void aQuestionFromASectionTheSummaryDoesNotHaveIsAskedAgain() {
+        theCompetencies();
+        when(ollama.chat(anyList(), any(), any(), any())).thenReturn(rules("", "s9"), rules("", "s1"));
+
+        Proposal result = proposer.propose(rulesSession(), step(3));
+
+        verify(ollama, times(2)).chat(anyList(), any(), any(), any());
+        assertThat(result.proposal().path("questions").get(0).path("sourceSection").asText())
+            .isEqualTo("Điều kiện mở tài khoản");
     }
 }

@@ -7,6 +7,7 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +49,19 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
           {"title":"Điều kiện mở tài khoản","description":"Ai được mở tài khoản.","sourceSection":"Điều kiện"},
           {"title":"Hồ sơ","description":"Giấy tờ khách hàng nộp.","sourceSection":"Hồ sơ và giấy tờ"}]}]}
         """;
+    private static final String RULES = """
+        {"rewardPoints":30,"competencyId":null,"questions":[
+          {"type":"SINGLE","content":"Ai được mở tài khoản?","explanation":"Theo điều kiện.","difficulty":"EASY",
+           "options":[{"content":"Cá nhân đủ 15 tuổi","correct":true},{"content":"Ai cũng được","correct":false}],
+           "sourceSection":"Điều kiện"},
+          {"type":"SINGLE","content":"Giấy tờ nào bắt buộc?","explanation":null,"difficulty":"MEDIUM",
+           "options":[{"content":"Căn cước","correct":true},{"content":"Sổ đỏ","correct":false}],
+           "sourceSection":"Hồ sơ và giấy tờ"},
+          {"type":"MULTIPLE","content":"Hồ sơ gồm?","explanation":null,"difficulty":"HARD",
+           "options":[{"content":"Giấy đề nghị","correct":true},{"content":"Căn cước","correct":true},
+                      {"content":"Sổ hộ khẩu","correct":false}],
+           "sourceSection":"Hồ sơ và giấy tờ"}]}
+        """;
 
     @MockitoBean
     private OllamaClient ollama;
@@ -67,12 +81,15 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     private long ownOrg;
     private long programme;
     private long competency;
+    private long ownProgramme;
 
     @BeforeAll
     void setUp() {
         api = new ApiClient(mvc, json);
         AssessmentFixtures fixtures = new AssessmentFixtures(api, jdbc);
-        fixtures.course();
+        long fixtureRevision = fixtures.course().revisionId();
+        ownProgramme = jdbc.queryForObject("SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Long.class, fixtureRevision);
         competency = fixtures.competency();
         ownOrg = fixtures.orgId();
         programme = jdbc.queryForObject("SELECT min(program_id) FROM learning_hub.training_programs", Long.class);
@@ -89,6 +106,9 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
             }
             if (step.stepNo() == 2) {
                 return new Proposal(json.readTree(OUTLINE), List.of("Đã đề xuất 1 chương, 2 bài."), null);
+            }
+            if (step.stepNo() == 3) {
+                return new Proposal(json.readTree(RULES), List.of("Đã đề xuất 3 câu hỏi nháp."), null);
             }
             return new Proposal(json.readTree("""
                 {"title":"Mở tài khoản","summary":"Quy trình.","objectives":["Thực hiện được"],"level":"basic",
@@ -404,7 +424,7 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         assertThat(notes.get(1).path("sourceSection").asText()).isEqualTo("Hồ sơ và giấy tờ");
         assertThat(api.ok(INSTRUCTOR, session(id)).path("steps").get(1).path("lessonNotes")).isEqualTo(notes);
 
-        // step 2 cannot be confirmed twice, and step 3 waits for its own ticket
+        // step 2 cannot be confirmed twice
         api.error(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId)), "CORE-VALIDATION_FAILED");
     }
 
@@ -451,6 +471,145 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         api.error(INSTRUCTOR, confirm(id, 3, outlineBody(revisionId)), "CORE-VALIDATION_FAILED");
 
         assertThat(api.ok(INSTRUCTOR, session(id)).path("currentStep").asInt()).isEqualTo(2);
+    }
+
+    // ---- step 3, rules and draft questions (ticket 06) ---------------------------------------------------------------
+
+    /** A session at step 3 with its rules proposed; returns {sessionId, courseId, revisionId}. */
+    private long[] rulesProposed(String code) {
+        long id = proposedSession();
+        JsonNode created = api.ok(INSTRUCTOR, confirm(id, 1, basics(code)));
+        long courseId = created.path("courseId").asLong();
+        long revisionId = created.path("revisionId").asLong();
+        worker.runOnce();
+        api.ok(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId, lesson("Điều kiện mở tài khoản", List.of()))));
+        assertThat(worker.runOnce()).isTrue();
+        return new long[] {id, courseId, revisionId};
+    }
+
+    @Test
+    void stepThreeProposesQuestionsThatStayOutOfTheBankUntilConfirmed() {
+        int bankBefore = bank();
+        long[] ids = rulesProposed("AI-RULES001");
+
+        JsonNode step = api.ok(INSTRUCTOR, session(ids[0])).path("steps").get(2);
+        assertThat(step.path("state").asText()).isEqualTo("proposed");
+        assertThat(step.path("proposal").path("rewardPoints").asInt()).isEqualTo(30);
+        assertThat(step.path("proposal").path("questions")).hasSize(3);
+        assertThat(step.path("proposal").path("questions").get(1).path("sourceSection").asText())
+            .isEqualTo("Hồ sơ và giấy tờ");
+        assertThat(bank()).isEqualTo(bankBefore);
+        assertThat(finalExams(ids[1])).isZero();
+    }
+
+    @Test
+    void confirmingStepThreeCreatesANewFinalExamFromTheKeptQuestionsOnly() {
+        long[] ids = rulesProposed("AI-RULES002");
+        JsonNode proposed = api.ok(INSTRUCTOR, session(ids[0])).path("steps").get(2).path("proposal");
+        int bankBefore = bank();
+        // the author removed the second question and edited the third
+        ObjectNode edited = proposed.path("questions").get(2).deepCopy();
+        edited.put("content", "Hồ sơ mở tài khoản gồm những gì?");
+        List<JsonNode> kept = List.of(proposed.path("questions").get(0), edited);
+
+        JsonNode confirmed = api.ok(INSTRUCTOR, confirm(ids[0], 3, rulesBody(ids[2], 45, competency, kept)));
+
+        assertThat(confirmed.path("currentStep").asInt()).isEqualTo(4);
+        assertThat(confirmed.path("steps").get(2).path("state").asText()).isEqualTo("confirmed");
+        assertThat(confirmed.path("steps").get(3).path("step").asInt()).isEqualTo(4);
+        assertThat(confirmed.path("steps").get(3).path("state").asText()).isEqualTo("proposing");
+        assertThat(bank()).isEqualTo(bankBefore + 2);
+        assertThat(jdbc.queryForList("SELECT content FROM learning_hub.questions WHERE course_id = ? ORDER BY "
+            + "question_id", String.class, ids[1])).containsExactly("Ai được mở tài khoản?",
+            "Hồ sơ mở tài khoản gồm những gì?");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions WHERE course_id = ? AND "
+            + "content = 'Giấy tờ nào bắt buộc?'", Integer.class, ids[1])).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(DISTINCT competency_id) FROM learning_hub.questions "
+            + "WHERE course_id = ? AND competency_id = ?", Integer.class, ids[1], competency)).isEqualTo(1);
+
+        // the new exam is a fixed final exam of the kept questions, selected to complete the course
+        Map<String, Object> rule = jdbc.queryForMap("SELECT final_quiz_id, reward_points "
+            + "FROM learning_hub.course_completion_rules WHERE revision_id = ?", ids[2]);
+        assertThat(rule).containsEntry("reward_points", 45);
+        long quizId = ((Number) rule.get("final_quiz_id")).longValue();
+        assertThat(jdbc.queryForMap("SELECT course_id, quiz_type, selection_mode, question_count "
+            + "FROM learning_hub.quizzes WHERE quiz_id = ?", quizId)).containsEntry("course_id", ids[1])
+            .containsEntry("quiz_type", "FINAL_EXAM").containsEntry("selection_mode", "FIXED")
+            .containsEntry("question_count", 2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.quiz_questions WHERE quiz_id = ?",
+            Integer.class, quizId)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT ai_generated FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Boolean.class, ids[2])).isTrue();
+
+        // confirmed once only
+        api.error(INSTRUCTOR, confirm(ids[0], 3, rulesBody(ids[2], 45, competency, kept)), "CORE-VALIDATION_FAILED");
+        assertThat(bank()).isEqualTo(bankBefore + 2);
+    }
+
+    @Test
+    void keptQuestionsNeedACompetencyAndAProgrammeAndAFailedSaveLeavesNothingBehind() {
+        long[] ids = rulesProposed("AI-RULES003");
+        List<JsonNode> kept = List.of(api.ok(INSTRUCTOR, session(ids[0])).path("steps").get(2).path("proposal")
+            .path("questions").get(0));
+        int bankBefore = bank();
+
+        JsonNode noCompetency = api.error(INSTRUCTOR, confirm(ids[0], 3, rulesBody(ids[2], 10, null, kept)),
+            "CORE-VALIDATION_FAILED");
+        assertThat(noCompetency.path("errors").get(0).path("field").asText()).isEqualTo("competencyId");
+        Map<String, Object> noProgramme = rulesBody(ids[2], 10, competency, kept);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> draft = (Map<String, Object>) noProgramme.get("draft");
+        draft.remove("programId");
+        JsonNode refused = api.error(INSTRUCTOR, confirm(ids[0], 3, noProgramme), "CORE-VALIDATION_FAILED");
+        assertThat(refused.path("errors").get(0).path("field").asText()).isEqualTo("draft.programId");
+        // a competency that is not in the list: the bank refuses it and the draft save rolls back with it
+        api.error(INSTRUCTOR, confirm(ids[0], 3, rulesBody(ids[2], 10, competency + 100_000, kept)),
+            "ASSESSMENT-INVALID_REFERENCE");
+
+        assertThat(bank()).isEqualTo(bankBefore);
+        assertThat(finalExams(ids[1])).isZero();
+        assertThat(jdbc.queryForObject("SELECT reward_points FROM learning_hub.course_completion_rules "
+            + "WHERE revision_id = ?", Integer.class, ids[2])).isZero();
+        JsonNode view = api.ok(INSTRUCTOR, session(ids[0]));
+        assertThat(view.path("currentStep").asInt()).isEqualTo(3);
+        assertThat(view.path("steps").get(2).path("state").asText()).isEqualTo("proposed");
+    }
+
+    @Test
+    void removingEveryQuestionSavesTheRulesWithoutAnExam() {
+        long[] ids = rulesProposed("AI-RULES004");
+        int bankBefore = bank();
+
+        JsonNode confirmed = api.ok(INSTRUCTOR, confirm(ids[0], 3, rulesBody(ids[2], 20, null, List.of())));
+
+        assertThat(confirmed.path("currentStep").asInt()).isEqualTo(4);
+        assertThat(bank()).isEqualTo(bankBefore);
+        assertThat(finalExams(ids[1])).isZero();
+        assertThat(jdbc.queryForObject("SELECT reward_points FROM learning_hub.course_completion_rules "
+            + "WHERE revision_id = ?", Integer.class, ids[2])).isEqualTo(20);
+    }
+
+    /** What the page sends for step 3: the draft with the outline, the rules and the kept questions. */
+    private Map<String, Object> rulesBody(long revisionId, int rewardPoints, Long competencyId, List<JsonNode> kept) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> draft = new HashMap<>((Map<String, Object>) outlineBody(revisionId,
+            lesson("Điều kiện mở tài khoản", List.of())).get("draft"));
+        draft.put("programId", ownProgramme);
+        draft.put("rewardPoints", rewardPoints);
+        Map<String, Object> body = new HashMap<>();
+        body.put("draft", draft);
+        body.put("competencyId", competencyId);
+        body.put("questions", kept);
+        return body;
+    }
+
+    private int bank() {
+        return jdbc.queryForObject("SELECT count(*) FROM learning_hub.questions", Integer.class);
+    }
+
+    private int finalExams(long courseId) {
+        return jdbc.queryForObject("SELECT count(*) FROM learning_hub.quizzes WHERE course_id = ? "
+            + "AND quiz_type = 'FINAL_EXAM'", Integer.class, courseId);
     }
 
     private Map<String, Object> lesson(String title, List<Object> blocks) {

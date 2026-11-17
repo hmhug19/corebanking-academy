@@ -37,6 +37,12 @@ public final class GenerationSchemas {
     /** One line per lesson: what it teaches. */
     public static final int MAX_LESSON_DESCRIPTION = 300;
     static final int MAX_SECTION_KEY = 20;
+    /** Step 3 of Soạn cùng trợ lý: bonus points, a competency and draft final exam questions. */
+    public static final String DRAFT_RULES = "draft_rules";
+    /** About ten questions are asked for; a few more are accepted. */
+    public static final int MAX_DRAFT_QUESTIONS = 15;
+    /** The bonus points the model may propose; the course itself accepts more. */
+    public static final int MAX_DRAFT_REWARD = 1000;
     /** The step 1 fields the model may say it is unsure of. */
     public static final List<String> BASICS_FIELDS = List.of("title", "summary", "objectives", "level",
         "defaultRequirement", "programId", "moduleId");
@@ -88,6 +94,16 @@ public final class GenerationSchemas {
                     "description", string(MAX_LESSON_DESCRIPTION), "section", string(MAX_SECTION_KEY)),
                     "title", "description", "section"), 1, MAX_LESSONS_PER_CHAPTER)), "title", "lessons"), 1,
                 MAX_CHAPTERS)), "chapters");
+            case DRAFT_RULES -> object(Map.of("rewardPoints", integer(0, MAX_DRAFT_REWARD),
+                "competencyId", integer(1, Integer.MAX_VALUE),
+                "questions", array(object(Map.of("type", enumOf("SINGLE", "MULTIPLE"),
+                    "content", string(2000), "explanation", string(2000),
+                    "difficulty", enumOf("EASY", "MEDIUM", "HARD"),
+                    "options", array(object(Map.of("content", string(1000), "correct", MAPPER.createObjectNode()
+                        .put("type", "boolean")), "content", "correct"), 2, 6),
+                    "section", string(MAX_SECTION_KEY)),
+                    "type", "content", "difficulty", "options", "section"), 1, MAX_DRAFT_QUESTIONS)),
+                "rewardPoints", "questions");
             default -> throw new IllegalArgumentException("No schema for step " + stepKind);
         };
     }
@@ -219,39 +235,44 @@ public final class GenerationSchemas {
         }
         noLinks(node, problems, "questions");
         for (JsonNode question : questions) {
-            String type = question.path("type").asText("");
-            if (!type.equals("SINGLE") && !type.equals("MULTIPLE")) {
-                problems.add("question type must be SINGLE or MULTIPLE");
-            }
-            text(question, "content", 2000, problems, "question");
-            if (question.has("explanation") && !question.path("explanation").isTextual()) {
-                problems.add("question explanation must be text");
-            }
-            if (!DIFFICULTIES.contains(question.path("difficulty").asText(""))) {
-                problems.add("question difficulty must be EASY, MEDIUM or HARD");
-            }
-            JsonNode options = question.path("options");
-            if (!options.isArray() || options.size() < 2 || options.size() > 6) {
-                problems.add("question options must have 2 to 6 items");
-                continue;
-            }
-            int correct = 0;
-            for (JsonNode option : options) {
-                text(option, "content", 1000, problems, "option");
-                if (!option.path("correct").isBoolean()) {
-                    problems.add("option correct must be true or false");
-                } else if (option.path("correct").asBoolean()) {
-                    correct++;
-                }
-            }
-            if (type.equals("SINGLE") && correct != 1) {
-                problems.add("a SINGLE question needs exactly one correct option");
-            }
-            if (type.equals("MULTIPLE") && correct < 2) {
-                problems.add("a MULTIPLE question needs at least two correct options");
-            }
+            question(question, problems);
         }
         return problems;
+    }
+
+    /** One multiple choice question: its type, text, difficulty and 2 to 6 options with the right number correct. */
+    private static void question(JsonNode question, List<String> problems) {
+        String type = question.path("type").asText("");
+        if (!type.equals("SINGLE") && !type.equals("MULTIPLE")) {
+            problems.add("question type must be SINGLE or MULTIPLE");
+        }
+        text(question, "content", 2000, problems, "question");
+        if (question.has("explanation") && !question.path("explanation").isTextual()) {
+            problems.add("question explanation must be text");
+        }
+        if (!DIFFICULTIES.contains(question.path("difficulty").asText(""))) {
+            problems.add("question difficulty must be EASY, MEDIUM or HARD");
+        }
+        JsonNode options = question.path("options");
+        if (!options.isArray() || options.size() < 2 || options.size() > 6) {
+            problems.add("question options must have 2 to 6 items");
+            return;
+        }
+        int correct = 0;
+        for (JsonNode option : options) {
+            text(option, "content", 1000, problems, "option");
+            if (!option.path("correct").isBoolean()) {
+                problems.add("option correct must be true or false");
+            } else if (option.path("correct").asBoolean()) {
+                correct++;
+            }
+        }
+        if (type.equals("SINGLE") && correct != 1) {
+            problems.add("a SINGLE question needs exactly one correct option");
+        }
+        if (type.equals("MULTIPLE") && correct < 2) {
+            problems.add("a MULTIPLE question needs at least two correct options");
+        }
     }
 
     /**
@@ -322,6 +343,34 @@ public final class GenerationSchemas {
             problems.add("outline must have at most " + MAX_TOTAL_LESSONS + " lessons in total");
         }
         noLinks(node, problems, "outline");
+        return problems;
+    }
+
+    /**
+     * Step 3 of Soạn cùng trợ lý as the model wrote it: bonus points from 0 to {@value #MAX_DRAFT_REWARD}, an optional
+     * competency id (checked against the list later, not here) and 1 to {@value #MAX_DRAFT_QUESTIONS} questions, each
+     * naming the key of the source section it comes from (checked against the summary by the proposer).
+     */
+    public static List<String> draftRules(JsonNode node) {
+        List<String> problems = new ArrayList<>();
+        JsonNode points = node.path("rewardPoints");
+        if (!points.isIntegralNumber() || points.asInt() < 0 || points.asInt() > MAX_DRAFT_REWARD) {
+            problems.add("rules.rewardPoints must be a whole number of 0 to " + MAX_DRAFT_REWARD);
+        }
+        JsonNode competency = node.path("competencyId");
+        if (!competency.isMissingNode() && !competency.isNull() && !competency.isIntegralNumber()) {
+            problems.add("rules.competencyId must be a whole number or absent");
+        }
+        JsonNode questions = node.path("questions");
+        if (!questions.isArray() || questions.isEmpty() || questions.size() > MAX_DRAFT_QUESTIONS) {
+            problems.add("rules.questions must have 1 to " + MAX_DRAFT_QUESTIONS + " items");
+            return problems;
+        }
+        for (JsonNode question : questions) {
+            question(question, problems);
+            text(question, "section", MAX_SECTION_KEY, problems, "question");
+        }
+        noLinks(node, problems, "rules");
         return problems;
     }
 

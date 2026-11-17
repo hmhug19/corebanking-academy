@@ -31,6 +31,10 @@ public class CourseDraftingRepository {
     public record Candidate(long id, String name, long fieldId) {
     }
 
+    /** A competency the author may pick for the course's questions. */
+    public record Choice(long id, String name) {
+    }
+
     /** The course as step 1 saved it, what the outline is built for. */
     public record CourseBrief(String title, String summary, String level, List<String> objectives) {
     }
@@ -305,6 +309,19 @@ public class CourseDraftingRepository {
              ORDER BY m.sort_no, m.module_id
              LIMIT ?
             """, (rs, row) -> new Candidate(rs.getLong(1), rs.getString(2), rs.getLong(3)), ownerOrgId, limit);
+    }
+
+    /**
+     * Competencies a new question may be tagged with: active and not deleted (what the question bank accepts). They are
+     * shared master data, so every author picks from the same list. At most {@code limit}, by sort order.
+     */
+    public List<Choice> competencies(int limit) {
+        return jdbc.query("""
+            SELECT competency_id, name FROM learning_hub.competencies
+             WHERE NOT is_deleted AND status = 'ACTIVE'
+             ORDER BY sort_no, competency_id
+             LIMIT ?
+            """, (rs, row) -> new Choice(rs.getLong(1), rs.getString(2)), limit);
     }
 
     /** The draft revision's title, summary, level and objectives; empty when the revision is gone. */

@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.course;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,7 +77,7 @@ class GenerationSchemasTest {
         """;
 
     private JsonNode basicsWith(String field, Object value) throws Exception {
-        var node = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(BASICS);
+        var node = (ObjectNode) json.readTree(BASICS);
         node.set(field, json.valueToTree(value));
         return node;
     }
@@ -117,8 +118,8 @@ class GenerationSchemasTest {
         """;
 
     private JsonNode outlineLessonWith(String field, Object value) throws Exception {
-        var node = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(OUTLINE);
-        ((com.fasterxml.jackson.databind.node.ObjectNode) node.path("chapters").get(0).path("lessons").get(0))
+        var node = (ObjectNode) json.readTree(OUTLINE);
+        ((ObjectNode) node.path("chapters").get(0).path("lessons").get(0))
             .set(field, json.valueToTree(value));
         return node;
     }
@@ -149,5 +150,59 @@ class GenerationSchemasTest {
         assertThat(lesson.path("required")).extracting(JsonNode::asText)
             .containsExactlyInAnyOrder("title", "description", "section");
         assertThat(lesson.path("properties").has("blocks")).isFalse();
+    }
+
+    // ---- step 3, the rules and draft questions (ticket 06) --------------------------------------------------------
+
+    private static final String RULES = """
+        {"rewardPoints": 50, "competencyId": 4, "questions": [
+          {"type": "SINGLE", "content": "Ai được mở tài khoản?", "explanation": "Theo điều kiện.",
+           "difficulty": "EASY", "section": "s1",
+           "options": [{"content": "Cá nhân đủ 15 tuổi", "correct": true}, {"content": "Ai cũng được", "correct": false}]},
+          {"type": "MULTIPLE", "content": "Hồ sơ gồm?", "difficulty": "MEDIUM", "section": "s2",
+           "options": [{"content": "Giấy đề nghị", "correct": true}, {"content": "Căn cước", "correct": true},
+                       {"content": "Sổ hộ khẩu", "correct": false}]}]}
+        """;
+
+    private JsonNode rulesWith(String field, Object value) throws Exception {
+        ObjectNode node = (ObjectNode) json.readTree(RULES);
+        ObjectNode question = (ObjectNode) node.path("questions").get(0);
+        question.set(field, json.valueToTree(value));
+        return node;
+    }
+
+    @Test
+    void aStepThreeProposalWithPointsQuestionsAndSectionsIsValid() throws Exception {
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES))).isEmpty();
+        // the competency is optional: the model leaves it out when it is unsure
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("\"competencyId\": 4,", ""))))
+            .isEmpty();
+    }
+
+    @Test
+    void aStepThreeProposalWithBadPointsQuestionsOrSectionsIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("50", "-1")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("\"competencyId\": 4",
+            "\"competencyId\": \"bốn\"")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(rulesWith("section", ""))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(rulesWith("content", "Xem https://evil.example"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(rulesWith("difficulty", "VERY_HARD"))).isNotEmpty();
+        // a SINGLE question with two correct options
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("\"Ai cũng được\", \"correct\": false",
+            "\"Ai cũng được\", \"correct\": true")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(json.readTree("{\"rewardPoints\": 0, \"questions\": []}")))
+            .isNotEmpty();
+    }
+
+    @Test
+    void theStepThreeSchemaAsksForTheSourceSectionOfEveryQuestion() {
+        JsonNode schema = GenerationSchemas.format(GenerationSchemas.DRAFT_RULES);
+        JsonNode question = schema.path("properties").path("questions").path("items");
+
+        assertThat(schema.path("required")).extracting(JsonNode::asText)
+            .containsExactlyInAnyOrder("rewardPoints", "questions");
+        assertThat(question.path("required")).extracting(JsonNode::asText).contains("section", "options");
+        assertThat(schema.path("properties").path("questions").path("maxItems").asInt())
+            .isEqualTo(GenerationSchemas.MAX_DRAFT_QUESTIONS);
     }
 }

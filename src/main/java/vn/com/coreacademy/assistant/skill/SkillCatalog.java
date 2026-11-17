@@ -32,7 +32,7 @@ public class SkillCatalog {
     private static final int VERSION_CHARS = 12;
     /** The prompts of course generation, one file per step in {@code skills/tao_khoa_hoc/steps/}. */
     private static final List<String> GENERATION_STEPS = List.of("summarise_sections", "outline", "lesson",
-        "questions", "draft_basics", "draft_outline");
+        "questions", "draft_basics", "draft_outline", "draft_rules");
 
     private final String style;
     private final String suggestions;
