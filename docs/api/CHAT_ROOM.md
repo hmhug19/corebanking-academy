@@ -70,6 +70,13 @@ Ba bàn Caro 50×50 cạnh Trên/Dưới đều có hai ghế đối diện. C�
 
 ### Nâng cấp Khu vui chơi ngày 17-11-2026
 
+Điều chỉnh hiện hành: sàn đổi màu đã được gỡ khỏi map (`colorFloor: null`, `colorTiles: []`),
+server không quảng bá capability hoặc chạy vòng sàn màu nữa. Các mô tả/fixture sàn bên dưới
+ghi lại bản trước của nâng cấp. Ba nhóm cờ được xếp ba hàng cách nhau 240 px ở góc Trên/Dưới.
+Menu “Thách đấu trí tuệ” gom ba bàn Caro, sáu bàn cờ và Trên/Dưới. Lệnh `dice-approach`
+đưa người chơi theo đường hợp lệ tới vùng Trên/Dưới, sau đó FE mới gửi `dice-open`.
+Chọn Caro từ menu tự chọn ghế trống của đúng bàn. Các thay đổi này không cần migration DB.
+
 Nâng cấp này không có migration, không tạo bảng/cột và không cần cấp thêm quyền DB.
 Sáu bàn cờ, nước đi, đồng hồ, lời mời hòa, trạng thái sàn màu và reaction nằm trong RAM của
 một backend instance. Cờ vua/cờ tướng dùng cơ chế giữ CPoint và kết toán ví hiện có của Caro
@@ -105,8 +112,9 @@ sau khi kết toán; không xóa giao dịch đang chờ xử lý lỗi DB.
 
 Cờ vua đối chiếu [FIDE Laws of Chess, hiệu lực 01-01-2023](https://handbook.fide.com/chapter/e012023),
 điều 3, 5, 6, 9. Có nước hợp lệ/gỡ chiếu/ghim, nhập thành, bắt qua đường, bốn lựa chọn phong cấp,
-chiếu hết, hết nước, xin hòa, đầu hàng, hết giờ. Hòa ba lần/50 nước phải yêu cầu; có thể chọn
-“Xin hòa theo nước dự định”, rồi chọn quân và đích. Yêu cầu đúng không thực hiện nước đó.
+chiếu hết, hết nước, xin hòa, đầu hàng, hết giờ. Engine vẫn hỗ trợ lệnh yêu cầu hòa ba lần/50 nước
+và nước dự định để tương thích; giao diện đã bỏ hai nút xác minh hòa theo yêu cầu sản phẩm.
+Giao diện chỉ giữ mời hòa/đồng ý hòa và đầu hàng. Yêu cầu đúng không thực hiện nước đó.
 Yêu cầu sai cộng 2 phút cho đối phương và thực hiện nước dự định hợp lệ. Năm lần/75 nước tự hòa,
 ưu tiên chiếu hết. Khóa thế gồm bên đi, quyền nhập thành và bắt qua đường thực sự hợp lệ.
 **Giới hạn:** nhận diện thế chết/khả năng chiếu hết hiện dựa trên các nhóm vật chất thông dụng,
@@ -119,7 +127,7 @@ hết nước là thua. Bộ phân loại chu kỳ ưu tiên chiếu dai trên �
 loại đuổi bằng tướng/tốt, tốt chưa qua sông, đổi quân cùng loại và quân có bảo vệ hợp lệ;
 mã/pháo đuổi xe có ngoại lệ. Một bên vi phạm phải đổi nước; tiếp tục chu kỳ sau cảnh báo thì thua.
 Hai bên cùng mức vi phạm hòa. Lặp không vi phạm cần bốn lần xuất hiện theo 3.2.B.
-“Yêu cầu xác minh hòa” thay yêu cầu trọng tài. Bộ đếm tự xác minh sau 100 lượt đơn không bắt quân
+Bộ đếm tự xác minh sau 100 lượt đơn không bắt quân
 (50 nước mỗi bên); chỉ 10 lần chiếu đầu tiên mỗi bên tính vào bộ đếm, chiếu dư không tăng số đếm.
 Bắt quân đặt lại bộ đếm. Yêu cầu sai trừ 5 phút và một lỗi kỹ thuật, lỗi thứ hai hoặc hết giờ thì thua.
 **Giới hạn:** mới có fixture hình 1 và các fixture luật tổng quát; chưa chứng nhận đủ 110 hình WXF.
@@ -142,6 +150,53 @@ Fixture và lệnh kiểm thử:
 | `RoomColorFloorTest` | Mép ô, hai người, năm vòng, đồng thắng, tất cả trượt, hàng chờ ván sau. |
 
 Chạy `mvn test -Dtest=RoomBoardPositionTest,RoomBoardMatchTest,ChatRoomPlaygroundTest,RoomColorFloorTest`.
+
+#### Bàn trình chiếu và màn hình 16:9
+
+Không thêm bảng, cột hay migration. `presentation` trong map trỏ tới bảng 0, bàn 73, ghế 74.
+Khách gửi capability `presentation: true`; chỉ người đang ngồi ghế trình chiếu được điều khiển.
+Ảnh/video từ máy phát qua WebRTC trực tiếp tới từng người xem, không tải tệp lên backend,
+không ghi hình và không lưu byte media trong bộ nhớ backend. Trình duyệt vẫn cần bộ đệm giải mã
+và khung hình; ảnh dựng canvas 1920×1080, video đọc dần bằng object URL. YouTube dùng IFrame API,
+mỗi người tải trực tiếp từ YouTube theo cùng thời điểm/tạm dừng. Người xem bật âm thanh bằng thao tác.
+
+| Lệnh/event | Hợp đồng |
+|---|---|
+| `media-state` | `{id,controller,name,source,title,videoId,paused,position,updatedAt,serverTime,iceServers}`. ID phiên UUID v4; source `idle/image/video/screen/youtube`. |
+| `media-start` | `{id,source,title?,videoId?}` từ người ngồi ghế; YouTube chỉ nhận ID 11 ký tự, không nhận URL iframe tùy ý. |
+| `media-stop` | Người trình chiếu dừng và đổi ID phiên. |
+| `media-control` | `{id,paused,position}` cho YouTube; chỉ chủ ghế, giới hạn 100 ms/lệnh. |
+| `media-watch` | `{id,connection}` từ người xem; connection UUID v4 mới cho mỗi kết nối. |
+| `media-peer` | `{id,peer,connection}` gửi chủ ghế để tạo offer. |
+| `media-signal` | Client `{id,connection,to,kind,payload}`, server thay `to` bằng `from`. `offer/answer/ice`, tối đa 20.000 ký tự payload. Chỉ relay giữa chủ ghế và người xem đã đăng ký đúng phiên/kết nối. |
+| `media-error` | `{message}` có ngữ cảnh quyền/trạng thái. |
+
+Đứng dậy/mất kết nối dừng phiên. Chủ ghế mới luôn bắt đầu phiên mới; callback rời phòng muộn của
+chủ cũ không xóa phiên của người mới. FE dọn tracks, peers, timers, iframe và object URLs khi đổi
+nguồn/rời phòng. Người vào muộn xin kết nối mới. Metadata và tín hiệu tồn tại trong RAM một instance.
+Kích thước packet tối đa 32 KiB để chứa SDP; giới hạn payload phía trên vẫn áp dụng.
+
+| Biến môi trường | Mặc định / ý nghĩa |
+|---|---|
+| `CHAT_ROOM_ICE_URLS` | `stun:stun.l.google.com:19302`; danh sách STUN/TURN phân cách dấu phẩy. |
+| `CHAT_ROOM_TURN_USERNAME` | Rỗng; tài khoản TURN nếu dùng. |
+| `CHAT_ROOM_TURN_CREDENTIAL` | Rỗng; mật khẩu TURN nếu dùng. |
+
+Cần HTTPS ngoài localhost. Mạng NAT/firewall hạn chế cần TURN; STUN mặc định không bảo đảm kết nối
+mọi mạng. TURN chỉ chuyển tiếp media, không ghi tệp. P2P tăng upload của người trình chiếu theo số
+người xem; chưa kiểm thử tải nhiều người. Video cục bộ cần trình duyệt hỗ trợ captureStream;
+Chrome đã kiểm tra, trình duyệt thiếu hỗ trợ dùng chia sẻ màn hình nếu có. Âm thanh chia sẻ màn hình
+phụ thuộc trình duyệt/nguồn người dùng chọn. Video YouTube phải cho phép nhúng.
+
+Kiểm tra bổ sung ngày 17-11: Maven verify bốn lớp ở trên qua 32 test, gồm quyền trình chiếu,
+signaling theo phiên, ID sai và callback disconnect muộn. Chrome hai tài khoản xác nhận ảnh P2P
+bằng pixel giải mã, video WebM có track âm thanh, tạm dừng/tiếp tục, YouTube phát thực tế cùng
+pause/seek, fullscreen và dọn nguồn khi đứng dậy/rời phòng.
+Bố cục Caro/cờ vua/cờ tướng được kiểm tra ở 1280×840, 375×780 và 844×390: toàn bàn,
+đồng hồ/lượt và thao tác chính nằm trong khung; lịch sử có vùng cuộn riêng, Caro vẫn kéo bàn 50×50.
+Người xem vào muộn nhận ảnh đang phát, kể cả trên viewport điện thoại.
+FE qua 48 test phòng/guard, 3 test hợp đồng phòng và 16 test menu/section card; lint/typecheck qua.
+Production/staging build và bundle guard qua. Cỡ quân co theo ô để không chồng chữ ở màn hình ngang thấp.
 
 Nghiệm thu cục bộ ngày 17-11-2026: 28 test ở bốn lớp trên thành công và đóng gói Maven thành công.
 Chrome desktop dùng ba tài khoản/phiên để chơi xong mỗi loại cờ, xem ván, thử gửi nước từ người xem,

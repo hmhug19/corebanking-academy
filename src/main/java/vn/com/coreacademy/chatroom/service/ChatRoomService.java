@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.NestedRuntimeException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -66,6 +67,19 @@ public class ChatRoomService {
     private final Deque<Map<String, Object>> chatHistory = new ArrayDeque<>();
     private final Map<String, BoardSession> boardSessions = new LinkedHashMap<>();
     private final RoomColorFloor colorFloor = new RoomColorFloor();
+    private String mediaId = UUID.randomUUID().toString();
+    private String mediaSource = "idle";
+    private String mediaTitle = "";
+    private String mediaVideoId = "";
+    private double mediaPosition;
+    private boolean mediaPaused = true;
+    private long mediaUpdatedAt;
+    @Value("${app.chat-room.media-ice-urls:stun:stun.l.google.com:19302}")
+    private String mediaIceUrls = "stun:stun.l.google.com:19302";
+    @Value("${app.chat-room.media-turn-username:}")
+    private String mediaTurnUsername = "";
+    @Value("${app.chat-room.media-turn-credential:}")
+    private String mediaTurnCredential = "";
     private static final Set<String> REACTIONS = Set.of("hello", "laugh", "clap", "love", "celebrate", "surprise");
     private long knownDiceRound = -1;
     private long diceClosesAt;
@@ -132,6 +146,9 @@ public class ChatRoomService {
         private boolean reactions;
         private boolean boardGames;
         private boolean floorGame;
+        private boolean presentation;
+        private String mediaWatchId;
+        private long lastMediaCommand;
         private String watchingBoard;
         private long lastReaction;
         private long wallet = -1;
@@ -230,6 +247,9 @@ public class ChatRoomService {
                 case "chat" -> chat(guest, packet, now);
                 case "gesture" -> gesture(guest, packet, now);
                 case "reaction" -> reaction(guest, packet, now);
+                case "dice-approach" -> approachDice(guest);
+                case "media-start", "media-stop", "media-control", "media-watch", "media-signal" ->
+                    presentation(guest, type, packet, now);
                 case "board-watch", "board-ready", "board-move", "board-action" -> board(guest, type, packet, now);
                 case "floor-join" -> {
                     if (guest.floorGame && map.layout().colorFloor().contains(guest.x, guest.y)
@@ -268,12 +288,13 @@ public class ChatRoomService {
             return;
         }
         guest.name = name;
+        guest.presentation = packet.path("presentation").asBoolean(false);
         guest.activities = packet.path("activities").isBoolean() && packet.path("activities").asBoolean();
         guest.gestures = packet.path("gestures").isBoolean() && packet.path("gestures").asBoolean();
         guest.interactions = packet.path("interactions").isBoolean() && packet.path("interactions").asBoolean();
         guest.reactions = packet.path("reactions").asBoolean(false);
         guest.boardGames = packet.path("boardGames").asBoolean(false);
-        guest.floorGame = packet.path("floorGame").asBoolean(false);
+        guest.floorGame = false;
         boolean wantsGames = packet.path("roomGames").isBoolean() && packet.path("roomGames").asBoolean();
         guest.avatar = "female".equals(packet.path("avatar").asText()) ? "female" : "male";
         String color = packet.path("color").asText();
@@ -295,6 +316,9 @@ public class ChatRoomService {
             }
         }
         initializeGames(guest, wantsGames);
+        if (guest.presentation) {
+            sendMediaState(guest);
+        }
         if (guest.reactions || guest.boardGames || guest.floorGame) {
             sendGame(guest, Map.of("type", "playground-ready", "reactions", guest.reactions,
                 "boardGames", guest.boardGames, "floorGame", guest.floorGame));
@@ -942,6 +966,9 @@ public class ChatRoomService {
     }
 
     private boolean canTakeSeat(Guest guest, int index) {
+        if (index == map.layout().presentation().chair() && !guest.presentation) {
+            return false;
+        }
         if (!"chair".equals(map.layout().objects().get(index).kind())) {
             return false;
         }
@@ -986,6 +1013,9 @@ public class ChatRoomService {
         guest.facing = "south".equals(map.layout().objects().get(chair).facing()) ? "south" : "north";
         broadcastPosition(guest);
         int table = map.caroTable(chair);
+        if (chair == map.layout().presentation().chair()) {
+            stopPresentation();
+        }
         if (table != 0) {
             refreshCaroTable(table, System.currentTimeMillis());
         }
@@ -1001,9 +1031,17 @@ public class ChatRoomService {
         if (guest.seat == null) {
             return;
         }
+        boolean presentationSeat = guest.seat == map.layout().presentation().chair();
         int table = map.caroTable(guest.seat);
         ChatRoomMap.BoardTable board = map.boardTable(guest.seat);
         guest.seat = null;
+        if (presentationSeat) {
+            if (presentationHost() == null) {
+                stopPresentation();
+            } else {
+                broadcastMediaState();
+            }
+        }
         broadcastPosition(guest);
         if (table != 0) {
             sendGame(guest, Map.of("type", "caro-table"));
@@ -1042,6 +1080,28 @@ public class ChatRoomService {
                     && startApproach(guest, null, target, map.path(origin, destination))) {
                     return;
                 }
+            }
+        }
+    }
+
+    private void approachDice(Guest guest) throws IOException {
+        if (!guest.roomGames || !guest.interactions || guest.seat != null || map.layout().diceArea() == null) {
+            return;
+        }
+        ChatRoomMap.Area area = map.layout().diceArea();
+        Point origin = point(guest);
+        List<Point> targets = new ArrayList<>();
+        targets.add(new Point(Math.max(area.x() + 24, Math.min(guest.x, area.x() + area.w() - 24)),
+            Math.max(area.y() + 24, Math.min(guest.y, area.y() + area.h() - 24))));
+        for (double x : new double[] {area.x() + 24, area.x() + area.w() / 2, area.x() + area.w() - 24}) {
+            for (double y : new double[] {area.y() + 24, area.y() + area.h() - 24}) {
+                targets.add(new Point(x, y));
+            }
+        }
+        targets.sort(Comparator.comparingDouble(target -> ChatRoomMap.distance(origin, target)));
+        for (Point target : targets) {
+            if (startApproach(guest, null, null, map.path(origin, target))) {
+                return;
             }
         }
     }
@@ -1089,7 +1149,7 @@ public class ChatRoomService {
                     takeSeat(guest, approach.chair(), point(guest));
                     continue;
                 }
-                if (inHighFiveRange(guest, partner)) {
+                if (partner != null && inHighFiveRange(guest, partner)) {
                     sendHighFiveInvite(guest, partner, now);
                 }
             }
@@ -1214,6 +1274,145 @@ public class ChatRoomService {
         return FACINGS.get(octant);
     }
 
+    private Guest presentationHost() {
+        return guests.values().stream().filter(guest -> guest.presentation && guest.name != null
+            && guest.session.isOpen() && Integer.valueOf(map.layout().presentation().chair()).equals(guest.seat))
+            .findFirst().orElse(null);
+    }
+
+    private void sendMediaState(Guest viewer) {
+        Guest host = presentationHost();
+        List<Map<String, Object>> ice = new ArrayList<>();
+        for (String url : mediaIceUrls.split(",")) {
+            String trimmed = url.strip();
+            if (trimmed.startsWith("stun:") || trimmed.startsWith("turn:") || trimmed.startsWith("turns:")) {
+                Map<String, Object> server = new LinkedHashMap<>();
+                server.put("urls", trimmed);
+                if (!trimmed.startsWith("stun:") && !mediaTurnUsername.isBlank()) {
+                    server.put("username", mediaTurnUsername);
+                    server.put("credential", mediaTurnCredential);
+                }
+                ice.add(server);
+            }
+        }
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("type", "media-state");
+        state.put("id", mediaId);
+        state.put("controller", host == null ? "" : host.session.getId());
+        state.put("name", host == null ? "" : host.name);
+        state.put("source", mediaSource);
+        state.put("title", mediaTitle);
+        state.put("videoId", mediaVideoId);
+        state.put("paused", mediaPaused);
+        state.put("position", mediaPosition);
+        state.put("updatedAt", mediaUpdatedAt);
+        state.put("serverTime", System.currentTimeMillis());
+        state.put("iceServers", ice);
+        sendGame(viewer, state);
+    }
+
+    private void broadcastMediaState() {
+        guests.values().stream().filter(guest -> guest.presentation && guest.name != null)
+            .forEach(this::sendMediaState);
+    }
+
+    private void stopPresentation() {
+        mediaSource = "idle";
+        mediaTitle = mediaVideoId = "";
+        mediaId = UUID.randomUUID().toString();
+        mediaPosition = 0;
+        mediaPaused = true;
+        mediaUpdatedAt = System.currentTimeMillis();
+        guests.values().forEach(guest -> guest.mediaWatchId = null);
+        broadcastMediaState();
+    }
+
+    private boolean validPresentationId(String id) {
+        try {
+            UUID value = UUID.fromString(id);
+            return value.version() == 4 && value.variant() == 2 && value.toString().equalsIgnoreCase(id);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    /** Chỉ chuyển tín hiệu WebRTC; ảnh, video và âm thanh không đi qua bộ nhớ máy chủ. */
+    private void presentation(Guest guest, String type, JsonNode packet, long now) {
+        if (!guest.presentation) {
+            return;
+        }
+        Guest host = presentationHost();
+        if ("media-signal".equals(type)) {
+            Guest target = guests.get(packet.path("to").asText());
+            String kind = packet.path("kind").asText();
+            String payload = packet.path("payload").asText();
+            Guest viewer = guest == host ? target : guest;
+            if (host == null || target == null || !target.presentation || viewer == host || viewer == null
+                || !target.session.isOpen() || !(guest == host || target == host)
+                || !mediaId.equals(packet.path("id").asText()) || "idle".equals(mediaSource)
+                || "youtube".equals(mediaSource) || payload.length() > 20000
+                || !Set.of("offer", "answer", "ice").contains(kind)
+                || "offer".equals(kind) && guest != host || "answer".equals(kind) && target != host
+                || viewer.mediaWatchId == null || !viewer.mediaWatchId.equals(packet.path("connection").asText())) {
+                return;
+            }
+            sendGame(target, Map.of("type", "media-signal", "id", mediaId, "from", guest.session.getId(),
+                "connection", viewer.mediaWatchId, "kind", kind, "payload", payload));
+            return;
+        }
+        if ("media-watch".equals(type)) {
+            String connection = packet.path("connection").asText();
+            if (host != null && host != guest && !Set.of("idle", "youtube").contains(mediaSource)
+                && mediaId.equals(packet.path("id").asText())
+                && validPresentationId(connection) && !connection.equals(guest.mediaWatchId)) {
+                guest.mediaWatchId = connection;
+                sendGame(host, Map.of("type", "media-peer", "id", mediaId, "peer", guest.session.getId(),
+                    "connection", connection));
+            }
+            return;
+        }
+        if (guest != host) {
+            sendGame(guest, Map.of("type", "media-error", "message", "Ngồi vào bàn trình chiếu để điều khiển."));
+            return;
+        }
+        if ("media-stop".equals(type)) {
+            stopPresentation();
+            return;
+        }
+        if ("media-control".equals(type) && now - guest.lastMediaCommand < 100) {
+            return;
+        }
+        if ("media-start".equals(type)) {
+            String source = packet.path("source").asText();
+            String id = packet.path("id").asText();
+            String video = packet.path("videoId").asText();
+            if (!Set.of("video", "image", "screen", "youtube").contains(source)
+                || !validPresentationId(id)
+                || "youtube".equals(source) && !video.matches("[a-zA-Z0-9_-]{11}")) {
+                return;
+            }
+            mediaId = id;
+            mediaSource = source;
+            mediaVideoId = "youtube".equals(source) ? video : "";
+            String title = clean(packet.path("title").asText());
+            mediaTitle = title.substring(0, Math.min(100, title.length()));
+            mediaPosition = 0;
+            mediaPaused = false;
+            guests.values().forEach(viewer -> viewer.mediaWatchId = null);
+        } else {
+            double position = packet.path("position").asDouble(-1);
+            if (!"youtube".equals(mediaSource) || !mediaId.equals(packet.path("id").asText())
+                || !Double.isFinite(position) || position < 0 || position > 864000
+                || !packet.path("paused").isBoolean()) {
+                return;
+            }
+            mediaPosition = position;
+            mediaPaused = packet.path("paused").asBoolean();
+        }
+        guest.lastMediaCommand = mediaUpdatedAt = now;
+        broadcastMediaState();
+    }
+
     private void reaction(Guest guest, JsonNode packet, long now) throws IOException {
         String reaction = packet.path("reaction").asText();
         if (!guest.reactions || !REACTIONS.contains(reaction) || now - guest.lastReaction < 1200) {
@@ -1225,6 +1424,9 @@ public class ChatRoomService {
     }
 
     private void tickFloor(long now) throws IOException {
+        if (map.layout().colorTiles().isEmpty()) {
+            return;
+        }
         List<RoomColorFloor.Player> present = guests.values().stream()
             .filter(guest -> guest.name != null && guest.session.isOpen() && guest.floorGame)
             .map(guest -> new RoomColorFloor.Player(guest.access.userId(), guest.name, guest.x, guest.y)).toList();
@@ -1455,6 +1657,13 @@ public class ChatRoomService {
     public synchronized void disconnect(WebSocketSession session) throws IOException {
         Guest guest = guests.remove(session.getId());
         if (guest != null && guest.name != null) {
+            if (Integer.valueOf(map.layout().presentation().chair()).equals(guest.seat)) {
+                if (presentationHost() == null) {
+                    stopPresentation();
+                } else {
+                    broadcastMediaState();
+                }
+            }
             colorFloor.leave(guest.access.userId());
             ChatRoomMap.BoardTable board = map.boardTable(guest.seat);
             if (board != null) {

@@ -37,9 +37,13 @@ public class ChatRoomMap {
     public record BoardClock(long baseMillis, long incrementMillis) {
     }
 
+    public record Presentation(int board, int desk, int chair) {
+    }
+
     public record Layout(int width, int height, double speed, double radius, Point spawn, List<Furniture> objects,
         Area activityArea, Area diceArea, List<CaroTable> caroTables, Area playgroundArea,
-        List<BoardTable> boardTables, Area colorFloor, List<ColorTile> colorTiles, BoardClock boardClock) {
+        List<BoardTable> boardTables, Area colorFloor, List<ColorTile> colorTiles, BoardClock boardClock,
+        Presentation presentation) {
     }
 
     private final Layout layout;
