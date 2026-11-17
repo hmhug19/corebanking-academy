@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant;
 
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -238,6 +239,139 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         assertThat(sessions()).isZero();
         assertThat(documents()).isEqualTo(documentsBefore);
         jdbc.update("DELETE FROM learning_hub.assistant_conversations WHERE conversation_id = ?", foreign);
+    }
+
+    // ---- confirming step 1 (ticket 04) -------------------------------------------------------------------------------
+
+    @Test
+    void confirmingStepOneCreatesTheDraftOnceLinksItAndQueuesStepTwo() {
+        long id = proposedSession();
+        Map<String, Object> body = basics("AI-CONFIRM01");
+
+        JsonNode confirmed = api.ok(INSTRUCTOR, confirm(id, 1, body));
+
+        long courseId = confirmed.path("courseId").asLong();
+        assertThat(courseId).isPositive();
+        assertThat(confirmed.path("revisionId").asLong()).isPositive();
+        assertThat(confirmed.path("currentStep").asInt()).isEqualTo(2);
+        assertThat(confirmed.path("steps")).hasSize(2);
+        assertThat(confirmed.path("steps").get(0).path("state").asText()).isEqualTo("confirmed");
+        assertThat(confirmed.path("steps").get(1).path("step").asInt()).isEqualTo(2);
+        assertThat(confirmed.path("steps").get(1).path("state").asText()).isEqualTo("proposing");
+        assertThat(jdbc.queryForMap("""
+            SELECT c.owner_org_id, c.owner_user_id, r.title, r.summary, r.ai_generated
+              FROM learning_hub.courses c JOIN learning_hub.course_revisions r ON r.course_id = c.course_id
+             WHERE c.course_id = ?
+            """, courseId)).containsEntry("owner_org_id", ownOrg).containsEntry("owner_user_id", INSTRUCTOR)
+            .containsEntry("title", "Mở tài khoản").containsEntry("summary", "Quy trình.")
+            .containsEntry("ai_generated", false);
+
+        // a second press (or the chat card after the page) creates nothing new
+        JsonNode again = api.ok(INSTRUCTOR, confirm(id, 1, body));
+        assertThat(again.path("courseId").asLong()).isEqualTo(courseId);
+        assertThat(again.path("currentStep").asInt()).isEqualTo(2);
+        assertThat(courses("AI-CONFIRM01")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_drafting_steps WHERE session_id = ?",
+            Integer.class, id)).isEqualTo(2);
+    }
+
+    @Test
+    void theDraftsEditPageFindsItsSessionAgain() {
+        long id = proposedSession();
+        long courseId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-RESUME01"))).path("courseId").asLong();
+
+        JsonNode resumed = api.ok(INSTRUCTOR, get(SESSIONS + "/course/{courseId}", courseId));
+
+        assertThat(resumed.path("id").asLong()).isEqualTo(id);
+        assertThat(resumed.path("currentStep").asInt()).isEqualTo(2);
+        assertThat(resumed.path("steps").get(1).path("state").asText()).isEqualTo("proposing");
+        // another author, or a course without a session, has none
+        assertThat(api.ok(ADMIN, get(SESSIONS + "/course/{courseId}", courseId)).isNull()).isTrue();
+        assertThat(api.ok(INSTRUCTOR, get(SESSIONS + "/course/{courseId}", courseId + 100_000)).isNull()).isTrue();
+        api.http(LEARNER, get(SESSIONS + "/course/{courseId}", courseId), 403, "CORE-ACCESS_DENIED");
+    }
+
+    @Test
+    void aTakenCodeReturnsTheFieldErrorAndTheSessionProposesANewCode() {
+        long id = proposedSession();
+        String taken = jdbc.queryForObject("SELECT min(code) FROM learning_hub.courses", String.class);
+        int before = courses(taken);
+
+        JsonNode refused = api.error(INSTRUCTOR, confirm(id, 1, basics(taken)), "LEARNING-DUPLICATE");
+
+        assertThat(refused.path("errors").get(0).path("field").asText()).isEqualTo("course.code");
+        assertThat(courses(taken)).isEqualTo(before);
+        JsonNode view = api.ok(INSTRUCTOR, session(id));
+        JsonNode step = view.path("steps").get(0);
+        String proposed = step.path("proposal").path("code").asText();
+        assertThat(view.path("courseId").isNull()).isTrue();
+        assertThat(view.path("currentStep").asInt()).isEqualTo(1);
+        assertThat(view.path("steps")).hasSize(1);
+        assertThat(step.path("state").asText()).isEqualTo("proposed");
+        assertThat(proposed).startsWith("AI-").isNotEqualTo("AI-TESTCODE").isNotEqualToIgnoringCase(taken);
+        assertThat(step.path("proposal").path("title").asText()).isEqualTo("Mở tài khoản");
+        assertThat(step.path("notes").toString()).contains(taken).contains(proposed);
+
+        // the new code goes through
+        assertThat(api.ok(INSTRUCTOR, confirm(id, 1, basics(proposed))).path("courseId").asLong()).isPositive();
+    }
+
+    @Test
+    void aStepIsConfirmedOnlyWhenItIsTheCurrentOneAndHasBeenProposed() {
+        long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+
+        JsonNode early = api.error(INSTRUCTOR, confirm(id, 1, basics("AI-EARLY001")), "CORE-VALIDATION_FAILED");
+        assertThat(early.path("errors").get(0).path("field").asText()).isEqualTo("step");
+        assertThat(early.path("errors").get(0).path("code").asText()).isEqualTo("INVALID_STATE");
+
+        worker.runOnce();
+        api.error(INSTRUCTOR, confirm(id, 2, Map.of()), "CORE-VALIDATION_FAILED");
+        api.error(INSTRUCTOR, confirm(id, 5, basics("AI-EARLY002")), "CORE-VALIDATION_FAILED");
+        assertThat(courses("AI-EARLY001") + courses("AI-EARLY002")).isZero();
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("courseId").isNull()).isTrue();
+    }
+
+    @Test
+    void anInvalidBodyAnotherAuthorOrALearnerCreateNothing() {
+        long id = proposedSession();
+        int before = jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses", Integer.class);
+
+        JsonNode invalid = api.error(INSTRUCTOR, confirm(id, 1, Map.of("course", Map.of("ownerOrgId", ownOrg))),
+            "CORE-VALIDATION_FAILED");
+        assertThat(invalid.path("errors").toString()).contains("course.code");
+        api.error(INSTRUCTOR, confirm(id, 1, Map.of()), "CORE-VALIDATION_FAILED");
+        api.error(ADMIN, confirm(id, 1, basics("AI-FOREIGN1")), "CORE-RESOURCE_NOT_FOUND");
+        api.http(LEARNER, confirm(id, 1, basics("AI-FOREIGN2")), 403, "CORE-ACCESS_DENIED");
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses", Integer.class)).isEqualTo(before);
+    }
+
+    private long proposedSession() {
+        long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+        assertThat(worker.runOnce()).isTrue();
+        return id;
+    }
+
+    private MockHttpServletRequestBuilder confirm(long id, int step, Object body) {
+        return api.post(body, SESSIONS + "/{id}/steps/{step}/confirm", id, step);
+    }
+
+    /** What the page sends for step 1: the create command with the form's draft. */
+    private Map<String, Object> basics(String code) {
+        Map<String, Object> draft = new HashMap<>();
+        draft.put("title", "Mở tài khoản");
+        draft.put("summary", "Quy trình.");
+        draft.put("level", "basic");
+        draft.put("defaultRequirement", "mandatory");
+        draft.put("objectives", List.of("Thực hiện được"));
+        draft.put("chapters", List.of());
+        draft.put("rewardPoints", 0);
+        return Map.of("course", Map.of("ownerOrgId", ownOrg, "code", code, "title", "Mở tài khoản", "draft", draft));
+    }
+
+    private int courses(String code) {
+        return jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses WHERE lower(code) = lower(?)",
+            Integer.class, code);
     }
 
     private MockMultipartHttpServletRequestBuilder oldJob(Map<String, Object> inputs) {

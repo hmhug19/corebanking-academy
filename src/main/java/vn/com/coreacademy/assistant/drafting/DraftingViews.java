@@ -5,6 +5,9 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import vn.com.coreacademy.learning.dto.LearningRequests;
 
 /** What the drafting endpoints receive and send. */
 public final class DraftingViews {
@@ -34,5 +37,10 @@ public final class DraftingViews {
     public record SessionView(long id, String status, int currentStep, Long courseId, Long revisionId,
                               Long conversationId, SourceView source, String error, List<StepView> steps,
                               OffsetDateTime createTime, OffsetDateTime updateTime) {
+    }
+
+    /** Chốt bước 1: the course create command built from the page's current values. */
+    @Schema(description = "Chốt bước 1: lệnh tạo khóa học từ giá trị hiện có trên trang.")
+    public record BasicsConfirm(@NotNull @Valid LearningRequests.CreateCourse course) {
     }
 }

@@ -108,6 +108,49 @@ public class CourseDraftingRepository {
             """, errorMessage, sessionId);
     }
 
+    /** The session, locked until the transaction ends, so two confirms of one step run one after the other. */
+    public Optional<SessionRow> lockSession(long sessionId) {
+        return jdbc.query("SELECT " + SESSION_COLUMNS + " FROM learning_hub.course_drafting_sessions "
+            + "WHERE session_id = ? FOR UPDATE", SESSION, sessionId).stream().findFirst();
+    }
+
+    /** The author's latest session of the course, the one its edit page follows. */
+    public Optional<SessionRow> latestForCourse(long courseId, String ownerUserId) {
+        return jdbc.query("SELECT " + SESSION_COLUMNS + " FROM learning_hub.course_drafting_sessions "
+            + "WHERE course_id = ? AND owner_user_id = ? ORDER BY create_time DESC, session_id DESC LIMIT 1", SESSION,
+            courseId, ownerUserId).stream().findFirst();
+    }
+
+    /** Step 1 is confirmed: the session holds the draft course it created and moves on to the step. */
+    public void linkCourse(long sessionId, long courseId, long revisionId, int nextStep) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_sessions
+               SET course_id = ?, revision_id = ?, current_step = ?, update_time = now()
+             WHERE session_id = ?
+            """, courseId, revisionId, nextStep, sessionId);
+    }
+
+    public void confirmStep(long sessionId, int stepNo) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET state = 'confirmed', claimed_at = NULL, error_message = NULL, update_time = now()
+             WHERE session_id = ? AND step_no = ?
+            """, sessionId, stepNo);
+    }
+
+    /**
+     * The step proposes another course code after the one confirmed was taken, with a note for the chat. A step with
+     * no proposal (failed, manual) keeps none: the code field is the author's then.
+     */
+    public void proposeCode(long sessionId, int stepNo, String code, String note) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET proposal = jsonb_set(proposal, '{code}', to_jsonb(?::text)),
+                   notes = notes || jsonb_build_array(?::text), update_time = now()
+             WHERE session_id = ? AND step_no = ? AND proposal IS NOT NULL
+            """, code, note, sessionId, stepNo);
+    }
+
     public void touchSession(long sessionId) {
         jdbc.update("UPDATE learning_hub.course_drafting_sessions SET update_time = now() WHERE session_id = ?",
             sessionId);

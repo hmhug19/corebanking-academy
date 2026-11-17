@@ -8,6 +8,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -17,6 +20,7 @@ import vn.com.coreacademy.assistant.course.GenerationAllowance;
 import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow;
+import vn.com.coreacademy.assistant.drafting.DraftingViews.BasicsConfirm;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SessionView;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SourceView;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.StartFields;
@@ -27,14 +31,19 @@ import vn.com.coreacademy.identity.constants.RoleCodes;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
+import vn.com.coreacademy.learning.dto.LearningDetails.CourseDetail;
+import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.service.LearningAccessPolicy;
+import vn.com.coreacademy.learning.service.LearningContentService;
 import vn.com.coreacademy.security.SecurityContextUtils;
 
 /**
  * Soạn cùng trợ lý on the server: starts a drafting session from a document and shows it. Only roles that manage
  * courses may use it; the owner unit is decided here (an instructor's own unit, an admin's choice checked against their
  * scope), never by the model; and every start counts against the daily course generation allowance. The model work
- * happens later in {@link CourseDraftingWorker}, so closing the chat or the page does not stop it.
+ * happens later in {@link CourseDraftingWorker}, so closing the chat or the page does not stop it. Confirming step 1
+ * creates the draft course through the course service's own create path, so its checks (scope, code) apply as on the
+ * page.
  */
 @Service
 @RequiredArgsConstructor
@@ -48,6 +57,8 @@ public class CourseDraftingService {
     private final GenerationAllowance allowance;
     private final TransactionTemplate transaction;
     private final ObjectMapper json;
+    private final LearningContentService courses;
+    private final Validator validator;
 
     private record Prepared(String userId, long ownerOrgId, StartFields fields, Long conversationId) {
     }
@@ -71,6 +82,88 @@ public class CourseDraftingService {
     public SessionView get(long sessionId) {
         requireManager(access.actor());
         return view(owned(sessionId));
+    }
+
+    /** The caller's latest session of the course, so its edit page resumes at the right step; null when it has none. */
+    public SessionView forCourse(long courseId) {
+        requireManager(access.actor());
+        return drafting.latestForCourse(courseId, SecurityContextUtils.getUserId()).map(this::view).orElse(null);
+    }
+
+    /**
+     * Chốt bước: the step is saved with what is on the page now ({@code body}) and the next one is queued. Only the
+     * current step, once proposed (or failed, or filled by hand), may be confirmed; confirming step 1 again after it
+     * created the draft returns the session as it is.
+     */
+    public SessionView confirm(long sessionId, int step, JsonNode body) {
+        requireManager(access.actor());
+        owned(sessionId);
+        if (step != DraftingStates.FIRST_STEP) {
+            // Steps 2 to 4 are confirmed by the tickets that propose them.
+            throw notReady();
+        }
+        BasicsConfirm basics = basics(body);
+        try {
+            return view(transaction.execute(status -> confirmBasics(sessionId, basics)));
+        } catch (BusinessException exception) {
+            if (exception.getResponseCode() != LearningResponseCode.DUPLICATE) {
+                throw exception;
+            }
+            // The create rolled back: the new code is proposed in a transaction of its own.
+            String taken = basics.course().code().strip();
+            String code = CourseDraftingProposer.freeCode(drafting);
+            transaction.executeWithoutResult(status -> drafting.proposeCode(sessionId, step, code,
+                "Mã " + taken + " đã có; trợ lý đề xuất mã " + code + "."));
+            throw BusinessException.field(LearningResponseCode.DUPLICATE, "course.code", "DUPLICATE",
+                "Mã khóa học đã có. Trợ lý đã đề xuất mã mới.");
+        }
+    }
+
+    private SessionRow confirmBasics(long sessionId, BasicsConfirm basics) {
+        SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+        if (session.courseId() != null) {
+            return session;
+        }
+        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != DraftingStates.FIRST_STEP
+            || !confirmable(stepRow(sessionId, DraftingStates.FIRST_STEP))) {
+            throw notReady();
+        }
+        CourseDetail created = courses.create(basics.course());
+        int next = DraftingStates.FIRST_STEP + 1;
+        drafting.linkCourse(sessionId, created.course().id(), created.revision().id(), next);
+        drafting.confirmStep(sessionId, DraftingStates.FIRST_STEP);
+        drafting.insertStep(sessionId, next);
+
+        return drafting.session(sessionId).orElseThrow();
+    }
+
+    private DraftingStepRow stepRow(long sessionId, int step) {
+        return drafting.steps(sessionId).stream().filter(row -> row.stepNo() == step).findFirst().orElse(null);
+    }
+
+    private static boolean confirmable(DraftingStepRow step) {
+        return step != null && Set.of(DraftingStates.PROPOSED, DraftingStates.FAILED, DraftingStates.MANUAL)
+            .contains(step.state());
+    }
+
+    private static BusinessException notReady() {
+        return BusinessException.validation("step", "INVALID_STATE", "Bước này chưa sẵn sàng để chốt.");
+    }
+
+    /** The step 1 body, checked with the course create rules; errors name the field under {@code course}. */
+    private BasicsConfirm basics(JsonNode body) {
+        BasicsConfirm basics;
+        try {
+            basics = json.treeToValue(body == null ? json.createObjectNode() : body, BasicsConfirm.class);
+        } catch (JsonProcessingException | IllegalArgumentException exception) {
+            throw BusinessException.validation("course", "INVALID_FORMAT", "Kiểu dữ liệu hoặc giá trị không hợp lệ.");
+        }
+        Set<ConstraintViolation<BasicsConfirm>> violations = validator.validate(basics);
+        if (!violations.isEmpty()) {
+            throw new ConstraintViolationException(violations);
+        }
+
+        return basics;
     }
 
     private Prepared prepare(StartFields requested, Long conversationId) {

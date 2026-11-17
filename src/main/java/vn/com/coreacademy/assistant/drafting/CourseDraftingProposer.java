@@ -182,6 +182,14 @@ public class CourseDraftingProposer implements DraftingStepProposer {
 
     /** A course code nobody uses now, in the old flow's shape ({@code AI-} and 8 characters). */
     String freeCode() {
+        return freeCode(drafting);
+    }
+
+    /**
+     * A course code nobody uses now. Static so the service can propose a new code after a taken one at confirm, even
+     * where the proposer itself is replaced (tests).
+     */
+    static String freeCode(CourseDraftingRepository drafting) {
         for (int i = 0; i < CODE_TRIES; i++) {
             String code = newCode();
             if (!drafting.codeTaken(code)) {
