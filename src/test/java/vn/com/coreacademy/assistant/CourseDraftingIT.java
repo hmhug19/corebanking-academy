@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequ
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
+import vn.com.coreacademy.assistant.course.CourseJobService;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
 import vn.com.coreacademy.assistant.course.SourceSummariser;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
@@ -31,6 +32,7 @@ import vn.com.coreacademy.assistant.drafting.DraftingPublishCheck;
 import vn.com.coreacademy.assistant.drafting.DraftingTargets;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer.Proposal;
+import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,7 +49,6 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.REPORT_VI
 /** Starting a drafting session, its step 1 proposal and its failure; the model work is a stub here. */
 class CourseDraftingIT extends AssessmentIntegrationTest {
     private static final String SESSIONS = "/api/v1/assistant/drafting-sessions";
-    private static final String JOBS = "/api/v1/assistant/course-jobs";
     private static final String OUTLINE = """
         {"chapters":[{"title":"Chuẩn bị","lessons":[
           {"title":"Điều kiện mở tài khoản","description":"Ai được mở tài khoản.","sourceSection":"Điều kiện"},
@@ -89,8 +90,11 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     private DraftingPublishCheck publishCheck;
     @Autowired
     private DraftingTargets targets;
+    @Autowired
+    private CourseJobService oldJobs;
 
     private ApiClient api;
+    private OldCourseJobs old;
     private long ownOrg;
     private long programme;
     private long competency;
@@ -99,6 +103,7 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     @BeforeAll
     void setUp() {
         api = new ApiClient(mvc, json);
+        old = new OldCourseJobs(oldJobs, json);
         AssessmentFixtures fixtures = new AssessmentFixtures(api, jdbc);
         long fixtureRevision = fixtures.course().revisionId();
         ownProgramme = jdbc.queryForObject("SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?",
@@ -252,7 +257,8 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     void sessionsAndOldJobsShareTheDailyAllowance() {
         Map<String, Object> inputs = Map.of("targetLearners", "Giao dịch viên", "level", "BEGINNER", "chapters", 3,
             "programmeId", programme, "competencyId", competency);
-        api.ok(INSTRUCTOR, oldJob(inputs));
+        // an old job started before its start was retired still counts
+        old.start(INSTRUCTOR, "a.md", "# A\n\nB.\n", inputs);
         api.ok(INSTRUCTOR, start(null));
         api.ok(INSTRUCTOR, start(null));
         int documentsBefore = documents();
@@ -262,7 +268,10 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         assertThat(refused.path("errors").get(0).path("message").asText()).contains("thử lại sau");
         assertThat(sessions()).isEqualTo(2);
         assertThat(documents()).isEqualTo(documentsBefore);
-        api.error(INSTRUCTOR, oldJob(inputs), "ASSISTANT-JOB_RATE_LIMITED");
+        RuntimeException oldRefused = old.refusal(INSTRUCTOR, inputs);
+        assertThat(oldRefused).isInstanceOf(BusinessException.class);
+        assertThat(((BusinessException) oldRefused).getResponseCode().getCode())
+            .isEqualTo("ASSISTANT-JOB_RATE_LIMITED");
         // other people have their own allowance
         api.ok(ADMIN, start(Map.of("ownerOrgId", ownOrg)));
     }
@@ -989,21 +998,6 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     private int courses(String code) {
         return jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses WHERE lower(code) = lower(?)",
             Integer.class, code);
-    }
-
-    private MockMultipartHttpServletRequestBuilder oldJob(Map<String, Object> inputs) {
-        return multipart(JOBS)
-            .file(new MockMultipartFile("file", "a.md", "text/markdown",
-                "# A\n\nB.\n".getBytes(StandardCharsets.UTF_8)))
-            .file(new MockMultipartFile("inputs", "", "application/json", write(inputs)));
-    }
-
-    private byte[] write(Object value) {
-        try {
-            return json.writeValueAsBytes(value);
-        } catch (Exception exception) {
-            throw new IllegalStateException(exception);
-        }
     }
 
     private int sessions() {

@@ -328,13 +328,18 @@ riêng việc dùng còn cần vai trò quản lý khóa học (INSTRUCTOR, ADMI
 
 | Method | Path | Ý nghĩa |
 |---|---|---|
-| POST | `/api/v1/assistant/course-jobs` | multipart `file` (.pdf/.docx/.md ≤ `app.knowledge.max-file-size`) + `inputs` (JSON). Trả job. |
+| POST | `/api/v1/assistant/course-jobs` | **Đã ngừng.** Mọi yêu cầu nhận HTTP 410, `ASSISTANT-COURSE_JOBS_RETIRED` ("Tạo khóa học bằng AI theo cách cũ đã ngừng. Hãy dùng Soạn cùng trợ lý."), không lưu gì. Dùng `/api/v1/assistant/drafting-sessions`. |
 | GET | `/api/v1/assistant/course-jobs` | Các job của tôi, mới nhất trước (tối đa 50). |
 | GET | `/api/v1/assistant/course-jobs/{jobId}` | Trạng thái, bước, tiến độ, các bước đã có. Job của người khác: `CORE-RESOURCE_NOT_FOUND`. |
 | POST | `/api/v1/assistant/course-jobs/{jobId}/cancel` | Hủy job chưa kết thúc (`CORE-VALIDATION_FAILED`/`JOB_FINISHED` nếu đã kết thúc). |
 | DELETE | `/api/v1/assistant/course-jobs/{jobId}` | Xóa job khỏi danh sách, xóa bước và tài liệu nguồn; dòng job được giữ (`deleted_at`) nên vẫn tính vào hạn mức trong ngày. Job đang chạy phải hủy trước (`JOB_RUNNING`). |
 
-`inputs`: `targetLearners` (1–500 ký tự), `level` (`BEGINNER|INTERMEDIATE|ADVANCED`), `chapters` (1–20) hoặc
+Từ khi có Soạn cùng trợ lý (ADR 0002), không tạo được job mới: `POST /course-jobs` trả **HTTP 410** (ngoại lệ có chủ đích
+với quy tắc lỗi nghiệp vụ HTTP 200 của DEVELOPMENT_GUIDELINES §13.2, vì endpoint đã bỏ chứ không phải từ chối một quy tắc
+nghiệp vụ). Job đã bắt đầu trước đó vẫn chạy đến hết; mọi endpoint đọc, duyệt, hủy, dừng, xóa và màn duyệt job vẫn dùng được.
+Mã job cũ sẽ được gỡ ở một thay đổi sau. Phần dưới mô tả hành vi của job đã có.
+
+`inputs` (của job đã có): `targetLearners` (1–500 ký tự), `level` (`BEGINNER|INTERMEDIATE|ADVANCED`), `chapters` (1–20) hoặc
 `durationMinutes` (15–1200) — cần ít nhất một, `programmeId`, `competencyId` (người dùng chọn, không do model), `ownerOrgId`.
 
 - Đơn vị sở hữu do server quyết định: giảng viên luôn là đơn vị của mình (gửi đơn vị khác là 403); ADMIN/SUPER_ADMIN bắt buộc gửi
