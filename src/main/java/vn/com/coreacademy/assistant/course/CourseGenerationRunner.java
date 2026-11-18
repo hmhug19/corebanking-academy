@@ -190,7 +190,7 @@ public class CourseGenerationRunner implements GenerationStepRunner {
             }
             blocks.add(new BlockInput(process ? "process" : "text", block.path("title").asText(),
                 process ? null : block.path("body").asText(), process ? null : "markdown", "manual", null, true,
-                List.of(), steps, null, null));
+                List.of(), steps, null, null, false));
         }
 
         return blocks;

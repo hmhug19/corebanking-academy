@@ -767,6 +767,18 @@ Lưu ý khi tích hợp:
 - Schema: `docs/sql/upgrade/2026-11-03-lesson-player-modes.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
   backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu cột); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
 
+### Cho phép tua video (`allowSeeking`)
+
+Khối `video` có cờ `allowSeeking` (boolean, mặc định `false`): khi `true`, trình phát cho người học tua tự do tới/lùi.
+
+- Request (lưu cây): bỏ qua nghĩa là `false`. Response (cây biên soạn và nội dung bài của học viên): luôn có trường này.
+- Gửi `true` cho khối không phải `video` bị từ chối: `CORE-VALIDATION_FAILED`, `errors[0].field` là `allowSeeking`.
+- Cờ đi theo bản nháp → xuất bản như mọi trường khối; học viên ở bản cũ giữ giá trị của bản đó. Bản nháp nhân bản từ
+  bản đã xuất bản và bản sao khóa/bài giữ nguyên cờ; bản nháp do trợ lý AI tạo luôn `false`.
+- **Không đổi cách tính hoàn thành**: chỉ đoạn đã phát được tính vào tỷ lệ; sự kiện `SEEK` không tạo đoạn và máy chủ
+  không từ chối `SEEK` (trình phát tự áp dụng giao diện theo cờ).
+- Schema: `docs/sql/upgrade/2026-11-24-video-allow-seeking.sql` phải chạy **trước khi triển khai backend**.
+
 ### Phản hồi bài học
 
 Dưới nội dung bài, học viên (`LEARNER`, scope `OWN`) đánh giá bài từ 1 đến 5 sao, gửi nhận xét **công khai** cho học viên

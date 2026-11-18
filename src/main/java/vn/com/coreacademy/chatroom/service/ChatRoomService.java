@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.NestedRuntimeException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -64,6 +65,22 @@ public class ChatRoomService {
     private final Map<Integer, CaroTableSession> caroTables = new LinkedHashMap<>();
     private final Map<String, ChatRoomCaro> caroMatches = new LinkedHashMap<>();
     private final Deque<Map<String, Object>> chatHistory = new ArrayDeque<>();
+    private final Map<String, BoardSession> boardSessions = new LinkedHashMap<>();
+    private final RoomColorFloor colorFloor = new RoomColorFloor();
+    private String mediaId = UUID.randomUUID().toString();
+    private String mediaSource = "idle";
+    private String mediaTitle = "";
+    private String mediaVideoId = "";
+    private double mediaPosition;
+    private boolean mediaPaused = true;
+    private long mediaUpdatedAt;
+    @Value("${app.chat-room.media-ice-urls:stun:stun.l.google.com:19302}")
+    private String mediaIceUrls = "stun:stun.l.google.com:19302";
+    @Value("${app.chat-room.media-turn-username:}")
+    private String mediaTurnUsername = "";
+    @Value("${app.chat-room.media-turn-credential:}")
+    private String mediaTurnCredential = "";
+    private static final Set<String> REACTIONS = Set.of("hello", "laugh", "clap", "love", "celebrate", "surprise");
     private long knownDiceRound = -1;
     private long diceClosesAt;
     private long lastWalletRefresh;
@@ -85,6 +102,12 @@ public class ChatRoomService {
         private Guest host;
         private Long stake;
         private CaroInvite invite;
+    }
+
+    private static final class BoardSession {
+        private long points = 10;
+        private final Set<String> ready = new HashSet<>();
+        private RoomBoardMatch match;
     }
 
     private record Approach(Integer chair, Guest partner, Deque<Point> path, double speed) {
@@ -120,6 +143,14 @@ public class ChatRoomService {
         private boolean interactions;
         private boolean roomGames;
         private boolean diceViewing;
+        private boolean reactions;
+        private boolean boardGames;
+        private boolean floorGame;
+        private boolean presentation;
+        private String mediaWatchId;
+        private long lastMediaCommand;
+        private String watchingBoard;
+        private long lastReaction;
         private long wallet = -1;
         private long shownWallet = -1;
         private UUID activeCaroId;
@@ -210,10 +241,22 @@ public class ChatRoomService {
                 error(guest, "Hãy nhập tên để vào phòng.");
                 return;
             }
+            tickFloor(now);
             switch (type) {
                 case "move" -> move(guest, packet);
                 case "chat" -> chat(guest, packet, now);
                 case "gesture" -> gesture(guest, packet, now);
+                case "reaction" -> reaction(guest, packet, now);
+                case "dice-approach" -> approachDice(guest);
+                case "media-start", "media-stop", "media-control", "media-watch", "media-signal" ->
+                    presentation(guest, type, packet, now);
+                case "board-watch", "board-ready", "board-move", "board-action" -> board(guest, type, packet, now);
+                case "floor-join" -> {
+                    if (guest.floorGame && map.layout().colorFloor().contains(guest.x, guest.y)
+                        && guest.seat == null && colorFloor.join(guest.access.userId(), true)) {
+                        publishFloor(now);
+                    }
+                }
                 case "seat" -> seat(guest, packet, now);
                 case "high-five-invite" -> inviteHighFive(guest, now);
                 case "high-five-reply" -> replyHighFive(guest, packet, now);
@@ -245,9 +288,13 @@ public class ChatRoomService {
             return;
         }
         guest.name = name;
+        guest.presentation = packet.path("presentation").asBoolean(false);
         guest.activities = packet.path("activities").isBoolean() && packet.path("activities").asBoolean();
         guest.gestures = packet.path("gestures").isBoolean() && packet.path("gestures").asBoolean();
         guest.interactions = packet.path("interactions").isBoolean() && packet.path("interactions").asBoolean();
+        guest.reactions = packet.path("reactions").asBoolean(false);
+        guest.boardGames = packet.path("boardGames").asBoolean(false);
+        guest.floorGame = false;
         boolean wantsGames = packet.path("roomGames").isBoolean() && packet.path("roomGames").asBoolean();
         guest.avatar = "female".equals(packet.path("avatar").asText()) ? "female" : "male";
         String color = packet.path("color").asText();
@@ -269,6 +316,27 @@ public class ChatRoomService {
             }
         }
         initializeGames(guest, wantsGames);
+        if (guest.presentation) {
+            sendMediaState(guest);
+        }
+        if (guest.reactions || guest.boardGames || guest.floorGame) {
+            sendGame(guest, Map.of("type", "playground-ready", "reactions", guest.reactions,
+                "boardGames", guest.boardGames, "floorGame", guest.floorGame));
+        }
+        if (guest.boardGames) {
+            sendBoardTables(guest);
+            for (var entry : boardSessions.entrySet()) {
+                RoomBoardMatch match = entry.getValue().match;
+                if (match != null && match.side(guest.access.userId()) >= 0 && match.reason == null) {
+                    guest.watchingBoard = entry.getKey();
+                    sendBoard(guest, entry.getKey(), entry.getValue(), System.currentTimeMillis());
+                    break;
+                }
+            }
+        }
+        if (guest.floorGame) {
+            sendGame(guest, colorFloor.snapshot(guest.access.userId(), System.currentTimeMillis()));
+        }
     }
 
     private void initializeGames(Guest guest, boolean wantsGames) throws IOException {
@@ -360,6 +428,17 @@ public class ChatRoomService {
     @Scheduled(fixedDelay = 1000)
     public synchronized void gameTick() throws IOException {
         long now = System.currentTimeMillis();
+        for (var entry : boardSessions.entrySet()) {
+            BoardSession table = entry.getValue();
+            if (table.match != null && table.match.expire(now)) {
+                publishBoard(entry.getKey(), now);
+            }
+            if (table.match != null && table.match.settled && now - table.match.finishedAt > 120_000) {
+                table.match = null;
+                table.ready.clear();
+                publishBoard(entry.getKey(), now);
+            }
+        }
         expireCaroInvites(now);
         for (ChatRoomCaro match : caroMatches.values().stream().distinct().toList()) {
             if (match.expire(now)) {
@@ -371,6 +450,16 @@ public class ChatRoomService {
             return;
         }
         try {
+            for (var entry : boardSessions.entrySet()) {
+                RoomBoardMatch match = entry.getValue().match;
+                if (match != null && match.reason != null && !match.settled) {
+                    games.settleCaro(match.players[match.winner].userId(),
+                        match.players[1 - match.winner].userId(), match.points, match.transfer);
+                    match.settled = true;
+                    refreshWallets();
+                    publishBoard(entry.getKey(), now);
+                }
+            }
             for (ChatRoomCaro match : caroMatches.values().stream().distinct().toList()) {
                 if (match.result != null && !match.settled) {
                     games.settleCaro(match.winner().id(), match.loser().id(), match.points, match.walletTransfer);
@@ -442,7 +531,13 @@ public class ChatRoomService {
 
     private long reserved(String userId) {
         ChatRoomCaro match = caroMatches.get(userId);
-        return match != null && !match.settled ? match.points : 0;
+        long points = match != null && !match.settled ? match.points : 0;
+        for (BoardSession board : boardSessions.values()) {
+            if (board.match != null && !board.match.settled && board.match.side(userId) >= 0) {
+                points += board.match.points;
+            }
+        }
+        return points;
     }
 
     private void sendGame(Guest guest, Object event) {
@@ -871,18 +966,36 @@ public class ChatRoomService {
     }
 
     private boolean canTakeSeat(Guest guest, int index) {
+        if (index == map.layout().presentation().chair() && !guest.presentation) {
+            return false;
+        }
         if (!"chair".equals(map.layout().objects().get(index).kind())) {
             return false;
         }
         boolean caro = map.caroTable(index) != 0;
+        ChatRoomMap.BoardTable board = map.boardTable(index);
+        if (board != null) {
+            if (!guest.boardGames || !guest.roomGames || reserved(guest.access.userId()) > 0
+                && !boardParticipant(guest, board.id())) {
+                return false;
+            }
+            BoardSession table = boardSessions.get(board.id());
+            if (table != null && table.match != null && table.match.reason == null) {
+                int side = table.match.side(guest.access.userId());
+                if (side < 0 || board.chairs().get(side) != index) {
+                    return false;
+                }
+            }
+        }
         if (caro && !guest.roomGames) {
             return false;
         }
         return guests.values().stream().filter(other -> other != guest).noneMatch(other -> {
             Integer reserved = other.approach == null ? null : other.approach.chair();
             return Integer.valueOf(index).equals(other.seat) || Integer.valueOf(index).equals(reserved)
-                || caro && guest.access.userId().equals(other.access.userId())
-                    && (map.caroTable(other.seat) != 0 || map.caroTable(reserved) != 0);
+                || (caro || board != null) && guest.access.userId().equals(other.access.userId())
+                    && (map.caroTable(other.seat) != 0 || map.caroTable(reserved) != 0
+                        || map.boardTable(other.seat) != null || map.boardTable(reserved) != null);
         });
     }
 
@@ -900,8 +1013,17 @@ public class ChatRoomService {
         guest.facing = "south".equals(map.layout().objects().get(chair).facing()) ? "south" : "north";
         broadcastPosition(guest);
         int table = map.caroTable(chair);
+        if (chair == map.layout().presentation().chair()) {
+            stopPresentation();
+        }
         if (table != 0) {
             refreshCaroTable(table, System.currentTimeMillis());
+        }
+        ChatRoomMap.BoardTable board = map.boardTable(chair);
+        if (board != null) {
+            guest.watchingBoard = board.id();
+            boardSessions.computeIfAbsent(board.id(), key -> new BoardSession());
+            publishBoard(board.id(), System.currentTimeMillis());
         }
     }
 
@@ -909,12 +1031,28 @@ public class ChatRoomService {
         if (guest.seat == null) {
             return;
         }
+        boolean presentationSeat = guest.seat == map.layout().presentation().chair();
         int table = map.caroTable(guest.seat);
+        ChatRoomMap.BoardTable board = map.boardTable(guest.seat);
         guest.seat = null;
+        if (presentationSeat) {
+            if (presentationHost() == null) {
+                stopPresentation();
+            } else {
+                broadcastMediaState();
+            }
+        }
         broadcastPosition(guest);
         if (table != 0) {
             sendGame(guest, Map.of("type", "caro-table"));
             refreshCaroTable(table, System.currentTimeMillis());
+        }
+        if (board != null) {
+            BoardSession session = boardSessions.get(board.id());
+            if (session != null) {
+                session.ready.remove(guest.access.userId());
+                publishBoard(board.id(), System.currentTimeMillis());
+            }
         }
     }
 
@@ -946,6 +1084,28 @@ public class ChatRoomService {
         }
     }
 
+    private void approachDice(Guest guest) throws IOException {
+        if (!guest.roomGames || !guest.interactions || guest.seat != null || map.layout().diceArea() == null) {
+            return;
+        }
+        ChatRoomMap.Area area = map.layout().diceArea();
+        Point origin = point(guest);
+        List<Point> targets = new ArrayList<>();
+        targets.add(new Point(Math.max(area.x() + 24, Math.min(guest.x, area.x() + area.w() - 24)),
+            Math.max(area.y() + 24, Math.min(guest.y, area.y() + area.h() - 24))));
+        for (double x : new double[] {area.x() + 24, area.x() + area.w() / 2, area.x() + area.w() - 24}) {
+            for (double y : new double[] {area.y() + 24, area.y() + area.h() - 24}) {
+                targets.add(new Point(x, y));
+            }
+        }
+        targets.sort(Comparator.comparingDouble(target -> ChatRoomMap.distance(origin, target)));
+        for (Point target : targets) {
+            if (startApproach(guest, null, null, map.path(origin, target))) {
+                return;
+            }
+        }
+    }
+
     private boolean startApproach(Guest guest, Integer chair, Guest partner, List<Point> path) throws IOException {
         if (path.isEmpty()) {
             return false;
@@ -967,6 +1127,7 @@ public class ChatRoomService {
     @Scheduled(fixedDelay = APPROACH_TICK_MILLIS)
     public synchronized void walkApproaches() throws IOException {
         long now = System.currentTimeMillis();
+        tickFloor(now);
         long stepAt = System.nanoTime();
         for (Guest guest : List.copyOf(guests.values())) {
             Approach approach = guest.approach;
@@ -988,7 +1149,7 @@ public class ChatRoomService {
                     takeSeat(guest, approach.chair(), point(guest));
                     continue;
                 }
-                if (inHighFiveRange(guest, partner)) {
+                if (partner != null && inHighFiveRange(guest, partner)) {
                     sendHighFiveInvite(guest, partner, now);
                 }
             }
@@ -1113,8 +1274,335 @@ public class ChatRoomService {
         return FACINGS.get(octant);
     }
 
+    private Guest presentationHost() {
+        return guests.values().stream().filter(guest -> guest.presentation && guest.name != null
+            && guest.session.isOpen() && Integer.valueOf(map.layout().presentation().chair()).equals(guest.seat))
+            .findFirst().orElse(null);
+    }
+
+    private void sendMediaState(Guest viewer) {
+        Guest host = presentationHost();
+        List<Map<String, Object>> ice = new ArrayList<>();
+        for (String url : mediaIceUrls.split(",")) {
+            String trimmed = url.strip();
+            if (trimmed.startsWith("stun:") || trimmed.startsWith("turn:") || trimmed.startsWith("turns:")) {
+                Map<String, Object> server = new LinkedHashMap<>();
+                server.put("urls", trimmed);
+                if (!trimmed.startsWith("stun:") && !mediaTurnUsername.isBlank()) {
+                    server.put("username", mediaTurnUsername);
+                    server.put("credential", mediaTurnCredential);
+                }
+                ice.add(server);
+            }
+        }
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("type", "media-state");
+        state.put("id", mediaId);
+        state.put("controller", host == null ? "" : host.session.getId());
+        state.put("name", host == null ? "" : host.name);
+        state.put("source", mediaSource);
+        state.put("title", mediaTitle);
+        state.put("videoId", mediaVideoId);
+        state.put("paused", mediaPaused);
+        state.put("position", mediaPosition);
+        state.put("updatedAt", mediaUpdatedAt);
+        state.put("serverTime", System.currentTimeMillis());
+        state.put("iceServers", ice);
+        sendGame(viewer, state);
+    }
+
+    private void broadcastMediaState() {
+        guests.values().stream().filter(guest -> guest.presentation && guest.name != null)
+            .forEach(this::sendMediaState);
+    }
+
+    private void stopPresentation() {
+        mediaSource = "idle";
+        mediaTitle = mediaVideoId = "";
+        mediaId = UUID.randomUUID().toString();
+        mediaPosition = 0;
+        mediaPaused = true;
+        mediaUpdatedAt = System.currentTimeMillis();
+        guests.values().forEach(guest -> guest.mediaWatchId = null);
+        broadcastMediaState();
+    }
+
+    private boolean validPresentationId(String id) {
+        try {
+            UUID value = UUID.fromString(id);
+            return value.version() == 4 && value.variant() == 2 && value.toString().equalsIgnoreCase(id);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    /** Chỉ chuyển tín hiệu WebRTC; ảnh, video và âm thanh không đi qua bộ nhớ máy chủ. */
+    private void presentation(Guest guest, String type, JsonNode packet, long now) {
+        if (!guest.presentation) {
+            return;
+        }
+        Guest host = presentationHost();
+        if ("media-signal".equals(type)) {
+            Guest target = guests.get(packet.path("to").asText());
+            String kind = packet.path("kind").asText();
+            String payload = packet.path("payload").asText();
+            Guest viewer = guest == host ? target : guest;
+            if (host == null || target == null || !target.presentation || viewer == host || viewer == null
+                || !target.session.isOpen() || !(guest == host || target == host)
+                || !mediaId.equals(packet.path("id").asText()) || "idle".equals(mediaSource)
+                || "youtube".equals(mediaSource) || payload.length() > 20000
+                || !Set.of("offer", "answer", "ice").contains(kind)
+                || "offer".equals(kind) && guest != host || "answer".equals(kind) && target != host
+                || viewer.mediaWatchId == null || !viewer.mediaWatchId.equals(packet.path("connection").asText())) {
+                return;
+            }
+            sendGame(target, Map.of("type", "media-signal", "id", mediaId, "from", guest.session.getId(),
+                "connection", viewer.mediaWatchId, "kind", kind, "payload", payload));
+            return;
+        }
+        if ("media-watch".equals(type)) {
+            String connection = packet.path("connection").asText();
+            if (host != null && host != guest && !Set.of("idle", "youtube").contains(mediaSource)
+                && mediaId.equals(packet.path("id").asText())
+                && validPresentationId(connection) && !connection.equals(guest.mediaWatchId)) {
+                guest.mediaWatchId = connection;
+                sendGame(host, Map.of("type", "media-peer", "id", mediaId, "peer", guest.session.getId(),
+                    "connection", connection));
+            }
+            return;
+        }
+        if (guest != host) {
+            sendGame(guest, Map.of("type", "media-error", "message", "Ngồi vào bàn trình chiếu để điều khiển."));
+            return;
+        }
+        if ("media-stop".equals(type)) {
+            stopPresentation();
+            return;
+        }
+        if ("media-control".equals(type) && now - guest.lastMediaCommand < 100) {
+            return;
+        }
+        if ("media-start".equals(type)) {
+            String source = packet.path("source").asText();
+            String id = packet.path("id").asText();
+            String video = packet.path("videoId").asText();
+            if (!Set.of("video", "image", "screen", "youtube").contains(source)
+                || !validPresentationId(id)
+                || "youtube".equals(source) && !video.matches("[a-zA-Z0-9_-]{11}")) {
+                return;
+            }
+            mediaId = id;
+            mediaSource = source;
+            mediaVideoId = "youtube".equals(source) ? video : "";
+            String title = clean(packet.path("title").asText());
+            mediaTitle = title.substring(0, Math.min(100, title.length()));
+            mediaPosition = 0;
+            mediaPaused = false;
+            guests.values().forEach(viewer -> viewer.mediaWatchId = null);
+        } else {
+            double position = packet.path("position").asDouble(-1);
+            if (!"youtube".equals(mediaSource) || !mediaId.equals(packet.path("id").asText())
+                || !Double.isFinite(position) || position < 0 || position > 864000
+                || !packet.path("paused").isBoolean()) {
+                return;
+            }
+            mediaPosition = position;
+            mediaPaused = packet.path("paused").asBoolean();
+        }
+        guest.lastMediaCommand = mediaUpdatedAt = now;
+        broadcastMediaState();
+    }
+
+    private void reaction(Guest guest, JsonNode packet, long now) throws IOException {
+        String reaction = packet.path("reaction").asText();
+        if (!guest.reactions || !REACTIONS.contains(reaction) || now - guest.lastReaction < 1200) {
+            return;
+        }
+        guest.lastReaction = now;
+        broadcast(Map.of("type", "reaction", "playerId", guest.session.getId(), "reaction", reaction),
+            viewer -> viewer.reactions);
+    }
+
+    private void tickFloor(long now) throws IOException {
+        if (map.layout().colorTiles().isEmpty()) {
+            return;
+        }
+        List<RoomColorFloor.Player> present = guests.values().stream()
+            .filter(guest -> guest.name != null && guest.session.isOpen() && guest.floorGame)
+            .map(guest -> new RoomColorFloor.Player(guest.access.userId(), guest.name, guest.x, guest.y)).toList();
+        if (colorFloor.tick(now, present, map.layout().colorTiles())) {
+            publishFloor(now);
+        }
+    }
+
+    private void publishFloor(long now) {
+        for (Guest viewer : guests.values()) {
+            if (viewer.floorGame && viewer.name != null) {
+                sendGame(viewer, colorFloor.snapshot(viewer.access.userId(), now));
+            }
+        }
+    }
+
+    private boolean boardParticipant(Guest guest, String table) {
+        BoardSession session = boardSessions.get(table);
+        return session != null && session.match != null && session.match.reason == null
+            && session.match.side(guest.access.userId()) >= 0;
+    }
+
+    private List<Guest> boardOccupants(ChatRoomMap.BoardTable table) {
+        List<Guest> occupants = new ArrayList<>();
+        for (int chair : table.chairs()) {
+            occupants.add(guests.values().stream().filter(guest -> guest.name != null && guest.session.isOpen()
+                && Integer.valueOf(chair).equals(guest.seat)).findFirst().orElse(null));
+        }
+        return occupants;
+    }
+
+    private void board(Guest guest, String type, JsonNode packet, long now) {
+        if (!guest.boardGames) {
+            return;
+        }
+        String tableId = packet.path("table").asText();
+        ChatRoomMap.BoardTable layout = map.layout().boardTables().stream()
+            .filter(table -> table.id().equals(tableId)).findFirst().orElse(null);
+        if (layout == null) {
+            return;
+        }
+        BoardSession session = boardSessions.computeIfAbsent(tableId, key -> new BoardSession());
+        if ("board-watch".equals(type)) {
+            guest.watchingBoard = tableId;
+            sendBoard(guest, tableId, session, now);
+            return;
+        }
+        if (!guest.roomGames || !layout.chairs().contains(guest.seat)) {
+            boardError(guest, "Hãy ngồi vào ghế của bàn để chơi.");
+            return;
+        }
+        if (session.match != null && session.match.expire(now)) {
+            publishBoard(tableId, now);
+            return;
+        }
+        if ("board-ready".equals(type)) {
+            if (session.match != null && (!session.match.settled || session.match.reason == null)) {
+                return;
+            }
+            long points = integer(packet, "points");
+            if (points < ChatRoomGames.MIN_CARO_STAKE || points > ChatRoomGames.MAX_STAKE
+                || reserved(guest.access.userId()) > 0 || available(guest) < points) {
+                boardError(guest, "Mỗi bạn cần góp ít nhất 10 CPoint và đủ số dư.");
+                return;
+            }
+            if (session.ready.isEmpty()) {
+                session.points = points;
+            } else if (session.points != points) {
+                boardError(guest, "Hai bạn cần chọn cùng số CPoint.");
+                return;
+            }
+            session.match = null;
+            session.ready.add(guest.access.userId());
+            List<Guest> occupants = boardOccupants(layout);
+            if (occupants.stream().allMatch(player -> player != null && session.ready.contains(player.access.userId())
+                && available(player) >= points && reserved(player.access.userId()) == 0)
+                && !occupants.get(0).access.userId().equals(occupants.get(1).access.userId())) {
+                Guest first = occupants.get(0);
+                Guest second = occupants.get(1);
+                session.match = new RoomBoardMatch("xiangqi".equals(layout.kind()),
+                    new RoomBoardMatch.Player(first.access.userId(), first.name),
+                    new RoomBoardMatch.Player(second.access.userId(), second.name), points,
+                    map.layout().boardClock().baseMillis(), map.layout().boardClock().incrementMillis(), now);
+                session.ready.clear();
+                guests.values().stream().filter(player -> player.roomGames).forEach(this::showWallet);
+            }
+            publishBoard(tableId, now);
+            return;
+        }
+        RoomBoardMatch match = session.match;
+        if (match == null) {
+            return;
+        }
+        int version = packet.path("version").isIntegralNumber() && packet.path("version").canConvertToInt()
+            ? packet.path("version").intValue() : -1;
+        boolean changed;
+        if ("board-move".equals(type)) {
+            changed = packet.path("from").isIntegralNumber() && packet.path("from").canConvertToInt()
+                && packet.path("to").isIntegralNumber() && packet.path("to").canConvertToInt()
+                && match.move(guest.access.userId(), packet.path("matchId").asText(), version,
+                    packet.path("from").asInt(-1), packet.path("to").asInt(-1),
+                    packet.path("promotion").asText(""), now);
+        } else {
+            for (String cell : List.of("from", "to")) {
+                if (packet.has(cell) && (!packet.path(cell).isIntegralNumber()
+                    || !packet.path(cell).canConvertToInt())) {
+                    boardError(guest, "Ô cờ chưa phù hợp.");
+                    return;
+                }
+            }
+            changed = match.action(guest.access.userId(), packet.path("matchId").asText(), version,
+                packet.path("action").asText(), packet.has("from") ? packet.path("from").asInt(-1) : null,
+                packet.has("to") ? packet.path("to").asInt(-1) : null, packet.path("promotion").asText(""), now);
+        }
+        if (!changed) {
+            boardError(guest, "Nước đi hoặc yêu cầu chưa phù hợp với ván hiện tại.");
+            sendBoard(guest, tableId, session, now);
+            return;
+        }
+        publishBoard(tableId, now);
+    }
+
+    private void boardError(Guest guest, String message) {
+        sendGame(guest, Map.of("type", "board-error", "message", message));
+    }
+
+    private void publishBoard(String table, long now) {
+        BoardSession session = boardSessions.get(table);
+        for (Guest viewer : guests.values()) {
+            if (viewer.boardGames && viewer.name != null) {
+                sendBoardTables(viewer);
+                if (table.equals(viewer.watchingBoard)) {
+                    sendBoard(viewer, table, session, now);
+                }
+            }
+        }
+    }
+
+    private void sendBoardTables(Guest viewer) {
+        List<Map<String, Object>> states = new ArrayList<>();
+        for (ChatRoomMap.BoardTable table : map.layout().boardTables()) {
+            BoardSession session = boardSessions.get(table.id());
+            List<String> names = boardOccupants(table).stream().map(guest -> guest == null ? "" : guest.name).toList();
+            String status = session != null && session.match != null && session.match.reason == null ? "playing"
+                : names.stream().allMatch(String::isEmpty) ? "empty" : "waiting";
+            states.add(Map.of("id", table.id(), "status", status, "players", names));
+        }
+        sendGame(viewer, Map.of("type", "board-tables", "tables", states));
+    }
+
+    private void sendBoard(Guest viewer, String tableId, BoardSession session, long now) {
+        ChatRoomMap.BoardTable table = map.layout().boardTables().stream()
+            .filter(item -> item.id().equals(tableId)).findFirst().orElseThrow();
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("type", "board-state");
+        state.put("table", tableId);
+        state.put("kind", table.kind());
+        state.put("name", table.name());
+        state.put("points", session.points);
+        state.put("seated", table.chairs().contains(viewer.seat));
+        state.put("ready", session.ready.contains(viewer.access.userId()));
+        state.put("readyNames", boardOccupants(table).stream().filter(player -> player != null
+            && session.ready.contains(player.access.userId())).map(player -> player.name).toList());
+        state.put("players", boardOccupants(table).stream().map(player -> player == null ? "" : player.name).toList());
+        state.put("baseMillis", map.layout().boardClock().baseMillis());
+        state.put("incrementMillis", map.layout().boardClock().incrementMillis());
+        if (session.match != null) {
+            state.put("match", session.match.snapshot(viewer.access.userId(), now));
+        }
+        sendGame(viewer, state);
+    }
+
     private void chat(Guest guest, JsonNode packet, long now) throws IOException {
-        String text = clean(packet.path("text").asText());
+        // Giữ ZWJ để emoji ghép vẫn là một grapheme, lọc ký tự điều khiển còn lại.
+        String text = Normalizer.normalize(packet.path("text").asText(), Normalizer.Form.NFC)
+            .replaceAll("[\\p{Cc}\\p{Cf}&&[^\\x{200D}]]", " ").strip();
         if (text.isBlank() || text.length() > ChatRoomLimits.MESSAGE_LENGTH) {
             error(guest, "Tin nhắn cần từ 1 đến " + ChatRoomLimits.MESSAGE_LENGTH + " ký tự.");
             return;
@@ -1169,6 +1657,22 @@ public class ChatRoomService {
     public synchronized void disconnect(WebSocketSession session) throws IOException {
         Guest guest = guests.remove(session.getId());
         if (guest != null && guest.name != null) {
+            if (Integer.valueOf(map.layout().presentation().chair()).equals(guest.seat)) {
+                if (presentationHost() == null) {
+                    stopPresentation();
+                } else {
+                    broadcastMediaState();
+                }
+            }
+            colorFloor.leave(guest.access.userId());
+            ChatRoomMap.BoardTable board = map.boardTable(guest.seat);
+            if (board != null) {
+                BoardSession boardSession = boardSessions.get(board.id());
+                if (boardSession != null) {
+                    boardSession.ready.remove(guest.access.userId());
+                    publishBoard(board.id(), System.currentTimeMillis());
+                }
+            }
             String userId = guest.access.userId();
             ChatRoomCaro match = caroMatches.get(userId);
             long now = System.currentTimeMillis();

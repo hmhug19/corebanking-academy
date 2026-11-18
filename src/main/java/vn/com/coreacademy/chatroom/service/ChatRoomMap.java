@@ -28,8 +28,22 @@ public class ChatRoomMap {
     public record CaroTable(int desk, List<Integer> chairs) {
     }
 
+    public record BoardTable(String id, String kind, String name, int desk, List<Integer> chairs) {
+    }
+
+    public record ColorTile(String color, String label, String symbol, String fill, Area area) {
+    }
+
+    public record BoardClock(long baseMillis, long incrementMillis) {
+    }
+
+    public record Presentation(int board, int desk, int chair) {
+    }
+
     public record Layout(int width, int height, double speed, double radius, Point spawn, List<Furniture> objects,
-        Area activityArea, Area diceArea, List<CaroTable> caroTables) {
+        Area activityArea, Area diceArea, List<CaroTable> caroTables, Area playgroundArea,
+        List<BoardTable> boardTables, Area colorFloor, List<ColorTile> colorTiles, BoardClock boardClock,
+        Presentation presentation) {
     }
 
     private final Layout layout;
@@ -76,6 +90,13 @@ public class ChatRoomMap {
             }
         }
         return 0;
+    }
+
+    public BoardTable boardTable(Integer chair) {
+        if (chair == null) {
+            return null;
+        }
+        return layout.boardTables().stream().filter(table -> table.chairs().contains(chair)).findFirst().orElse(null);
     }
 
     public boolean walkable(double x, double y) {
