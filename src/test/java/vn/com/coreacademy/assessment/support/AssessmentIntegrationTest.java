@@ -62,6 +62,7 @@ public abstract class AssessmentIntegrationTest {
         "upgrade/2026-11-21-assistant-feedback-review.sql", "upgrade/2026-11-22-system-audit-route.sql",
         "upgrade/2026-11-23-revoked-sessions.sql", "upgrade/2026-11-24-course-drafting-sessions.sql",
         "upgrade/2026-11-25-course-drafting-reproposals.sql", "upgrade/2026-11-26-assistant-turn-drafting-step.sql",
+        "upgrade/2026-11-27-external-assistant-connections.sql",
         "learning_hub_community.sql", "learning_hub_reporting.sql");
 
     /** Bật test khi có database ngoài được chỉ định hoặc có Docker cho Testcontainers. */

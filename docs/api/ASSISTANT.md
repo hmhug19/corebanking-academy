@@ -397,3 +397,26 @@ Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể
 - Kỹ năng và công cụ chỉ dành cho INSTRUCTOR, ADMIN, SUPER_ADMIN. Học viên không được cấp kỹ năng; `style.md` bảo trợ lý trả lời ngắn rằng tính năng
   dành cho giảng viên.
 
+
+## Trợ lý ngoài (ADR 0004 bên lms-vip-pro-max)
+
+Một trợ lý chạy ngoài CHAN Academy (v1: Claude Code trên máy người dùng, trong mạng nội bộ) soạn khóa học thay
+người dùng qua endpoint MCP `/api/v1/mcp`, với đúng quyền hiện tại của người đó. Cờ `app.assistant.external.enabled`
+(`ASSISTANT_EXTERNAL_ENABLED`, mặc định `false`): khi tắt, mọi endpoint dưới đây trừ `/status` và `/api/v1/mcp`
+trả HTTP 404 `CORE-ENDPOINT_NOT_FOUND`.
+
+### Kết nối trợ lý ngoài (`/api/v1/assistant/external-connections`, JWT đăng nhập)
+
+Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng `AI_ASSISTANT`; người khác nhận 403.
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/status` | `{ enabled, allowed }`: cờ bật chưa, người gọi có tạo được kết nối không. Luôn trả về. |
+| GET | `/` | Kết nối chưa thu hồi của người gọi (kể cả đã hết hạn), mới nhất trước: `id, name, tokenPrefix, createTime, expiresAt, lastUsedAt`. Không bao giờ có token. |
+| POST | `/` | `{ name (1–100 ký tự), validDays (30 \| 90) }` → `{ connection, token }`. Token `chan_ext_` + 43 ký tự base64url chỉ trả về đúng một lần; DB chỉ giữ SHA-256 và 13 ký tự đầu. `validDays` khác trả `CORE-VALIDATION_FAILED` trường `validDays`. |
+| DELETE | `/{connectionId}` | Thu hồi ngay. Kết nối của người khác hoặc đã thu hồi trả `CORE-RESOURCE_NOT_FOUND`. |
+
+Token chỉ xác thực `/api/v1/mcp`; mọi API khác từ chối nó (401, vì không phải JWT). Kết nối hết hạn, đã thu hồi,
+hoặc người dùng mất vai trò quản lý khóa học/chức năng `AI_ASSISTANT` thì `/api/v1/mcp` trả 401.
+`lastUsedAt` cập nhật tối đa mỗi phút một lần. Bảng: `external_assistant_connection`
+(`docs/sql/upgrade/2026-11-27-external-assistant-connections.sql`).

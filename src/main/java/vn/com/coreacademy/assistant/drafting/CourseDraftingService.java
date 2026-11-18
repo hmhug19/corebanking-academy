@@ -563,9 +563,7 @@ public class CourseDraftingService {
     // ---- checks ----------------------------------------------------------------------------------------------------
 
     private static void requireManager(Actor actor) {
-        if (actor.grants().stream().noneMatch(grant -> RoleCodes.COURSE_MANAGERS.contains(grant.roleCode()))) {
-            throw new AccessDeniedException("Only roles that manage courses may draft a course with the assistant");
-        }
+        DraftingRoles.require(actor);
     }
 
     /**
