@@ -1,4 +1,4 @@
-description: mở một màn hình hoặc chuyển tới một chức năng của ứng dụng
+description: mở trang hoặc màn hình của ứng dụng, câu có dạng "mở/vào/đi tới trang ..." (hồ sơ cá nhân, Học tập = trang khóa học của tôi, tiến độ học tập, quiz, kho tri thức, trợ lý AI, vấn đề, cộng đồng...). Chỉ mở trang, không trả lời dữ liệu
 tools:
   - open_screen
 roles: []

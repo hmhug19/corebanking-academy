@@ -17,6 +17,8 @@ public final class ToolDefinitions {
     public static final String OPEN_SCREEN = "open_screen";
     public static final String UPDATE_PROFILE = "update_profile";
     public static final String OPEN_COURSE_FORM = "open_course_form";
+    public static final String MY_LEARNING = "my_learning";
+    public static final String READ_PROFILE = "read_profile";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -103,6 +105,33 @@ public final class ToolDefinitions {
         return new ToolDefinition(UPDATE_PROFILE,
             "Đề xuất sửa hồ sơ của chính người dùng: họ tên, email, chức danh. Chỉ gửi trường người dùng muốn đổi. "
                 + "Thay đổi chỉ có hiệu lực sau khi người dùng bấm xác nhận.", parameters);
+    }
+
+    public static ToolDefinition myLearning() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties").putObject("filter").put("type", "string")
+            .put("description", "overdue: khóa quá hạn; upcoming: khóa chưa hoàn thành sắp đến hạn; in_progress: "
+                + "đang học; not_started: chưa bắt đầu; completed: đã hoàn thành; all: mọi khóa. Mặc định all.")
+            .set("enum", JSON.createArrayNode().add("overdue").add("upcoming").add("in_progress")
+                .add("not_started").add("completed").add("all"));
+
+        return new ToolDefinition(MY_LEARNING,
+            "Xem các khóa học của CHÍNH người dùng đang hỏi: tên khóa, hạn hoàn thành, % tiến độ, trạng thái. Dùng "
+                + "cho câu hỏi về \"khóa của tôi\", khóa quá hạn, sắp đến hạn, đang học hay đã hoàn thành. Không "
+                + "tìm trong nội dung bài học. Danh sách rỗng nghĩa là người dùng thật sự không có khóa nào như vậy.",
+            parameters);
+    }
+
+    public static ToolDefinition readProfile() {
+        ObjectNode parameters = object();
+        parameters.put("additionalProperties", false);
+        parameters.putObject("properties");
+
+        return new ToolDefinition(READ_PROFILE,
+            "Xem hồ sơ của CHÍNH người dùng đang hỏi (không cần tham số): họ tên, tên đăng nhập, email, chức danh, "
+                + "đơn vị, nhóm. Dùng khi người dùng hỏi thông tin hồ sơ của mình; không dùng để mở trang hồ sơ.",
+            parameters);
     }
 
     public static ToolDefinition openCourseForm() {
