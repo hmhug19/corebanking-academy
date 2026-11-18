@@ -37,6 +37,7 @@ public class SkillCatalog {
     private final String style;
     private final String suggestions;
     private final String explain;
+    private final String selfExplain;
     private final Map<String, String> generationSteps = new LinkedHashMap<>();
     private final Map<String, Skill> skills = new LinkedHashMap<>();
     private final String version;
@@ -47,6 +48,7 @@ public class SkillCatalog {
         this.style = read(resolver.getResource("classpath:" + ROOT + "style.md"), digest);
         this.suggestions = read(resolver.getResource("classpath:" + ROOT + "suggestions.md"), digest);
         this.explain = read(resolver.getResource("classpath:" + ROOT + "explain.md"), digest);
+        this.selfExplain = read(resolver.getResource("classpath:" + ROOT + "self-explain.md"), digest);
         for (String step : GENERATION_STEPS) {
             generationSteps.put(step, read(resolver.getResource(
                 "classpath:" + ROOT + "skills/tao_khoa_hoc/steps/" + step + ".md"), digest));
@@ -76,6 +78,7 @@ public class SkillCatalog {
         this.style = style;
         this.suggestions = "";
         this.explain = "";
+        this.selfExplain = "";
         list.forEach(skill -> skills.put(skill.id(), skill));
         this.version = version;
     }
@@ -179,6 +182,11 @@ public class SkillCatalog {
         }
 
         return rules + "\n\nViết bằng tiếng Việt.";
+    }
+
+    /** The system prompt that compares what a learner wrote with a lesson: the shared style, then the rules. */
+    public String selfExplainPrompt() {
+        return style + "\n\n" + selfExplain;
     }
 
     /** The shared style alone, for the grounded document chat. */

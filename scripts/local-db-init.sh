@@ -69,6 +69,7 @@ FILES=(
   upgrade/2026-11-21-assistant-feedback-review.sql
   upgrade/2026-11-22-system-audit-route.sql
   upgrade/2026-11-23-revoked-sessions.sql
+  upgrade/2026-11-24-checkpoint-answers.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql
