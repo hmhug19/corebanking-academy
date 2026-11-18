@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.util.unit.DataSize;
 import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingService;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SessionView;
@@ -18,6 +19,7 @@ import vn.com.coreacademy.assistant.tool.TurnState;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.dto.RoleGrant;
 import vn.com.coreacademy.identity.dto.UserRights;
+import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,7 +36,12 @@ import static org.mockito.Mockito.when;
 class StartCourseDraftingToolTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private final CourseDraftingService drafting = mock(CourseDraftingService.class);
-    private final StartCourseDraftingTool tool = new StartCourseDraftingTool(drafting);
+    private final KnowledgeProperties knowledge = mock(KnowledgeProperties.class);
+    private final StartCourseDraftingTool tool = new StartCourseDraftingTool(drafting, knowledge);
+
+    StartCourseDraftingToolTest() {
+        when(knowledge.maxFileSize()).thenReturn(DataSize.ofMegabytes(15));
+    }
 
     private static AgentContext as(String role) {
         return new AgentContext("000004", null, new UserRights(List.of(new RoleGrant(role, role, null)), List.of(),
@@ -78,7 +85,8 @@ class StartCourseDraftingToolTest {
         ToolOutcome outcome = tool.run(JSON.createObjectNode(), as("INSTRUCTOR"), new TurnState());
 
         assertThat(outcome).isInstanceOf(ToolOutcome.Reply.class);
-        assertThat(((ToolOutcome.Reply) outcome).text()).contains("đính kèm tài liệu").contains(".pdf");
+        assertThat(((ToolOutcome.Reply) outcome).text()).contains("đính kèm tài liệu").contains(".pdf")
+            .contains("tối đa 15 MB");
         verifyNoInteractions(drafting);
     }
 

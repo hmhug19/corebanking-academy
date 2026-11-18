@@ -6,6 +6,7 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.knowledge.ai.ToolDefinition;
 
 /** What the model is told about each tool: name, when to use it and its arguments. No behaviour lives here. */
@@ -109,9 +110,10 @@ public final class ToolDefinitions {
         ObjectNode parameters = object();
         parameters.put("additionalProperties", false);
         ObjectNode properties = parameters.putObject("properties");
-        properties.putObject("title").put("type", "string").put("maxLength", 255)
+        properties.putObject("title").put("type", "string").put("maxLength", GenerationSchemas.MAX_TITLE)
             .put("description", "Tên khóa học nếu người dùng đã nói. Không tự đặt.");
-        properties.putObject("targetLearners").put("type", "string").put("maxLength", 500)
+        properties.putObject("targetLearners").put("type", "string")
+            .put("maxLength", GenerationSchemas.MAX_TARGET_LEARNERS)
             .put("description", "Đối tượng học viên nếu người dùng đã nói, ví dụ: giao dịch viên mới vào làm.");
         properties.putObject("level").put("type", "string")
             .put("description", "Mức độ nếu người dùng đã nói: basic (cơ bản), intermediate (trung cấp), "

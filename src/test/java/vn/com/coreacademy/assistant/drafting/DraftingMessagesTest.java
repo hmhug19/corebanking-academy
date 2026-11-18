@@ -35,6 +35,29 @@ class DraftingMessagesTest {
     }
 
     @Test
+    void stepThreeNamesWhatItReallyProposes() {
+        messages.proposed(session(31L), 3, List.of());
+
+        assertThat(sent(3)).startsWith("Bước 3 · Bài kiểm tra & điều kiện:").contains("câu hỏi nháp")
+            .contains("điểm thưởng").contains("năng lực").doesNotContain("điều kiện hoàn thành");
+    }
+
+    @Test
+    void aTakenCodeIsToldToTheConversationWithTheNewCodeAndAStepOneCard() {
+        messages.codeTaken(session(31L), "KH-01", "AI-NEW0001");
+
+        assertThat(sent(1)).startsWith("Bước 1 · Thông tin cơ bản:").contains("KH-01").contains("AI-NEW0001")
+            .endsWith(DraftingMessages.CHECK_AND_CONFIRM);
+    }
+
+    @Test
+    void aTakenCodeOfASessionStartedFromThePageSendsNothing() {
+        messages.codeTaken(session(null), "KH-01", "AI-NEW0001");
+
+        verifyNoInteractions(conversations);
+    }
+
+    @Test
     void aReadyStepSaysWhatWasFilledWhatToCheckAndToConfirm() {
         messages.proposed(session(31L), 1, List.of("Chưa chọn được chương trình đào tạo phù hợp; hãy chọn trong "
             + "danh sách.", " "));

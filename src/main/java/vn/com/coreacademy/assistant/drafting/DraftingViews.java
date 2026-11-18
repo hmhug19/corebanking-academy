@@ -12,7 +12,10 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.Difficulty;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuestionType;
 import vn.com.coreacademy.assessment.constants.AssessmentLimits;
+import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 
 /** What the drafting endpoints receive and send. */
@@ -23,8 +26,10 @@ public final class DraftingViews {
     /** What the author said with the document; every field is optional. Admins may name the owner unit. */
     @Schema(description = "Thông tin gửi kèm tài liệu; mọi trường đều tùy chọn.")
     public record StartFields(
-        @Schema(description = "Tên khóa học người dùng muốn, tối đa 255 ký tự") String title,
-        @Schema(description = "Đối tượng học viên, tối đa 500 ký tự") String targetLearners,
+        @Schema(description = "Tên khóa học người dùng muốn, tối đa " + GenerationSchemas.MAX_TITLE + " ký tự")
+        String title,
+        @Schema(description = "Đối tượng học viên, tối đa " + GenerationSchemas.MAX_TARGET_LEARNERS + " ký tự")
+        String targetLearners,
         @Schema(description = "basic | intermediate | advanced") String level,
         @Schema(description = "Đơn vị sở hữu; giảng viên luôn là đơn vị của mình, quản trị chọn trong phạm vi quản lý")
         Long ownerOrgId) {
@@ -34,8 +39,12 @@ public final class DraftingViews {
     public record SourceView(long documentId, String fileName, String status) {
     }
 
-    @Schema(description = "Một bước đã tới của phiên; proposal theo từng bước (bước 1: BasicsProposal, bước 2: "
-        + "OutlineProposal, bước 3: RulesProposal, bước 4: AudienceProposal gồm targets và publishBlockers). lessonNotes chỉ có ở bước 2 đã chốt: mô tả và phần nguồn của từng bài theo id bài đã lưu.")
+    @Schema(description = """
+        Một bước đã tới của phiên; proposal theo từng bước.
+        - Bước 1: BasicsProposal; bước 2: OutlineProposal; bước 3: RulesProposal.
+        - Bước 4: AudienceProposal gồm targets và publishBlockers.
+        - lessonNotes chỉ có ở bước 2 đã chốt: mô tả và phần nguồn của từng bài theo id bài đã lưu.
+        """)
     public record StepView(int step, String state, JsonNode proposal, List<String> notes, String error,
                            OffsetDateTime updateTime,
                            @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode lessonNotes) {
@@ -53,7 +62,7 @@ public final class DraftingViews {
     }
 
     /** Chốt bước 2: the draft (chapters and lessons) as the page holds it now. */
-    @Schema(description = "Chốt bước 2: bản nháp (chương, bài) như trên trang; bài do trợ lý đề xuất không có nội dung.")
+    @Schema(description = "Chốt bước 2: bản nháp (chương, bài) như trên trang, kể cả nội dung bài người dùng đã viết.")
     public record OutlineConfirm(@NotNull @Valid LearningRequests.DraftRequest draft) {
     }
 
@@ -70,13 +79,13 @@ public final class DraftingViews {
 
     /** A draft question as the page holds it: the step 3 proposal's shape. */
     public record DraftQuestion(
-        @NotNull @Pattern(regexp = "SINGLE|MULTIPLE") String type,
+        @NotNull @Pattern(regexp = QuestionType.PATTERN) String type,
         @NotBlank @Size(max = AssessmentLimits.MAX_QUESTION_TEXT) String content,
         @Size(max = AssessmentLimits.MAX_QUESTION_TEXT) String explanation,
-        @NotNull @Pattern(regexp = "EASY|MEDIUM|HARD") String difficulty,
+        @NotNull @Pattern(regexp = Difficulty.PATTERN) String difficulty,
         @NotNull @Size(min = AssessmentLimits.MIN_OPTIONS, max = AssessmentLimits.MAX_OPTIONS)
         List<@NotNull @Valid DraftOption> options,
-        @Size(max = 255) String sourceSection) {
+        @Size(max = GenerationSchemas.MAX_TITLE) String sourceSection) {
     }
 
     public record DraftOption(@NotBlank @Size(max = AssessmentLimits.MAX_QUESTION_TEXT) String content,

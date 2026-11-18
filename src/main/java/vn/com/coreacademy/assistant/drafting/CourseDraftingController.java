@@ -43,12 +43,19 @@ public class CourseDraftingController {
     @Operation(
         summary = "Bắt đầu Soạn cùng trợ lý từ một tài liệu",
         description = """
-            multipart: file (.pdf, .docx hoặc .md, tối đa theo app.knowledge.max-file-size), fields (JSON StartFields, tùy chọn) và conversationId (tùy chọn, hội thoại của chính người gọi).
-            - Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng AI_ASSISTANT; người khác nhận 403.
-            - Đơn vị sở hữu: giảng viên luôn là đơn vị của mình (gửi đơn vị khác là 403); ADMIN/SUPER_ADMIN chọn ownerOrgId trong phạm vi quản lý, bỏ trống thì là đơn vị của mình.
-            - Tệp trở thành tài liệu course_source của người gọi: chỉ người đó đọc được, không bao giờ được liệt kê hay tìm thấy qua trợ lý.
-            - Tính chung giới hạn app.assistant.generation.jobs-per-day trong 24 giờ với việc tạo khóa học bằng AI; vượt giới hạn trả ASSISTANT-JOB_RATE_LIMITED kèm thời gian chờ.
-            - Trả về phiên với bước 1 ở trạng thái proposing; trợ lý đọc tài liệu và đề xuất bước 1 ở nền. Tài liệu không đọc được hoặc quá ngắn làm phiên failed với error đọc được.
+            Bắt đầu một phiên từ tài liệu; trợ lý đọc tài liệu và đề xuất bước 1 ở nền.
+            - multipart: file (.pdf, .docx hoặc .md, tối đa theo app.knowledge.max-file-size), fields (JSON \
+            StartFields, tùy chọn) và conversationId (tùy chọn, hội thoại của chính người gọi).
+            - Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng AI_ASSISTANT; người khác \
+            nhận 403.
+            - Đơn vị sở hữu: giảng viên luôn là đơn vị của mình (gửi đơn vị khác là 403); ADMIN/SUPER_ADMIN chọn \
+            ownerOrgId trong phạm vi quản lý, bỏ trống thì là đơn vị của mình.
+            - Tệp trở thành tài liệu course_source của người gọi: chỉ người đó đọc được, không bao giờ được liệt kê \
+            hay tìm thấy qua trợ lý.
+            - Tính chung giới hạn app.assistant.generation.jobs-per-day trong 24 giờ với việc tạo khóa học bằng AI; \
+            vượt giới hạn trả ASSISTANT-JOB_RATE_LIMITED kèm thời gian chờ.
+            - Trả về phiên với bước 1 ở trạng thái proposing. Tài liệu không đọc được hoặc quá ngắn làm phiên failed \
+            với error đọc được.
             """
     )
     public BaseResponse<SessionView> start(@RequestPart MultipartFile file,
@@ -63,10 +70,17 @@ public class CourseDraftingController {
     @Operation(
         summary = "Tải tài liệu đính kèm của chat cho Soạn cùng trợ lý",
         description = """
-            multipart: file (.pdf, .docx hoặc .md, tối đa theo app.knowledge.max-file-size).
-            - Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng AI_ASSISTANT; người khác nhận 403.
-            - Tệp trở thành tài liệu course_source của người gọi (chỉ người đó đọc được, không bao giờ được liệt kê hay tìm thấy) và chưa gắn với phiên nào.
-            - Gửi documentId trả về làm attachmentDocumentId của lượt chat; công cụ start_course_drafting bắt đầu phiên từ tài liệu đó (tính vào giới hạn mỗi ngày lúc bắt đầu, không phải lúc tải lên).
+            Lưu tệp đính kèm của chat để công cụ start_course_drafting bắt đầu phiên từ đó.
+            - multipart: file (.pdf, .docx hoặc .md, tối đa theo app.knowledge.max-file-size).
+            - Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng AI_ASSISTANT; người khác \
+            nhận 403.
+            - Tệp trở thành tài liệu course_source của người gọi (chỉ người đó đọc được, không bao giờ được liệt kê \
+            hay tìm thấy) và chưa gắn với phiên nào.
+            - Mỗi người có tối đa app.assistant.generation.source-uploads-per-day tệp tải trong 24 giờ mà chưa phiên \
+            nào dùng; vượt giới hạn trả ASSISTANT-JOB_RATE_LIMITED trường limit mã DAILY_UPLOAD_LIMIT kèm thời gian chờ.
+            - Tệp chưa phiên nào dùng bị xóa sau app.assistant.generation.unused-source-ttl.
+            - Gửi documentId trả về làm attachmentDocumentId của lượt chat; phiên tính vào giới hạn mỗi ngày lúc bắt \
+            đầu, không phải lúc tải lên.
             """
     )
     public BaseResponse<SourceView> uploadSource(@RequestPart MultipartFile file) {
@@ -89,8 +103,10 @@ public class CourseDraftingController {
     @GetMapping("/{sessionId}")
     @Operation(
         summary = "Chi tiết một phiên Soạn cùng trợ lý",
-        description = "Trạng thái, bước hiện tại, tài liệu nguồn và các bước đã tới cùng đề xuất của từng bước. "
-            + "Phiên của người khác trả not found."
+        description = """
+            Trạng thái, bước hiện tại, tài liệu nguồn và các bước đã tới cùng đề xuất của từng bước.
+            - Phiên của người khác trả not found.
+            """
     )
     public BaseResponse<SessionView> get(@PathVariable @Positive Long sessionId) {
         gate.requireAccess();
@@ -100,8 +116,10 @@ public class CourseDraftingController {
     @GetMapping("/course/{courseId}")
     @Operation(
         summary = "Phiên Soạn cùng trợ lý của một khóa học",
-        description = "Phiên mới nhất của người gọi đã tạo bản nháp khóa học này, để trang sửa khóa học mở đúng bước "
-            + "hiện tại. Không có phiên (hoặc phiên của người khác) trả data null."
+        description = """
+            Phiên mới nhất của người gọi đã tạo bản nháp khóa học này, để trang sửa khóa học mở đúng bước hiện tại.
+            - Không có phiên (hoặc phiên của người khác) trả data null.
+            """
     )
     public BaseResponse<SessionView> forCourse(@PathVariable @Positive Long courseId) {
         gate.requireAccess();
@@ -112,10 +130,17 @@ public class CourseDraftingController {
     @Operation(
         summary = "Chốt một bước với giá trị hiện có trên trang",
         description = """
-            Thân theo bước; bước 1: { course: CreateCourse }.
-            - Chỉ chốt được bước hiện tại khi đã đề xuất xong (proposed), lỗi (failed) hoặc tự điền (manual); khác đi trả             CORE-VALIDATION_FAILED trường step mã INVALID_STATE.
-            - Bước 1 tạo bản nháp khóa học qua đường tạo khóa học thông thường, gắn vào phiên rồi chuyển sang bước 2             (proposing). Chốt lại bước 1 khi đã có khóa học trả phiên như hiện tại, không tạo khóa thứ hai.
-            - Mã khóa học đã có trả LEARNING-DUPLICATE trường course.code; phiên đề xuất mã mới ở bước 1.
+            Lưu bước với giá trị hiện có trên trang rồi chuyển sang bước sau; thân theo bước.
+            - Chỉ chốt được bước hiện tại khi đã đề xuất xong (proposed), lỗi (failed) hoặc tự điền (manual); khác đi \
+            trả CORE-VALIDATION_FAILED trường step mã INVALID_STATE.
+            - Bước 1 ({ course: CreateCourse }) tạo bản nháp khóa học qua đường tạo khóa học thông thường, gắn vào \
+            phiên rồi chuyển sang bước 2 (proposing). Chốt lại bước 1 khi đã có khóa học trả phiên như hiện tại.
+            - course.ownerOrgId phải là đơn vị của phiên; đơn vị khác trả CORE-VALIDATION_FAILED trường \
+            course.ownerOrgId mã OWNER_MISMATCH.
+            - Mã khóa học đã có trả LEARNING-DUPLICATE trường course.code; phiên đề xuất mã mới ở bước 1 và báo mã \
+            đó trong hội thoại của phiên.
+            - Bước 2 ({ draft }) lưu chương và bài như trên trang, kể cả nội dung bài người dùng đã viết.
+            - Bước 3 ({ draft, competencyId, questions }) tạo bài kiểm tra cuối khóa từ các câu hỏi được giữ.
             - Bước 4 ({}) chỉ kết thúc phiên (status finished): không giao, không chia sẻ, không xuất bản gì.
             """
     )
@@ -131,9 +156,9 @@ public class CourseDraftingController {
         summary = "Đề xuất lại một bước (cả Thử lại khi bước lỗi)",
         description = """
             Không có thân. Bước quay về proposing, bỏ đề xuất cũ; trợ lý đề xuất lại ở nền.
-            - Chỉ bước đã đề xuất (proposed), đã chốt (confirmed) hoặc lỗi (failed) của phiên chưa kết thúc; bước đang \
-            soạn, tự điền, chưa tới hoặc phiên finished/manual trả CORE-VALIDATION_FAILED trường step mã INVALID_STATE.
-            - Không đổi các bước khác, bước hiện tại hay khóa học nháp. Phiên failed trở lại active.
+            - Chỉ bước hiện tại của phiên khi đã đề xuất (proposed) hoặc lỗi (failed). Bước khác (kể cả bước đã chốt), \
+            bước đang soạn, tự điền hoặc phiên finished/manual trả CORE-VALIDATION_FAILED trường step mã INVALID_STATE.
+            - Không đổi các bước khác hay khóa học nháp. Phiên failed trở lại active.
             - Tính vào giới hạn app.assistant.generation.jobs-per-day; vượt giới hạn trả ASSISTANT-JOB_RATE_LIMITED.
             - Bước đã dùng hết số lần thử trả CORE-VALIDATION_FAILED mã REPROPOSE_LIMIT.
             """
@@ -147,9 +172,11 @@ public class CourseDraftingController {
     @PostMapping("/{sessionId}/stop")
     @Operation(
         summary = "Dừng bước trợ lý đang soạn",
-        description = "Không có thân. Bước đang proposing dừng: còn đề xuất thì giữ (proposed), chưa có gì thì người "
-            + "dùng tự điền (manual) và chốt như thường; phiên vẫn active. Kết quả trợ lý trả về sau đó bị bỏ. "
-            + "Không có bước nào đang soạn thì không đổi gì."
+        description = """
+            Không có thân. Bước đang proposing dừng; phiên vẫn active.
+            - Còn đề xuất thì giữ (proposed), chưa có gì thì người dùng tự điền (manual) và chốt như thường.
+            - Kết quả trợ lý trả về sau đó bị bỏ. Không có bước nào đang soạn thì không đổi gì.
+            """
     )
     public BaseResponse<SessionView> stop(@PathVariable @Positive Long sessionId) {
         gate.requireAccess();
@@ -159,9 +186,11 @@ public class CourseDraftingController {
     @PostMapping("/{sessionId}/steps/{step}/manual")
     @Operation(
         summary = "Tự điền từ bước này",
-        description = "Không có thân. Bước hiện tại chuyển manual và phiên kết thúc phần của trợ lý (status manual): "
-            + "không đề xuất nào tới nữa, người dùng lưu khóa học bằng các nút thường của trang. Bước đã chốt, chưa "
-            + "tới hoặc phiên finished trả CORE-VALIDATION_FAILED trường step mã INVALID_STATE."
+        description = """
+            Không có thân. Bước hiện tại chuyển manual và phiên kết thúc phần của trợ lý (status manual).
+            - Không đề xuất nào tới nữa; người dùng lưu khóa học bằng các nút thường của trang.
+            - Bước đã chốt, chưa tới hoặc phiên finished trả CORE-VALIDATION_FAILED trường step mã INVALID_STATE.
+            """
     )
     public BaseResponse<SessionView> manual(@PathVariable @Positive Long sessionId,
                                             @PathVariable @Min(1) @Max(4) Integer step) {

@@ -121,6 +121,7 @@ class CourseJobIT extends AssessmentIntegrationTest {
         });
         jdbc.update("DELETE FROM learning_hub.course_generation_jobs");
         // Drafting sessions count against the same daily allowance.
+        jdbc.update("DELETE FROM learning_hub.course_drafting_steps");
         jdbc.update("DELETE FROM learning_hub.course_drafting_sessions");
     }
 

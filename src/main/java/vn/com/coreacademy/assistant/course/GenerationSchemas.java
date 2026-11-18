@@ -22,7 +22,10 @@ public final class GenerationSchemas {
     static final int MAX_TOTAL_LESSONS = 60;
     static final int MAX_BLOCKS = 6;
     static final int MAX_BODY = 6000;
-    static final int MAX_TITLE = 255;
+    /** A course (and chapter, lesson) title, as the course service stores it. */
+    public static final int MAX_TITLE = 255;
+    /** What the author says the course is for (targetLearners). */
+    public static final int MAX_TARGET_LEARNERS = 500;
     static final int MAX_STEPS = 30;
     static final Set<String> DIFFICULTIES = Set.of("EASY", "MEDIUM", "HARD");
     /** Step 1 of Soạn cùng trợ lý: the basic information of the course. */
@@ -152,7 +155,7 @@ public final class GenerationSchemas {
 
     public static List<String> summary(JsonNode node) {
         List<String> problems = new ArrayList<>();
-        text(node, "title", 255, problems, "summary");
+        text(node, "title", MAX_TITLE, problems, "summary");
         text(node, "summary", 4000, problems, "summary");
         array(node, "keyPoints", 0, 8, problems, "summary");
         return problems;

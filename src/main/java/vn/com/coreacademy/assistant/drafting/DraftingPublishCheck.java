@@ -17,9 +17,9 @@ import vn.com.coreacademy.learning.service.LearningQuizDirectory.QuizRef;
 
 /**
  * What still blocks publishing a drafted course, for the step 4 chat summary. It is the editor's own pre-publish check
- * ("Kiểm tra trước khi xuất bản", {@code draftChecks} in the page's {@code course-draft.ts}) run on the saved draft: the
- * same rules and the same labels, so the chat and the page say the same thing. Only the required checks that fail are
- * listed (the recommended ones never block), and failing lessons are also counted ("3 bài chưa có nội dung"). The
+ * ("Kiểm tra trước khi xuất bản", {@code draftChecks} in the page's {@code course-draft.ts}) run on the saved draft:
+ * the same rules and the same labels, so the chat and the page say the same thing. Only the required checks that fail
+ * are listed (the recommended ones never block), and failing lessons are also counted ("3 bài chưa có nội dung"). The
  * server checks again when the author publishes; this list only informs.
  */
 @Component

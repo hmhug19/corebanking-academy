@@ -46,7 +46,6 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 public class CourseJobService {
     static final String FIRST_STEP = "summarise_sections";
     private static final Set<String> LEVELS = Set.of("BEGINNER", "INTERMEDIATE", "ADVANCED");
-    private static final Set<String> MANAGERS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN, RoleCodes.INSTRUCTOR);
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
     private static final int LIST_LIMIT = 50;
     /** How long a failed or stopped job stays in the active list, so its notice survives a reload. */
@@ -196,7 +195,7 @@ public class CourseJobService {
     // ---- checks ----------------------------------------------------------------------------------------------------
 
     private static void requireManager(Actor actor) {
-        if (actor.grants().stream().noneMatch(grant -> MANAGERS.contains(grant.roleCode()))) {
+        if (actor.grants().stream().noneMatch(grant -> RoleCodes.COURSE_MANAGERS.contains(grant.roleCode()))) {
             throw new AccessDeniedException("Only roles that manage courses may generate a course");
         }
     }
@@ -227,8 +226,9 @@ public class CourseJobService {
             throw BusinessException.validation("inputs", "REQUIRED", "Thiếu thông tin khởi tạo.");
         }
         String learners = in.targetLearners() == null ? "" : in.targetLearners().strip();
-        if (learners.isEmpty() || learners.length() > 500) {
-            throw BusinessException.validation("targetLearners", "INVALID_LENGTH", "Đối tượng học viên từ 1 đến 500 ký tự.");
+        if (learners.isEmpty() || learners.length() > GenerationSchemas.MAX_TARGET_LEARNERS) {
+            throw BusinessException.validation("targetLearners", "INVALID_LENGTH",
+                "Đối tượng học viên từ 1 đến " + GenerationSchemas.MAX_TARGET_LEARNERS + " ký tự.");
         }
         if (in.level() == null || !LEVELS.contains(in.level())) {
             throw BusinessException.validation("level", "INVALID_VALUE", "Trình độ phải là BEGINNER, INTERMEDIATE hoặc ADVANCED.");
@@ -250,8 +250,9 @@ public class CourseJobService {
         }
 
         String title = in.title() == null ? null : in.title().strip();
-        if (title != null && title.length() > 255) {
-            throw BusinessException.validation("title", "INVALID_LENGTH", "Tên khóa học tối đa 255 ký tự.");
+        if (title != null && title.length() > GenerationSchemas.MAX_TITLE) {
+            throw BusinessException.validation("title", "INVALID_LENGTH",
+                "Tên khóa học tối đa " + GenerationSchemas.MAX_TITLE + " ký tự.");
         }
         String description = in.description() == null ? null : in.description().strip();
         if (description != null && description.length() > 30000) {

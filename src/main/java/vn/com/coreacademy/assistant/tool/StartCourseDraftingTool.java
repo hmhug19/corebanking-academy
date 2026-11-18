@@ -1,6 +1,5 @@
 package vn.com.coreacademy.assistant.tool;
 
-import java.util.Set;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,6 +16,7 @@ import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.identity.constants.RoleCodes;
 import vn.com.coreacademy.identity.dto.RoleGrant;
 import vn.com.coreacademy.knowledge.ai.ToolDefinition;
+import vn.com.coreacademy.knowledge.config.KnowledgeProperties;
 
 /**
  * Soạn cùng trợ lý from the chat: with the document the user attached (already uploaded as their own course source),
@@ -33,12 +33,13 @@ public class StartCourseDraftingTool implements AgentTool {
     static final String TITLE = "Khóa học mới";
     static final String ANSWER = "Mình đang đọc tài liệu và mở trang Khóa học mới. Mình sẽ điền từng bước để bạn "
         + "xem, sửa nếu cần rồi bấm \"Đã chốt\"; mỗi bước xong mình báo ở đây.";
-    static final String ASK_FOR_DOCUMENT = "Bạn đính kèm tài liệu (.pdf, .docx hoặc .md, tối đa 20 MB) rồi gửi lại "
+    /** The size is the upload limit itself ({@code app.knowledge.max-file-size}), so the two cannot disagree. */
+    static final String ASK_FOR_DOCUMENT = "Bạn đính kèm tài liệu (.pdf, .docx hoặc .md, tối đa %d MB) rồi gửi lại "
         + "yêu cầu, mình sẽ đọc và soạn khóa học từ đó.";
     static final String FOR_INSTRUCTORS = "Tính năng tạo khóa học dành cho giảng viên.";
-    private static final Set<String> MANAGERS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN, RoleCodes.INSTRUCTOR);
 
     private final CourseDraftingService drafting;
+    private final KnowledgeProperties knowledge;
 
     @Override
     public boolean actsForUser() {
@@ -52,7 +53,7 @@ public class StartCourseDraftingTool implements AgentTool {
 
     @Override
     public boolean availableTo(AgentContext context) {
-        return roles(context).anyMatch(MANAGERS::contains);
+        return roles(context).anyMatch(RoleCodes.COURSE_MANAGERS::contains);
     }
 
     @Override
@@ -66,10 +67,11 @@ public class StartCourseDraftingTool implements AgentTool {
             return new ToolOutcome.Reply(FOR_INSTRUCTORS);
         }
         if (context.attachedDocumentId() == null) {
-            return new ToolOutcome.Reply(ASK_FOR_DOCUMENT);
+            return new ToolOutcome.Reply(ASK_FOR_DOCUMENT.formatted(knowledge.maxFileSize().toMegabytes()));
         }
         String level = ToolArguments.text(arguments, "level");
-        StartFields hints = new StartFields(text(arguments, "title", 255), text(arguments, "targetLearners", 500),
+        StartFields hints = new StartFields(text(arguments, "title", GenerationSchemas.MAX_TITLE),
+            text(arguments, "targetLearners", GenerationSchemas.MAX_TARGET_LEARNERS),
             level != null && GenerationSchemas.LEVELS.contains(level) ? level : null, null);
         try {
             SessionView started = drafting.startFromSource(context.userId(), context.attachedDocumentId(), hints,

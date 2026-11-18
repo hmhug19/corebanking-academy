@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +29,7 @@ import vn.com.coreacademy.assessment.constants.AssessmentCodes.ReviewPolicy;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.ScoreMethod;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.ScoringMode;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.SelectionMode;
+import vn.com.coreacademy.assessment.constants.AssessmentLimits;
 import vn.com.coreacademy.assessment.dto.AssessmentRequests.OptionInput;
 import vn.com.coreacademy.assessment.dto.AssessmentRequests.PoolItem;
 import vn.com.coreacademy.assessment.dto.AssessmentRequests.PoolRequest;
@@ -69,18 +69,22 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 /**
  * Soạn cùng trợ lý on the server: starts a drafting session from a document and shows it. Only roles that manage
  * courses may use it; the owner unit is decided here (an instructor's own unit, an admin's choice checked against their
- * scope), never by the model; and every start counts against the daily course generation allowance. The model work
- * happens later in {@link CourseDraftingWorker}, so closing the chat or the page does not stop it. Confirming step 1
- * creates the draft course through the course service's own create path, so its checks (scope, code) apply as on the
- * page.
+ * scope), never by the model or a later request; and every start counts against the daily course generation allowance.
+ * The model work happens later in {@link CourseDraftingWorker}, so closing the chat or the page does not stop it.
+ * Confirming step 1 creates the draft course through the course service's own create path, so its checks (scope,
+ * code) apply as on the page.
  */
 @Service
 @RequiredArgsConstructor
 public class CourseDraftingService {
-    private static final Set<String> MANAGERS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN, RoleCodes.INSTRUCTOR);
     /** Where a confirmed outline keeps its lesson notes in the step's proposal. */
     static final String LESSON_NOTES = "lessonNotes";
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
+    // The final exam step 3 creates gets the defaults the page's own new final exam form offers.
+    private static final String FINAL_EXAM_TITLE = "Thi cuối khóa";
+    private static final int FINAL_EXAM_MINUTES = 15;
+    private static final BigDecimal FINAL_EXAM_PASS_PERCENT = BigDecimal.valueOf(70);
+    private static final int FINAL_EXAM_ATTEMPTS = 3;
 
     private final CourseDraftingRepository drafting;
     private final KnowledgeDocumentService documents;
@@ -93,6 +97,7 @@ public class CourseDraftingService {
     private final QuestionService questions;
     private final CourseExamService exams;
     private final LearningIdentityService identity;
+    private final DraftingMessages messages;
 
     private record Prepared(String userId, long ownerOrgId, StartFields fields, Long conversationId) {
     }
@@ -108,7 +113,7 @@ public class CourseDraftingService {
             conversationId);
         long documentId = documents.upload(file, DocumentScope.COURSE_SOURCE, null).id();
         try {
-            return queue(prepared, documentId);
+            return queue(prepared, documentId, false);
         } catch (RuntimeException exception) {
             documents.delete(documentId);
             throw exception;
@@ -118,10 +123,12 @@ public class CourseDraftingService {
     /**
      * The chat's file, uploaded before the turn that hands it to {@link #startFromSource}: stored as the caller's
      * course source (only they read it, it is never listed or searched) and linked to nothing yet. Only roles that
-     * manage courses may upload one.
+     * manage courses may upload one, at most {@code source-uploads-per-day} in 24 hours; one no session uses is deleted
+     * after {@code unused-source-ttl} ({@link UnusedSourceCleanup}).
      */
     public SourceView uploadSource(MultipartFile file) {
         requireManager(access.actor());
+        allowance.requireUpload(SecurityContextUtils.getUserId());
         var uploaded = documents.upload(file, DocumentScope.COURSE_SOURCE, null);
 
         return new SourceView(uploaded.id(), uploaded.fileName(), uploaded.status());
@@ -136,11 +143,8 @@ public class CourseDraftingService {
     public SessionView startFromSource(String userId, long documentId, StartFields hints, Long conversationId) {
         Prepared prepared = prepare(identity.actor(userId), userId, hints == null ? StartFields.NONE : hints,
             conversationId);
-        if (!drafting.freeSourceOf(documentId, userId)) {
-            throw BusinessException.validation("documentId", "NOT_FOUND", "Không tìm thấy tài liệu đính kèm.");
-        }
 
-        return queue(prepared, documentId);
+        return queue(prepared, documentId, true);
     }
 
     public SessionView get(long sessionId) {
@@ -163,22 +167,21 @@ public class CourseDraftingService {
         requireManager(access.actor());
         owned(sessionId);
         return switch (step) {
-            case 1 -> confirmBasicsStep(sessionId, body);
-            case 2 -> {
+            case DraftingStates.BASICS_STEP -> confirmBasicsStep(sessionId, body);
+            case DraftingStates.OUTLINE_STEP -> {
                 OutlineConfirm outline = checked(body, OutlineConfirm.class, "draft");
                 yield view(transaction.execute(status -> confirmOutline(sessionId, outline)));
             }
-            case 3 -> {
+            case DraftingStates.RULES_STEP -> {
                 RulesConfirm rules = checked(body, RulesConfirm.class, "draft");
                 yield view(transaction.execute(status -> confirmRules(sessionId, rules)));
             }
-            case DraftingStates.LAST_STEP -> view(transaction.execute(status -> confirmAudience(sessionId)));
+            case DraftingStates.AUDIENCE_STEP -> view(transaction.execute(status -> confirmAudience(sessionId)));
             default -> throw notReady();
         };
     }
 
     private SessionView confirmBasicsStep(long sessionId, JsonNode body) {
-        int step = DraftingStates.FIRST_STEP;
         BasicsConfirm basics = checked(body, BasicsConfirm.class, "course");
         try {
             return view(transaction.execute(status -> confirmBasics(sessionId, basics)));
@@ -186,60 +189,78 @@ public class CourseDraftingService {
             if (exception.getResponseCode() != LearningResponseCode.DUPLICATE) {
                 throw exception;
             }
-            // The create rolled back: the new code is proposed in a transaction of its own.
-            String taken = basics.course().code().strip();
-            String code = CourseDraftingProposer.freeCode(drafting);
-            transaction.executeWithoutResult(status -> drafting.proposeCode(sessionId, step, code,
-                "Mã " + taken + " đã có; trợ lý đề xuất mã " + code + "."));
+            proposeFreeCode(sessionId, basics.course().code().strip());
             throw BusinessException.field(LearningResponseCode.DUPLICATE, "course.code", "DUPLICATE",
                 "Mã khóa học đã có. Trợ lý đã đề xuất mã mới.");
         }
     }
 
+    /**
+     * The confirmed code was taken and the create rolled back: in a transaction of its own, step 1 proposes a free code
+     * (also when it holds no proposal, so the page still offers it), and after the commit the session's conversation
+     * says so. Nothing is written when step 1 stopped being current meanwhile (another confirm went through).
+     */
+    private void proposeFreeCode(long sessionId, String taken) {
+        String code = CourseDraftingProposer.freeCode(drafting);
+        SessionRow proposed = transaction.execute(status -> {
+            SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+            if (session.courseId() != null || !isCurrent(session, DraftingStates.BASICS_STEP)) {
+                return null;
+            }
+            drafting.proposeCode(sessionId, DraftingStates.BASICS_STEP, code,
+                "Mã " + taken + " đã có; trợ lý đề xuất mã " + code + ".");
+            return session;
+        });
+        if (proposed != null) {
+            messages.codeTaken(proposed, taken, code);
+        }
+    }
+
+    /**
+     * The draft course is created for the session's own unit, never for one the body names: the unit was decided and
+     * checked when the session started. A confirm once the draft exists returns the session as it is.
+     */
     private SessionRow confirmBasics(long sessionId, BasicsConfirm basics) {
         SessionRow session = drafting.lockSession(sessionId).orElseThrow();
         if (session.courseId() != null) {
             return session;
         }
-        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != DraftingStates.FIRST_STEP
-            || !confirmable(stepRow(sessionId, DraftingStates.FIRST_STEP))) {
-            throw notReady();
+        requireCurrent(session, DraftingStates.BASICS_STEP);
+        if (!basics.course().ownerOrgId().equals(session.ownerOrgId())) {
+            throw BusinessException.validation("course.ownerOrgId", "OWNER_MISMATCH",
+                "Khóa học được tạo cho đơn vị đã chọn khi bắt đầu soạn; không đổi đơn vị ở bước này.");
         }
+
         CourseDetail created = courses.create(basics.course());
-        int next = DraftingStates.FIRST_STEP + 1;
-        drafting.linkCourse(sessionId, created.course().id(), created.revision().id(), next);
-        drafting.confirmStep(sessionId, DraftingStates.FIRST_STEP);
-        drafting.insertStep(sessionId, next);
+        drafting.linkCourse(sessionId, created.course().id(), created.revision().id(), DraftingStates.OUTLINE_STEP);
+        drafting.confirmStep(sessionId, DraftingStates.BASICS_STEP);
+        drafting.insertStep(sessionId, DraftingStates.OUTLINE_STEP);
 
         return drafting.session(sessionId).orElseThrow();
     }
 
     /**
-     * Chốt bước 2: the page's draft is saved through the course service, so its checks apply as with "Lưu nháp". The
-     * assistant never writes lesson content, so a proposed lesson arriving with content is refused; lessons left empty
-     * never block the step (only publishing checks content). With a proposal in it the revision is marked as AI made,
-     * so publishing asks the author to confirm the review; each proposed lesson's description and source stay on the
-     * session by saved lesson id (lessons have no description of their own). Step 3 is queued.
+     * Chốt bước 2: the page's draft is saved through the course service, so its checks apply as with "Lưu nháp". It
+     * takes what is on the page, lesson content the author already wrote included (the assistant writes none: its
+     * proposal has no content field); lessons left empty never block the step (only publishing checks content). When a
+     * proposed lesson is among the saved ones the revision is marked as AI made, so publishing asks the author to
+     * confirm the review; each such lesson's description and source stay on the session by saved lesson id (lessons
+     * have no description of their own). Step 3 is queued.
      */
     private SessionRow confirmOutline(long sessionId, OutlineConfirm outline) {
-        int step = DraftingStates.FIRST_STEP + 1;
+        int step = DraftingStates.OUTLINE_STEP;
         SessionRow session = drafting.lockSession(sessionId).orElseThrow();
-        DraftingStepRow row = stepRow(sessionId, step);
-        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != step
-            || session.courseId() == null || !confirmable(row)) {
-            throw notReady();
-        }
+        DraftingStepRow row = requireCurrent(session, step);
         JsonNode proposal = row.proposal() == null ? null : read(row.proposal(), new TypeReference<JsonNode>() { });
-        List<JsonNode> proposed = proposedLessons(proposal);
-        requireNoContentIn(proposed, outline.draft());
 
         CourseDetail saved = courses.saveDraft(session.courseId(), session.revisionId(), outline.draft());
-        if (!proposed.isEmpty()) {
+        ArrayNode notes = lessonNotes(proposal, proposedLessons(proposal), saved);
+        if (!notes.isEmpty()) {
             drafting.markAiGenerated(session.revisionId());
         }
-        drafting.confirmOutline(sessionId, step, write(lessonNotes(proposal, proposed, saved)));
-        drafting.advance(sessionId, step + 1);
-        drafting.insertStep(sessionId, step + 1);
+        drafting.confirmOutline(sessionId, step, write(notes));
+        drafting.advance(sessionId, DraftingStates.RULES_STEP);
+        drafting.insertStep(sessionId, DraftingStates.RULES_STEP);
 
         return drafting.session(sessionId).orElseThrow();
     }
@@ -252,13 +273,9 @@ public class CourseDraftingService {
      * revision as AI made. Step 4 is queued.
      */
     private SessionRow confirmRules(long sessionId, RulesConfirm rules) {
-        int step = DraftingStates.FIRST_STEP + 2;
+        int step = DraftingStates.RULES_STEP;
         SessionRow session = drafting.lockSession(sessionId).orElseThrow();
-        DraftingStepRow row = stepRow(sessionId, step);
-        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != step
-            || session.courseId() == null || !confirmable(row)) {
-            throw notReady();
-        }
+        DraftingStepRow row = requireCurrent(session, step);
         DraftRequest draft = rules.draft();
         List<DraftQuestion> kept = rules.questions();
         if (!kept.isEmpty() && rules.competencyId() == null) {
@@ -290,8 +307,8 @@ public class CourseDraftingService {
             }
         }
         drafting.confirmStep(sessionId, step);
-        drafting.advance(sessionId, step + 1);
-        drafting.insertStep(sessionId, step + 1);
+        drafting.advance(sessionId, DraftingStates.AUDIENCE_STEP);
+        drafting.insertStep(sessionId, DraftingStates.AUDIENCE_STEP);
 
         return drafting.session(sessionId).orElseThrow();
     }
@@ -302,12 +319,9 @@ public class CourseDraftingService {
      * review of AI content). The body is ignored: whatever the page holds for step 4 is saved by publishing, not here.
      */
     private SessionRow confirmAudience(long sessionId) {
-        int step = DraftingStates.LAST_STEP;
+        int step = DraftingStates.AUDIENCE_STEP;
         SessionRow session = drafting.lockSession(sessionId).orElseThrow();
-        if (!DraftingStates.ACTIVE.equals(session.status()) || session.currentStep() != step
-            || session.courseId() == null || !confirmable(stepRow(sessionId, step))) {
-            throw notReady();
-        }
+        requireCurrent(session, step);
         drafting.confirmStep(sessionId, step);
         drafting.finish(sessionId);
 
@@ -315,11 +329,12 @@ public class CourseDraftingService {
     }
 
     /**
-     * "Đề xuất lại" (and "Thử lại" on a failed step): the step is queued again with its last proposal dropped; the
-     * other steps, the session's current step and the draft course stay as they are, and the page writes the new
-     * proposal into that step's fields only. A step being proposed or filled by hand, or one of a session that is
-     * over, cannot be. It counts against the daily course generation allowance, and a step that has used every attempt
-     * is left to the author. A failed session is active again.
+     * "Đề xuất lại" (and "Thử lại" on a failed step): the session's current step is queued again with its last
+     * proposal dropped; the other steps and the draft course stay as they are, and the page writes the new proposal
+     * into that step's fields only. Only the current step can be: a new proposal for a confirmed step would reach no
+     * form and no "Đã chốt". Neither can a step being proposed or filled by hand, or one of a session that is over. It
+     * counts against the daily course generation allowance, and a step that has used every attempt is left to the
+     * author. A failed session is active again.
      */
     public SessionView proposeAgain(long sessionId, int step) {
         requireManager(access.actor());
@@ -327,11 +342,13 @@ public class CourseDraftingService {
         String userId = SecurityContextUtils.getUserId();
         return view(transaction.execute(status -> {
             SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+            if (open(session) && session.currentStep() != step) {
+                throw BusinessException.validation("step", "INVALID_STATE",
+                    "Chỉ đề xuất lại được bước đang soạn; bước đã chốt giữ nguyên như đã lưu.");
+            }
             DraftingStepRow row = stepRow(sessionId, step);
-            boolean open = DraftingStates.ACTIVE.equals(session.status())
-                || DraftingStates.FAILED_SESSION.equals(session.status());
-            if (!open || row == null || !Set.of(DraftingStates.PROPOSED, DraftingStates.CONFIRMED,
-                DraftingStates.FAILED).contains(row.state())) {
+            if (!open(session) || row == null
+                || !Set.of(DraftingStates.PROPOSED, DraftingStates.FAILED).contains(row.state())) {
                 throw BusinessException.validation("step", "INVALID_STATE",
                     "Bước này không đề xuất lại được lúc này.");
             }
@@ -373,9 +390,7 @@ public class CourseDraftingService {
         owned(sessionId);
         return view(transaction.execute(status -> {
             SessionRow session = drafting.lockSession(sessionId).orElseThrow();
-            boolean open = DraftingStates.ACTIVE.equals(session.status())
-                || DraftingStates.FAILED_SESSION.equals(session.status());
-            if (!open || session.currentStep() != step || !drafting.manualStep(sessionId, step)) {
+            if (!open(session) || session.currentStep() != step || !drafting.manualStep(sessionId, step)) {
                 throw BusinessException.validation("step", "INVALID_STATE", "Bước này không tự điền được lúc này.");
             }
             drafting.endAsManual(sessionId);
@@ -383,13 +398,14 @@ public class CourseDraftingService {
         }));
     }
 
-    /** The exam the page would create with its defaults, fixed to the kept questions: 15 minutes, 70 %, 3 attempts. */
+    /** The exam the page would create with its defaults, fixed to the kept questions. */
     private static QuizRequest finalExam(long courseId, String courseTitle, int questionCount) {
-        String title = courseTitle == null || courseTitle.isBlank() ? "Thi cuối khóa"
-            : "Thi cuối khóa: " + courseTitle.strip();
-        return new QuizRequest(courseId, title.substring(0, Math.min(title.length(), 255)), null, QuizType.FINAL_EXAM,
-            SelectionMode.FIXED, questionCount, true, true, 15, null, null, 0, BigDecimal.valueOf(70),
-            ScoringMode.ALL_OR_NOTHING, ScoreMethod.BEST, ReviewPolicy.AFTER_SUBMIT, 3, 0, false, true);
+        String title = courseTitle == null || courseTitle.isBlank() ? FINAL_EXAM_TITLE
+            : FINAL_EXAM_TITLE + ": " + courseTitle.strip();
+        return new QuizRequest(courseId, title.substring(0, Math.min(title.length(), AssessmentLimits.MAX_QUIZ_TITLE)),
+            null, QuizType.FINAL_EXAM, SelectionMode.FIXED, questionCount, true, true, FINAL_EXAM_MINUTES, null, null,
+            0, FINAL_EXAM_PASS_PERCENT, ScoringMode.ALL_OR_NOTHING, ScoreMethod.BEST, ReviewPolicy.AFTER_SUBMIT,
+            FINAL_EXAM_ATTEMPTS, 0, false, true);
     }
 
     private static DraftRequest withVersion(DraftRequest draft, long version) {
@@ -405,18 +421,6 @@ public class CourseDraftingService {
         }
 
         return lessons;
-    }
-
-    private static void requireNoContentIn(List<JsonNode> proposed, DraftRequest draft) {
-        Set<String> titles = new HashSet<>();
-        proposed.forEach(lesson -> titles.add(lesson.path("title").asText().strip()));
-        boolean filled = draft.chapters().stream().flatMap(chapter -> chapter.lessons().stream())
-            .anyMatch(lesson -> lesson.title() != null && titles.contains(lesson.title().strip())
-                && !lesson.blocks().isEmpty());
-        if (filled) {
-            throw BusinessException.validation("draft.chapters", "CONTENT_NOT_EMPTY",
-                "Bài do trợ lý đề xuất được lưu với nội dung trống; hãy thêm nội dung sau khi chốt bước này.");
-        }
     }
 
     /**
@@ -474,6 +478,30 @@ public class CourseDraftingService {
         return drafting.steps(sessionId).stream().filter(row -> row.stepNo() == step).findFirst().orElse(null);
     }
 
+    /** The session is still the assistant's to work on: going, or failed and waiting for "Thử lại". */
+    private static boolean open(SessionRow session) {
+        return DraftingStates.ACTIVE.equals(session.status())
+            || DraftingStates.FAILED_SESSION.equals(session.status());
+    }
+
+    private static boolean isCurrent(SessionRow session, int step) {
+        return DraftingStates.ACTIVE.equals(session.status()) && session.currentStep() == step;
+    }
+
+    /**
+     * The step may be confirmed now: it is the current step of an active session (after step 1, one with its draft
+     * course) and it was proposed, failed or is filled by hand. Returns the step.
+     */
+    private DraftingStepRow requireCurrent(SessionRow session, int step) {
+        DraftingStepRow row = stepRow(session.id(), step);
+        boolean hasCourse = step == DraftingStates.BASICS_STEP || session.courseId() != null;
+        if (!isCurrent(session, step) || !hasCourse || !confirmable(row)) {
+            throw notReady();
+        }
+
+        return row;
+    }
+
     private static boolean confirmable(DraftingStepRow step) {
         return step != null && Set.of(DraftingStates.PROPOSED, DraftingStates.FAILED, DraftingStates.MANUAL)
             .contains(step.state());
@@ -512,9 +540,16 @@ public class CourseDraftingService {
         return new Prepared(userId, ownerOrgId, fields, conversationId);
     }
 
-    private SessionView queue(Prepared prepared, long documentId) {
+    /**
+     * Inserts the session and its first step under the user's allowance lock. A chat attachment ({@code chatSource}) is
+     * checked to be free there, so two turns handing over the same document start one session only.
+     */
+    private SessionView queue(Prepared prepared, long documentId, boolean chatSource) {
         long sessionId = transaction.execute(status -> {
             allowance.lock(prepared.userId());
+            if (chatSource && !drafting.freeSourceOf(documentId, prepared.userId())) {
+                throw BusinessException.validation("documentId", "NOT_FOUND", "Không tìm thấy tài liệu đính kèm.");
+            }
             allowance.require(prepared.userId());
             long created = drafting.insertSession(prepared.userId(), prepared.ownerOrgId(), documentId,
                 prepared.conversationId(), hints(prepared.fields()));
@@ -528,7 +563,7 @@ public class CourseDraftingService {
     // ---- checks ----------------------------------------------------------------------------------------------------
 
     private static void requireManager(Actor actor) {
-        if (actor.grants().stream().noneMatch(grant -> MANAGERS.contains(grant.roleCode()))) {
+        if (actor.grants().stream().noneMatch(grant -> RoleCodes.COURSE_MANAGERS.contains(grant.roleCode()))) {
             throw new AccessDeniedException("Only roles that manage courses may draft a course with the assistant");
         }
     }
@@ -560,13 +595,14 @@ public class CourseDraftingService {
 
     private static StartFields checked(StartFields in, long ownerOrgId) {
         String title = blankToNull(in.title());
-        if (title != null && title.length() > 255) {
-            throw BusinessException.validation("title", "INVALID_LENGTH", "Tên khóa học tối đa 255 ký tự.");
+        if (title != null && title.length() > GenerationSchemas.MAX_TITLE) {
+            throw BusinessException.validation("title", "INVALID_LENGTH",
+                "Tên khóa học tối đa " + GenerationSchemas.MAX_TITLE + " ký tự.");
         }
         String learners = blankToNull(in.targetLearners());
-        if (learners != null && learners.length() > 500) {
+        if (learners != null && learners.length() > GenerationSchemas.MAX_TARGET_LEARNERS) {
             throw BusinessException.validation("targetLearners", "INVALID_LENGTH",
-                "Đối tượng học viên tối đa 500 ký tự.");
+                "Đối tượng học viên tối đa " + GenerationSchemas.MAX_TARGET_LEARNERS + " ký tự.");
         }
         String level = blankToNull(in.level());
         if (level != null && !GenerationSchemas.LEVELS.contains(level)) {

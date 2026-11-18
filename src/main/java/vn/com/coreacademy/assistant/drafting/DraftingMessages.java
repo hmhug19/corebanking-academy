@@ -24,7 +24,7 @@ public class DraftingMessages {
     private static final List<String> FILLED = List.of(
         "tên, mô tả ngắn, mục tiêu đầu ra, mức độ, loại khóa học, chương trình, phân hệ và mã khóa học",
         "dàn ý gồm chương, bài và một dòng mô tả mỗi bài; nội dung bài để trống cho bạn",
-        "điều kiện hoàn thành, điểm thưởng và các câu hỏi nháp từ tài liệu",
+        "các câu hỏi nháp cho bài kiểm tra cuối khóa từ tài liệu, điểm thưởng và năng lực của các câu hỏi",
         "đối tượng được giao và những gì còn thiếu trước khi xuất bản");
     static final String CHECK_AND_CONFIRM = "Bạn xem lại trên trang, sửa nếu cần rồi bấm \"Đã chốt\".";
     static final String RETRY_OR_MANUAL = "Bạn mở trang soạn để bấm \"Thử lại\" hoặc \"Tự điền\".";
@@ -41,6 +41,15 @@ public class DraftingMessages {
         }
         text.append("\n\n").append(CHECK_AND_CONFIRM);
         send(session, step, text.toString());
+    }
+
+    /**
+     * Confirming step 1 found the course code taken: step 1 now proposes {@code code} instead, and the author confirms
+     * again from the page or this message's card.
+     */
+    public void codeTaken(SessionRow session, String taken, String code) {
+        send(session, DraftingStates.BASICS_STEP, heading(DraftingStates.BASICS_STEP) + " mã " + taken
+            + " đã có khóa học khác dùng, mình đề xuất mã " + code + ".\n\n" + CHECK_AND_CONFIRM);
     }
 
     /** Step {@code step} could not be proposed; {@code error} is the message the page shows too. */

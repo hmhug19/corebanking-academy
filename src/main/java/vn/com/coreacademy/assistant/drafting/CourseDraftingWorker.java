@@ -1,9 +1,12 @@
 package vn.com.coreacademy.assistant.drafting;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -12,6 +15,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 import vn.com.coreacademy.assistant.agent.TurnLimiter;
+import vn.com.coreacademy.assistant.config.GenerationProperties;
 import vn.com.coreacademy.assistant.course.CourseDraftService;
 import vn.com.coreacademy.assistant.course.CourseGenerationWorker;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
@@ -31,8 +35,11 @@ import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class CourseDraftingWorker {
     static final String GENERIC_FAILURE = "Trợ lý không soạn được bước này. Hãy thử lại hoặc tự điền.";
+    /** No step is being proposed on this instance. */
+    private static final long NONE = -1;
 
     private final CourseDraftingRepository drafting;
     private final ObjectProvider<DraftingStepProposer> proposer;
@@ -42,29 +49,30 @@ public class CourseDraftingWorker {
     private final TurnLimiter chat;
     private final ObjectMapper json;
     private final DraftingMessages messages;
+    private final GenerationProperties generation;
+    /** The step this instance is proposing now: its claim may outlast one model call (step 1 summarises first). */
+    private final AtomicLong running = new AtomicLong(NONE);
 
-    public CourseDraftingWorker(CourseDraftingRepository drafting, ObjectProvider<DraftingStepProposer> proposer,
-                                OllamaClient ollama, TransactionTemplate transaction, AssistantMetrics metrics,
-                                TurnLimiter chat, ObjectMapper json, DraftingMessages messages) {
-        this.drafting = drafting;
-        this.proposer = proposer;
-        this.ollama = ollama;
-        this.transaction = transaction;
-        this.metrics = metrics;
-        this.chat = chat;
-        this.json = json;
-        this.messages = messages;
-    }
-
-    /** A step claimed when the server stopped waits again; one that used every attempt fails instead of looping. */
+    /**
+     * A step whose claim is older than one model call ({@code model-call-timeout}) lost its worker, which stopped with
+     * the server: it waits again, and one that used every attempt fails instead of looping. A newer claim may belong
+     * to another instance still calling the model, so it is left for a later run, and the step this instance is
+     * proposing is never touched. Runs at start and then once per model-call timeout, so a claim interrupted just
+     * before a restart is picked up too.
+     */
     @EventListener(ApplicationReadyEvent.class)
+    @Scheduled(fixedDelayString = "${app.assistant.generation.model-call-timeout}",
+        initialDelayString = "${app.assistant.generation.model-call-timeout}")
     public void requeueInterrupted() {
-        for (DraftingStepRow step : drafting.interruptedAtCap(CourseDraftService.MAX_STEP_ATTEMPTS)) {
+        OffsetDateTime claimedBefore = OffsetDateTime.now().minus(generation.modelCallTimeout());
+        long own = running.get();
+        for (DraftingStepRow step : drafting.interruptedAtCap(CourseDraftService.MAX_STEP_ATTEMPTS, claimedBefore,
+            own)) {
             log.warn("Interrupted drafting step used every attempt, giving up stepId={} attempt={}", step.id(),
                 step.attempts());
             fail(step, CourseGenerationWorker.TOO_SLOW);
         }
-        int requeued = drafting.requeueInterrupted();
+        int requeued = drafting.requeueInterrupted(claimedBefore, own);
         if (requeued > 0) {
             log.info("Requeued interrupted drafting steps count={}", requeued);
         }
@@ -97,6 +105,15 @@ public class CourseDraftingWorker {
     }
 
     private void execute(DraftingStepRow step) {
+        running.set(step.id());
+        try {
+            propose(step);
+        } finally {
+            running.set(NONE);
+        }
+    }
+
+    private void propose(DraftingStepRow step) {
         DraftingStepProposer active = proposer.getIfAvailable();
         Optional<SessionRow> session = drafting.session(step.sessionId());
         if (active == null || session.isEmpty()) {
@@ -155,8 +172,20 @@ public class CourseDraftingWorker {
         if (proposal.sourceSummary() != null) {
             drafting.setSourceSummary(step.sessionId(), write(proposal.sourceSummary()));
         }
+        markAiContent(step);
         drafting.touchSession(step.sessionId());
         return true;
+    }
+
+    /**
+     * An outline or questions proposal is AI content on the page from now on: the author may keep it with the page's
+     * own "Lưu nháp" instead of "Đã chốt", and publishing must still ask them to confirm the review.
+     */
+    private void markAiContent(DraftingStepRow step) {
+        if (step.stepNo() != DraftingStates.OUTLINE_STEP && step.stepNo() != DraftingStates.RULES_STEP) {
+            return;
+        }
+        drafting.session(step.sessionId()).map(SessionRow::revisionId).ifPresent(drafting::markAiGenerated);
     }
 
     /**

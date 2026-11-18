@@ -16,6 +16,8 @@ import vn.com.coreacademy.assistant.agent.TurnLimiter;
 import vn.com.coreacademy.assistant.agent.TurnLimiter.Admission;
 import vn.com.coreacademy.assistant.config.AssistantLimits;
 import vn.com.coreacademy.assistant.config.AssistantProperties;
+import vn.com.coreacademy.assistant.config.GenerationProperties;
+import vn.com.coreacademy.assistant.course.CourseDraftService;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
 import vn.com.coreacademy.assistant.course.StepNotReadyException;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
@@ -29,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -69,7 +72,8 @@ class CourseDraftingWorkerTest {
         when(drafting.storeProposal(anyLong(), any(), anyString(), anyString())).thenReturn(true);
         when(drafting.failStep(anyLong(), any(), anyString())).thenReturn(true);
         worker = new CourseDraftingWorker(drafting, provider, ollama, transaction, mock(AssistantMetrics.class),
-            limiter, json, messages);
+            limiter, json, messages, new GenerationProperties(3, Duration.ofSeconds(3), Duration.ofDays(30),
+            Duration.ofSeconds(90)));
     }
 
     @Test
@@ -152,6 +156,67 @@ class CourseDraftingWorkerTest {
 
         verify(drafting, never()).failSession(anyLong(), any());
         verify(messages, never()).failed(any(), anyInt(), any());
+    }
+
+    @Test
+    void onlyClaimsOlderThanOneModelCallAreRequeuedOrFailed() {
+        OffsetDateTime before = OffsetDateTime.now().minusSeconds(90);
+
+        worker.requeueInterrupted();
+
+        // Another instance may still be calling the model for a newer claim: the cut-off is one call timeout ago.
+        verify(drafting).interruptedAtCap(eq(CourseDraftService.MAX_STEP_ATTEMPTS),
+            argThat(cutoff -> !cutoff.isBefore(before.minusSeconds(5)) && !cutoff.isAfter(OffsetDateTime.now()
+                .minusSeconds(89))), eq(-1L));
+        verify(drafting).requeueInterrupted(argThat(cutoff -> !cutoff.isBefore(before.minusSeconds(5))
+            && !cutoff.isAfter(OffsetDateTime.now().minusSeconds(89))), eq(-1L));
+    }
+
+    @Test
+    void theStepThisInstanceIsProposingIsNeverRequeued() {
+        when(proposer.propose(session, step)).thenAnswer(invocation -> {
+            worker.requeueInterrupted();
+            return new Proposal(json.createObjectNode(), List.of(), null);
+        });
+
+        worker.runOnce();
+
+        verify(drafting).requeueInterrupted(any(), eq(7L));
+        worker.requeueInterrupted();
+        verify(drafting).requeueInterrupted(any(), eq(-1L));
+    }
+
+    @Test
+    void anOutlineOrQuestionsProposalMarksTheDraftAsAiMadeAndBasicsDoNot() {
+        when(proposer.propose(any(), any())).thenReturn(new Proposal(json.createObjectNode(), List.of(), null));
+        worker.runOnce();
+        verify(drafting, never()).markAiGenerated(anyLong());
+
+        SessionRow drafted = new SessionRow(5, "000005", 1, 9L, null, 40L, 41L, 2, "active", null, "{}", null, null,
+            null);
+        when(drafting.session(5)).thenReturn(Optional.of(drafted));
+        for (int stepNo : new int[] {2, 3, 4}) {
+            when(drafting.claimNext()).thenReturn(Optional.of(new DraftingStepRow(7 + stepNo, 5, stepNo, "proposing",
+                null, "[]", null, 1, claimedAt, false, null)));
+            worker.runOnce();
+        }
+
+        // steps 2 and 3, not step 4: the page's own "Lưu nháp" keeps them, and publishing must ask for the review
+        verify(drafting, org.mockito.Mockito.times(2)).markAiGenerated(41L);
+    }
+
+    @Test
+    void aDroppedOutlineProposalMarksNothing() {
+        when(drafting.storeProposal(anyLong(), any(), anyString(), anyString())).thenReturn(false);
+        when(drafting.session(5)).thenReturn(Optional.of(new SessionRow(5, "000005", 1, 9L, null, 40L, 41L, 2,
+            "active", null, "{}", null, null, null)));
+        when(drafting.claimNext()).thenReturn(Optional.of(new DraftingStepRow(9, 5, 2, "proposing", null, "[]", null,
+            1, claimedAt, false, null)));
+        when(proposer.propose(any(), any())).thenReturn(new Proposal(json.createObjectNode(), List.of(), null));
+
+        worker.runOnce();
+
+        verify(drafting, never()).markAiGenerated(anyLong());
     }
 
     @Test

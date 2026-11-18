@@ -114,6 +114,9 @@ app:
       poll-interval: ${ASSISTANT_GENERATION_POLL:3s}
       source-retention: ${ASSISTANT_GENERATION_SOURCE_RETENTION:30d}
       model-call-timeout: ${ASSISTANT_GENERATION_CALL_TIMEOUT:90s}
+      # Chat attachments for Soạn cùng trợ lý: uploads per user in 24 hours, and how long one no session uses is kept.
+      source-uploads-per-day: ${ASSISTANT_GENERATION_SOURCE_UPLOADS_PER_DAY:10}
+      unused-source-ttl: ${ASSISTANT_GENERATION_UNUSED_SOURCE_TTL:24h}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 600

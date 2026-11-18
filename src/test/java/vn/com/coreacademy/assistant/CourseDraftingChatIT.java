@@ -96,9 +96,15 @@ class CourseDraftingChatIT extends AssessmentIntegrationTest {
     @AfterAll
     void clear() {
         // Sessions and jobs share the daily allowance: none is left behind for other classes.
+        // Steps have no foreign key to their session (guideline §13.2): they go with it here.
+        jdbc.update("DELETE FROM learning_hub.course_drafting_steps");
         jdbc.update("DELETE FROM learning_hub.course_drafting_sessions");
         jdbc.update("DELETE FROM learning_hub.course_drafting_reproposals");
         jdbc.update("DELETE FROM learning_hub.course_generation_jobs");
+        // Course sources no session uses count against the upload cap: none is left behind either.
+        jdbc.update("DELETE FROM learning_hub.knowledge_document_chunks WHERE document_id IN "
+            + "(SELECT document_id FROM learning_hub.knowledge_documents WHERE scope = 'course_source')");
+        jdbc.update("DELETE FROM learning_hub.knowledge_documents WHERE scope = 'course_source'");
     }
 
     /** What the stub proposes. Stubbing again calls the earlier answer once, with no arguments. */

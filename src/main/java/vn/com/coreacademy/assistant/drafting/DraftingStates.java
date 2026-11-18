@@ -20,9 +20,17 @@ public final class DraftingStates {
     public static final String MANUAL_SESSION = "manual";
     public static final String FAILED_SESSION = "failed";
 
-    /** Step numbers, 1 to 4; the editor's step index is {@code step - 1}. */
-    public static final int FIRST_STEP = 1;
-    public static final int LAST_STEP = 4;
+    // ---- the steps, numbered 1 to 4; the editor's step index is {@code step - 1} ----
+    /** Thông tin cơ bản: confirming it creates the draft course. */
+    public static final int BASICS_STEP = 1;
+    /** Nội dung khóa học: chapters and empty lessons. */
+    public static final int OUTLINE_STEP = 2;
+    /** Bài kiểm tra & điều kiện: reward points, competency and the final exam's questions. */
+    public static final int RULES_STEP = 3;
+    /** Đối tượng & xuất bản: confirming it ends the flow. */
+    public static final int AUDIENCE_STEP = 4;
+    public static final int FIRST_STEP = BASICS_STEP;
+    public static final int LAST_STEP = AUDIENCE_STEP;
 
     private static final String[] KINDS = {"draft_basics", "draft_outline", "draft_rules", "draft_audience"};
 

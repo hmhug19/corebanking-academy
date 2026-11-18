@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant;
 
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,10 +27,12 @@ import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 import vn.com.coreacademy.assistant.course.CourseJobService;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
 import vn.com.coreacademy.assistant.course.SourceSummariser;
+import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.DraftingStepRow;
 import vn.com.coreacademy.assistant.drafting.CourseDraftingWorker;
 import vn.com.coreacademy.assistant.drafting.DraftingPublishCheck;
 import vn.com.coreacademy.assistant.drafting.DraftingTargets;
+import vn.com.coreacademy.assistant.drafting.UnusedSourceCleanup;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer;
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer.Proposal;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -92,6 +95,10 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     private DraftingTargets targets;
     @Autowired
     private CourseJobService oldJobs;
+    @Autowired
+    private CourseDraftingRepository drafting;
+    @Autowired
+    private UnusedSourceCleanup unusedSources;
 
     private ApiClient api;
     private OldCourseJobs old;
@@ -147,9 +154,15 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     @AfterAll
     void clear() {
         // Sessions and jobs share the daily allowance: none is left behind for other classes.
+        // Steps have no foreign key to their session (guideline §13.2): they go with it here.
+        jdbc.update("DELETE FROM learning_hub.course_drafting_steps");
         jdbc.update("DELETE FROM learning_hub.course_drafting_sessions");
         jdbc.update("DELETE FROM learning_hub.course_drafting_reproposals");
         jdbc.update("DELETE FROM learning_hub.course_generation_jobs");
+        // Course sources no session uses count against the upload cap: none is left behind either.
+        jdbc.update("DELETE FROM learning_hub.knowledge_document_chunks WHERE document_id IN "
+            + "(SELECT document_id FROM learning_hub.knowledge_documents WHERE scope = 'course_source')");
+        jdbc.update("DELETE FROM learning_hub.knowledge_documents WHERE scope = 'course_source'");
     }
 
     private MockMultipartHttpServletRequestBuilder start(Map<String, Object> fields) {
@@ -374,6 +387,74 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void stepOneCreatesTheCourseOnlyInTheSessionsOwnUnit() {
+        long id = proposedSession();
+        long otherOrg = ownOrg + 100_000;
+        Map<String, Object> body = new HashMap<>(basics("AI-OWNER001"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> course = new HashMap<>((Map<String, Object>) body.get("course"));
+        course.put("ownerOrgId", otherOrg);
+        body.put("course", course);
+
+        JsonNode refused = api.error(INSTRUCTOR, confirm(id, 1, body), "CORE-VALIDATION_FAILED");
+
+        assertThat(refused.path("errors").get(0).path("field").asText()).isEqualTo("course.ownerOrgId");
+        assertThat(refused.path("errors").get(0).path("code").asText()).isEqualTo("OWNER_MISMATCH");
+        assertThat(courses("AI-OWNER001")).isZero();
+        assertThat(api.ok(INSTRUCTOR, session(id)).path("courseId").isNull()).isTrue();
+        // an admin, who may manage other units, is held to the session's unit as well
+        long adminSession = api.ok(ADMIN, start(Map.of("ownerOrgId", ownOrg))).path("id").asLong();
+        worker.runOnce();
+        api.error(ADMIN, confirm(adminSession, 1, body), "CORE-VALIDATION_FAILED");
+        assertThat(courses("AI-OWNER001")).isZero();
+    }
+
+    @Test
+    void aTakenCodeIsToldInTheSessionsConversationWithTheNewCode() {
+        long conversation = jdbc.queryForObject("""
+            INSERT INTO learning_hub.assistant_conversations (owner_id, title) VALUES (?, 'Soạn khóa học')
+            RETURNING conversation_id
+            """, Long.class, INSTRUCTOR);
+        try {
+            long id = api.ok(INSTRUCTOR, start(null).param("conversationId", String.valueOf(conversation)))
+                .path("id").asLong();
+            worker.runOnce();
+            String taken = jdbc.queryForObject("SELECT min(code) FROM learning_hub.courses", String.class);
+
+            api.error(INSTRUCTOR, confirm(id, 1, basics(taken)), "LEARNING-DUPLICATE");
+
+            String proposed = api.ok(INSTRUCTOR, session(id)).path("steps").get(0).path("proposal").path("code")
+                .asText();
+            List<Map<String, Object>> told = jdbc.queryForList("""
+                SELECT answer, drafting_step FROM learning_hub.assistant_turns
+                 WHERE conversation_id = ? AND drafting_session_id = ? ORDER BY turn_id
+                """, conversation, id);
+            assertThat(told).hasSize(2);
+            assertThat(((Number) told.get(1).get("drafting_step")).intValue()).isEqualTo(1);
+            assertThat(told.get(1).get("answer").toString()).contains(taken).contains(proposed);
+        } finally {
+            jdbc.update("DELETE FROM learning_hub.assistant_turns WHERE conversation_id = ?", conversation);
+            jdbc.update("DELETE FROM learning_hub.assistant_conversations WHERE conversation_id = ?", conversation);
+        }
+    }
+
+    @Test
+    void aTakenCodeOnAStepFilledByHandStillGetsANewCode() {
+        long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+        api.ok(INSTRUCTOR, stop(id));
+        String taken = jdbc.queryForObject("SELECT min(code) FROM learning_hub.courses", String.class);
+
+        api.error(INSTRUCTOR, confirm(id, 1, basics(taken)), "LEARNING-DUPLICATE");
+
+        JsonNode step = api.ok(INSTRUCTOR, session(id)).path("steps").get(0);
+        assertThat(step.path("state").asText()).isEqualTo("manual");
+        assertThat(step.path("proposal").path("code").asText()).startsWith("AI-").isNotEqualToIgnoringCase(taken);
+        assertThat(step.path("notes").toString()).contains(taken);
+        assertThat(api.ok(INSTRUCTOR, confirm(id, 1, basics(step.path("proposal").path("code").asText())))
+            .path("courseId").asLong()).isPositive();
+    }
+
+    @Test
     void aStepIsConfirmedOnlyWhenItIsTheCurrentOneAndHasBeenProposed() {
         long id = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
 
@@ -458,7 +539,7 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void aProposedLessonSentWithContentIsRefusedAndNothingIsSaved() {
+    void lessonContentTheAuthorAlreadyWroteIsSavedWithTheOutline() {
         long id = proposedSession();
         long revisionId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-OUTLINE2"))).path("revisionId").asLong();
         worker.runOnce();
@@ -472,19 +553,56 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         block.put("assets", List.of());
         block.put("steps", List.of());
 
-        JsonNode refused = api.error(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId,
-            lesson("Điều kiện mở tài khoản", List.of(block)), lesson("Hồ sơ", List.of()))),
-            "CORE-VALIDATION_FAILED");
+        // the page sends what it holds: a proposed lesson the author already wrote content for
+        JsonNode confirmed = api.ok(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId,
+            lesson("Điều kiện mở tài khoản", List.of(block)), lesson("Hồ sơ", List.of()))));
 
-        assertThat(refused.path("errors").get(0).path("code").asText()).isEqualTo("CONTENT_NOT_EMPTY");
-        JsonNode view = api.ok(INSTRUCTOR, session(id));
-        assertThat(view.path("currentStep").asInt()).isEqualTo(2);
-        assertThat(view.path("steps").get(1).path("state").asText()).isEqualTo("proposed");
+        assertThat(confirmed.path("currentStep").asInt()).isEqualTo(3);
+        assertThat(confirmed.path("steps").get(1).path("state").asText()).isEqualTo("confirmed");
         assertThat(jdbc.queryForObject("""
-            SELECT count(*) FROM learning_hub.course_chapters WHERE revision_id = ?
-            """, Integer.class, revisionId)).isZero();
-        assertThat(jdbc.queryForObject("SELECT ai_generated FROM learning_hub.course_revisions WHERE revision_id = ?",
-            Boolean.class, revisionId)).isFalse();
+            SELECT count(*) FROM learning_hub.lesson_blocks b
+              JOIN learning_hub.course_lessons l ON l.lesson_id = b.lesson_id
+              JOIN learning_hub.course_chapters c ON c.chapter_id = l.chapter_id WHERE c.revision_id = ?
+            """, Integer.class, revisionId)).isEqualTo(1);
+    }
+
+    @Test
+    void anOutlineProposalMarksTheDraftAsAiMadeBeforeAnyConfirm() {
+        long id = proposedSession();
+        long revisionId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-AIMARK01"))).path("revisionId").asLong();
+        assertThat(aiGenerated(revisionId)).isFalse();
+
+        worker.runOnce();
+
+        // "Lưu nháp" and publishing on the page, without "Đã chốt", must still ask for the review
+        assertThat(aiGenerated(revisionId)).isTrue();
+    }
+
+    @Test
+    void confirmingStepTwoMarksTheDraftOnlyWhenAProposedLessonIsKept() {
+        long id = proposedSession();
+        long revisionId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-AIMARK02"))).path("revisionId").asLong();
+        worker.runOnce();
+        // as if the proposal had not marked it: only the confirm decides here
+        jdbc.update("UPDATE learning_hub.course_revisions SET ai_generated = false WHERE revision_id = ?", revisionId);
+
+        // the author removed every proposed lesson
+        api.ok(INSTRUCTOR, confirm(id, 2, outlineBody(revisionId)));
+
+        assertThat(aiGenerated(revisionId)).isFalse();
+        // step 3 of this session would be the worker's next step: stopped, so the next session's step 1 is
+        api.ok(INSTRUCTOR, stop(id));
+
+        long other = proposedSession();
+        long otherRevision = api.ok(INSTRUCTOR, confirm(other, 1, basics("AI-AIMARK03"))).path("revisionId")
+            .asLong();
+        worker.runOnce();
+        jdbc.update("UPDATE learning_hub.course_revisions SET ai_generated = false WHERE revision_id = ?",
+            otherRevision);
+
+        api.ok(INSTRUCTOR, confirm(other, 2, outlineBody(otherRevision, lesson("Hồ sơ", List.of()))));
+
+        assertThat(aiGenerated(otherRevision)).isTrue();
     }
 
     @Test
@@ -729,21 +847,24 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void aConfirmedStepIsProposedAgainWithoutMovingTheSessionBack() {
+    void onlyTheSessionsCurrentStepIsProposedAgain() {
         long id = proposedSession();
         long courseId = api.ok(INSTRUCTOR, confirm(id, 1, basics("AI-AGAIN002"))).path("courseId").asLong();
 
-        JsonNode again = api.ok(INSTRUCTOR, proposeAgain(id, 1));
+        // step 1 is confirmed and the session is at step 2: a new step 1 proposal would reach no form
+        JsonNode refused = api.error(INSTRUCTOR, proposeAgain(id, 1), "CORE-VALIDATION_FAILED");
 
-        assertThat(again.path("currentStep").asInt()).isEqualTo(2);
-        assertThat(again.path("courseId").asLong()).isEqualTo(courseId);
-        assertThat(again.path("steps").get(0).path("state").asText()).isEqualTo("proposing");
-        worker.runOnce();
-        worker.runOnce();
+        assertThat(refused.path("errors").get(0).path("field").asText()).isEqualTo("step");
+        assertThat(refused.path("errors").get(0).path("code").asText()).isEqualTo("INVALID_STATE");
+        assertThat(refused.path("errors").get(0).path("message").asText()).contains("bước đang soạn");
         JsonNode view = api.ok(INSTRUCTOR, session(id));
-        assertThat(view.path("steps").get(0).path("state").asText()).isEqualTo("proposed");
-        assertThat(view.path("steps").get(1).path("state").asText()).isEqualTo("proposed");
-        assertThat(courses("AI-AGAIN002")).isEqualTo(1);
+        assertThat(view.path("currentStep").asInt()).isEqualTo(2);
+        assertThat(view.path("courseId").asLong()).isEqualTo(courseId);
+        assertThat(view.path("steps").get(0).path("state").asText()).isEqualTo("confirmed");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_drafting_reproposals",
+            Integer.class)).isZero();
+        // a step not reached yet is refused the same way
+        api.error(INSTRUCTOR, proposeAgain(id, 3), "CORE-VALIDATION_FAILED");
     }
 
     @Test
@@ -891,6 +1012,82 @@ class CourseDraftingIT extends AssessmentIntegrationTest {
         api.error(INSTRUCTOR, manual(id, 3), "CORE-VALIDATION_FAILED");
 
         assertThat(api.ok(INSTRUCTOR, session(id)).path("status").asText()).isEqualTo("active");
+    }
+
+    // ---- review fixes: upload cap, unused sources, interrupted claims -----------------------------------------------
+
+    @Test
+    void chatAttachmentsNoSessionUsesAreCappedPerDay() {
+        for (int upload = 0; upload < 10; upload++) {
+            api.ok(INSTRUCTOR, uploadSource());
+        }
+        int documentsBefore = documents();
+
+        JsonNode refused = api.error(INSTRUCTOR, uploadSource(), "ASSISTANT-JOB_RATE_LIMITED");
+
+        assertThat(refused.path("errors").get(0).path("field").asText()).isEqualTo("limit");
+        assertThat(refused.path("errors").get(0).path("code").asText()).isEqualTo("DAILY_UPLOAD_LIMIT");
+        assertThat(refused.path("errors").get(0).path("message").asText()).contains("thử lại sau");
+        assertThat(documents()).isEqualTo(documentsBefore);
+        // sources a session uses and other people's uploads do not count
+        api.ok(INSTRUCTOR, start(null));
+        api.error(INSTRUCTOR, uploadSource(), "ASSISTANT-JOB_RATE_LIMITED");
+        api.ok(ADMIN, uploadSource());
+    }
+
+    @Test
+    void onlyOldSourcesNoSessionUsesAreDeleted() {
+        long unusedOld = api.ok(INSTRUCTOR, uploadSource()).path("documentId").asLong();
+        long unusedNew = api.ok(INSTRUCTOR, uploadSource()).path("documentId").asLong();
+        long usedOld = api.ok(INSTRUCTOR, start(null)).path("source").path("documentId").asLong();
+        jdbc.update("UPDATE learning_hub.knowledge_documents SET create_time = now() - interval '2 days' "
+            + "WHERE document_id IN (?, ?)", unusedOld, usedOld);
+
+        assertThat(drafting.unusedSourcesBefore(OffsetDateTime.now().minusHours(24), 100)).containsExactly(unusedOld);
+        unusedSources.run();
+
+        assertThat(jdbc.queryForList("SELECT document_id FROM learning_hub.knowledge_documents WHERE document_id IN "
+            + "(?, ?, ?)", Long.class, unusedOld, unusedNew, usedOld)).containsExactlyInAnyOrder(unusedNew, usedOld);
+    }
+
+    @Test
+    void onlyClaimsOlderThanTheCutOffAreRequeued() {
+        long stale = api.ok(INSTRUCTOR, start(null)).path("id").asLong();
+        long fresh = api.ok(ADMIN, start(Map.of("ownerOrgId", ownOrg))).path("id").asLong();
+        jdbc.update("UPDATE learning_hub.course_drafting_steps SET claimed_at = now() - interval '10 minutes', "
+            + "attempts = 1 WHERE session_id = ?", stale);
+        jdbc.update("UPDATE learning_hub.course_drafting_steps SET claimed_at = now(), attempts = 1 "
+            + "WHERE session_id = ?", fresh);
+
+        int requeued = drafting.requeueInterrupted(OffsetDateTime.now().minusMinutes(5), -1);
+
+        assertThat(requeued).isEqualTo(1);
+        assertThat(claimedAt(stale)).isNull();
+        assertThat(claimedAt(fresh)).isNotNull();
+        // the step this instance is proposing stays claimed whatever its age
+        jdbc.update("UPDATE learning_hub.course_drafting_steps SET claimed_at = now() - interval '10 minutes' "
+            + "WHERE session_id = ?", fresh);
+        long freshStep = jdbc.queryForObject("SELECT step_id FROM learning_hub.course_drafting_steps "
+            + "WHERE session_id = ?", Long.class, fresh);
+        assertThat(drafting.requeueInterrupted(OffsetDateTime.now().minusMinutes(5), freshStep)).isZero();
+        assertThat(drafting.interruptedAtCap(1, OffsetDateTime.now().minusMinutes(5), freshStep)).isEmpty();
+        assertThat(drafting.interruptedAtCap(1, OffsetDateTime.now().minusMinutes(5), -1))
+            .extracting(DraftingStepRow::sessionId).containsExactly(fresh);
+    }
+
+    private Object claimedAt(long sessionId) {
+        return jdbc.queryForObject("SELECT claimed_at FROM learning_hub.course_drafting_steps WHERE session_id = ?",
+            Object.class, sessionId);
+    }
+
+    private MockMultipartHttpServletRequestBuilder uploadSource() {
+        return multipart(SESSIONS + "/sources").file(new MockMultipartFile("file", "dinh-kem.md", "text/markdown",
+            ("# Đính kèm\n\nNội dung " + System.nanoTime() + ".\n").getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private boolean aiGenerated(long revisionId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+            "SELECT ai_generated FROM learning_hub.course_revisions WHERE revision_id = ?", Boolean.class, revisionId));
     }
 
     private MockHttpServletRequestBuilder proposeAgain(long id, int step) {
