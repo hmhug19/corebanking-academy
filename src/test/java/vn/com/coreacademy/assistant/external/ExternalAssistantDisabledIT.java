@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
@@ -26,6 +27,8 @@ class ExternalAssistantDisabledIT extends AssessmentIntegrationTest {
     private MockMvc mvc;
     @Autowired
     private ObjectMapper json;
+    @Autowired
+    private JdbcTemplate jdbc;
 
     private ApiClient api;
 
@@ -40,6 +43,22 @@ class ExternalAssistantDisabledIT extends AssessmentIntegrationTest {
         api.http(INSTRUCTOR, api.post(Map.of("name", "Laptop", "validDays", 30), CONNECTIONS), 404,
             "CORE-ENDPOINT_NOT_FOUND");
         api.http(INSTRUCTOR, delete(CONNECTIONS + "/{id}", 1), 404, "CORE-ENDPOINT_NOT_FOUND");
+    }
+
+    @Test
+    void theMcpEndpointAnswers404EvenWithAValidToken() {
+        // A connection made while the feature was on stays in the table but cannot be used.
+        String token = ExternalConnectionCodes.TOKEN_PREFIX + "made-while-on";
+        jdbc.update("INSERT INTO learning_hub.external_assistant_connection (user_id, name, token_hash, token_prefix, "
+            + "expires_at) VALUES (?, 'x', ?, 'chan_ext_made', now() + interval '1 day')", INSTRUCTOR,
+            ExternalConnectionService.hash(token));
+        try {
+            McpClient mcp = new McpClient(mvc, json);
+            assertThat(mcp.raw("Bearer " + token, "tools/list", Map.of()).getStatus()).isEqualTo(404);
+            assertThat(mcp.raw(null, "tools/list", Map.of()).getStatus()).isEqualTo(404);
+        } finally {
+            jdbc.update("DELETE FROM learning_hub.external_assistant_connection");
+        }
     }
 
     @Test

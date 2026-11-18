@@ -420,3 +420,30 @@ Token chỉ xác thực `/api/v1/mcp`; mọi API khác từ chối nó (401, vì
 hoặc người dùng mất vai trò quản lý khóa học/chức năng `AI_ASSISTANT` thì `/api/v1/mcp` trả 401.
 `lastUsedAt` cập nhật tối đa mỗi phút một lần. Bảng: `external_assistant_connection`
 (`docs/sql/upgrade/2026-11-27-external-assistant-connections.sql`).
+
+### Endpoint MCP (`/api/v1/mcp`, token Kết nối trợ lý ngoài)
+
+Spring AI MCP Server 1.1.8 (dòng 1.1.x dựng trên Spring Boot 3.5 / Java 17; 2.x cần Boot 4), WebMVC, Streamable
+HTTP, **stateless** (`spring.ai.mcp.server.protocol=STATELESS`). Chỉ POST JSON-RPC (`initialize`, `tools/list`,
+`tools/call`, `prompts/list`, `prompts/get`), header `Accept: application/json, text/event-stream` và
+`Authorization: Bearer chan_ext_…`. Chuỗi bảo mật riêng (`ExternalMcpSecurityConfig`, xếp trước chuỗi chính):
+
+- Cờ tắt → 404 trước mọi kiểm tra. Thiếu token, token sai/đã thu hồi/hết hạn, tài khoản không active, mật khẩu tạm
+  hoặc không còn vai trò quản lý khóa học/chức năng `AI_ASSISTANT` → 401 (đọc quyền ở mỗi lần gọi).
+- JWT đăng nhập không dùng được ở đây (401); token kết nối không dùng được ở API khác (401).
+- Lệnh gọi chạy với đúng quyền hiện tại của người dùng, qua cùng service và kiểm tra vai trò/chủ sở hữu như web.
+
+Năm công cụ (không công cụ nào đọc tài liệu, bài học, khóa học, kho tri thức hay cộng đồng; server không nhận tệp):
+
+| Công cụ | Tham số | Kết quả |
+|---|---|---|
+| `start_course_drafting` | `source_name` (1–255 ký tự) | Phiên mới `proposer = external`, không có tài liệu nguồn, cho đơn vị của người gọi; `editorUrl` = `{app.assistant.external.app-base-url}/admin/courses/new?session={id}` (sau bước 1: `/admin/courses/{courseId}/edit?step={n}`), `waitingStep: 1`. Không tính vào giới hạn tạo khóa học mỗi ngày. |
+| `get_reference_data` | — | `programmes`, `modules` (`id, name, fieldId`), `competencies` (`id, name`), `audience` (`key, type, name, canIncludeSubunits`), `levels`, `requirements`. |
+| `get_drafting_session` | `session_id` | Trạng thái, bước hiện tại, `waitingStep`, từng bước (`state, proposal, notes, error`), `next`. Chỉ phiên external của chính người gọi; khác đi là lỗi "not found". |
+| `propose_step` | `session_id`, `step`, `proposal` | (ticket 03) |
+| `stop_course_drafting` | `session_id` | Phiên kết thúc phần của trợ lý (status `manual`); những gì đã ghi giữ nguyên. |
+
+Lỗi của công cụ là kết quả `isError: true` với câu tiếng Anh ngắn (tham số nào, trạng thái nào), không lặp lại nội
+dung đã lưu. Prompt `soan_khoa_hoc` (tham số tùy chọn `tai_lieu`) mở đầu luồng; `instructions` của server và mô tả
+từng công cụ nêu quy tắc: từng bước một, không viết nội dung bài, sau mỗi bước dặn tác giả mở link, sửa, Chốt bước rồi
+chờ "tiếp", không bao giờ nói khóa học đã được tạo hay xuất bản.

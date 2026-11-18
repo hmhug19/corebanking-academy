@@ -20,6 +20,12 @@ public final class DraftingStates {
     public static final String MANUAL_SESSION = "manual";
     public static final String FAILED_SESSION = "failed";
 
+    // ---- who proposes ----
+    /** The in-house model proposes each step through the worker. */
+    public static final String IN_HOUSE = "assistant";
+    /** A Trợ lý ngoài proposes each step through {@code /api/v1/mcp}; the worker never runs for it. */
+    public static final String EXTERNAL = "external";
+
     // ---- the steps, numbered 1 to 4; the editor's step index is {@code step - 1} ----
     /** Thông tin cơ bản: confirming it creates the draft course. */
     public static final int BASICS_STEP = 1;

@@ -23,10 +23,23 @@ import vn.com.coreacademy.knowledge.entity.DocumentScope;
 @Repository
 @RequiredArgsConstructor
 public class CourseDraftingRepository {
+    /** {@code proposer} is who makes the Đề xuất ({@link DraftingStates#IN_HOUSE} or {@link DraftingStates#EXTERNAL}). */
     public record SessionRow(long id, String ownerUserId, long ownerOrgId, Long sourceDocumentId, Long conversationId,
                              Long courseId, Long revisionId, int currentStep, String status, String errorMessage,
                              String hints, String sourceSummary, OffsetDateTime createTime,
-                             OffsetDateTime updateTime) {
+                             OffsetDateTime updateTime, String proposer, String sourceName) {
+        /** A session of the in-house assistant. */
+        public SessionRow(long id, String ownerUserId, long ownerOrgId, Long sourceDocumentId, Long conversationId,
+                          Long courseId, Long revisionId, int currentStep, String status, String errorMessage,
+                          String hints, String sourceSummary, OffsetDateTime createTime, OffsetDateTime updateTime) {
+            this(id, ownerUserId, ownerOrgId, sourceDocumentId, conversationId, courseId, revisionId, currentStep,
+                status, errorMessage, hints, sourceSummary, createTime, updateTime, DraftingStates.IN_HOUSE, null);
+        }
+
+        /** A Trợ lý ngoài makes this session's Đề xuất: the worker and the chat leave it alone. */
+        public boolean external() {
+            return DraftingStates.EXTERNAL.equals(proposer);
+        }
     }
 
     public record DraftingStepRow(long id, long sessionId, int stepNo, String state, String proposal, String notes,
@@ -75,7 +88,7 @@ public class CourseDraftingRepository {
         (Long) rs.getObject("conversation_id"), (Long) rs.getObject("course_id"), (Long) rs.getObject("revision_id"),
         rs.getInt("current_step"), rs.getString("status"), rs.getString("error_message"), rs.getString("hints"),
         rs.getString("source_summary"), rs.getObject("create_time", OffsetDateTime.class),
-        rs.getObject("update_time", OffsetDateTime.class));
+        rs.getObject("update_time", OffsetDateTime.class), rs.getString("proposer"), rs.getString("source_name"));
     private static final RowMapper<DraftingStepRow> STEP = (rs, row) -> new DraftingStepRow(rs.getLong("step_id"),
         rs.getLong("session_id"), rs.getInt("step_no"), rs.getString("state"), rs.getString("proposal"),
         rs.getString("notes"), rs.getString("error_message"), rs.getInt("attempts"),
@@ -103,21 +116,35 @@ public class CourseDraftingRepository {
 
     public long insertSession(String ownerUserId, long ownerOrgId, long sourceDocumentId, Long conversationId,
                               String hintsJson) {
+        return insertSession(ownerUserId, ownerOrgId, sourceDocumentId, conversationId, hintsJson,
+            DraftingStates.IN_HOUSE, null);
+    }
+
+    /** A session of a Trợ lý ngoài: no source document (the server never receives it), only its name for display. */
+    public long insertExternalSession(String ownerUserId, long ownerOrgId, String sourceName) {
+        return insertSession(ownerUserId, ownerOrgId, null, null, "{}", DraftingStates.EXTERNAL, sourceName);
+    }
+
+    private long insertSession(String ownerUserId, long ownerOrgId, Long sourceDocumentId, Long conversationId,
+                               String hintsJson, String proposer, String sourceName) {
         return jdbc.queryForObject("""
             INSERT INTO learning_hub.course_drafting_sessions (owner_user_id, owner_org_id, source_document_id,
-                                                               conversation_id, current_step, status, hints)
-            VALUES (:owner, :org, :document, :conversation, :firstStep, :active, :hints::jsonb)
+                                                               conversation_id, current_step, status, hints,
+                                                               proposer, source_name)
+            VALUES (:owner, :org, :document, :conversation, :firstStep, :active, :hints::jsonb, :proposer,
+                    :sourceName)
             RETURNING session_id
             """, states().addValue("owner", ownerUserId).addValue("org", ownerOrgId)
             .addValue("document", sourceDocumentId).addValue("conversation", conversationId)
-            .addValue("firstStep", DraftingStates.FIRST_STEP).addValue("hints", hintsJson), Long.class);
+            .addValue("firstStep", DraftingStates.FIRST_STEP).addValue("hints", hintsJson)
+            .addValue("proposer", proposer).addValue("sourceName", sourceName), Long.class);
     }
 
     public Optional<SessionRow> session(long sessionId) {
         return jdbc.query("""
             SELECT session_id, owner_user_id, owner_org_id, source_document_id, conversation_id, course_id,
                    revision_id, current_step, status, error_message, hints::text AS hints,
-                   source_summary::text AS source_summary, create_time, update_time
+                   source_summary::text AS source_summary, create_time, update_time, proposer, source_name
               FROM learning_hub.course_drafting_sessions
              WHERE session_id = :session
             """, Map.of("session", sessionId), SESSION).stream().findFirst();
@@ -125,7 +152,8 @@ public class CourseDraftingRepository {
 
     /**
      * Start times of the user's course generation since the instant, oldest first: old jobs (deleted ones too) and
-     * drafting sessions count against the same daily allowance.
+     * drafting sessions count against the same daily allowance. Sessions a Trợ lý ngoài drives do not: they cost the
+     * in-house model nothing (they have their own limit of open sessions).
      */
     public List<OffsetDateTime> startedSince(String ownerUserId, OffsetDateTime since) {
         return jdbc.queryForList("""
@@ -136,13 +164,13 @@ public class CourseDraftingRepository {
                     UNION ALL
                     SELECT create_time
                       FROM learning_hub.course_drafting_sessions
-                     WHERE owner_user_id = :owner AND create_time > :since
+                     WHERE owner_user_id = :owner AND create_time > :since AND proposer = :inHouse
                     UNION ALL
                     SELECT create_time
                       FROM learning_hub.course_drafting_reproposals
                      WHERE owner_user_id = :owner AND create_time > :since) starts
              ORDER BY started
-            """, Map.of("owner", ownerUserId, "since", since), OffsetDateTime.class);
+            """, Map.of("owner", ownerUserId, "since", since, "inHouse", DraftingStates.IN_HOUSE), OffsetDateTime.class);
     }
 
     /**
@@ -212,7 +240,7 @@ public class CourseDraftingRepository {
         return jdbc.query("""
             SELECT session_id, owner_user_id, owner_org_id, source_document_id, conversation_id, course_id,
                    revision_id, current_step, status, error_message, hints::text AS hints,
-                   source_summary::text AS source_summary, create_time, update_time
+                   source_summary::text AS source_summary, create_time, update_time, proposer, source_name
               FROM learning_hub.course_drafting_sessions
              WHERE session_id = :session
                FOR UPDATE
@@ -224,7 +252,7 @@ public class CourseDraftingRepository {
         return jdbc.query("""
             SELECT session_id, owner_user_id, owner_org_id, source_document_id, conversation_id, course_id,
                    revision_id, current_step, status, error_message, hints::text AS hints,
-                   source_summary::text AS source_summary, create_time, update_time
+                   source_summary::text AS source_summary, create_time, update_time, proposer, source_name
               FROM learning_hub.course_drafting_sessions
              WHERE course_id = :course AND owner_user_id = :owner
              ORDER BY create_time DESC, session_id DESC

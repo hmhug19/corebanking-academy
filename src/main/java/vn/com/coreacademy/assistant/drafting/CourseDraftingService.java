@@ -147,6 +147,71 @@ public class CourseDraftingService {
         return queue(prepared, documentId, true);
     }
 
+    /**
+     * {@code start_course_drafting} of a Trợ lý ngoài, as the caller (the connection's user): the same role and unit
+     * checks as {@link #start}, with no document (the server never receives it), only {@code sourceName} to show. The
+     * worker never takes its steps: step 1 waits in {@code proposing} for the {@code propose_step} tool. It does not count
+     * against the daily course generation allowance, which is for the in-house model.
+     */
+    public SessionView startExternal(String sourceName) {
+        String userId = SecurityContextUtils.getUserId();
+        Actor actor = identity.actor(userId);
+        requireManager(actor);
+        long ownerOrgId = ownerOrg(actor, null);
+        String name = blankToNull(sourceName);
+        if (name == null || name.length() > GenerationSchemas.MAX_TITLE) {
+            throw BusinessException.validation("source_name", "INVALID_LENGTH",
+                "Tên tài liệu từ 1 đến " + GenerationSchemas.MAX_TITLE + " ký tự.");
+        }
+        long sessionId = transaction.execute(status -> {
+            allowance.lock(userId);
+            long created = drafting.insertExternalSession(userId, ownerOrgId, name);
+            drafting.insertStep(created, DraftingStates.FIRST_STEP);
+            return created;
+        });
+
+        return view(drafting.session(sessionId).orElseThrow());
+    }
+
+    /** The caller's own session that a Trợ lý ngoài drives; any other answers as missing. */
+    public SessionView getExternal(long sessionId) {
+        requireManager(access.actor());
+        return view(ownedExternal(sessionId));
+    }
+
+    /**
+     * {@code stop_course_drafting}: the Trợ lý ngoài's part of the session ends (status manual), as "Tự điền" would end
+     * it. What it already proposed and what the author confirmed stay; a step still waiting for a proposal is the
+     * author's to fill. A session already over is returned as it is.
+     */
+    public SessionView stopExternal(long sessionId) {
+        requireManager(access.actor());
+        ownedExternal(sessionId);
+        return view(transaction.execute(status -> {
+            SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+            if (open(session)) {
+                drafting.stopProposing(sessionId);
+                drafting.endAsManual(sessionId);
+            }
+            return drafting.session(sessionId).orElseThrow();
+        }));
+    }
+
+    /** The unit a Trợ lý ngoài session of the caller is for: their own, as {@link #startExternal} decides it. */
+    long externalOwnerOrg(Actor actor) {
+        requireManager(actor);
+        return ownerOrg(actor, null);
+    }
+
+    SessionRow ownedExternal(long sessionId) {
+        SessionRow session = owned(sessionId);
+        if (!session.external()) {
+            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+
+        return session;
+    }
+
     public SessionView get(long sessionId) {
         requireManager(access.actor());
         return view(owned(sessionId));
@@ -629,7 +694,8 @@ public class CourseDraftingService {
         List<StepView> steps = drafting.steps(row.id()).stream().map(this::stepView).toList();
 
         return new SessionView(row.id(), row.status(), row.currentStep(), row.courseId(), row.revisionId(),
-            row.conversationId(), source, row.errorMessage(), steps, row.createTime(), row.updateTime());
+            row.conversationId(), source, row.errorMessage(), steps, row.createTime(), row.updateTime(),
+            row.proposer(), row.sourceName());
     }
 
     private StepView stepView(DraftingStepRow step) {
