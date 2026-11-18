@@ -91,6 +91,7 @@ Thứ tự `scripts/local-db-init.sh` chạy, mỗi file một lần với `ON_E
 | 5q | `upgrade/2026-11-21-assistant-feedback-review.sql` | Bản sao lượt hỏi đáp kèm 👎 khi người dùng đồng ý chia sẻ (cột `shared_*` của `assistant_feedback`) và chức năng `AI_FEEDBACK_REVIEW` (không cấp cho vai trò nào); chạy trước backend mới |
 | 5r | `upgrade/2026-11-22-system-audit-route.sql` | Chức năng `SYSTEM_AUDIT` trỏ tới `/admin/gamification`, màn mà menu "Hệ thống & nhật ký" thực sự mở (trước đó seed ghi `/admin/system`, màn giữ chỗ). Chỉ đổi dòng còn giá trị seed cũ; chạy lại an toàn. Rollback: `upgrade/2026-11-22-system-audit-route.rollback.sql` |
 | 5s | `upgrade/2026-11-23-revoked-sessions.sql` | Bảng `revoked_sessions`: đăng xuất chỉ kết thúc phiên (claim `sid`) đang dùng, phiên ở trình duyệt khác vẫn dùng được; đổi vai trò, mật khẩu, trạng thái vẫn thu hồi mọi phiên. Thêm cột `scorm_registrations.launch_session_id` (nếu có bảng SCORM). Chạy trước backend mới. Rollback: `upgrade/2026-11-23-revoked-sessions.rollback.sql` (sau khi lùi backend) |
+| 5t | `upgrade/2026-11-24-checkpoint-answers.sql` | Bảng `checkpoint_answers`: câu trả lời câu hỏi nhanh cuối bài (không tính điểm), dùng để chọn câu và gợi ý ôn tập; chạy trước backend mới. Rollback cùng tên `.rollback.sql` xoá hết câu trả lời đã lưu |
 | 6 | `learning_hub_community.sql` | 51 bảng Community |
 | 7 | `learning_hub_community_functions.sql` | Menu `COMMUNITY`, `COMMUNITY_MODERATION` |
 | 8 | `learning_hub_community_catalog.sql` | Tag, alias, luật huy hiệu (org `BIDV110B803`, actor `quantri.ban`) |

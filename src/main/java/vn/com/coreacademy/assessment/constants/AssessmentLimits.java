@@ -17,6 +17,8 @@ public final class AssessmentLimits {
     public static final int MAX_BULK_IDS = 100;
     public static final int MAX_REASON_LENGTH = 2000;
     public static final int MAX_EXTRA_ATTEMPTS = 10;
+    /** Số câu hỏi nhanh tối đa cho một lần mở cuối bài; ngắn để không giống một bài thi. */
+    public static final int CHECKPOINT_QUESTIONS = 3;
     public static final int MAX_EXPORT_ROWS = 10_000;
     public static final int MAX_IMPORT_ROWS = 1000;
     public static final int MAX_IMPORT_ERRORS = 200;
