@@ -97,7 +97,7 @@ bàn/ghế có hitbox, các ô sàn đi qua được. Đồng hồ mặc định
 | `board-ready` | `{table,points}`; phải ngồi đúng bàn, hai tài khoản khác nhau cùng sẵn sàng, góp bằng nhau từ 10 CPoint. |
 | `board-move` | `{table,matchId,version,from,to,promotion?}`. Ô đánh số từ góc trái trên, theo hàng; `promotion` là `q/r/b/n` khi phong cấp. |
 | `board-action` | `{table,matchId,version,action,from?,to?,promotion?}` với `resign/offer-draw/accept-draw/claim-draw`. Các ô tùy chọn là nước dự định xin hòa. |
-| `board-tables` | `{tables:[{id,status,players}]}`; trạng thái `empty/waiting/playing`. |
+| `board-tables` | `{tables:[{id,status,players}]}` cho Caro (`caro:0`–`caro:2`), cờ vua và cờ tướng. Trạng thái `empty/waiting/playing`; `players` luôn có hai phần tử, ghế trống dùng chuỗi rỗng. |
 | `board-state` | Bàn, ghế, hai trạng thái sẵn sàng, mức góp, cấu hình đồng hồ và `match?`. Match gồm ID, version, board, side, turn, clocks, serverTime, legal, lastCells, check, history, result, reason, drawOffer, mustChange. |
 | `board-error` | `{message}` và snapshot mới khi lệnh trùng/sai phiên bản/nước không hợp lệ. |
 | `floor-join` | Không có payload; phải đứng trong vùng sàn và có capability. Người đến giữa ván xếp hàng ván sau. |
@@ -150,6 +150,17 @@ Fixture và lệnh kiểm thử:
 | `RoomColorFloorTest` | Mép ô, hai người, năm vòng, đồng thắng, tất cả trượt, hàng chờ ván sau. |
 
 Chạy `mvn test -Dtest=RoomBoardPositionTest,RoomBoardMatchTest,ChatRoomPlaygroundTest,RoomColorFloorTest`.
+
+#### Thoại trong phòng
+
+Client gửi `voice: true` khi vào phòng và nhận `voice-ready` với cấu hình ICE dùng chung với trình chiếu.
+Giữ V hoặc giữ nút thoại để mở micrô. `voice-talk` đăng ký ID lượt nói hoặc gửi `null` khi thả.
+Server báo `voice-state` cho người nghe, kể cả người mới vào. Người nghe gửi `voice-watch`; server
+gửi `voice-peer` cho người nói. `voice-signal` chuyển offer/answer/ICE giữa đúng hai phiên đã vào
+phòng, theo ID lượt nói hiện tại, kèm `speaker` và `to` (server thay `to` bằng `from`).
+Âm thanh truyền qua WebRTC. Server chỉ chuyển tín hiệu và không ghi âm hay ghi DB.
+Client ngừng track và đóng kết nối khi thả, mất focus, chuyển tab hoặc rời phòng. Trình duyệt cần
+HTTPS ngoài localhost và quyền micrô. Mạng hạn chế có thể cần TURN.
 
 #### Bàn trình chiếu và màn hình 16:9
 
