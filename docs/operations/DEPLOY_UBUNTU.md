@@ -173,6 +173,8 @@ nano .env.ubuntu
 | OLLAMA_BASE_URL | Địa chỉ Ollama nhìn từ container, ví dụ `http://100.x.y.z:11434` qua Tailscale; mặc định `localhost` là chính container nên tính năng AI không chạy |
 | OLLAMA_CHAT_MODEL / OLLAMA_EMBED_MODEL | Mặc định `qwen3:8b` và `bge-m3`; chỉ đặt khi khác |
 | KNOWLEDGE_MAX_FILE_SIZE / KNOWLEDGE_WORKER_POLL / KNOWLEDGE_WORKER_CONCURRENCY | Mặc định `20MB`, `2s`, `1`; tài liệu tải lên được lưu trong volume `backend_knowledge` (`/app/data/knowledge`) |
+| ASSISTANT_EXTERNAL_ENABLED | Trợ lý ngoài (Kết nối trợ lý ngoài, MCP ở `/api/v1/mcp`); compose mặc định `true`, đặt `false` để tắt. Cần migration 2026-11-27 đến 2026-11-29 |
+| ASSISTANT_EXTERNAL_APP_BASE_URL | Địa chỉ web app trong `editorUrl` và lệnh `claude mcp add`; mặc định bằng `SCORM_LMS_ORIGIN` |
 
 Sinh JWT secret mới bằng lệnh sau, rồi paste giá trị vào `.env.ubuntu`:
 
