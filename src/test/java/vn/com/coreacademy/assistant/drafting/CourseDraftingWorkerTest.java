@@ -25,6 +25,7 @@ import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository.SessionRow
 import vn.com.coreacademy.assistant.drafting.DraftingStepProposer.Proposal;
 import vn.com.coreacademy.assistant.metrics.AssistantMetrics;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
+import vn.com.coreacademy.knowledge.ai.OllamaUnavailableException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -37,6 +38,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 /** The drafting worker yields to chat, stores what the proposer returns and fails the session on a readable error. */
@@ -131,6 +133,26 @@ class CourseDraftingWorkerTest {
 
         verify(drafting).releaseStep(7, claimedAt);
         verify(drafting, never()).failStep(anyLong(), any(), any());
+    }
+
+    @Test
+    void aPollStopsAtAStepThatWaitsInsteadOfClaimingItAgainAndAgain() {
+        // The same scheduler thread runs the document reader: a poll that spins on a waiting step starves it.
+        when(proposer.propose(session, step)).thenThrow(new StepNotReadyException("reading"));
+
+        worker.poll();
+
+        verify(drafting, times(1)).claimNext();
+        verify(drafting).releaseStep(7, claimedAt);
+    }
+
+    @Test
+    void aPollStopsAtAStepThatWaitsForTheModel() {
+        when(proposer.propose(session, step)).thenThrow(new OllamaUnavailableException("down", null));
+
+        worker.poll();
+
+        verify(drafting, times(1)).claimNext();
     }
 
     @Test

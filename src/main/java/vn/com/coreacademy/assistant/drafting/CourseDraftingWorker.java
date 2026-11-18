@@ -90,7 +90,12 @@ public class CourseDraftingWorker {
         }
     }
 
-    /** Proposes the next waiting step; false when there is none, the model is unreachable or a chat turn runs. */
+    /**
+     * Proposes the next waiting step; false when there is none, the model is unreachable, a chat turn runs or the step
+     * claimed has to wait again (its source is still being read, or the model went away). Stopping there matters: the
+     * same scheduler thread runs the document reader, so a poll that kept claiming a waiting step would never let the
+     * source be read.
+     */
     public boolean runOnce() {
         if (chat.chatRunning() || !ollama.isAvailable()) {
             return false;
@@ -99,26 +104,25 @@ public class CourseDraftingWorker {
         if (claimed == null || claimed.isEmpty()) {
             return false;
         }
-        execute(claimed.get());
-
-        return true;
+        return execute(claimed.get());
     }
 
-    private void execute(DraftingStepRow step) {
+    private boolean execute(DraftingStepRow step) {
         running.set(step.id());
         try {
-            propose(step);
+            return propose(step);
         } finally {
             running.set(NONE);
         }
     }
 
-    private void propose(DraftingStepRow step) {
+    /** False when the step went back to wait for the next poll. */
+    private boolean propose(DraftingStepRow step) {
         DraftingStepProposer active = proposer.getIfAvailable();
         Optional<SessionRow> session = drafting.session(step.sessionId());
         if (active == null || session.isEmpty()) {
             fail(step, GENERIC_FAILURE);
-            return;
+            return true;
         }
         long started = System.nanoTime();
         String outcome = "done";
@@ -157,6 +161,8 @@ public class CourseDraftingWorker {
             metrics.generationStep(DraftingStates.kind(step.stepNo()), outcome,
                 (System.nanoTime() - started) / 1_000_000);
         }
+
+        return !"waiting".equals(outcome);
     }
 
     /**
