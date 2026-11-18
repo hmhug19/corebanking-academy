@@ -74,6 +74,8 @@ class ConversationControllerTest extends KnowledgeIntegrationTest {
 
     private void modelAnswers(String text) throws Exception {
         doReturn(true).when(ollama).isAvailable();
+        // Chit-chat has no required tool; the default document skill must search, which these turns do not test.
+        doReturn("tro_chuyen").when(ollama).chat(anyList(), any());
         doReturn(new ChatTurn(text, List.of())).when(ollama).chatWithTools(anyList(), anyList(), any(), any(), any());
     }
 

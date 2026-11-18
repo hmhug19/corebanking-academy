@@ -1,6 +1,11 @@
-description: xem hoặc sửa hồ sơ cá nhân của chính người dùng
+description: hồ sơ cá nhân của CHÍNH người dùng - hỏi thông tin hồ sơ (họ tên, email, chức danh, đơn vị của tôi) hoặc đổi hồ sơ. Mở trang hồ sơ thì dùng dieu_huong
 tools:
+  - read_profile
   - update_profile
   - open_screen
 roles: []
-output: Nêu rõ thay đổi đang chờ xác nhận. Bắt buộc gọi công cụ sửa hồ sơ trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
+output: Xem thông tin thì trả lời đúng giá trị công cụ đọc hồ sơ trả về. Sửa thì nêu rõ thay đổi đang chờ xác nhận. Bắt buộc gọi công cụ (xem hồ sơ, sửa hồ sơ hoặc mở màn hình) trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
+requiredTools:
+  - read_profile
+  - update_profile
+  - open_screen
