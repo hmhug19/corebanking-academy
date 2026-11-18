@@ -13,10 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
-import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.ApiClient.delete;
@@ -27,8 +25,7 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.REPORT_VIEWER;
 
 /** Kết nối trợ lý ngoài: create (token shown once, only its hash kept), list, revoke, and who may. */
-@TestPropertySource(properties = "app.assistant.external.enabled=true")
-class ExternalConnectionIT extends AssessmentIntegrationTest {
+class ExternalConnectionIT extends ExternalAssistantIT {
     static final String CONNECTIONS = "/api/v1/assistant/external-connections";
 
     @Autowired

@@ -14,10 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
-import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 import vn.com.coreacademy.identity.repository.UserRepository;
 import vn.com.coreacademy.identity.service.TokenService;
 
@@ -32,9 +30,7 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.REPORT_VI
  * The MCP endpoint of the Trợ lý ngoài, over HTTP with real connection tokens: who gets in, which tools there are,
  * and the start / read / stop tools on drafting sessions.
  */
-@TestPropertySource(properties = {"app.assistant.external.enabled=true",
-    "app.assistant.external.app-base-url=https://lms.example"})
-class ExternalMcpIT extends AssessmentIntegrationTest {
+class ExternalMcpIT extends ExternalAssistantIT {
     @Autowired
     private MockMvc mvc;
     @Autowired

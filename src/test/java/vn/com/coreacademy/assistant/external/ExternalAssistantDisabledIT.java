@@ -8,7 +8,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
@@ -18,8 +17,10 @@ import static vn.com.coreacademy.assessment.support.ApiClient.delete;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 
-/** With {@code app.assistant.external.enabled=false} (the default) the feature does not exist for anyone. */
-@TestPropertySource(properties = "app.assistant.external.enabled=false")
+/**
+ * With {@code app.assistant.external.enabled=false}, the default (this IT runs on the default context), the feature does
+ * not exist for anyone.
+ */
 class ExternalAssistantDisabledIT extends AssessmentIntegrationTest {
     private static final String CONNECTIONS = ExternalConnectionIT.CONNECTIONS;
 

@@ -11,18 +11,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.support.TransactionTemplate;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
-import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
-import vn.com.coreacademy.assistant.drafting.CourseDraftingWorker;
-import vn.com.coreacademy.knowledge.ai.OllamaClient;
+import vn.com.coreacademy.assistant.drafting.CourseDraftingRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
@@ -32,13 +28,9 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTO
  * would, the worker and the chat leave the session alone, "Đề xuất lại" waits for the Trợ lý ngoài again, and what the
  * author confirmed (their edits included) is what the next step builds on.
  */
-@TestPropertySource(properties = "app.assistant.external.enabled=true")
-class ExternalProposeIT extends AssessmentIntegrationTest {
+class ExternalProposeIT extends ExternalAssistantIT {
     private static final String SESSIONS = "/api/v1/assistant/drafting-sessions";
     private static final String PROPOSE = ExternalAssistantTools.PROPOSE;
-
-    @MockitoBean
-    private OllamaClient ollama;
 
     @Autowired
     private MockMvc mvc;
@@ -47,7 +39,9 @@ class ExternalProposeIT extends AssessmentIntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
     @Autowired
-    private CourseDraftingWorker worker;
+    private CourseDraftingRepository drafting;
+    @Autowired
+    private TransactionTemplate transaction;
 
     private ApiClient api;
     private McpClient mcp;
@@ -66,8 +60,6 @@ class ExternalProposeIT extends AssessmentIntegrationTest {
 
     @BeforeEach
     void clear() {
-        // The model is up: a worker that could claim an external step would do so now.
-        when(ollama.isAvailable()).thenReturn(true);
         jdbc.update("DELETE FROM learning_hub.external_assistant_connection");
         jdbc.update("DELETE FROM learning_hub.course_drafting_steps");
         jdbc.update("DELETE FROM learning_hub.course_drafting_sessions");
@@ -117,6 +109,11 @@ class ExternalProposeIT extends AssessmentIntegrationTest {
 
     private MockHttpServletRequestBuilder confirm(long id, int step, Object body) {
         return api.post(body, SESSIONS + "/{id}/steps/{step}/confirm", id, step);
+    }
+
+    /** Whether the worker's claim takes a step now; only external sessions exist in these tests. */
+    private boolean workerClaims() {
+        return transaction.execute(status -> drafting.claimNext()).isPresent();
     }
 
     private int turns(long id) {
@@ -171,7 +168,7 @@ class ExternalProposeIT extends AssessmentIntegrationTest {
     @Test
     void aValidProposalForTheWaitingStepIsStoredAndShowsOnThePage() {
         long id = start();
-        assertThat(worker.runOnce()).as("the worker never claims an external step").isFalse();
+        assertThat(workerClaims()).as("the worker never claims an external step").isFalse();
 
         JsonNode answered = propose(id, 1, basics()).data();
         assertThat(answered).isNotNull();
@@ -186,7 +183,7 @@ class ExternalProposeIT extends AssessmentIntegrationTest {
         assertThat(step.path("proposal").path("title").asText()).isEqualTo("Mở tài khoản thanh toán");
         assertThat(step.path("proposal").path("code").asText()).startsWith("AI-");
         assertThat(step.path("proposal").path("programId").isNull()).isTrue();
-        assertThat(worker.runOnce()).isFalse();
+        assertThat(workerClaims()).isFalse();
         assertThat(turns(id)).isZero();
     }
 
@@ -261,7 +258,7 @@ class ExternalProposeIT extends AssessmentIntegrationTest {
         assertThat(confirmed.path("title").asText()).isEqualTo("Tên tác giả sửa");
         assertThat(confirmed.path("code").asText()).isEqualTo(code);
         assertThat(read.path("steps").get(1).path("confirmed").isNull()).isTrue();
-        assertThat(worker.runOnce()).isFalse();
+        assertThat(workerClaims()).isFalse();
 
         // Step 2, asked again from the page: back to waiting for the Trợ lý ngoài, the worker still not involved.
         assertThat(propose(id, 2, outline()).error()).isFalse();
@@ -269,7 +266,7 @@ class ExternalProposeIT extends AssessmentIntegrationTest {
             .path("sourceSection").asText()).isEqualTo("Phần 1");
         JsonNode again = api.ok(INSTRUCTOR, post(SESSIONS + "/{id}/steps/{step}/propose-again", id, 2));
         assertThat(again.path("steps").get(1).path("state").asText()).isEqualTo("proposing");
-        assertThat(worker.runOnce()).isFalse();
+        assertThat(workerClaims()).isFalse();
         assertThat(mcp.ok(token, ExternalAssistantTools.GET_SESSION, Map.of("session_id", id)).data()
             .path("waitingStep").asInt()).isEqualTo(2);
         assertThat(propose(id, 2, outline()).error()).isFalse();

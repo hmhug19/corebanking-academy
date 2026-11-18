@@ -15,17 +15,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.com.coreacademy.assessment.support.ApiClient;
-import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 
 /** The limits of the Trợ lý ngoài (calls per minute, body size, sessions going at once) and the audit of its calls. */
-@TestPropertySource(properties = "app.assistant.external.enabled=true")
-class ExternalLimitsIT extends AssessmentIntegrationTest {
+class ExternalLimitsIT extends ExternalAssistantIT {
     private static final String START = ExternalAssistantTools.START;
 
     @Autowired
