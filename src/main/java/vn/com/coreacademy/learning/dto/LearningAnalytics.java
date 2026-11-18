@@ -21,7 +21,11 @@ public final class LearningAnalytics {
     public record Summary(Instant dataAsOf, String timeZone, Counts counts) {
     }
 
-    public record Dashboard(Instant dataAsOf, String timeZone, Counts counts, List<DailyActivity> daily) {
+    public record Dashboard(Instant dataAsOf, String timeZone, Counts counts, List<DailyActivity> daily,
+                            List<TopLearner> topLearners) {
+    }
+
+    public record TopLearner(String userId, String fullName, Long completed) {
     }
 
     public record DailyActivity(LocalDate date, Long started, Long completed) {

@@ -116,6 +116,20 @@ public class LearningAnalyticsRepository {
         }).toList();
     }
 
+    public record LearnerRank(String userId, Long completed) {
+    }
+
+    public List<LearnerRank> topLearners(Criteria criteria, Instant from, Instant to, int limit) {
+        Source source = source(criteria, "", List.of(
+            "x.status = :completed", "x.completed_at >= :since", "x.completed_at < :until"));
+        List<?> rows = source.bind(entityManager.createNativeQuery(
+            "select x.user_id, count(*) " + source.sql()
+                + "group by x.user_id order by count(*) desc, max(x.completed_at) desc, x.user_id",
+            LearnerRank.class))
+            .setParameter("since", from).setParameter("until", to).setMaxResults(limit).getResultList();
+        return rows.stream().map(LearnerRank.class::cast).toList();
+    }
+
     public Page<LearningAnalytics.Enrollment> enrollments(Criteria criteria, Pageable page) {
         Source source = source(criteria);
         NativeSearchQuery sql = new NativeSearchQuery("from (select x.* " + source.sql() + ") x\n");
