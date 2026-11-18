@@ -162,7 +162,7 @@ public class LearningLeaderboardController {
             - Chỉ đơn vị từ 5 học viên trở lên được xếp hạng. Trả top 10 và đơn vị của người gọi (myUnit); khi đơn vị của
               người gọi chưa đủ 5 học viên, myUnit là null và myUnitTooSmall là true. Không bao giờ trả các hạng cuối.
             - Học viên tắt hiển thị tên trên bảng vẫn được tính vào đơn vị.
-            - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
+            - Mọi tài khoản đã đăng nhập có thể xem. Đối tượng được xếp hạng vẫn là học viên đủ điều kiện.
             """
     )
     public BaseResponse<LearningPointsViews.UnitLeaderboard> unitLeaderboard(
@@ -186,7 +186,7 @@ public class LearningLeaderboardController {
             - Trả top 10 và me (luôn có; rank null nếu caller không thuộc phạm vi). Khi me ngoài top 10, above là 1-2
               người ngay trên me và gapToAbove là XP còn thiếu để vượt người gần nhất có XP cao hơn. Không phân trang
               và không có tổng số người.
-            - Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
+            - Mọi tài khoản đã đăng nhập có thể xem. Đối tượng được xếp hạng vẫn là học viên đủ điều kiện.
             """
     )
     public BaseResponse<LearningPointsViews.Leaderboard> leaderboard(

@@ -173,9 +173,9 @@ class CatalogTreeIT extends AssessmentIntegrationTest {
             assertThat(summary.path("counts").path("enrollments").asLong()).isEqualTo(1);
             assertThat(summary.path("counts").path("completed").asLong()).isEqualTo(1);
             JsonNode daily = summary.path("daily");
-            assertThat(daily).hasSize(14);
-            assertThat(daily.get(13).path("started").asLong()).isEqualTo(1);
-            assertThat(daily.get(13).path("completed").asLong()).isEqualTo(1);
+            assertThat(daily).hasSize(30);
+            assertThat(daily.get(29).path("started").asLong()).isEqualTo(1);
+            assertThat(daily.get(29).path("completed").asLong()).isEqualTo(1);
             JsonNode leaders = summary.path("topLearners");
             assertThat(leaders).hasSize(1);
             assertThat(leaders.get(0).path("userId").asText()).isEqualTo(LEARNER);
@@ -184,16 +184,28 @@ class CatalogTreeIT extends AssessmentIntegrationTest {
 
             jdbc.update("""
                 update learning_hub.course_enrollments
-                set started_at = now() - interval '9 days', completed_at = now() - interval '9 days'
+                set enrolled_at = now() - interval '9 days', started_at = now() - interval '9 days',
+                    completed_at = now() - interval '9 days'
                 where course_id = ?
                 """, own.id());
             JsonNode week = api.ok(LEARNER_2, ApiClient.get(dashboard + "?days=7"));
             assertThat(week.path("daily")).hasSize(7);
             assertThat(week.path("topLearners")).isEmpty();
-            assertThat(week.path("counts").path("completed").asLong()).isEqualTo(1);
+            assertThat(week.path("counts").path("completed").asLong()).isZero();
+            assertThat(week.path("counts").path("enrollments").asLong()).isZero();
             JsonNode month = api.ok(LEARNER_2, ApiClient.get(dashboard + "?days=30"));
             assertThat(month.path("daily")).hasSize(30);
             assertThat(month.path("topLearners").get(0).path("completed").asLong()).isEqualTo(1);
+            assertThat(month.path("counts").path("enrollments").asLong()).isEqualTo(1);
+
+            jdbc.update("update learning_hub.course_enrollments set enrolled_at = now() - interval '45 days'"
+                + " where course_id = ?", own.id());
+            JsonNode all = api.ok(LEARNER_2, ApiClient.get(dashboard + "?days=0"));
+            assertThat(all.path("counts").path("enrollments").asLong()).isEqualTo(1);
+            assertThat(all.path("daily")).hasSize(30);
+            JsonNode recent = api.ok(LEARNER_2, ApiClient.get(dashboard + "?days=30"));
+            assertThat(recent.path("counts").path("enrollments").asLong()).isZero();
+            assertThat(recent.path("daily").get(20).path("completed").asLong()).isEqualTo(1);
             api.error(LEARNER_2, ApiClient.get(dashboard + "?days=3"), "CORE-VALIDATION_FAILED");
             api.http(LEARNER_2, ApiClient.get("/api/v1/reports/learning/summary"), 403, "CORE-ACCESS_DENIED");
             api.http(LEARNER, ApiClient.get(dashboard), 403, "CORE-ACCESS_DENIED");

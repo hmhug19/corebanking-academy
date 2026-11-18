@@ -246,8 +246,9 @@ class LearningLeaderboardIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void aNonLearnerIsRefusedAndBadParametersAreRejected() {
-        api.http(ADMIN, get(URL), 403, "CORE-ACCESS_DENIED");
+    void signedInNonLearnersCanReadAndBadParametersAreRejected() {
+        assertThat(api.ok(ADMIN, get(URL)).path("top").isArray()).isTrue();
+        api.http(null, get(URL), 401, "CORE-UNAUTHENTICATED");
         api.error(LEARNER, get(URL + "?scope=planet"), "CORE-VALIDATION_FAILED");
         api.error(LEARNER, get(URL + "?period=year"), "CORE-VALIDATION_FAILED");
         api.error(LEARNER, get(URL + "?offset=-1"), "CORE-VALIDATION_FAILED");

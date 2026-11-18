@@ -51,7 +51,6 @@ public class LearningLeaderboardService {
      */
     public Leaderboard leaderboard(String scope, String period, int offset) {
         var actor = access.actor();
-        access.requireLearner(actor);
         Person caller = actor.person();
         LocalDate today = LearningActivityService.localDate(Instant.now());
         LeaderboardRange range = LeaderboardRange.of(period, offset, today);
@@ -59,7 +58,9 @@ public class LearningLeaderboardService {
 
         Set<String> ids = new HashSet<>();
         members.forEach(person -> ids.add(person.id()));
-        ids.add(caller.id());
+        if (access.isLearner(actor)) {
+            ids.add(caller.id());
+        }
         Map<String, Long> sums = points.sumsBetween(ids, range.fromInstant(), range.endInstant());
 
         Collator collator = Collator.getInstance(Locale.forLanguageTag("vi"));

@@ -14,6 +14,10 @@ public record LearningReportFilter(@Size(max = 100) String q, @Size(max = 20) St
                                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
                                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
     public static LearningReportFilter empty() {
-        return new LearningReportFilter(null, null, null, null, null, null, null, null, null, null, null);
+        return enrolledBetween(null, null);
+    }
+
+    public static LearningReportFilter enrolledBetween(Instant from, Instant to) {
+        return new LearningReportFilter(null, null, null, null, null, null, null, null, null, from, to);
     }
 }

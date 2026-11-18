@@ -57,23 +57,26 @@ public class LearningAnalyticsService {
         var actor = access.actor();
         access.requireStaff(actor);
         var person = actor.person();
-        var criteria = new Criteria(LearningReportFilter.empty(), null, Set.of(), null, null, Set.of(),
-            new Manager(access.searchScope(actor), person.id(), person.orgId()));
+        var manager = new Manager(access.searchScope(actor), person.id(), person.orgId());
+        var criteria = new Criteria(LearningReportFilter.empty(), null, Set.of(), null, null, Set.of(), manager);
         Instant now = Instant.now();
         ZoneId zone = ZoneId.of(TIME_ZONE);
         LocalDate today = now.atZone(zone).toLocalDate();
-        if (days != 7 && days != 14 && days != 30) {
-            throw BusinessException.validation("days", "INVALID_VALUE", "Chọn khoảng 7, 14 hoặc 30 ngày.");
+        if (days != 0 && days != 7 && days != 14 && days != 30) {
+            throw BusinessException.validation("days", "INVALID_VALUE", "Chọn toàn thời gian, 7, 14 hoặc 30 ngày.");
         }
-        LocalDate first = today.minusDays(days - 1);
+        int chartDays = days == 0 ? 30 : days;
+        LocalDate first = today.minusDays(chartDays - 1);
         Instant from = first.atStartOfDay(zone).toInstant();
         Instant to = today.plusDays(1).atStartOfDay(zone).toInstant();
         var ranks = repository.topLearners(criteria, from, to, 5);
         var names = identity.fullNames(ranks.stream().map(LearningAnalyticsRepository.LearnerRank::userId).toList());
         var top = ranks.stream().map(rank -> new LearningAnalytics.TopLearner(rank.userId(),
             names.getOrDefault(rank.userId(), rank.userId()), rank.completed())).toList();
-        return new LearningAnalytics.Dashboard(now, TIME_ZONE, repository.counts(criteria),
-            repository.daily(criteria, first, from, to, TIME_ZONE, days), top);
+        var enrollmentCriteria = days == 0 ? criteria : new Criteria(LearningReportFilter.enrolledBetween(from, to),
+            null, Set.of(), null, null, Set.of(), manager);
+        return new LearningAnalytics.Dashboard(now, TIME_ZONE, repository.counts(enrollmentCriteria),
+            repository.daily(criteria, first, from, to, TIME_ZONE, chartDays), top);
     }
 
     public LearningAnalytics.Summary summary(LearningReportFilter filter) {

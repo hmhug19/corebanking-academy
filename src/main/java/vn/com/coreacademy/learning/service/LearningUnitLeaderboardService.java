@@ -46,7 +46,6 @@ public class LearningUnitLeaderboardService {
 
     public UnitLeaderboard units(String period, int offset) {
         var actor = access.actor();
-        access.requireLearner(actor);
         Person caller = actor.person();
         LocalDate today = LearningActivityService.localDate(Instant.now());
         LeaderboardRange range = LeaderboardRange.of(period, offset, today);

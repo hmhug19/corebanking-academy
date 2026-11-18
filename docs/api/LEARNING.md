@@ -562,7 +562,7 @@ vượt 10.000 dòng báo lỗi rõ thay vì cắt im lặng. API summary độc
 ### Điểm học tập và bảng xếp hạng
 
 XP đọc từ sổ ghi XP (`xp_ledger`, chỉ cộng thêm, một dòng mỗi lần nhận XP), không tính lại từ tiến độ nên xóa hoặc đổi khóa, đề không làm mất XP đã nhận. Chỉ học viên (`LEARNER`, scope `OWN`)
-có điểm; vai trò khác nhận 403 `CORE-ACCESS_DENIED`. Hạng phụ thuộc phạm vi nên không nằm trong `/points`.
+có điểm và được gọi `/points`. Các API đọc bảng xếp hạng cá nhân và đơn vị mở cho mọi tài khoản đã đăng nhập. Hạng phụ thuộc phạm vi và nằm trong API bảng xếp hạng.
 
 | API | Trách nhiệm |
 |---|---|
@@ -595,8 +595,8 @@ Bảng xếp hạng (`/leaderboard`):
   Đo trên PostgreSQL 16 (Testcontainers, dữ liệu tổng hợp 60 ngày học, 5 lần học × 12 bài hoàn thành, 3 đề đạt mỗi
   người): 7 người của bộ demo 3 ms, 500 người 57 ms, 4.900 người 540 ms cho điểm và 618 ms cho cả API. Nếu phạm vi
   thực tế vượt vài nghìn người, cân nhắc bảng tổng hợp hằng đêm thay vì tính khi đọc.
-- Lỗi: `scope` ngoài `team|org|all`, `period` ngoài `week|month|all` hoặc `offset` âm hoặc quá 520 trả `CORE-VALIDATION_FAILED`; vai trò không phải
-  học viên trả 403 `CORE-ACCESS_DENIED`.
+- Người xem đã đăng nhập có thể đọc cả hai bảng. Tài khoản không có vai trò học viên nhận `me.rank = null`.
+- Lỗi: tham số không hợp lệ trả `CORE-VALIDATION_FAILED`. Khách chưa đăng nhập nhận 401.
 
 Huy hiệu (`GET /me/learning/badges`): `MyBadges { earned: BadgeView[], notEarned: BadgeView[] }`, `BadgeView { badgeId, name,
 description, icon, condition, earnedAt, retired, progress }`. Chỉ học viên (LEARNER, OWN); vai trò khác nhận 403.
