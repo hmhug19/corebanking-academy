@@ -96,8 +96,15 @@ public class LearningSearchService {
     private Page<CourseCard> query(String mode, String q, Long fieldId, Long programId, Long moduleId, String level,
                                    String requirement, String learningStatus, String state, Boolean overdue,
                                    Boolean assigned, Boolean failed, boolean withoutModule, Pageable pageable) {
+        return queryAs(access.actor(), mode, q, fieldId, programId, moduleId, level, requirement, learningStatus,
+            state, overdue, assigned, failed, withoutModule, pageable);
+    }
+
+    private Page<CourseCard> queryAs(Actor actor, String mode, String q, Long fieldId, Long programId, Long moduleId,
+                                     String level, String requirement, String learningStatus, String state,
+                                     Boolean overdue, Boolean assigned, Boolean failed, boolean withoutModule,
+                                     Pageable pageable) {
         // Bước 1: scope xuất phát từ grant đang hiệu lực; client chỉ được gửi filter nghiệp vụ.
-        var actor = access.actor();
         if (!SearchMode.MANAGE.equals(mode)) {
             access.requireLearner(actor);
         }
@@ -147,6 +154,18 @@ public class LearningSearchService {
         }
         Map<Long, RatingSummary> ratings = feedback.courseRatings(cards.map(CourseCard::courseId).toList());
         return cards.map(card -> card.withRating(ratings.get(card.courseId())));
+    }
+
+    /**
+     * Khóa của chính người dùng cho trợ lý AI, cùng truy vấn với list "khóa của tôi" (tối đa {@code limit} khóa, xếp
+     * theo hạn rồi theo id). Luồng stream của trợ lý không có SecurityContext nên userId là giá trị server đã chụp
+     * trước stream, không bao giờ do model chọn; không điền điểm vì bước đó đọc SecurityContext.
+     */
+    public List<CourseCard> mineFor(String trustedUserId, String learningStatus, Boolean overdue, int limit) {
+        var actor = identity.actor(trustedUserId);
+        var order = PageQuery.of(0, limit, "dueAt,asc", Set.of("dueAt")).getSort().and(Sort.by("id"));
+        return queryAs(actor, SearchMode.MINE, null, null, null, null, null, null, learningStatus, null, overdue,
+            null, null, false, PageRequest.of(0, limit, order)).getContent();
     }
 
     /** Số khóa trong danh sách khóa của tôi theo requirement/assigned; cùng truy vấn với list nên khớp tổng của list. */

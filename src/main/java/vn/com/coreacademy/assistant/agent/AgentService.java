@@ -69,7 +69,7 @@ public class AgentService {
     public static final String ACTION_AFTER_DOCUMENTS = "Không thể mở màn hình hay đề xuất thay đổi trong lượt "
         + "đã đọc tài liệu. Hãy trả lời câu hỏi, người dùng có thể gửi yêu cầu đó riêng.";
     /** The reply when a skill's mandatory tool was not called after one retry: never the model's claim of an action. */
-    public static final String TOOL_MISSING_ANSWER = "Mình chưa mở được màn hình này, bạn thử lại nhé.";
+    public static final String TOOL_MISSING_ANSWER = "Mình chưa xử lý được yêu cầu này, bạn thử diễn đạt lại nhé.";
     static final String TOOL_NUDGE = "Bạn phải gọi công cụ %s để làm việc này; không trả lời bằng chữ.";
     public static final String EMPTY_ANSWER = "Mình chưa có câu trả lời cho yêu cầu này. Bạn thử hỏi lại nhé.";
     static final String STEP_CAP_ANSWER =
@@ -204,7 +204,9 @@ public class AgentService {
         boolean readShared = false;
         Suggestions.Filter filter = new Suggestions.Filter();
         // A skill whose reply is its tool's shows no model text: a text-only answer there claims an action not done.
-        boolean[] mustCall = {skill.mustCall(tools.stream().map(AgentTool::name).toList())};
+        List<String> offeredNames = tools.stream().map(AgentTool::name).toList();
+        List<String> required = skill.requiredAmong(offeredNames);
+        boolean[] mustCall = {skill.mustCall(offeredNames)};
         boolean nudged = false;
 
         try {
@@ -223,10 +225,10 @@ public class AgentService {
                     if (!nudged) {
                         nudged = true;
                         messages.add(ChatMessage.assistant(answer.content()));
-                        messages.add(ChatMessage.system(TOOL_NUDGE.formatted(skill.requiredTool())));
+                        messages.add(ChatMessage.system(TOOL_NUDGE.formatted(String.join(" hoặc ", required))));
                         continue;
                     }
-                    log.warn("Assistant mandatory tool not called skill={} tool={}", skill.id(), skill.requiredTool());
+                    log.warn("Assistant mandatory tool not called skill={} tools={}", skill.id(), required);
                     metrics.toolMissing(skill.id());
                     emit(output, turnLog, AgentStreamEvent.done(TOOL_MISSING_ANSWER, List.of()));
                     return;
@@ -239,7 +241,7 @@ public class AgentService {
                 List<ToolCall> calls = answer.toolCalls().stream().limit(MAX_CALLS_PER_STEP).toList();
                 messages.add(ChatMessage.assistant(answer.content(), calls));
                 for (ToolCall call : calls) {
-                    if (call.name().equals(skill.requiredTool())) {
+                    if (required.contains(call.name())) {
                         // Called: whatever the tool answers, the model may now reply in its own words.
                         mustCall[0] = false;
                     }

@@ -1,7 +1,11 @@
-description: hỏi đáp nghiệp vụ, quy trình, thuật ngữ, tài liệu, nội dung khóa học và tìm trong cộng đồng
+description: hỏi đáp nghiệp vụ, quy trình, thuật ngữ, tài liệu, nội dung khóa học và tìm trong cộng đồng. KHÔNG dùng cho dữ liệu cá nhân của người dùng (khóa học của tôi, hạn, quá hạn, tiến độ, hồ sơ, email, chức danh) và không dùng để mở trang
 tools:
   - search_documents
   - search_courses
   - search_community
 roles: []
 output: Trả lời có số đoạn nguồn, ví dụ [1] cho đoạn 1; nếu tài liệu không có thì nói không tìm thấy. Bắt buộc gọi công cụ tìm kiếm trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
+requiredTools:
+  - search_documents
+  - search_courses
+  - search_community

@@ -19,7 +19,8 @@ class SkillCatalogTest {
         SkillCatalog catalog = new SkillCatalog();
 
         assertThat(catalog.all()).extracting(Skill::id)
-            .containsExactlyInAnyOrder("qa_tai_lieu", "dieu_huong", "ho_so", "tom_tat_bai", "hoi_bai_hoc", "tro_chuyen", "tao_khoa_hoc");
+            .containsExactlyInAnyOrder("qa_tai_lieu", "dieu_huong", "ho_so", "tom_tat_bai", "hoi_bai_hoc", "tro_chuyen", "tao_khoa_hoc",
+                "hoc_tap_cua_toi");
         assertThat(catalog.find("qa_tai_lieu").orElseThrow().tools())
             .containsExactly("search_documents", "search_courses", "search_community");
         assertThat(catalog.find("tro_chuyen").orElseThrow().tools()).isEmpty();
@@ -45,11 +46,33 @@ class SkillCatalogTest {
     void theNavigationSkillsNameTheToolTheyMustCall() {
         SkillCatalog catalog = new SkillCatalog();
 
-        assertThat(catalog.find("dieu_huong").orElseThrow().requiredTool()).isEqualTo("open_screen");
-        assertThat(catalog.find("tao_khoa_hoc").orElseThrow().requiredTool()).isEqualTo("start_course_drafting");
-        assertThat(catalog.find("qa_tai_lieu").orElseThrow().requiredTool()).isNull();
-        catalog.all().stream().filter(skill -> skill.requiredTool() != null).forEach(skill ->
-            assertThat(skill.tools()).as(skill.id()).contains(skill.requiredTool()));
+        assertThat(catalog.find("dieu_huong").orElseThrow().requiredTools()).containsExactly("open_screen");
+        assertThat(catalog.find("tao_khoa_hoc").orElseThrow().requiredTools()).containsExactly("start_course_drafting");
+        assertThat(catalog.find("hoc_tap_cua_toi").orElseThrow().requiredTools()).containsExactly("my_learning");
+        assertThat(catalog.find("tro_chuyen").orElseThrow().requiredTools()).isEmpty();
+        catalog.all().forEach(skill -> assertThat(skill.tools()).as(skill.id()).containsAll(skill.requiredTools()));
+    }
+
+    @Test
+    void theDocumentSkillMustCallOneOfItsSearchToolsAndTheProfileSkillOneOfItsOwn() {
+        SkillCatalog catalog = new SkillCatalog();
+
+        assertThat(catalog.find("qa_tai_lieu").orElseThrow().requiredTools())
+            .containsExactly("search_documents", "search_courses", "search_community");
+        assertThat(catalog.find("ho_so").orElseThrow().tools()).contains("read_profile", "update_profile", "open_screen");
+        assertThat(catalog.find("ho_so").orElseThrow().requiredTools()).contains("read_profile");
+    }
+
+    @Test
+    void theNewLearningSkillIsOnlyForTheUsersOwnLearningDataAndTheDocumentSkillSaysItIsNot() {
+        SkillCatalog catalog = new SkillCatalog();
+        Skill mine = catalog.find("hoc_tap_cua_toi").orElseThrow();
+
+        assertThat(mine.tools()).containsExactly("my_learning");
+        assertThat(mine.roles()).isEmpty();
+        assertThat(mine.description()).contains("quá hạn").contains("tiến độ").contains("của tôi");
+        assertThat(catalog.defaultSkill().description()).contains("KHÔNG dùng cho dữ liệu cá nhân");
+        assertThat(catalog.style()).contains("Không tự viết URL").contains("[...]");
     }
 
     @Test

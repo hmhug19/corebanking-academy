@@ -92,7 +92,20 @@ public class SkillCatalog {
             List.copyOf((List<String>) yaml.getOrDefault("tools", List.of())),
             List.copyOf((List<String>) yaml.getOrDefault("roles", List.of())), system, examples,
             String.valueOf(yaml.getOrDefault("output", "")),
-            yaml.get("requiredTool") == null ? null : String.valueOf(yaml.get("requiredTool")));
+            requiredTools(yaml));
+    }
+
+    /** Both spellings are read: {@code requiredTool: x} (one) and {@code requiredTools: [x, y]} (any one of them). */
+    private static List<String> requiredTools(Map<String, Object> yaml) {
+        List<String> names = new ArrayList<>();
+        if (yaml.get("requiredTool") != null) {
+            names.add(String.valueOf(yaml.get("requiredTool")));
+        }
+        if (yaml.get("requiredTools") instanceof List<?> list) {
+            list.forEach(name -> names.add(String.valueOf(name)));
+        }
+
+        return names.stream().distinct().toList();
     }
 
     private static String read(Resource resource, MessageDigest digest) {
