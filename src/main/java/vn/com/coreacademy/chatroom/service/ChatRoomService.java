@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,6 +42,9 @@ import vn.com.coreacademy.common.exception.BusinessException;
 @Service
 @RequiredArgsConstructor
 public class ChatRoomService {
+    private static final Pattern VOICE_FRAME = Pattern.compile("[A-Za-z0-9+/]{1280}");
+    private static final int MAX_RELAY_SPEAKERS = 3;
+    private static final long VOICE_LEASE_MILLIS = 2500;
     private static final long CARO_INVITE_MILLIS = 20_000;
     private static final int APPROACH_TICK_MILLIS = 80;
     private static final double APPROACH_SPEED_MULTIPLIER = 2.4;
@@ -147,6 +151,13 @@ public class ChatRoomService {
         private boolean boardGames;
         private boolean floorGame;
         private boolean presentation;
+        private boolean voice;
+        private boolean voiceRelay;
+        private boolean voiceListening;
+        private String voiceId;
+        private long voiceExpiresAt;
+        private long voiceFrameWindow;
+        private int voiceFrames;
         private String mediaWatchId;
         private long lastMediaCommand;
         private String watchingBoard;
@@ -250,6 +261,13 @@ public class ChatRoomService {
                 case "dice-approach" -> approachDice(guest);
                 case "media-start", "media-stop", "media-control", "media-watch", "media-signal" ->
                     presentation(guest, type, packet, now);
+                case "voice-talk", "voice-watch", "voice-signal", "voice-listen", "voice-frame" -> {
+                    if (guest.voiceRelay) {
+                        relayVoice(guest, type, packet, now);
+                    } else {
+                        voice(guest, type, packet);
+                    }
+                }
                 case "board-watch", "board-ready", "board-move", "board-action" -> board(guest, type, packet, now);
                 case "floor-join" -> {
                     if (guest.floorGame && map.layout().colorFloor().contains(guest.x, guest.y)
@@ -289,6 +307,8 @@ public class ChatRoomService {
         }
         guest.name = name;
         guest.presentation = packet.path("presentation").asBoolean(false);
+        guest.voice = packet.path("voice").asBoolean(false);
+        guest.voiceRelay = guest.voice && packet.path("voiceRelay").asBoolean(false);
         guest.activities = packet.path("activities").isBoolean() && packet.path("activities").asBoolean();
         guest.gestures = packet.path("gestures").isBoolean() && packet.path("gestures").asBoolean();
         guest.interactions = packet.path("interactions").isBoolean() && packet.path("interactions").asBoolean();
@@ -318,6 +338,14 @@ public class ChatRoomService {
         initializeGames(guest, wantsGames);
         if (guest.presentation) {
             sendMediaState(guest);
+        }
+        if (guest.voiceRelay) {
+            sendGame(guest, Map.of("type", "voice-ready", "iceServers", List.of(), "relay", true));
+        } else if (guest.voice) {
+            sendGame(guest, Map.of("type", "voice-ready", "iceServers", iceServers()));
+            guests.values().stream().filter(speaker -> !speaker.voiceRelay && speaker.voiceId != null
+                && speaker.session.isOpen())
+                .forEach(speaker -> sendGame(guest, voiceState(speaker)));
         }
         if (guest.reactions || guest.boardGames || guest.floorGame) {
             sendGame(guest, Map.of("type", "playground-ready", "reactions", guest.reactions,
@@ -428,6 +456,7 @@ public class ChatRoomService {
     @Scheduled(fixedDelay = 1000)
     public synchronized void gameTick() throws IOException {
         long now = System.currentTimeMillis();
+        expireRelayVoice(now);
         for (var entry : boardSessions.entrySet()) {
             BoardSession table = entry.getValue();
             if (table.match != null && table.match.expire(now)) {
@@ -618,6 +647,7 @@ public class ChatRoomService {
         Guest host = table.host;
         if (host == null) {
             caroTables.remove(number);
+            publishTableStatuses();
             return;
         }
         Guest partner = caroPartner(host, number);
@@ -627,6 +657,7 @@ public class ChatRoomService {
         boolean playing = atSameGame(host, partner);
         boolean paused = !playing && (host.activeCaroId != null || (partner != null && partner.activeCaroId != null));
         sendCaroTable(host, partner, number, true, table.stake, playing, paused);
+        publishTableStatuses();
         if (partner == null) {
             return;
         }
@@ -1280,8 +1311,7 @@ public class ChatRoomService {
             .findFirst().orElse(null);
     }
 
-    private void sendMediaState(Guest viewer) {
-        Guest host = presentationHost();
+    private List<Map<String, Object>> iceServers() {
         List<Map<String, Object>> ice = new ArrayList<>();
         for (String url : mediaIceUrls.split(",")) {
             String trimmed = url.strip();
@@ -1295,6 +1325,11 @@ public class ChatRoomService {
                 ice.add(server);
             }
         }
+        return ice;
+    }
+
+    private void sendMediaState(Guest viewer) {
+        Guest host = presentationHost();
         Map<String, Object> state = new LinkedHashMap<>();
         state.put("type", "media-state");
         state.put("id", mediaId);
@@ -1307,7 +1342,7 @@ public class ChatRoomService {
         state.put("position", mediaPosition);
         state.put("updatedAt", mediaUpdatedAt);
         state.put("serverTime", System.currentTimeMillis());
-        state.put("iceServers", ice);
+        state.put("iceServers", iceServers());
         sendGame(viewer, state);
     }
 
@@ -1334,6 +1369,131 @@ public class ChatRoomService {
         } catch (IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    private Map<String, Object> voiceState(Guest speaker) {
+        return Map.of("type", "voice-state", "speaker", speaker.session.getId(), "name", speaker.name,
+            "id", speaker.voiceId == null ? "" : speaker.voiceId);
+    }
+
+    private boolean hearsVoiceRelay(Guest viewer, Guest speaker) {
+        return viewer != speaker && viewer.voiceRelay && viewer.voiceListening;
+    }
+
+    private void endRelayVoice(Guest guest) throws IOException {
+        if (guest.voiceId != null) {
+            guest.voiceId = null;
+            broadcast(voiceState(guest), viewer -> hearsVoiceRelay(viewer, guest));
+        }
+    }
+
+    private void expireRelayVoice(long now) throws IOException {
+        for (Guest speaker : List.copyOf(guests.values())) {
+            if (speaker.voiceRelay && speaker.voiceId != null && speaker.voiceExpiresAt <= now) {
+                endRelayVoice(speaker);
+                sendGame(speaker, Map.of("type", "voice-issue",
+                    "message", "Luồng thoại bị gián đoạn. Thả nút rồi giữ lại để thử."));
+            }
+        }
+    }
+
+    /** Chuyển tiếp khung âm thanh ngắn, không lưu lại và không phát cho người chưa bật nghe. */
+    private void relayVoice(Guest guest, String type, JsonNode packet, long now) throws IOException {
+        if ("voice-listen".equals(type) && packet.path("enabled").isBoolean()) {
+            guest.voiceListening = packet.path("enabled").asBoolean();
+            if (!guest.voiceListening) {
+                endRelayVoice(guest);
+            }
+            return;
+        }
+        if (!guest.voiceListening) {
+            return;
+        }
+
+        String id = packet.path("id").asText();
+        if ("voice-talk".equals(type)) {
+            if (packet.path("id").isNull()) {
+                endRelayVoice(guest);
+            } else if (guest.voiceId == null && validPresentationId(id)) {
+                expireRelayVoice(now);
+                long speaking = guests.values().stream().filter(g -> g.voiceRelay && g.voiceId != null).count();
+                if (speaking >= MAX_RELAY_SPEAKERS) {
+                    sendGame(guest, Map.of("type", "voice-issue",
+                        "message", "Đang có nhiều người nói. Thả nút rồi thử lại sau vài giây."));
+                } else {
+                    guest.voiceId = id;
+                    guest.voiceExpiresAt = now + VOICE_LEASE_MILLIS;
+                }
+            }
+            return;
+        }
+
+        String data = packet.path("data").asText();
+        if (!"voice-frame".equals(type) || !id.equals(guest.voiceId) || now >= guest.voiceExpiresAt
+            || data.length() != 1280 || !VOICE_FRAME.matcher(data).matches()) {
+            return;
+        }
+        if (now - guest.voiceFrameWindow >= 1000) {
+            guest.voiceFrameWindow = now;
+            guest.voiceFrames = 0;
+        }
+        if (++guest.voiceFrames > 22) {
+            return;
+        }
+        guest.voiceExpiresAt = now + VOICE_LEASE_MILLIS;
+        broadcast(Map.of("type", "voice-frame", "id", id, "speaker", guest.session.getId(),
+            "name", guest.name, "data", data), viewer -> hearsVoiceRelay(viewer, guest));
+    }
+
+    /** Chuyển tín hiệu thoại giữa các phiên đã vào phòng; không nhận luồng âm thanh. */
+    private void voice(Guest guest, String type, JsonNode packet) {
+        if (!guest.voice || !("voice-talk".equals(type) || "voice-watch".equals(type) || "voice-signal".equals(type))) {
+            return;
+        }
+        String id = packet.path("id").asText();
+        if ("voice-talk".equals(type)) {
+            if (packet.path("id").isNull()) {
+                if (guest.voiceId == null) {
+                    return;
+                }
+                guest.voiceId = null;
+            } else if (validPresentationId(id) && guest.voiceId == null) {
+                guest.voiceId = id;
+            } else {
+                return;
+            }
+            Object state = voiceState(guest);
+            guests.values().stream().filter(viewer -> viewer.voice && !viewer.voiceRelay
+                && viewer.name != null && viewer != guest)
+                .forEach(viewer -> sendGame(viewer, state));
+            return;
+        }
+
+        String speakerId = packet.path("speaker").asText();
+        Guest speaker = guests.get(speakerId);
+        if (speaker == null || speaker.voiceRelay || !id.equals(speaker.voiceId) || !speaker.session.isOpen()) {
+            return;
+        }
+        if ("voice-watch".equals(type)) {
+            if (guest != speaker) {
+                sendGame(speaker, Map.of("type", "voice-peer", "id", id, "peer", guest.session.getId()));
+            }
+            return;
+        }
+
+        Guest target = guests.get(packet.path("to").asText());
+        String kind = packet.path("kind").asText();
+        String payload = packet.path("payload").asText();
+        if (target == null || target == guest || !target.voice || target.voiceRelay
+            || target.name == null || !target.session.isOpen()
+            || !packet.path("payload").isTextual()
+            || !(guest == speaker || target == speaker) || payload.length() > 20_000
+            || !("ice".equals(kind) || ("offer".equals(kind) && guest == speaker)
+                || ("answer".equals(kind) && target == speaker))) {
+            return;
+        }
+        sendGame(target, Map.of("type", "voice-signal", "id", id, "speaker", speakerId,
+            "from", guest.session.getId(), "kind", kind, "payload", payload));
     }
 
     /** Chỉ chuyển tín hiệu WebRTC; ảnh, video và âm thanh không đi qua bộ nhớ máy chủ. */
@@ -1567,6 +1727,16 @@ public class ChatRoomService {
 
     private void sendBoardTables(Guest viewer) {
         List<Map<String, Object>> states = new ArrayList<>();
+        var caro = map.layout().caroTables();
+        for (int index = 0; index < caro.size(); index++) {
+            int number = index + 1;
+            List<Guest> seated = guests.values().stream().filter(guest -> atCaroTable(guest, number)).toList();
+            boolean playing = seated.size() == 2 && atSameGame(seated.get(0), seated.get(1));
+            String status = playing ? "playing" : seated.isEmpty() ? "empty" : "waiting";
+            List<String> names = List.of(seated.isEmpty() ? "" : seated.get(0).name,
+                seated.size() < 2 ? "" : seated.get(1).name);
+            states.add(Map.of("id", "caro:" + index, "status", status, "players", names));
+        }
         for (ChatRoomMap.BoardTable table : map.layout().boardTables()) {
             BoardSession session = boardSessions.get(table.id());
             List<String> names = boardOccupants(table).stream().map(guest -> guest == null ? "" : guest.name).toList();
@@ -1575,6 +1745,11 @@ public class ChatRoomService {
             states.add(Map.of("id", table.id(), "status", status, "players", names));
         }
         sendGame(viewer, Map.of("type", "board-tables", "tables", states));
+    }
+
+    private void publishTableStatuses() {
+        guests.values().stream().filter(viewer -> viewer.boardGames && viewer.name != null)
+            .forEach(this::sendBoardTables);
     }
 
     private void sendBoard(Guest viewer, String tableId, BoardSession session, long now) {

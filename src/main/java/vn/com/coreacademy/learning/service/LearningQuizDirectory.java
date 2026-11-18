@@ -45,6 +45,9 @@ public interface LearningQuizDirectory {
 
     Optional<QuizRef> find(Long quizId);
 
+    /** Xuất bản đề nháp cùng khóa trong transaction xuất bản revision. */
+    void publishDraftLessonQuiz(Long courseId, Long quizId);
+
     /** Chỉ xét lượt đã chấm đạt của chính lần ghi danh, không lấy điểm từ chu kỳ học cũ. */
     boolean hasPassed(String userId, Long enrollmentId, Long quizId);
 

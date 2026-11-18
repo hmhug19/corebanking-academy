@@ -25,8 +25,12 @@ public class CourseExamController {
     private final CourseExamService exams;
 
     @PostMapping
-    @Operation(summary = "Lưu khóa học kèm bài thi cuối khóa và bộ câu hỏi",
-        description = "Một giao dịch; kiểm quyền quản lý khóa, phiên bản nháp/đề và chương trình của mọi câu hỏi.")
+    @Operation(summary = "Lưu khóa học cùng bài kiểm tra và bộ câu hỏi",
+        description = """
+            Lưu nguyên tử bản nháp khóa học, đề và bộ câu hỏi.
+            - Có lessonTarget: tạo đề PRACTICE gắn vào bài học theo vị trí trong cây nháp.
+            - Bỏ lessonTarget: lưu cấu hình bài kiểm tra cuối khóa.
+            """)
     public BaseResponse<LearningDetails.CourseDetail> save(@Valid @RequestBody CourseExamRequest request) {
         return BaseResponse.ok(exams.save(request));
     }

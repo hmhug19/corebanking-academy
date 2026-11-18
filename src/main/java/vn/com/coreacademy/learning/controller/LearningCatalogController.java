@@ -56,7 +56,7 @@ public class LearningCatalogController {
     @Operation(
         summary = "Danh sách fields",
         description = """
-            Danh mục được lọc quyền và phân trang tại database.
+            Danh mục và tổng số bản ghi được lọc theo quyền của người gọi trước khi phân trang.
             """
     )
     public BaseResponse<PageResponse<LearningViews.TrainingFieldView>> fields(@RequestParam @Positive Long ownerOrgId,
@@ -133,7 +133,7 @@ public class LearningCatalogController {
     @Operation(
         summary = "Danh sách programs",
         description = """
-            Danh mục được lọc quyền và phân trang tại database.
+            Danh mục và tổng số bản ghi được lọc theo quyền của người gọi trước khi phân trang.
             """
     )
     public BaseResponse<PageResponse<LearningViews.TrainingProgramView>> programs(
@@ -190,7 +190,7 @@ public class LearningCatalogController {
     @Operation(
         summary = "Danh sách modules",
         description = """
-            Danh mục được lọc quyền và phân trang tại database.
+            Danh mục và tổng số bản ghi được lọc theo quyền của người gọi trước khi phân trang.
             """
     )
     public BaseResponse<PageResponse<LearningViews.BusinessModuleView>> modules(@RequestParam @Positive Long fieldId,

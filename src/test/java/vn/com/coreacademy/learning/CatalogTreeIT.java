@@ -21,6 +21,7 @@ import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
+import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER_2;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.unique;
 
 /** Cây Lĩnh vực → Chương trình → Khóa học của một đơn vị, cắt theo quyền của người gọi. */
@@ -139,6 +140,77 @@ class CatalogTreeIT extends AssessmentIntegrationTest {
                 assertThat(byId(program.path("courses"), id)).isNull();
             }
         }
+    }
+
+    @Test
+    void ownInstructorReceivesOnlyTheirCatalogAndDashboardCounts() {
+        Course own = fixtures.course(LEARNER);
+        Course other = fixtures.course(LEARNER);
+        long ownProgram = program(own);
+        long otherProgram = program(other);
+        jdbc.update("update learning_hub.courses set owner_user_id = ? where course_id = ?", LEARNER_2, own.id());
+        jdbc.update("""
+            update learning_hub.course_enrollments
+            set started_at = now(), completed_at = now(), status = 'completed', progress_percent = 100
+            where course_id in (?, ?)
+            """, own.id(), other.id());
+
+        long grant = jdbc.queryForObject("""
+            insert into learning_hub.user_roles(user_id, role_id, scope)
+            select ?, role_id, 'OWN' from learning_hub.roles where code = 'INSTRUCTOR'
+            returning ur_id
+            """, Long.class, LEARNER_2);
+        try {
+            JsonNode programs = api.ok(LEARNER_2, ApiClient.get(
+                "/api/v1/training-catalog/programs?ownerOrgId={org}", org)).path("items");
+            assertThat(byId(programs, ownProgram)).isNotNull();
+            assertThat(byId(programs, otherProgram)).isNull();
+            assertThat(tree(LEARNER_2, org)).hasSize(1);
+            api.http(LEARNER_2, ApiClient.get("/api/v1/courses/{id}", other.id()), 403, "CORE-ACCESS_DENIED");
+
+            String dashboard = "/api/v1/reports/learning/dashboard";
+            JsonNode summary = api.ok(LEARNER_2, ApiClient.get(dashboard));
+            assertThat(summary.path("counts").path("enrollments").asLong()).isEqualTo(1);
+            assertThat(summary.path("counts").path("completed").asLong()).isEqualTo(1);
+            JsonNode daily = summary.path("daily");
+            assertThat(daily).hasSize(14);
+            assertThat(daily.get(13).path("started").asLong()).isEqualTo(1);
+            assertThat(daily.get(13).path("completed").asLong()).isEqualTo(1);
+            api.http(LEARNER_2, ApiClient.get("/api/v1/reports/learning/summary"), 403, "CORE-ACCESS_DENIED");
+            api.http(LEARNER, ApiClient.get(dashboard), 403, "CORE-ACCESS_DENIED");
+        } finally {
+            jdbc.update("delete from learning_hub.user_roles where ur_id = ?", grant);
+        }
+    }
+
+    @Test
+    void teamInstructorReceivesProgramsOnlyForCoursesOwnedByTheirTeam() {
+        long team = jdbc.queryForObject("select team_id from learning_hub.users where user_id = ?",
+            Long.class, LEARNER_2);
+        Course teamCourse = fixtures.course();
+        Course unitCourse = fixtures.course();
+        jdbc.update("update learning_hub.courses set owner_team_id = ? where course_id = ?", team, teamCourse.id());
+        long grant = jdbc.queryForObject("""
+            insert into learning_hub.user_roles(user_id, role_id, scope, org_id, team_id)
+            select ?, role_id, 'TEAM', ?, ? from learning_hub.roles where code = 'INSTRUCTOR'
+            returning ur_id
+            """, Long.class, LEARNER_2, org, team);
+        try {
+            JsonNode programs = api.ok(LEARNER_2, ApiClient.get(
+                "/api/v1/training-catalog/programs?ownerOrgId={org}", org)).path("items");
+            assertThat(programs).hasSize(1);
+            assertThat(byId(programs, program(teamCourse))).isNotNull();
+            assertThat(byId(programs, program(unitCourse))).isNull();
+            api.ok(LEARNER_2, ApiClient.get("/api/v1/courses/{id}", teamCourse.id()));
+            api.http(LEARNER_2, ApiClient.get("/api/v1/courses/{id}", unitCourse.id()), 403, "CORE-ACCESS_DENIED");
+        } finally {
+            jdbc.update("delete from learning_hub.user_roles where ur_id = ?", grant);
+        }
+    }
+
+    private long program(Course course) {
+        return jdbc.queryForObject("select program_id from learning_hub.course_revisions where revision_id = ?",
+            Long.class, course.revisionId());
     }
 
     @Test

@@ -556,6 +556,24 @@ public final class AssessmentViews {
         BigDecimal percent) {
     }
 
+    /** Một bài nên ôn lại cho một năng lực yếu, kèm số câu sai tính vào bài này. */
+    public record ReviewLesson(
+        Long courseId,
+        String courseTitle,
+        Long lessonId,
+        String lessonTitle,
+        Long missedCount,
+        Instant lastMissedAt) {
+    }
+
+    /** Năng lực yếu (percent như me/competency) và các bài nên ôn, nhiều câu sai nhất trước. */
+    public record CompetencyReview(
+        Long competencyId,
+        String name,
+        BigDecimal percent,
+        List<ReviewLesson> lessons) {
+    }
+
     public record RegradeItem(
         Long attemptId,
         String userId,

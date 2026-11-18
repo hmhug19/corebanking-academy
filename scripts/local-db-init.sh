@@ -70,6 +70,7 @@ FILES=(
   upgrade/2026-11-22-system-audit-route.sql
   upgrade/2026-11-23-revoked-sessions.sql
   upgrade/2026-11-24-video-allow-seeking.sql
+  upgrade/2026-11-24-checkpoint-answers.sql
   upgrade/2026-11-24-course-drafting-sessions.sql
   upgrade/2026-11-25-course-drafting-reproposals.sql
   upgrade/2026-11-26-assistant-turn-drafting-step.sql

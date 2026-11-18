@@ -44,6 +44,9 @@ public enum AssessmentResponseCode implements ApiResponseCode {
         "Nhóm năng lực đang được gắn với câu hỏi hoặc có nhóm con; chỉ có thể ngưng sử dụng.", "Chưa thể xóa"),
     IMPORT_INVALID("ASSESSMENT-IMPORT_INVALID",
         "Tệp nhập có lỗi; chưa dòng nào được ghi. Vui lòng sửa theo danh sách lỗi.", "Tệp nhập chưa hợp lệ"),
+    CHECKPOINT_STALE("ASSESSMENT-CHECKPOINT_STALE",
+        "Câu hỏi nhanh đã thay đổi hoặc không còn dùng cho bài học này. Hãy tải lại các câu hỏi.",
+        "Câu hỏi đã thay đổi"),
     EXPORT_TOO_LARGE("ASSESSMENT-EXPORT_TOO_LARGE", "Kết quả vượt giới hạn xuất %s dòng. Vui lòng thu hẹp bộ lọc."
             .formatted(String.format(Locale.ROOT, "%,d", AssessmentLimits.MAX_EXPORT_ROWS).replace(',', '.')),
         "Chưa thể xuất");

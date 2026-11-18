@@ -27,8 +27,11 @@ public class CourseExamService {
             throw BusinessException.validation("course", "INVALID_VALUE",
                 "Gửi thông tin tạo khóa mới hoặc định danh và nội dung bản nháp hiện hữu.");
         }
-        if (!QuizType.FINAL_EXAM.equals(request.quiz().quizType())) {
-            throw BusinessException.validation("quiz.quizType", "INVALID_VALUE", "Chọn loại bài thi cuối khóa.");
+        var target = request.lessonTarget();
+        String expectedType = target == null ? QuizType.FINAL_EXAM : QuizType.PRACTICE;
+        if (!expectedType.equals(request.quiz().quizType()) || target != null && request.quizId() != null) {
+            throw BusinessException.validation("quiz.quizType", "INVALID_VALUE",
+                "Chọn đúng loại bài kiểm tra cho bài học hoặc cho cuối khóa.");
         }
         if (request.quizId() != null && request.expectedQuizVersion() == null) {
             throw BusinessException.validation("expectedQuizVersion", "REQUIRED", "Thiếu phiên bản bài kiểm tra.");
@@ -45,6 +48,9 @@ public class CourseExamService {
                 && request.pool().items().size() != config.questionCount()) {
             throw BusinessException.validation("pool", "INVALID_VALUE",
                 "Chọn đủ câu hỏi đang sử dụng cho bài kiểm tra; đề cố định phải có đúng số câu đã chọn.");
+        }
+        if (target != null) {
+            return courses.attachLessonQuiz(saved, target.chapter(), target.lesson(), pooled.quiz().id());
         }
         return courses.attachFinalExam(courseId, saved.revision().id(), saved.revision().rowVersion(),
             pooled.quiz().id());

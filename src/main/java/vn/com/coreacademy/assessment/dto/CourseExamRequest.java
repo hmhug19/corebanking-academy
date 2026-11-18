@@ -16,5 +16,10 @@ public record CourseExamRequest(
     @Positive Long quizId,
     @Min(0) Long expectedQuizVersion,
     @NotNull @Valid AssessmentRequests.QuizRequest quiz,
-    @NotNull @Valid AssessmentRequests.PoolRequest pool) {
+    @NotNull @Valid AssessmentRequests.PoolRequest pool,
+    @Valid LessonTarget lessonTarget) {
+
+    /** Vị trí từ 0 trong cây nháp gửi cùng request. Bỏ trống để gắn làm bài kiểm tra cuối khóa. */
+    public record LessonTarget(@NotNull @Min(0) Integer chapter, @NotNull @Min(0) Integer lesson) {
+    }
 }

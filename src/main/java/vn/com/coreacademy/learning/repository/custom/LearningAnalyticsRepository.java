@@ -1,5 +1,7 @@
 package vn.com.coreacademy.learning.repository.custom;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,6 +27,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
 import vn.com.coreacademy.learning.constants.LearningCodes.ShareStatus;
 import vn.com.coreacademy.learning.dto.LearningAnalytics;
 import vn.com.coreacademy.learning.dto.LearningReportFilter;
+import vn.com.coreacademy.learning.service.LearningAccessPolicy.SearchScope;
 import vn.com.coreacademy.learning.service.LearningAssessmentAccess.ReportScope;
 
 /** Một dòng/enrollment hiện hành; mọi filter, scope, list/count và tổng hợp dùng cùng nguồn. */
@@ -55,7 +58,10 @@ public class LearningAnalyticsRepository {
     private final EntityManager entityManager;
 
     public record Criteria(LearningReportFilter filter, ReportScope scope, Set<Long> filterOrgs,
-                           String learnerId, Long actorOrgId, Set<Long> ancestors) {
+                           String learnerId, Long actorOrgId, Set<Long> ancestors, Manager manager) {
+    }
+
+    public record Manager(SearchScope scope, String userId, Long orgId) {
     }
 
     private record Source(String sql, Map<String, Object> params) {
@@ -79,6 +85,35 @@ public class LearningAnalyticsRepository {
             """ + source.sql(), LearningAnalytics.Counts.class))
             .setParameter("inProgress", ProgressStatus.IN_PROGRESS)
             .setParameter("notStarted", ProgressStatus.NOT_STARTED).getSingleResult();
+    }
+
+    public List<LearningAnalytics.DailyActivity> daily(Criteria criteria, LocalDate first, Instant from,
+                                                       Instant to, String timeZone, int days) {
+        Source source = source(criteria, """
+            cross join lateral (values (x.started_at, 'started'), (x.completed_at, 'completed')) events(at, kind)
+            """, List.of("events.at >= :since", "events.at < :until"));
+        List<?> rows = source.bind(entityManager.createNativeQuery("""
+            with activity as (
+                select cast(events.at at time zone :timeZone as date) as day,
+                       count(*) filter (where events.kind = 'started') as started,
+                       count(*) filter (where events.kind = 'completed') as completed
+            """ + source.sql() + """
+            group by 1
+            )
+            select cast(:firstDay as date) + dates.offset_days,
+                   coalesce(activity.started, 0), coalesce(activity.completed, 0)
+            from generate_series(0, :dayCount - 1) as dates(offset_days)
+            left join activity on activity.day = cast(:firstDay as date) + dates.offset_days
+            order by dates.offset_days
+            """)).setParameter("firstDay", first).setParameter("dayCount", days)
+            .setParameter("timeZone", timeZone).setParameter("since", from)
+            .setParameter("until", to).getResultList();
+        return rows.stream().map(row -> {
+            Object[] columns = (Object[]) row;
+            LocalDate date = LocalDate.parse(columns[0].toString());
+            return new LearningAnalytics.DailyActivity(date, ((Number) columns[1]).longValue(),
+                ((Number) columns[2]).longValue());
+        }).toList();
     }
 
     public Page<LearningAnalytics.Enrollment> enrollments(Criteria criteria, Pageable page) {
@@ -156,12 +191,29 @@ public class LearningAnalyticsRepository {
     }
 
     private Source source(Criteria criteria) {
+        return source(criteria, "", List.of());
+    }
+
+    private Source source(Criteria criteria, String joins, List<String> extraConditions) {
         Map<String, Object> params = parameters(criteria);
-        List<String> conditions = new ArrayList<>();
+        List<String> conditions = new ArrayList<>(extraConditions);
         LearningReportFilter filter = criteria.filter();
         if (criteria.learnerId() != null) {
             conditions.add("x.user_id = :learner");
             params.put("learner", criteria.learnerId());
+        } else if (criteria.manager() != null) {
+            Manager manager = criteria.manager();
+            if (!manager.scope().global()) {
+                conditions.add("""
+                    (x.owner_org_id in (:managedOrgs) or x.owner_team_id in (:managedTeams)
+                        or (:own and x.owner_org_id = :ownOrg and x.owner_user_id = :owner))
+                    """);
+                params.put("managedOrgs", nonEmpty(manager.scope().orgIds()));
+                params.put("managedTeams", nonEmpty(manager.scope().teamIds()));
+                params.put("own", manager.scope().own());
+                params.put("ownOrg", manager.orgId() == null ? -1L : manager.orgId());
+                params.put("owner", manager.userId());
+            }
         } else if (!criteria.scope().global()) {
             conditions.add("(x.org_id in (:scopeOrgs) or x.team_id in (:scopeTeams))");
             params.put("scopeOrgs", nonEmpty(criteria.scope().orgIds()));
@@ -184,7 +236,7 @@ public class LearningAnalyticsRepository {
         add(conditions, params, "(lower(x.course_code) like :term escape '!' "
             + "or lower(x.course_title) like :term escape '!')", "term", term);
         String where = conditions.isEmpty() ? "where 1 = 1\n" : "where " + String.join(" and ", conditions) + "\n";
-        return new Source(BASE + where, params);
+        return new Source(BASE + joins + where, params);
     }
 
     private Map<String, Object> parameters(Criteria criteria) {
@@ -218,6 +270,7 @@ public class LearningAnalyticsRepository {
             select e.enrollment_id as id, e.user_id, e.course_id, c.code as course_code, r.title as course_title,
                    e.revision_id, r.program_id, p.name as program_name, p.field_id,
                    e.org_id_snapshot as org_id, e.team_id_snapshot as team_id, e.status, e.progress_percent,
+                   c.owner_org_id, c.owner_team_id, c.owner_user_id,
                    e.enrolled_at, e.started_at, e.last_access_at, e.completed_at, e.last_block_id,
                    o.assigned, o.mandatory, o.due_at,
                    coalesce(o.due_at < current_timestamp and e.status <> :completed, false) as overdue,

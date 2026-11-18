@@ -97,7 +97,7 @@ bàn/ghế có hitbox, các ô sàn đi qua được. Đồng hồ mặc định
 | `board-ready` | `{table,points}`; phải ngồi đúng bàn, hai tài khoản khác nhau cùng sẵn sàng, góp bằng nhau từ 10 CPoint. |
 | `board-move` | `{table,matchId,version,from,to,promotion?}`. Ô đánh số từ góc trái trên, theo hàng; `promotion` là `q/r/b/n` khi phong cấp. |
 | `board-action` | `{table,matchId,version,action,from?,to?,promotion?}` với `resign/offer-draw/accept-draw/claim-draw`. Các ô tùy chọn là nước dự định xin hòa. |
-| `board-tables` | `{tables:[{id,status,players}]}`; trạng thái `empty/waiting/playing`. |
+| `board-tables` | `{tables:[{id,status,players}]}` cho Caro (`caro:0`–`caro:2`), cờ vua và cờ tướng. Trạng thái `empty/waiting/playing`; `players` luôn có hai phần tử, ghế trống dùng chuỗi rỗng. |
 | `board-state` | Bàn, ghế, hai trạng thái sẵn sàng, mức góp, cấu hình đồng hồ và `match?`. Match gồm ID, version, board, side, turn, clocks, serverTime, legal, lastCells, check, history, result, reason, drawOffer, mustChange. |
 | `board-error` | `{message}` và snapshot mới khi lệnh trùng/sai phiên bản/nước không hợp lệ. |
 | `floor-join` | Không có payload; phải đứng trong vùng sàn và có capability. Người đến giữa ván xếp hàng ván sau. |
@@ -150,6 +150,18 @@ Fixture và lệnh kiểm thử:
 | `RoomColorFloorTest` | Mép ô, hai người, năm vòng, đồng thắng, tất cả trượt, hàng chờ ván sau. |
 
 Chạy `mvn test -Dtest=RoomBoardPositionTest,RoomBoardMatchTest,ChatRoomPlaygroundTest,RoomColorFloorTest`.
+
+#### Thoại trong phòng
+
+Client mới gửi `voice: true, voiceRelay: true` khi vào phòng và nhận `voice-ready` với `relay: true`.
+Bấm **Bật âm thanh thoại** để mở AudioContext và đăng ký nghe bằng `voice-listen`. Cấp quyền micrô
+riêng trước khi giữ V hoặc giữ nút thoại. `voice-talk` đăng ký ID lượt nói hoặc gửi `null` khi thả.
+`voice-frame` chuyển 60 ms âm thanh mono 16 kHz qua WebSocket hiện có. Server chuyển tiếp theo thời
+gian thực cho các phiên đang nghe, chỉ nhận gói đúng độ dài từ người hiện đang giữ lượt nói.
+Tối đa ba người nói cùng lúc. Server kết thúc lượt thiếu khung âm thanh sau 2,5 giây, không ghi âm
+hay ghi DB. Client ngừng track khi thả nút, mất focus, chuyển tab hoặc rời phòng.
+Trình duyệt cần HTTPS ngoài localhost. Thoại relay không cần TURN. Client cũ vẫn có luồng WebRTC
+riêng trong thời gian cập nhật. Cả người nói và người nghe cần tải bản mới để dùng relay với nhau.
 
 #### Bàn trình chiếu và màn hình 16:9
 

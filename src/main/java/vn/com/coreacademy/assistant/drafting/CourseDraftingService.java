@@ -376,7 +376,7 @@ public class CourseDraftingService {
             }
             exams.save(new CourseExamRequest(session.courseId(), session.revisionId(), null,
                 withVersion(draft, saved.revision().rowVersion()), null, null,
-                finalExam(session.courseId(), draft.title(), pool.size()), new PoolRequest(pool)));
+                finalExam(session.courseId(), draft.title(), pool.size()), new PoolRequest(pool), null));
             if (row.proposal() != null) {
                 drafting.markAiGenerated(session.revisionId());
             }

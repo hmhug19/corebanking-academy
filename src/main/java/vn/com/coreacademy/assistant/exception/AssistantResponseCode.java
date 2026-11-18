@@ -27,6 +27,9 @@ public enum AssistantResponseCode implements ApiResponseCode {
     // A user over the day's course generation jobs; the message carries the wait time.
     JOB_RATE_LIMITED("ASSISTANT-JOB_RATE_LIMITED", "Bạn đã tạo đủ số khóa học bằng AI cho phép trong ngày.",
         "Đã đạt giới hạn tạo khóa học"),
+    // A lesson with no indexed text: there is nothing to compare the learner's words with.
+    LESSON_TEXT_UNAVAILABLE("ASSISTANT-LESSON_TEXT_UNAVAILABLE",
+        "Bài học này chưa có nội dung để đối chiếu. Bạn thử lại sau nhé.", "Chưa có nội dung bài học"),
     ACTION_STALE("ASSISTANT-ACTION_STALE", "Dữ liệu đã thay đổi từ lúc trợ lý đề xuất. Vui lòng yêu cầu lại.",
         "Dữ liệu đã thay đổi"),
     // The old "Tạo bằng AI" job start, replaced by "Soạn cùng trợ lý" (ADR 0002). The endpoint is gone, not refusing a
