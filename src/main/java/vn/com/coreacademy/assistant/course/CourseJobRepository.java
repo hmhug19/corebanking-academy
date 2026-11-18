@@ -114,14 +114,6 @@ public class CourseJobRepository {
             """, JOB, ownerUserId, stoppedSince, limit);
     }
 
-    /** Create times of the owner's jobs since the instant, oldest first (cancelled, failed and deleted ones count too). */
-    public List<OffsetDateTime> createdSince(String ownerUserId, OffsetDateTime since) {
-        return jdbc.queryForList("""
-            SELECT create_time FROM learning_hub.course_generation_jobs
-             WHERE owner_user_id = ? AND create_time > ? ORDER BY create_time
-            """, OffsetDateTime.class, ownerUserId, since);
-    }
-
     public void setProgress(long jobId, String step, int progress) {
         jdbc.update("""
             UPDATE learning_hub.course_generation_jobs SET step = ?, progress = ?, update_time = now()

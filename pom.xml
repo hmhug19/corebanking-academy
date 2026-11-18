@@ -23,7 +23,21 @@
         <springdoc.version>2.9.1</springdoc.version>
         <pdfbox.version>3.0.8</pdfbox.version>
         <poi.version>5.5.1</poi.version>
+        <!-- Spring AI 1.1.x is the line built on Spring Boot 3.5 / Java 17 (1.1.8 builds against Boot 3.5.15);
+             2.x needs Boot 4. Only its MCP server is used: /api/v1/mcp for the Trợ lý ngoài (ADR 0004). -->
+        <spring-ai.version>1.1.8</spring-ai.version>
     </properties>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <dependencies>
         <dependency>
             <groupId>org.jsoup</groupId>
@@ -84,6 +98,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+        <!-- Stateless Streamable HTTP MCP server on Spring MVC (spring.ai.mcp.server.protocol=STATELESS). -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

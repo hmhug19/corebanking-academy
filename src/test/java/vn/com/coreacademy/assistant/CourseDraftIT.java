@@ -21,6 +21,8 @@ import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 import vn.com.coreacademy.assistant.course.CourseGenerationWorker;
+import vn.com.coreacademy.assistant.course.CourseJobService;
+import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 import vn.com.coreacademy.knowledge.ai.OllamaClient.Message;
 import vn.com.coreacademy.learning.service.CourseStructureGuard;
@@ -65,8 +67,11 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     private LearningAiDraftService drafts;
     @Autowired
     private List<CourseStructureGuard> guards;
+    @Autowired
+    private CourseJobService service;
 
     private ApiClient api;
+    private OldCourseJobs old;
     private long programme;
     private long competency;
     private final AtomicInteger lessonCalls = new AtomicInteger();
@@ -76,6 +81,7 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     @BeforeAll
     void setUp() {
         api = new ApiClient(mvc, json);
+        old = new OldCourseJobs(service, json);
         AssessmentFixtures fixtures = new AssessmentFixtures(api, jdbc);
         fixtures.course();
         competency = fixtures.competency();
@@ -121,10 +127,8 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         inputs.put("chapters", 1);
         inputs.put("programmeId", programme);
         inputs.put("competencyId", competency);
-        JsonNode job = api.ok(INSTRUCTOR, multipart(JOBS)
-            .file(new MockMultipartFile("file", "q.md", "text/markdown", "# Q\n\nNội dung.\n"
-                .getBytes(StandardCharsets.UTF_8)))
-            .file(new MockMultipartFile("inputs", "", "application/json", json.writeValueAsBytes(inputs))));
+        // The start is retired (410): these are the jobs that were already running when it was.
+        JsonNode job = old.start(INSTRUCTOR, "q.md", "# Q\n\nNội dung.\n", inputs);
         long documentId = job.path("source").path("documentId").asLong();
         jdbc.update("""
             INSERT INTO learning_hub.knowledge_document_chunks(document_id, chunk_index, content, page_number,
@@ -234,6 +238,23 @@ class CourseDraftIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void aFinishedJobStillOpensOnTheReviewScreenAfterTheStartWasRetired() throws Exception {
+        long job = approved().path("jobId").asLong();
+
+        api.http(INSTRUCTOR, multipart(JOBS)
+            .file(new MockMultipartFile("file", "q.md", "text/markdown", "# Q".getBytes(StandardCharsets.UTF_8))),
+            410, "ASSISTANT-COURSE_JOBS_RETIRED");
+
+        JsonNode content = api.ok(INSTRUCTOR, get(path(job, "/content")));
+        assertThat(content.path("status").asText()).isEqualTo("completed");
+        assertThat(content.path("outline").path("title").asText()).isEqualTo("Khóa học thử");
+        assertThat(content.path("lessons")).hasSize(2);
+        assertThat(content.path("questions")).hasSize(2);
+        assertThat(api.ok(INSTRUCTOR, get(JOBS + "/{id}", job)).path("status").asText()).isEqualTo("completed");
+        assertThat(api.ok(INSTRUCTOR, get(JOBS))).extracting(item -> item.path("jobId").asLong()).contains(job);
+    }
+
+    @Test
     void afterTheJobFinishedALessonCanStillBeRegeneratedButThereIsNothingToRetry() throws Exception {
         long job = approved().path("jobId").asLong();
         assertThat(api.ok(INSTRUCTOR, get(path(job, "/content"))).path("status").asText()).isEqualTo("completed");
@@ -329,10 +350,10 @@ class CourseDraftIT extends AssessmentIntegrationTest {
         inputs.put("programmeId", -1);
         inputs.put("competencyId", competency);
 
-        api.error(INSTRUCTOR, multipart(JOBS)
-            .file(new MockMultipartFile("file", "q.md", "text/markdown", "# Q".getBytes(StandardCharsets.UTF_8)))
-            .file(new MockMultipartFile("inputs", "", "application/json", json.writeValueAsBytes(inputs))),
-            "CORE-VALIDATION_FAILED");
+        RuntimeException refused = old.refusal(INSTRUCTOR, inputs);
+
+        assertThat(refused).isInstanceOf(BusinessException.class);
+        assertThat(((BusinessException) refused).getResponseCode().getCode()).isEqualTo("CORE-VALIDATION_FAILED");
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.courses", Integer.class)).isEqualTo(courses);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs", Integer.class))

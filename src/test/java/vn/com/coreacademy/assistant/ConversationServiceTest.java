@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,7 +24,10 @@ import vn.com.coreacademy.assistant.conversation.ConversationRetention;
 import vn.com.coreacademy.assistant.conversation.ConversationRetentionJob;
 import vn.com.coreacademy.assistant.conversation.ConversationService;
 import vn.com.coreacademy.assistant.conversation.FeedbackRepository;
+import vn.com.coreacademy.assistant.conversation.ConversationViews;
 import vn.com.coreacademy.assistant.conversation.ConversationViews.ConversationDetail;
+import vn.com.coreacademy.assistant.conversation.ConversationViews.TurnView;
+import vn.com.coreacademy.assistant.conversation.DraftingCards;
 import vn.com.coreacademy.assistant.conversation.Conversations;
 import vn.com.coreacademy.assistant.conversation.TurnRecord;
 import vn.com.coreacademy.assistant.conversation.TurnRepository;
@@ -35,6 +39,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -276,6 +282,90 @@ class ConversationServiceTest {
         assertThat(detail.turns().get(0).toolNames()).containsExactly("search_documents");
         assertThat(detail.turns().get(0).navigation().path()).isEqualTo("/courses");
         assertThat(detail.turns().get(0).status()).isEqualTo("done");
+    }
+
+    private ConversationService serviceWithCards(DraftingCards cards) {
+        try {
+            var constructor = ConversationService.class.getDeclaredConstructor(ConversationRepository.class,
+                TurnRepository.class, PendingActionRepository.class, FeedbackRepository.class, ObjectMapper.class,
+                java.time.Clock.class, AssistantProperties.class, AssistantBudget.class, DraftingCards.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(conversations, turns, actions, mock(FeedbackRepository.class),
+                new ObjectMapper().findAndRegisterModules(), clock,
+                new AssistantProperties(4, 20, Duration.ofMinutes(10), 4), AssistantBudget.defaults(), cards);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static AssistantTurn stepMessage(long id, long sessionId, int step) {
+        AssistantTurn turn = done("", "Bước " + step + " · đã điền.");
+        turn.setId(id);
+        turn.setSurface("AGENT");
+        turn.setDraftingSessionId(sessionId);
+        turn.setDraftingStep((short) step);
+        return turn;
+    }
+
+    @Test
+    void aDraftingStepMessageIsNeitherAnExchangeOfTheHistoryNorThePreviousQuestion() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        when(conversations.existsByIdAndOwnerId(5L, ME)).thenReturn(true);
+        when(turns.findByConversationIdAndStatusOrderByIdDesc(any(), anyString(), any(Pageable.class)))
+            .thenReturn(List.of(stepMessage(3, 12, 1), done("tạo khóa học từ tài liệu này", "Mình đang đọc.")));
+
+        assertThat(service.open(ME, 5L, "tiếp").history()).extracting(Conversations.Exchange::question)
+            .containsExactly("tạo khóa học từ tài liệu này");
+        assertThat(service.previousQuestion(ME, 5L)).isEqualTo("tạo khóa học từ tài liệu này");
+    }
+
+    @Test
+    void getShowsEachDraftingCardWithTheLiveStateOfItsStepAndOtherTurnsWithout() {
+        when(conversations.findByIdAndOwnerId(5L, ME)).thenReturn(Optional.of(owned(5L, ME)));
+        AssistantTurn question = done("tạo khóa học", "Mình đang đọc.");
+        question.setId(1L);
+        question.setSurface("AGENT");
+        when(turns.findByConversationIdOrderByIdAsc(5L)).thenReturn(List.of(question, stepMessage(2, 12, 1),
+            stepMessage(3, 12, 2), stepMessage(4, 99, 1)));
+        DraftingCards cards = mock(DraftingCards.class);
+        when(cards.cards(eq(ME), any())).thenReturn(Map.of(
+            new DraftingCards.Key(12, 1), new ConversationViews.DraftingCard(12, 1, "confirmed", 40L),
+            new DraftingCards.Key(12, 2), new ConversationViews.DraftingCard(12, 2, "proposed", 40L)));
+
+        ConversationDetail detail = serviceWithCards(cards).get(ME, 5L);
+
+        assertThat(detail.turns()).extracting(TurnView::draftingCard).containsExactly(null,
+            new ConversationViews.DraftingCard(12, 1, "confirmed", 40L),
+            new ConversationViews.DraftingCard(12, 2, "proposed", 40L), null);
+        assertThat(detail.turns().get(1).question()).isEmpty();
+        verify(cards).cards(ME, List.of(new DraftingCards.Key(12, 1), new DraftingCards.Key(12, 2),
+            new DraftingCards.Key(99, 1)));
+    }
+
+    @Test
+    void aDraftingStepMessageIsStoredAsADoneAgentTurnOnlyWhileItsConversationExists() {
+        AssistantConversation conversation = owned(7L, ME);
+        when(conversations.findById(7L)).thenReturn(Optional.of(conversation));
+        doAnswer(invocation -> {
+            AssistantTurn saved = invocation.getArgument(0);
+            saved.setId(41L);
+            return saved;
+        }).when(turns).save(any());
+        clock.advance(Duration.ofHours(1));
+
+        assertThat(service.recordDraftingStep(7L, "Bước 1 · đã điền.", 12L, 1)).isEqualTo(41L);
+
+        ArgumentCaptor<AssistantTurn> stored = ArgumentCaptor.forClass(AssistantTurn.class);
+        verify(turns).save(stored.capture());
+        assertThat(stored.getValue().getQuestion()).isEmpty();
+        assertThat(stored.getValue().getStatus()).isEqualTo("DONE");
+        assertThat(stored.getValue().getSurface()).isEqualTo("AGENT");
+        assertThat(stored.getValue().getDraftingSessionId()).isEqualTo(12L);
+        assertThat(stored.getValue().getDraftingStep()).isEqualTo((short) 1);
+        assertThat(conversation.getLastActivityTime()).isEqualTo(clock.instant());
+
+        when(conversations.findById(8L)).thenReturn(Optional.empty());
+        assertThat(service.recordDraftingStep(8L, "Bước 2", 12L, 2)).isNull();
     }
 
     private AssistantPendingAction proposal(String id, String status, Duration expiresIn, String message) {

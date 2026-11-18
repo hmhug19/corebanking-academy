@@ -7,6 +7,7 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -16,6 +17,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.unit.DataSize;
 import vn.com.coreacademy.assistant.agent.AgentContext;
+import vn.com.coreacademy.assistant.agent.AgentService;
+import vn.com.coreacademy.identity.dto.RoleGrant;
+import vn.com.coreacademy.identity.dto.UserRights;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.skill.Skill;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
@@ -72,6 +76,7 @@ class AgentToolChoiceEval {
                 case ToolDefinitions.SEARCH_DOCUMENTS, ToolDefinitions.SEARCH_COMMUNITY -> "qa_tai_lieu";
                 case ToolDefinitions.OPEN_SCREEN -> "dieu_huong";
                 case ToolDefinitions.UPDATE_PROFILE -> "ho_so";
+                case ToolDefinitions.START_COURSE_DRAFTING -> "tao_khoa_hoc";
                 default -> "tro_chuyen";
             };
         }
@@ -80,6 +85,11 @@ class AgentToolChoiceEval {
             return new Prompt(text, NONE, null, null);
         }
     }
+
+    /** Marks a prompt sent with a file attached in the composer, as the app sends the course skill's turn. */
+    private static final String ATTACHED = "[tệp] ";
+    private static final AgentContext INSTRUCTOR = new AgentContext("000005", null, new UserRights(
+        List.of(new RoleGrant("INSTRUCTOR", "INSTRUCTOR", null)), List.of(), Map.of()));
 
     private record Call(String chosen, String arguments, OptionalLong firstDeltaMs, long totalMs) {
     }
@@ -129,6 +139,15 @@ class AgentToolChoiceEval {
         Prompt.tool("cập nhật giúp mình chức danh là Chuyên viên chính", ToolDefinitions.UPDATE_PROFILE,
             "positionName", "Chuyên viên chính"),
 
+        // Soạn cùng trợ lý: asked by an instructor, with or without a file attached; the tool asks for a missing one.
+        Prompt.tool(ATTACHED + "Tạo khóa học từ tài liệu này", ToolDefinitions.START_COURSE_DRAFTING),
+        Prompt.tool(ATTACHED + "Soạn giúp mình khóa học từ file đính kèm, tên khóa học là Mở tài khoản cá nhân",
+            ToolDefinitions.START_COURSE_DRAFTING, "title", "Mở tài khoản cá nhân"),
+        Prompt.tool(ATTACHED + "Dựa vào tài liệu này làm một khóa học cơ bản cho giao dịch viên mới",
+            ToolDefinitions.START_COURSE_DRAFTING, "level", "basic"),
+        Prompt.tool("Mình muốn tạo một khóa học mới về quy trình EOD", ToolDefinitions.START_COURSE_DRAFTING),
+        Prompt.tool("Giúp mình soạn khóa học đào tạo về hạch toán GL", ToolDefinitions.START_COURSE_DRAFTING),
+
         Prompt.direct("Xin chào"),
         Prompt.direct("Bạn làm được những gì?"),
         Prompt.direct("Cảm ơn nhé"));
@@ -138,7 +157,7 @@ class AgentToolChoiceEval {
         OllamaClient ollama = ollama();
         assertThat(ollama.isAvailable()).as("Ollama must be running on localhost:11434").isTrue();
         List<ToolDefinition> tools = List.of(ToolDefinitions.searchDocuments(), ToolDefinitions.searchCommunity(),
-            ToolDefinitions.openScreen(SCREENS), ToolDefinitions.updateProfile());
+            ToolDefinitions.openScreen(SCREENS), ToolDefinitions.updateProfile(), ToolDefinitions.startCourseDrafting());
 
         SkillCatalog catalog = new SkillCatalog();
         SkillSelector selector = new SkillSelector(ollama, catalog, AssistantModels.defaults());
@@ -161,8 +180,16 @@ class AgentToolChoiceEval {
 
     private static Result run(OllamaClient ollama, SkillCatalog catalog, SkillSelector selector,
                               List<ToolDefinition> tools, Prompt prompt) {
-        Skill skill = selector.select(null, prompt.text(), new AgentContext("000004", null, null));
-        Call call = call(ollama, catalog, skill, tools, prompt.text());
+        // Course prompts are an instructor's (learners are not offered the skill); others a learner's, as before.
+        boolean course = ToolDefinitions.START_COURSE_DRAFTING.equals(prompt.expectedTool());
+        boolean attached = prompt.text().startsWith(ATTACHED);
+        String text = attached ? prompt.text().substring(ATTACHED.length()) : prompt.text();
+        AgentContext context = course ? INSTRUCTOR : new AgentContext("000004", null, null);
+        if (attached) {
+            context = context.withAttachment(1L);
+        }
+        Skill skill = selector.select(null, text, context);
+        Call call = call(ollama, catalog, skill, tools, text, AgentService.attachmentNote(context));
         boolean argumentOk = prompt.argumentName() == null
             || argumentOf(call, prompt.argumentName()).equals(prompt.expectedArgument());
         return new Result(prompt, skill.id(), call.chosen(), call.arguments(), argumentOk, call.firstDeltaMs(), call.totalMs());
@@ -170,11 +197,16 @@ class AgentToolChoiceEval {
 
     private static Call call(OllamaClient ollama, SkillCatalog catalog, Skill skill, List<ToolDefinition> allTools,
                              String text) {
+        return call(ollama, catalog, skill, allTools, text, "");
+    }
+
+    private static Call call(OllamaClient ollama, SkillCatalog catalog, Skill skill, List<ToolDefinition> allTools,
+                             String text, String note) {
         List<ToolDefinition> tools = allTools.stream().filter(tool -> skill.tools().contains(tool.name())).toList();
         long started = System.nanoTime();
         AtomicLong firstDelta = new AtomicLong(-1);
         ChatTurn turn = ollama.chatWithTools(
-            List.of(ChatMessage.system(catalog.systemPrompt(skill)), ChatMessage.user(text)), tools,
+            List.of(ChatMessage.system(catalog.systemPrompt(skill) + note), ChatMessage.user(text)), tools,
             OllamaClient.Options.AGENT, delta -> firstDelta.compareAndSet(-1, millisSince(started)));
         long total = millisSince(started);
         ToolCall first = turn.toolCalls().isEmpty() ? null : turn.toolCalls().get(0);

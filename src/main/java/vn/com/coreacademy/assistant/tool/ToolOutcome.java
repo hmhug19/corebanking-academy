@@ -4,7 +4,10 @@ import java.util.Map;
 
 import vn.com.coreacademy.assistant.action.PendingAction;
 
-/** What a tool did. {@link Navigate} and {@link ActionRequired} end the turn; {@link Result} goes back to the model. */
+/**
+ * What a tool did. {@link Navigate}, {@link Reply} and {@link ActionRequired} end the turn; {@link Result} goes back to
+ * the model.
+ */
 public sealed interface ToolOutcome {
     /** Text for the model, appended as a {@code tool} message; the loop continues. */
     record Result(String text) implements ToolOutcome {
@@ -18,6 +21,10 @@ public sealed interface ToolOutcome {
         public Navigate(String path, String title, String text) {
             this(path, title, text, null);
         }
+    }
+
+    /** Terminal: {@code text} is the final answer as the tool wrote it; the model adds nothing. */
+    record Reply(String text) implements ToolOutcome {
     }
 
     /** Terminal: {@code action} waits for the user's confirmation; {@code text} is the final answer. */

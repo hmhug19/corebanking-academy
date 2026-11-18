@@ -17,6 +17,7 @@ import vn.com.coreacademy.assistant.course.CourseJobRepository.JobRow;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.StepRow;
 import vn.com.coreacademy.assistant.course.GenerationSchemas;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.GenerationException;
+import vn.com.coreacademy.assistant.course.SourceSummariser;
 import vn.com.coreacademy.assistant.course.SourceTextRepository;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
@@ -46,9 +47,9 @@ class CourseGenerationRunnerTest {
     private final SourceTextRepository sources = mock(SourceTextRepository.class);
     private final OllamaClient ollama = mock(OllamaClient.class);
     private final LearningAiDraftService drafts = mock(LearningAiDraftService.class);
-    private final CourseGenerationRunner runner = new CourseGenerationRunner(jobs, sources, ollama, new SkillCatalog(),
-        AssistantModels.defaults(), json, drafts, AssistantBudget.defaults(),
-        new GenerationProperties(3, Duration.ofSeconds(3)));
+    private final CourseGenerationRunner runner = new CourseGenerationRunner(jobs, sources,
+        new SourceSummariser(sources, ollama, new SkillCatalog(), AssistantModels.defaults(), json,
+            AssistantBudget.defaults(), new GenerationProperties(3, Duration.ofSeconds(3))), json, drafts);
 
     private StepRow outlineStep() {
         JobRow job = new JobRow(5, "000004", 1, 9L,

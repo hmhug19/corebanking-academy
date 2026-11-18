@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -21,9 +22,11 @@ import vn.com.coreacademy.assessment.support.AssessmentFixtures;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 import vn.com.coreacademy.assistant.course.CourseGenerationWorker;
 import vn.com.coreacademy.assistant.course.CourseJobRepository.StepRow;
+import vn.com.coreacademy.assistant.course.CourseJobService;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.NextStep;
 import vn.com.coreacademy.assistant.course.GenerationStepRunner.Result;
+import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,7 +40,10 @@ import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTO
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.LEARNER;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.REPORT_VIEWER;
 
-/** Starting, queueing, limiting and resuming course generation jobs; the model work itself is a stub here. */
+/**
+ * The retired start, and queueing, limiting and resuming the old course generation jobs that were started before it;
+ * the model work itself is a stub here.
+ */
 class CourseJobIT extends AssessmentIntegrationTest {
     private static final String JOBS = "/api/v1/assistant/course-jobs";
     private static final String ORG_SCOPED_ADMIN = "000003";
@@ -55,8 +61,11 @@ class CourseJobIT extends AssessmentIntegrationTest {
     private JdbcTemplate jdbc;
     @Autowired
     private CourseGenerationWorker worker;
+    @Autowired
+    private CourseJobService service;
 
     private ApiClient api;
+    private OldCourseJobs old;
     private long ownOrg;
     private long otherOrg;
     private long programme;
@@ -66,6 +75,7 @@ class CourseJobIT extends AssessmentIntegrationTest {
     @BeforeAll
     void setUp() {
         api = new ApiClient(mvc, json);
+        old = new OldCourseJobs(service, json);
         AssessmentFixtures fixtures = new AssessmentFixtures(api, jdbc);
         fixtures.course();
         competency = fixtures.competency();
@@ -110,6 +120,9 @@ class CourseJobIT extends AssessmentIntegrationTest {
                 : new Result("{\"chapters\":[]}", "h2", List.of(), 40, "waiting_approval");
         });
         jdbc.update("DELETE FROM learning_hub.course_generation_jobs");
+        // Drafting sessions count against the same daily allowance.
+        jdbc.update("DELETE FROM learning_hub.course_drafting_steps");
+        jdbc.update("DELETE FROM learning_hub.course_drafting_sessions");
     }
 
     private Map<String, Object> inputs(Long ownerOrgId) {
@@ -135,7 +148,16 @@ class CourseJobIT extends AssessmentIntegrationTest {
     }
 
     private long create(String user, Long ownerOrgId) {
-        return api.ok(user, start(inputs(ownerOrgId))).path("jobId").asLong();
+        return old.start(user, inputs(ownerOrgId)).path("jobId").asLong();
+    }
+
+    private static String code(RuntimeException exception) {
+        assertThat(exception).isInstanceOf(BusinessException.class);
+        return ((BusinessException) exception).getResponseCode().getCode();
+    }
+
+    private int jobs() {
+        return jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs", Integer.class);
     }
 
     private String status(long jobId, String user) {
@@ -143,37 +165,70 @@ class CourseJobIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void startingAJobIsGoneForEveryoneAndStoresNothing() {
+        int documentsBefore = jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents",
+            Integer.class);
+
+        for (String user : List.of(INSTRUCTOR, ADMIN, LEARNER, REPORT_VIEWER)) {
+            JsonNode refused = api.http(user, start(inputs(ownOrg)), 410, "ASSISTANT-COURSE_JOBS_RETIRED");
+            assertThat(refused.path("message").asText())
+                .isEqualTo("Tạo khóa học bằng AI theo cách cũ đã ngừng. Hãy dùng Soạn cùng trợ lý.");
+            assertThat(refused.path("messageTitle").asText()).isEqualTo("Tính năng đã thay đổi");
+            assertThat(refused.path("data").isNull()).isTrue();
+        }
+        // an empty request is refused the same way, not as a malformed upload
+        api.http(INSTRUCTOR, multipart(JOBS), 410, "ASSISTANT-COURSE_JOBS_RETIRED");
+
+        assertThat(jobs()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents", Integer.class))
+            .isEqualTo(documentsBefore);
+    }
+
+    @Test
+    void aJobStartedBeforeTheRetirementStillRunsToItsEnd() {
+        long job = create(INSTRUCTOR, null);
+        api.http(INSTRUCTOR, start(inputs(null)), 410, "ASSISTANT-COURSE_JOBS_RETIRED");
+
+        assertThat(worker.runOnce()).isTrue();
+        assertThat(status(job, INSTRUCTOR)).isEqualTo("running");
+        assertThat(worker.runOnce()).isTrue();
+        assertThat(worker.runOnce()).isFalse();
+        assertThat(status(job, INSTRUCTOR)).isEqualTo("waiting_approval");
+        assertThat(api.ok(INSTRUCTOR, get(JOBS + "/active"))).extracting(item -> item.path("jobId").asLong())
+            .contains(job);
+    }
+
+    @Test
     void learnersAndReportViewersAreRefused() {
-        api.http(LEARNER, start(inputs(null)), 403, "CORE-ACCESS_DENIED");
-        api.http(REPORT_VIEWER, start(inputs(null)), 403, "CORE-ACCESS_DENIED");
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs", Integer.class))
-            .isZero();
+        assertThat(old.refusal(LEARNER, inputs(null))).isInstanceOf(AccessDeniedException.class);
+        assertThat(old.refusal(REPORT_VIEWER, inputs(null))).isInstanceOf(AccessDeniedException.class);
+        assertThat(jobs()).isZero();
     }
 
     @Test
     void anInstructorGetsTheirOwnUnitAndCannotChooseAnother() {
-        JsonNode job = api.ok(INSTRUCTOR, start(inputs(null)));
+        JsonNode job = old.start(INSTRUCTOR, inputs(null));
 
         assertThat(job.path("ownerOrgId").asLong()).isEqualTo(ownOrg);
         assertThat(job.path("status").asText()).isEqualTo("queued");
         assertThat(job.path("source").path("fileName").asText()).isEqualTo("quy-trinh.md");
         assertThat(job.path("steps").get(0).path("kind").asText()).isEqualTo("summarise_sections");
         assertThat(job.path("inputs").path("level").asText()).isEqualTo("BEGINNER");
-        api.http(INSTRUCTOR, start(inputs(otherOrg)), 403, "CORE-ACCESS_DENIED");
+        assertThat(old.refusal(INSTRUCTOR, inputs(otherOrg))).isInstanceOf(AccessDeniedException.class);
     }
 
     @Test
     void anAdminChoosesAUnitInsideTheirScopeOnly() {
-        api.error(ADMIN, start(inputs(null)), "CORE-VALIDATION_FAILED");
-        assertThat(api.ok(ADMIN, start(inputs(otherOrg))).path("ownerOrgId").asLong()).isEqualTo(otherOrg);
+        assertThat(code(old.refusal(ADMIN, inputs(null)))).isEqualTo("CORE-VALIDATION_FAILED");
+        assertThat(old.start(ADMIN, inputs(otherOrg)).path("ownerOrgId").asLong()).isEqualTo(otherOrg);
 
-        assertThat(api.ok(ORG_SCOPED_ADMIN, start(inputs(ownOrg))).path("ownerOrgId").asLong()).isEqualTo(ownOrg);
-        api.http(ORG_SCOPED_ADMIN, start(inputs(otherOrg)), 403, "CORE-ACCESS_DENIED");
+        assertThat(old.start(ORG_SCOPED_ADMIN, inputs(ownOrg)).path("ownerOrgId").asLong()).isEqualTo(ownOrg);
+        assertThat(old.refusal(ORG_SCOPED_ADMIN, inputs(otherOrg))).isInstanceOf(AccessDeniedException.class);
     }
 
     @Test
     void theSourceIsACourseSourceDocumentNobodyElseCanSeeAndJobsOfOthersAreNotFound() {
-        JsonNode job = api.ok(INSTRUCTOR, start(inputs(null)));
+        JsonNode job = old.start(INSTRUCTOR, inputs(null));
         long documentId = job.path("source").path("documentId").asLong();
 
         assertThat(jdbc.queryForMap("SELECT scope, uploaded_by FROM learning_hub.knowledge_documents "
@@ -194,11 +249,11 @@ class CourseJobIT extends AssessmentIntegrationTest {
         int documentsBefore = jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents",
             Integer.class);
 
-        JsonNode refused = api.error(INSTRUCTOR, start(inputs(null)), "ASSISTANT-JOB_RATE_LIMITED");
+        RuntimeException refused = old.refusal(INSTRUCTOR, inputs(null));
 
-        assertThat(refused.path("errors").get(0).path("message").asText()).contains("thử lại sau").contains("giờ");
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs", Integer.class))
-            .isEqualTo(3);
+        assertThat(code(refused)).isEqualTo("ASSISTANT-JOB_RATE_LIMITED");
+        assertThat(((BusinessException) refused).getErrors().get(0).message()).contains("thử lại sau").contains("giờ");
+        assertThat(jobs()).isEqualTo(3);
         // the refused request stored no document
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.knowledge_documents", Integer.class))
             .isEqualTo(documentsBefore);
@@ -215,7 +270,7 @@ class CourseJobIT extends AssessmentIntegrationTest {
         }
 
         assertThat(api.ok(INSTRUCTOR, get(JOBS))).isEmpty();
-        api.error(INSTRUCTOR, start(inputs(null)), "ASSISTANT-JOB_RATE_LIMITED");
+        assertThat(code(old.refusal(INSTRUCTOR, inputs(null)))).isEqualTo("ASSISTANT-JOB_RATE_LIMITED");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_steps",
             Integer.class)).isZero();
     }
@@ -295,7 +350,7 @@ class CourseJobIT extends AssessmentIntegrationTest {
 
     @Test
     void cancelStopsAJobAndDeleteRemovesItWithItsSourceDocument() {
-        JsonNode created = api.ok(INSTRUCTOR, start(inputs(null)));
+        JsonNode created = old.start(INSTRUCTOR, inputs(null));
         long job = created.path("jobId").asLong();
         long documentId = created.path("source").path("documentId").asLong();
 
@@ -326,15 +381,14 @@ class CourseJobIT extends AssessmentIntegrationTest {
     void anInvalidFormIsRefusedBeforeAnythingIsStored() {
         Map<String, Object> bad = inputs(null);
         bad.put("level", "EXPERT");
-        api.error(INSTRUCTOR, start(bad), "CORE-VALIDATION_FAILED");
+        assertThat(code(old.refusal(INSTRUCTOR, bad))).isEqualTo("CORE-VALIDATION_FAILED");
         Map<String, Object> noSize = inputs(null);
         noSize.remove("chapters");
-        api.error(INSTRUCTOR, start(noSize), "CORE-VALIDATION_FAILED");
+        assertThat(code(old.refusal(INSTRUCTOR, noSize))).isEqualTo("CORE-VALIDATION_FAILED");
         Map<String, Object> noProgramme = inputs(null);
         noProgramme.put("programmeId", -1L);
-        api.error(INSTRUCTOR, start(noProgramme), "CORE-VALIDATION_FAILED");
+        assertThat(code(old.refusal(INSTRUCTOR, noProgramme))).isEqualTo("CORE-VALIDATION_FAILED");
 
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.course_generation_jobs", Integer.class))
-            .isZero();
+        assertThat(jobs()).isZero();
     }
 }

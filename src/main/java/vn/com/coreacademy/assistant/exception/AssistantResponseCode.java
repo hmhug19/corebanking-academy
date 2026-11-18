@@ -1,12 +1,10 @@
 package vn.com.coreacademy.assistant.exception;
 
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import vn.com.coreacademy.common.exception.ApiResponseCode;
 
 @Getter
-@RequiredArgsConstructor
 public enum AssistantResponseCode implements ApiResponseCode {
     AI_UNAVAILABLE("ASSISTANT-AI_UNAVAILABLE", "Dịch vụ AI tạm thời không phản hồi. Vui lòng thử lại sau.",
         "Dịch vụ AI chưa sẵn sàng"),
@@ -33,10 +31,25 @@ public enum AssistantResponseCode implements ApiResponseCode {
     LESSON_TEXT_UNAVAILABLE("ASSISTANT-LESSON_TEXT_UNAVAILABLE",
         "Bài học này chưa có nội dung để đối chiếu. Bạn thử lại sau nhé.", "Chưa có nội dung bài học"),
     ACTION_STALE("ASSISTANT-ACTION_STALE", "Dữ liệu đã thay đổi từ lúc trợ lý đề xuất. Vui lòng yêu cầu lại.",
-        "Dữ liệu đã thay đổi");
+        "Dữ liệu đã thay đổi"),
+    // The old "Tạo bằng AI" job start, replaced by "Soạn cùng trợ lý" (ADR 0002). The endpoint is gone, not refusing a
+    // business rule, so it answers HTTP 410 rather than 200 ERROR (spec decision; DEVELOPMENT_GUIDELINES 13.2 exception).
+    COURSE_JOBS_RETIRED(HttpStatus.GONE, "ASSISTANT-COURSE_JOBS_RETIRED",
+        "Tạo khóa học bằng AI theo cách cũ đã ngừng. Hãy dùng Soạn cùng trợ lý.", "Tính năng đã thay đổi");
 
-    private final HttpStatus httpStatus = HttpStatus.OK;
+    private final HttpStatus httpStatus;
     private final String code;
     private final String message;
     private final String title;
+
+    AssistantResponseCode(String code, String message, String title) {
+        this(HttpStatus.OK, code, message, title);
+    }
+
+    AssistantResponseCode(HttpStatus httpStatus, String code, String message, String title) {
+        this.httpStatus = httpStatus;
+        this.code = code;
+        this.message = message;
+        this.title = title;
+    }
 }

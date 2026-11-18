@@ -53,6 +53,14 @@ public class LearningIdentityService {
         return new Person(user.getId(), user.getFullName(), user.getOrgId(), user.getTeamId());
     }
 
+    /**
+     * auth_ver hiện tại của tài khoản đang hoạt động, để kênh xác thực không dùng JWT (Kết nối trợ lý ngoài) đối chiếu
+     * như một JWT đăng nhập. Tài khoản không có hoặc không active trả BusinessException UNAUTHORIZED.
+     */
+    public long authorizationVersion(String userId) {
+        return policy.current(userId).getAuthorizationVersion();
+    }
+
     /** Kiểm tra lại phiên phòng học từ danh tính tin cậy đã gắn với vé WebSocket, không nhận ID từ packet. */
     public void requireChatRoomSession(String userId, long authorizationVersion, String sessionId) {
         requireSession(userId, authorizationVersion, sessionId);

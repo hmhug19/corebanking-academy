@@ -31,6 +31,8 @@ public enum ResponseCode implements ApiResponseCode {
         "Kiểu nội dung yêu cầu không được hỗ trợ.", "Kiểu nội dung không hợp lệ"),
     RANGE_NOT_SATISFIABLE(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE, "CORE-RANGE_NOT_SATISFIABLE",
         "Khoảng byte yêu cầu không hợp lệ hoặc không được hỗ trợ.", "Không thể tải phần nội dung yêu cầu"),
+    PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "CORE-PAYLOAD_TOO_LARGE",
+        "Nội dung yêu cầu vượt quá kích thước cho phép.", "Yêu cầu quá lớn"),
     TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "CORE-TOO_MANY_REQUESTS",
         "Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau.", "Quá nhiều yêu cầu"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "CORE-INTERNAL_ERROR",
@@ -55,6 +57,7 @@ public enum ResponseCode implements ApiResponseCode {
             case 405 -> METHOD_NOT_ALLOWED;
             case 406 -> NOT_ACCEPTABLE;
             case 415 -> UNSUPPORTED_MEDIA_TYPE;
+            case 413 -> PAYLOAD_TOO_LARGE;
             case 416 -> RANGE_NOT_SATISFIABLE;
             case 429 -> TOO_MANY_REQUESTS;
             default -> status >= 500 ? INTERNAL_ERROR : BAD_REQUEST;

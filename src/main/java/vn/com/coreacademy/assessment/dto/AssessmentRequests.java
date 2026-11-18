@@ -89,7 +89,7 @@ public final class AssessmentRequests {
     public record QuizRequest(
         @Schema(description = "Bắt buộc khi tạo. Khi cập nhật bỏ trống hoặc gửi đúng khóa hiện tại.")
         @Positive Long courseId,
-        @NotBlank @Size(max = 255) String title,
+        @NotBlank @Size(max = AssessmentLimits.MAX_QUIZ_TITLE) String title,
         @Size(max = 10000) String description,
         @NotNull @Pattern(regexp = QuizType.PATTERN) String quizType,
         @NotNull @Pattern(regexp = SelectionMode.PATTERN) String selectionMode,

@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.course;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,5 +66,179 @@ class GenerationSchemasTest {
             .isNotEmpty();
         assertThat(GenerationSchemas.questions(json.readTree(single.replace("Câu hỏi?", "Xem http://x.y"))))
             .isNotEmpty();
+    }
+
+    // ---- Soạn cùng trợ lý, step 1 --------------------------------------------------------------------------------
+
+    private static final String BASICS = """
+        {"title": "Mở tài khoản", "summary": "Quy trình mở tài khoản cho khách hàng cá nhân.",
+         "objectives": ["Thực hiện được việc mở tài khoản"], "level": "basic", "defaultRequirement": "mandatory",
+         "programId": 3, "unsure": ["moduleId"]}
+        """;
+
+    private JsonNode basicsWith(String field, Object value) throws Exception {
+        var node = (ObjectNode) json.readTree(BASICS);
+        node.set(field, json.valueToTree(value));
+        return node;
+    }
+
+    @Test
+    void aStepOneProposalWithKnownValuesIsValidAndIdsMayBeLeftOut() throws Exception {
+        assertThat(GenerationSchemas.draftBasics(json.readTree(BASICS))).isEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("programId", null))).isEmpty();
+    }
+
+    @Test
+    void aStepOneProposalOutsideTheCourseValuesIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftBasics(basicsWith("level", "BEGINNER"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("defaultRequirement", "elective"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("objectives", java.util.List.of()))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("programId", "ba"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("unsure", java.util.List.of("code")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("title", " "))).isNotEmpty();
+        assertThat(GenerationSchemas.draftBasics(basicsWith("summary", "Xem https://evil.example"))).isNotEmpty();
+    }
+
+    @Test
+    void theStepOneSchemaLeavesTheCodeToTheServer() {
+        JsonNode format = GenerationSchemas.format(GenerationSchemas.DRAFT_BASICS);
+
+        assertThat(format.path("properties").has("code")).isFalse();
+        assertThat(format.path("required")).extracting(JsonNode::asText)
+            .contains("title", "summary", "objectives", "level", "defaultRequirement", "unsure")
+            .doesNotContain("programId", "moduleId");
+    }
+
+    // ---- Soạn cùng trợ lý, step 2 --------------------------------------------------------------------------------
+
+    private static final String OUTLINE = """
+        {"chapters": [{"title": "Chuẩn bị", "lessons": [
+            {"title": "Điều kiện mở tài khoản", "description": "Ai được mở tài khoản và cần giấy tờ gì.", "section": "s1"},
+            {"title": "Hồ sơ", "description": "Các giấy tờ khách hàng nộp.", "section": "s2"}]}]}
+        """;
+
+    private JsonNode outlineLessonWith(String field, Object value) throws Exception {
+        var node = (ObjectNode) json.readTree(OUTLINE);
+        ((ObjectNode) node.path("chapters").get(0).path("lessons").get(0))
+            .set(field, json.valueToTree(value));
+        return node;
+    }
+
+    @Test
+    void aStepTwoOutlineOfTitlesDescriptionsAndSectionsIsValid() throws Exception {
+        assertThat(GenerationSchemas.draftOutline(json.readTree(OUTLINE))).isEmpty();
+    }
+
+    @Test
+    void aStepTwoOutlineWithoutADescriptionOrSectionOrWithLinksIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("description", " "))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("description",
+            "x".repeat(GenerationSchemas.MAX_LESSON_DESCRIPTION + 1)))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("section", ""))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(outlineLessonWith("title", "Xem https://evil.example")))
+            .isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(json.readTree("{\"chapters\": []}"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftOutline(json.readTree(
+            "{\"chapters\": [{\"title\": \"C\", \"lessons\": []}]}"))).isNotEmpty();
+    }
+
+    @Test
+    void theStepTwoSchemaHasNoLessonContent() {
+        JsonNode lesson = GenerationSchemas.format(GenerationSchemas.DRAFT_OUTLINE).path("properties")
+            .path("chapters").path("items").path("properties").path("lessons").path("items");
+
+        assertThat(lesson.path("required")).extracting(JsonNode::asText)
+            .containsExactlyInAnyOrder("title", "description", "section");
+        assertThat(lesson.path("properties").has("blocks")).isFalse();
+    }
+
+    // ---- step 3, the rules and draft questions (ticket 06) --------------------------------------------------------
+
+    private static final String RULES = """
+        {"rewardPoints": 50, "competencyId": 4, "questions": [
+          {"type": "SINGLE", "content": "Ai được mở tài khoản?", "explanation": "Theo điều kiện.",
+           "difficulty": "EASY", "section": "s1",
+           "options": [{"content": "Cá nhân đủ 15 tuổi", "correct": true}, {"content": "Ai cũng được", "correct": false}]},
+          {"type": "MULTIPLE", "content": "Hồ sơ gồm?", "difficulty": "MEDIUM", "section": "s2",
+           "options": [{"content": "Giấy đề nghị", "correct": true}, {"content": "Căn cước", "correct": true},
+                       {"content": "Sổ hộ khẩu", "correct": false}]}]}
+        """;
+
+    private JsonNode rulesWith(String field, Object value) throws Exception {
+        ObjectNode node = (ObjectNode) json.readTree(RULES);
+        ObjectNode question = (ObjectNode) node.path("questions").get(0);
+        question.set(field, json.valueToTree(value));
+        return node;
+    }
+
+    @Test
+    void aStepThreeProposalWithPointsQuestionsAndSectionsIsValid() throws Exception {
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES))).isEmpty();
+        // the competency is optional: the model leaves it out when it is unsure
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("\"competencyId\": 4,", ""))))
+            .isEmpty();
+    }
+
+    @Test
+    void aStepThreeProposalWithBadPointsQuestionsOrSectionsIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("50", "-1")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("\"competencyId\": 4",
+            "\"competencyId\": \"bốn\"")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(rulesWith("section", ""))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(rulesWith("content", "Xem https://evil.example"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(rulesWith("difficulty", "VERY_HARD"))).isNotEmpty();
+        // a SINGLE question with two correct options
+        assertThat(GenerationSchemas.draftRules(json.readTree(RULES.replace("\"Ai cũng được\", \"correct\": false",
+            "\"Ai cũng được\", \"correct\": true")))).isNotEmpty();
+        assertThat(GenerationSchemas.draftRules(json.readTree("{\"rewardPoints\": 0, \"questions\": []}")))
+            .isNotEmpty();
+    }
+
+    @Test
+    void theStepThreeSchemaAsksForTheSourceSectionOfEveryQuestion() {
+        JsonNode schema = GenerationSchemas.format(GenerationSchemas.DRAFT_RULES);
+        JsonNode question = schema.path("properties").path("questions").path("items");
+
+        assertThat(schema.path("required")).extracting(JsonNode::asText)
+            .containsExactlyInAnyOrder("rewardPoints", "questions");
+        assertThat(question.path("required")).extracting(JsonNode::asText).contains("section", "options");
+        assertThat(schema.path("properties").path("questions").path("maxItems").asInt())
+            .isEqualTo(GenerationSchemas.MAX_DRAFT_QUESTIONS);
+    }
+
+    // ---- step 4, audience (ticket 07) -------------------------------------------------------------------------------
+
+    @Test
+    void aStepFourProposalNamesUnitKeysOrNothing() throws Exception {
+        assertThat(GenerationSchemas.draftAudience(json.readTree("""
+            {"targets": [{"key": "o12", "includeDescendants": true}, {"key": "t5"}]}
+            """))).isEmpty();
+        // no unit fits: an empty list is an answer, not a failure
+        assertThat(GenerationSchemas.draftAudience(json.readTree("{\"targets\": []}"))).isEmpty();
+    }
+
+    @Test
+    void aStepFourProposalWithoutKeysOrWithTooManyTargetsIsRejected() throws Exception {
+        assertThat(GenerationSchemas.draftAudience(json.readTree("{}"))).isNotEmpty();
+        assertThat(GenerationSchemas.draftAudience(json.readTree("{\"targets\": [{\"key\": \"\"}]}")))
+            .isNotEmpty();
+        assertThat(GenerationSchemas.draftAudience(json.readTree(
+            "{\"targets\": [{\"key\": \"o1\", \"includeDescendants\": \"có\"}]}"))).isNotEmpty();
+        ObjectNode many = json.createObjectNode();
+        var targets = many.putArray("targets");
+        for (int i = 0; i <= GenerationSchemas.MAX_DRAFT_TARGETS; i++) {
+            targets.addObject().put("key", "o" + i);
+        }
+        assertThat(GenerationSchemas.draftAudience(many)).isNotEmpty();
+    }
+
+    @Test
+    void theStepFourSchemaAsksForUnitKeysOnly() {
+        JsonNode schema = GenerationSchemas.format(GenerationSchemas.DRAFT_AUDIENCE);
+        JsonNode target = schema.path("properties").path("targets").path("items");
+
+        assertThat(schema.path("required")).extracting(JsonNode::asText).containsExactly("targets");
+        assertThat(target.path("required")).extracting(JsonNode::asText).containsExactly("key");
+        assertThat(target.path("properties").has("orgId")).isFalse();
     }
 }

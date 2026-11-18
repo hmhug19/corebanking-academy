@@ -42,6 +42,9 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
       OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:8b}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
+      # Trợ lý ngoài (MCP at /api/v1/mcp); app base URL defaults to the LMS origin.
+      ASSISTANT_EXTERNAL_ENABLED: ${ASSISTANT_EXTERNAL_ENABLED:-true}
+      ASSISTANT_EXTERNAL_APP_BASE_URL: ${ASSISTANT_EXTERNAL_APP_BASE_URL:-${SCORM_LMS_ORIGIN}}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=65.0 -XX:+ExitOnOutOfMemoryError}
     ports:
       - "${BIND_IP:-127.0.0.1}:${HOST_PORT:-8019}:8019"
