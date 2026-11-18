@@ -1,6 +1,8 @@
 package vn.com.coreacademy.learning.service;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +27,7 @@ import vn.com.coreacademy.learning.dto.LearningReportFilter;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.repository.custom.LearningAnalyticsRepository;
 import vn.com.coreacademy.learning.repository.custom.LearningAnalyticsRepository.Criteria;
+import vn.com.coreacademy.learning.repository.custom.LearningAnalyticsRepository.Manager;
 import vn.com.coreacademy.learning.service.LearningAssessmentAccess.ReportScope;
 
 /** Báo cáo hiện trạng: scope theo đơn vị/nhóm chụp lúc ghi danh, không gán lại lịch sử theo hồ sơ hiện tại. */
@@ -48,6 +51,22 @@ public class LearningAnalyticsService {
     public PageResponse<LearningAnalytics.Group> myPrograms(int page, int size) {
         return PageResponse.from(repository.groups(learnerCriteria(), "program",
             PageQuery.of(page, size, "id", Set.of("id"))));
+    }
+
+    public LearningAnalytics.Dashboard dashboard() {
+        var actor = access.actor();
+        access.requireStaff(actor);
+        var person = actor.person();
+        var criteria = new Criteria(LearningReportFilter.empty(), null, Set.of(), null, null, Set.of(),
+            new Manager(access.searchScope(actor), person.id(), person.orgId()));
+        Instant now = Instant.now();
+        ZoneId zone = ZoneId.of(TIME_ZONE);
+        LocalDate today = now.atZone(zone).toLocalDate();
+        int days = 14;
+        LocalDate first = today.minusDays(days - 1);
+        return new LearningAnalytics.Dashboard(now, TIME_ZONE, repository.counts(criteria),
+            repository.daily(criteria, first, first.atStartOfDay(zone).toInstant(),
+                today.plusDays(1).atStartOfDay(zone).toInstant(), TIME_ZONE, days));
     }
 
     public LearningAnalytics.Summary summary(LearningReportFilter filter) {
@@ -112,7 +131,7 @@ public class LearningAnalyticsService {
         var actor = access.actor();
         access.requireLearner(actor);
         return new Criteria(LearningReportFilter.empty(), new ReportScope(false, Set.of(), Set.of()), Set.of(),
-            actor.person().id(), actor.person().orgId(), identity.activeAncestorIds(actor.person().orgId()));
+            actor.person().id(), actor.person().orgId(), identity.activeAncestorIds(actor.person().orgId()), null);
     }
 
     private Criteria reportCriteria(LearningReportFilter filter) {
@@ -124,7 +143,7 @@ public class LearningAnalyticsService {
             throw BusinessException.validation("to", "INVALID_VALUE", "Thời điểm kết thúc phải sau thời điểm bắt đầu.");
         }
         Set<Long> orgs = filter.orgId() == null ? Set.of() : reportAccess.orgTree(filter.orgId());
-        return new Criteria(filter, scope, orgs, null, null, Set.of());
+        return new Criteria(filter, scope, orgs, null, null, Set.of(), null);
     }
 
     private Page<LearningAnalytics.EnrollmentRow> withNames(Page<LearningAnalytics.Enrollment> rows) {

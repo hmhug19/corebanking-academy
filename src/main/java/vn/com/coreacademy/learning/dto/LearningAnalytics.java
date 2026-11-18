@@ -2,6 +2,7 @@ package vn.com.coreacademy.learning.dto;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 /** Projection gọn cho trang chủ/báo cáo, không tải entity hoặc cây nội dung. */
@@ -18,6 +19,12 @@ public final class LearningAnalytics {
     }
 
     public record Summary(Instant dataAsOf, String timeZone, Counts counts) {
+    }
+
+    public record Dashboard(Instant dataAsOf, String timeZone, Counts counts, List<DailyActivity> daily) {
+    }
+
+    public record DailyActivity(LocalDate date, Long started, Long completed) {
     }
 
     public record Enrollment(Long id, String userId, Long courseId, String courseCode, String courseTitle,

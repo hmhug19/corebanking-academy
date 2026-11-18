@@ -11,9 +11,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.assessment.constants.AssessmentCodes.AttemptStatus;
+import vn.com.coreacademy.assessment.constants.AssessmentCodes.QuizStatus;
+import vn.com.coreacademy.assessment.dto.AssessmentRequests.VersionRequest;
 import vn.com.coreacademy.assessment.dto.AssessmentViews.AttemptSummary;
 import vn.com.coreacademy.assessment.entity.Quiz;
 import vn.com.coreacademy.assessment.entity.QuizAttempt;
@@ -32,6 +35,15 @@ public class AssessmentQuizDirectory implements LearningQuizDirectory {
     private final QuizRepository quizzes;
     private final QuizAttemptRepository attempts;
     private final AssessmentRepository repository;
+    private final ObjectProvider<QuizService> quizService;
+
+    @Override
+    public void publishDraftLessonQuiz(Long courseId, Long quizId) {
+        quizzes.findById(quizId)
+            .filter(quiz -> courseId.equals(quiz.getCourseId()) && !Boolean.TRUE.equals(quiz.getDeleted())
+                && QuizStatus.DRAFT.equals(quiz.getStatus()))
+            .ifPresent(quiz -> quizService.getObject().publish(quizId, new VersionRequest(quiz.getRowVersion())));
+    }
 
     @Override
     @Transactional(readOnly = true)
