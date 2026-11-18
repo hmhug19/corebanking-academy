@@ -176,6 +176,25 @@ class CatalogTreeIT extends AssessmentIntegrationTest {
             assertThat(daily).hasSize(14);
             assertThat(daily.get(13).path("started").asLong()).isEqualTo(1);
             assertThat(daily.get(13).path("completed").asLong()).isEqualTo(1);
+            JsonNode leaders = summary.path("topLearners");
+            assertThat(leaders).hasSize(1);
+            assertThat(leaders.get(0).path("userId").asText()).isEqualTo(LEARNER);
+            assertThat(leaders.get(0).path("fullName").asText()).isNotBlank();
+            assertThat(leaders.get(0).path("completed").asLong()).isEqualTo(1);
+
+            jdbc.update("""
+                update learning_hub.course_enrollments
+                set started_at = now() - interval '9 days', completed_at = now() - interval '9 days'
+                where course_id = ?
+                """, own.id());
+            JsonNode week = api.ok(LEARNER_2, ApiClient.get(dashboard + "?days=7"));
+            assertThat(week.path("daily")).hasSize(7);
+            assertThat(week.path("topLearners")).isEmpty();
+            assertThat(week.path("counts").path("completed").asLong()).isEqualTo(1);
+            JsonNode month = api.ok(LEARNER_2, ApiClient.get(dashboard + "?days=30"));
+            assertThat(month.path("daily")).hasSize(30);
+            assertThat(month.path("topLearners").get(0).path("completed").asLong()).isEqualTo(1);
+            api.error(LEARNER_2, ApiClient.get(dashboard + "?days=3"), "CORE-VALIDATION_FAILED");
             api.http(LEARNER_2, ApiClient.get("/api/v1/reports/learning/summary"), 403, "CORE-ACCESS_DENIED");
             api.http(LEARNER, ApiClient.get(dashboard), 403, "CORE-ACCESS_DENIED");
         } finally {

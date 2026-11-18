@@ -33,9 +33,10 @@ public class LearningReportController {
 
     @GetMapping("/dashboard")
     @ApiResponse(responseCode = "200", useReturnTypeSchema = true)
-    @Operation(summary = "Tổng quan cho giảng viên và quản trị theo phạm vi khóa học quản lý")
-    public BaseResponse<LearningAnalytics.Dashboard> dashboard() {
-        return BaseResponse.ok(reports.dashboard());
+    @Operation(summary = "Tổng quan cho giảng viên và quản trị theo phạm vi khóa học quản lý",
+        description = "days=7, 14 hoặc 30 lọc hoạt động và xếp hạng. Trạng thái ghi danh là số liệu hiện tại.")
+    public BaseResponse<LearningAnalytics.Dashboard> dashboard(@RequestParam(defaultValue = "14") int days) {
+        return BaseResponse.ok(reports.dashboard(days));
     }
 
     @GetMapping("/summary")

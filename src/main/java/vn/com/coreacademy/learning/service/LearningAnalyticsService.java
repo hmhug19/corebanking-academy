@@ -53,7 +53,7 @@ public class LearningAnalyticsService {
             PageQuery.of(page, size, "id", Set.of("id"))));
     }
 
-    public LearningAnalytics.Dashboard dashboard() {
+    public LearningAnalytics.Dashboard dashboard(int days) {
         var actor = access.actor();
         access.requireStaff(actor);
         var person = actor.person();
@@ -62,11 +62,18 @@ public class LearningAnalyticsService {
         Instant now = Instant.now();
         ZoneId zone = ZoneId.of(TIME_ZONE);
         LocalDate today = now.atZone(zone).toLocalDate();
-        int days = 14;
+        if (days != 7 && days != 14 && days != 30) {
+            throw BusinessException.validation("days", "INVALID_VALUE", "Chọn khoảng 7, 14 hoặc 30 ngày.");
+        }
         LocalDate first = today.minusDays(days - 1);
+        Instant from = first.atStartOfDay(zone).toInstant();
+        Instant to = today.plusDays(1).atStartOfDay(zone).toInstant();
+        var ranks = repository.topLearners(criteria, from, to, 5);
+        var names = identity.fullNames(ranks.stream().map(LearningAnalyticsRepository.LearnerRank::userId).toList());
+        var top = ranks.stream().map(rank -> new LearningAnalytics.TopLearner(rank.userId(),
+            names.getOrDefault(rank.userId(), rank.userId()), rank.completed())).toList();
         return new LearningAnalytics.Dashboard(now, TIME_ZONE, repository.counts(criteria),
-            repository.daily(criteria, first, first.atStartOfDay(zone).toInstant(),
-                today.plusDays(1).atStartOfDay(zone).toInstant(), TIME_ZONE, days));
+            repository.daily(criteria, first, from, to, TIME_ZONE, days), top);
     }
 
     public LearningAnalytics.Summary summary(LearningReportFilter filter) {
