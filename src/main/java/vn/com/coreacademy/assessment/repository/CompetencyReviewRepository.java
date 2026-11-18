@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assessment.repository;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 
@@ -67,7 +68,7 @@ public class CompetencyReviewRepository {
             limit :limit
             """).param("user", userId).param("competency", competencyId)
             .param("graded", List.of(AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED))
-            .param("since", java.sql.Timestamp.from(since)).param("withdrawn", ProgressStatus.WITHDRAWN)
+            .param("since", Timestamp.from(since)).param("withdrawn", ProgressStatus.WITHDRAWN)
             .param("limit", limit).query((rs, row) -> new ReviewLesson(rs.getLong("course_id"),
                 rs.getString("course_title"), rs.getLong("lesson_id"), rs.getString("lesson_title"),
                 rs.getLong("missed_count"), rs.getTimestamp("last_missed_at").toInstant())).list();

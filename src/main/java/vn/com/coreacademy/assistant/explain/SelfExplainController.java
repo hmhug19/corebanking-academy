@@ -2,7 +2,9 @@ package vn.com.coreacademy.assistant.explain;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -27,7 +29,7 @@ public class SelfExplainController {
     private final SelfExplainService selfExplain;
 
     /** Body of {@code self-explain}: what the learner wrote, 50 to 1500 characters after trimming. */
-    public record SelfExplainRequest(String text) {
+    public record SelfExplainRequest(@Size(max = 20_000) String text) {
     }
 
     @PostMapping(value = "/{lessonId}/self-explain",
@@ -45,7 +47,7 @@ public class SelfExplainController {
             """
     )
     public ResponseEntity<StreamingResponseBody> selfExplain(@PathVariable @Positive Long lessonId,
-                                                             @RequestBody SelfExplainRequest request) {
+                                                             @RequestBody @Valid SelfExplainRequest request) {
         StreamingResponseBody body = selfExplain.stream(lessonId, request.text());
         return ResponseEntity.ok().contentType(NDJSON).header("X-Accel-Buffering", "no").body(body);
     }
