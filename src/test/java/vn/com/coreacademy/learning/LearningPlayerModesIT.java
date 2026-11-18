@@ -1,6 +1,8 @@
 package vn.com.coreacademy.learning;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -13,13 +15,17 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures;
 import vn.com.coreacademy.assessment.support.AssessmentFixtures.Course;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
+import vn.com.coreacademy.security.SecurityConstants;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.ADMIN;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
@@ -32,6 +38,7 @@ class LearningPlayerModesIT extends AssessmentIntegrationTest {
     private static final String VALIDATION = "CORE-VALIDATION_FAILED";
     private static final String CHAPTERS = "videoChapters";
     private static final String TRANSCRIPT = "transcript";
+    private static final String SEEKING = "allowSeeking";
 
     @Autowired
     private MockMvc mvc;
@@ -315,6 +322,83 @@ class LearningPlayerModesIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void allowSeekingDefaultsToFalseAndRoundTripsInTheTreeAndTheLearnersCourse() {
+        Draft draft = draft();
+        assertThat(firstBlock(save(draft, block(draft, "video", null, null))).path(SEEKING).asBoolean(true)).isFalse();
+
+        Map<String, Object> allowed = block(draft, "video", null, null);
+        allowed.put(SEEKING, true);
+        assertThat(firstBlock(save(draft, allowed)).path(SEEKING).asBoolean()).isTrue();
+        assertThat(firstBlock(api.ok(INSTRUCTOR, get(COURSE + "?revisionId={r}", draft.course.id(),
+            draft.revisionId))).path(SEEKING).asBoolean()).isTrue();
+
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", draft.version), REVISION + "/publish",
+            draft.course.id(), draft.revisionId));
+        assign(draft, LEARNER);
+        JsonNode course = api.ok(LEARNER, get("/api/v1/me/learning/courses/{c}", draft.course.id()));
+        assertThat(firstBlock(course.path("content")).path(SEEKING).asBoolean()).isTrue();
+    }
+
+    @Test
+    void refusesAllowSeekingOnABlockThatIsNotAVideo() {
+        Draft draft = draft();
+        Map<String, Object> text = block(draft, "text", null, null);
+        text.put(SEEKING, true);
+        refused(draft, text, SEEKING);
+        assertThat(firstBlock(save(draft, block(draft, "text", null, null))).path(SEEKING).asBoolean(true)).isFalse();
+    }
+
+    @Test
+    void theFlagFollowsPublishAndTheOlderRevisionKeepsItsOwnValue() {
+        Draft draft = draft();
+        Map<String, Object> allowed = block(draft, "video", null, null);
+        allowed.put(SEEKING, true);
+        save(draft, allowed);
+        long published = draft.revisionId;
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", draft.version), REVISION + "/publish",
+            draft.course.id(), draft.revisionId));
+
+        JsonNode next = api.ok(INSTRUCTOR, api.post(Map.of(), COURSE + "/draft", draft.course.id()));
+        assertThat(firstBlock(next).path(SEEKING).asBoolean()).isTrue();
+        draft.track(next);
+        assertThat(firstBlock(save(draft, block(draft, "video", null, null))).path(SEEKING).asBoolean(true)).isFalse();
+
+        assertThat(firstBlock(api.ok(INSTRUCTOR, get(COURSE + "?revisionId={r}", draft.course.id(), published)))
+            .path(SEEKING).asBoolean()).isTrue();
+    }
+
+    @Test
+    void seekingToTheEndOfAnAllowedVideoDoesNotCompleteIt() {
+        Draft draft = draft();
+        Map<String, Object> allowed = block(draft, "video", null, null);
+        allowed.put(SEEKING, true);
+        save(draft, allowed);
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", draft.version), REVISION + "/publish",
+            draft.course.id(), draft.revisionId));
+        assign(draft, LEARNER);
+        JsonNode course = api.ok(LEARNER, get("/api/v1/me/learning/courses/{c}", draft.course.id()));
+        long enrollment = course.path("card").path("enrollmentId").asLong();
+        long blockId = firstBlock(course.path("content")).path("id").asLong();
+
+        JsonNode session = learner(api.post(Map.of("enrollmentId", enrollment, "blockId", blockId,
+            "takeover", true), "/api/v1/me/learning/sessions"));
+        long version = session.path("version").asLong();
+        long fence = session.path("sessionFence").asLong();
+        String id = session.path("sessionId").asText();
+        String path = "/api/v1/me/learning/enrollments/{e}/blocks/{b}/progress";
+        version = learner(api.put(event(id, fence, "OPEN", false, version, 1, 0, draft.assetId), path, enrollment,
+            blockId)).path("block").path("rowVersion").asLong();
+        version = learner(api.put(event(id, fence, "PLAY", true, version, 2, 0, draft.assetId), path, enrollment,
+            blockId)).path("block").path("rowVersion").asLong();
+        JsonNode sought = learner(api.put(event(id, fence, "SEEK", false, version, 3, 30, draft.assetId), path,
+            enrollment, blockId)).path("block");
+
+        assertThat(sought.path("status").asText()).isNotEqualToIgnoringCase("COMPLETED");
+        assertThat(sought.path("progressPercent").decimalValue()).isEqualByComparingTo("0");
+        assertThat(sought.path("watchedSeconds").decimalValue()).isEqualByComparingTo("0");
+    }
+
+    @Test
     void assignmentHistoryKeepsOrgScopeWithoutGrantingCrossOrgAssignment() {
         Course course = fixtures.course(LEARNER);
         long otherOrg = jdbc.queryForObject("""
@@ -355,6 +439,34 @@ class LearningPlayerModesIT extends AssessmentIntegrationTest {
         JsonNode history = api.ok(ADMIN, get(list, course.id(), course.ownerOrgId()));
         assertThat(history.path("items")).hasSize(1);
         assertThat(history.path("totalElements").asLong()).isEqualTo(1);
+    }
+
+    private static Map<String, Object> event(String session, long fence, String type, boolean playing, long version,
+                                             long sequence, Object position, long assetId) {
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("sessionId", session);
+        event.put("sessionFence", fence);
+        event.put("eventType", type);
+        event.put("assetId", assetId);
+        event.put("playing", playing);
+        event.put("expectedVersion", version);
+        event.put("sequence", sequence);
+        event.put("complete", false);
+        event.put("videoPositionSeconds", position);
+        return event;
+    }
+
+    /** /sessions và progress ký cookie media từ claim av của JWT, nên token giả lập phải mang claim này. */
+    private JsonNode learner(MockHttpServletRequestBuilder request) {
+        try {
+            MockHttpServletResponse response = api.raw(null, request.with(jwt().jwt(token -> token.subject(LEARNER)
+                .claim(SecurityConstants.AUTH_VERSION_CLAIM, 0L))));
+            JsonNode body = json.readTree(response.getContentAsString(StandardCharsets.UTF_8));
+            assertThat(body.path("status").asText()).as(body.toPrettyString()).isEqualTo("SUCCESS");
+            return body.path("data");
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private void assign(Draft draft, String learner) {

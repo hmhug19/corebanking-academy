@@ -605,6 +605,10 @@ public class LearningContentService {
             throw BusinessException.validation("chapters", "INVALID_VALUE",
                 "Loại khối và cách hoàn thành chưa phù hợp.");
         }
+        if (block.allowSeeking() && !BlockType.VIDEO.equals(block.blockType())) {
+            throw BusinessException.validation("allowSeeking", "INVALID_VALUE",
+                "Chỉ khối video mới được cho phép tua.");
+        }
         if (CompletionMode.VIDEO_COVERAGE.equals(block.completionMode()) && block.completionThreshold() == null) {
             throw BusinessException.validation("completionThreshold", "REQUIRED", "Vui lòng đặt tỷ lệ xem video.");
         }
@@ -843,6 +847,7 @@ public class LearningContentService {
         block.setSortNo(sort);
         block.setVideoChapters(LessonBlockJson.chaptersColumn(input.videoChapters()));
         block.setTranscript(LessonBlockJson.linesColumn(input.transcript()));
+        block.setAllowSeeking(input.allowSeeking());
         block.setMediaAssetId(input.assets().stream().filter(a -> AssetUsage.PRIMARY.equals(a.usage()))
             .map(LearningRequests.AssetUse::assetId).findFirst().orElse(null));
         repository.save(block, actor);
@@ -913,7 +918,8 @@ public class LearningContentService {
                             .map(s -> new LearningRequests.StepInput(s.title(), s.description())).toList(),
                         b.block().videoChapters().stream().map(ch -> new LearningRequests.VideoChapterInput(
                             ch.startSeconds(), ch.title())).toList(), b.block().transcript().stream()
-                            .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList()))
+                            .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList(),
+                        b.block().allowSeeking()))
                     .toList(), l.lesson().scormPackageId(), l.lesson().scormCompletionRule()))
                 .toList())).toList();
         var payload = new LearningRequests.DraftContent(source.getProgramId(), source.getModuleId(),
