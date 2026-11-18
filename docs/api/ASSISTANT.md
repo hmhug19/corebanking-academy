@@ -397,3 +397,68 @@ Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể
 - Kỹ năng và công cụ chỉ dành cho INSTRUCTOR, ADMIN, SUPER_ADMIN. Học viên không được cấp kỹ năng; `style.md` bảo trợ lý trả lời ngắn rằng tính năng
   dành cho giảng viên.
 
+
+## Trợ lý ngoài (ADR 0004 bên lms-vip-pro-max)
+
+Một trợ lý chạy ngoài CHAN Academy (v1: Claude Code trên máy người dùng, trong mạng nội bộ) soạn khóa học thay
+người dùng qua endpoint MCP `/api/v1/mcp`, với đúng quyền hiện tại của người đó. Cờ `app.assistant.external.enabled`
+(`ASSISTANT_EXTERNAL_ENABLED`, mặc định `false`): khi tắt, mọi endpoint dưới đây trừ `/status` và `/api/v1/mcp`
+trả HTTP 404 `CORE-ENDPOINT_NOT_FOUND`.
+
+### Kết nối trợ lý ngoài (`/api/v1/assistant/external-connections`, JWT đăng nhập)
+
+Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng `AI_ASSISTANT`; người khác nhận 403.
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/status` | `{ enabled, allowed }`: cờ bật chưa, người gọi có tạo được kết nối không. Luôn trả về. |
+| GET | `/` | Kết nối chưa thu hồi của người gọi (kể cả đã hết hạn), mới nhất trước: `id, name, tokenPrefix, createTime, expiresAt, lastUsedAt`. Không bao giờ có token. |
+| POST | `/` | `{ name (1–100 ký tự), validDays (30 \| 90) }` → `{ connection, token }`. Token `chan_ext_` + 43 ký tự base64url chỉ trả về đúng một lần; DB chỉ giữ SHA-256 và 13 ký tự đầu. `validDays` khác trả `CORE-VALIDATION_FAILED` trường `validDays`. |
+| DELETE | `/{connectionId}` | Thu hồi ngay. Kết nối của người khác hoặc đã thu hồi trả `CORE-RESOURCE_NOT_FOUND`. |
+
+Token chỉ xác thực `/api/v1/mcp`; mọi API khác từ chối nó (401, vì không phải JWT). Kết nối hết hạn, đã thu hồi,
+hoặc người dùng mất vai trò quản lý khóa học/chức năng `AI_ASSISTANT` thì `/api/v1/mcp` trả 401.
+`lastUsedAt` cập nhật tối đa mỗi phút một lần. Bảng: `external_assistant_connection`
+(`docs/sql/upgrade/2026-11-27-external-assistant-connections.sql`).
+
+### Endpoint MCP (`/api/v1/mcp`, token Kết nối trợ lý ngoài)
+
+Spring AI MCP Server 1.1.8 (dòng 1.1.x dựng trên Spring Boot 3.5 / Java 17; 2.x cần Boot 4), WebMVC, Streamable
+HTTP, **stateless** (`spring.ai.mcp.server.protocol=STATELESS`). Chỉ POST JSON-RPC (`initialize`, `tools/list`,
+`tools/call`, `prompts/list`, `prompts/get`), header `Accept: application/json, text/event-stream` và
+`Authorization: Bearer chan_ext_…`. Chuỗi bảo mật riêng (`ExternalMcpSecurityConfig`, xếp trước chuỗi chính):
+
+- Cờ tắt → 404 trước mọi kiểm tra. Thiếu token, token sai/đã thu hồi/hết hạn, tài khoản không active, mật khẩu tạm
+  hoặc không còn vai trò quản lý khóa học/chức năng `AI_ASSISTANT` → 401 (đọc quyền ở mỗi lần gọi).
+- JWT đăng nhập không dùng được ở đây (401); token kết nối không dùng được ở API khác (401).
+- Lệnh gọi chạy với đúng quyền hiện tại của người dùng, qua cùng service và kiểm tra vai trò/chủ sở hữu như web.
+
+Năm công cụ (không công cụ nào đọc tài liệu, bài học, khóa học, kho tri thức hay cộng đồng; server không nhận tệp):
+
+| Công cụ | Tham số | Kết quả |
+|---|---|---|
+| `start_course_drafting` | `source_name` (1–255 ký tự) | Phiên mới `proposer = external`, không có tài liệu nguồn, cho đơn vị của người gọi; `editorUrl` = `{app.assistant.external.app-base-url}/admin/courses/new?session={id}` (sau bước 1: `/admin/courses/{courseId}/edit?step={n}`), `waitingStep: 1`. Không tính vào giới hạn tạo khóa học mỗi ngày. |
+| `get_reference_data` | — | `programmes`, `modules` (`id, name, fieldId`), `competencies` (`id, name`), `audience` (`key, type, name, canIncludeSubunits`), `levels`, `requirements`. |
+| `get_drafting_session` | `session_id` | Trạng thái, bước hiện tại, `waitingStep`, từng bước (`state, proposal, notes, error, confirmed`: giá trị tác giả đã chốt, gồm cả chỗ tác giả sửa; không có nội dung bài học), `next`. Chỉ phiên external của chính người gọi; khác đi là lỗi "not found". |
+| `propose_step` | `session_id`, `step`, `proposal` | Đề xuất cho bước đang chờ (`waitingStep`). Kiểm bằng schema sinh của bước (`draft_basics` … `draft_audience`; `unsure` không bắt buộc) và cùng danh sách id như trợ lý nội bộ; id ngoài danh sách bị từ chối kèm tên trường (`proposal.programId`, `proposal.targets[0].key`…), không bị bỏ im lặng. Lưu như đề xuất của worker (trang soạn hiển thị y như cũ, mã khóa học do server tạo). Bước không ở `proposing`, không phải bước hiện tại, hoặc phiên không `active` → lỗi nêu trạng thái. Worker không bao giờ nhận bước của phiên external, không ghi tin nhắn chat. "Đề xuất lại" trên trang đưa bước về `proposing` chờ Trợ lý ngoài (không tính hạn mức sinh trong ngày; giới hạn số lần vẫn áp dụng). |
+| `stop_course_drafting` | `session_id` | Phiên kết thúc phần của trợ lý (status `manual`); những gì đã ghi giữ nguyên. |
+
+Lỗi của công cụ là kết quả `isError: true` với câu tiếng Anh ngắn (tham số nào, trạng thái nào), không lặp lại nội
+dung đã lưu. Prompt `soan_khoa_hoc` (tham số tùy chọn `tai_lieu`) mở đầu luồng; `instructions` của server và mô tả
+từng công cụ nêu quy tắc: từng bước một, không viết nội dung bài, sau mỗi bước dặn tác giả mở link, sửa, Chốt bước rồi
+chờ "tiếp", không bao giờ nói khóa học đã được tạo hay xuất bản.
+
+### Giới hạn và audit của Trợ lý ngoài
+
+| Giới hạn | Mặc định (`app.assistant.external.*`) | Khi vượt |
+|---|---|---|
+| Số lần gọi mỗi kết nối trong một phút (đếm theo phút lịch, trên từng instance) | `calls-per-minute: 60` | HTTP 429 `CORE-TOO_MANY_REQUESTS`, header `Retry-After` (giây đến phút sau), `errors[0]` có câu tiếng Anh |
+| Kích thước body của `/api/v1/mcp` | `max-body: 256KB` | HTTP 413 `CORE-PAYLOAD_TOO_LARGE`, từ chối trước khi đọc JSON |
+| Phiên external đang soạn (`active`) của một người dùng | `max-active-sessions: 3` | `start_course_drafting` trả lỗi công cụ; dừng/hoàn tất/tự điền một phiên là có chỗ lại |
+| Ghi "lần dùng cuối" của kết nối | `last-used-interval: 1m` | ghi tối đa một lần mỗi khoảng |
+
+Mỗi lần gọi công cụ (kể cả bị từ chối hay lỗi) ghi một dòng `learning_hub.audit_log` trong transaction riêng:
+`action = EXTERNAL_ASSISTANT_TOOL_CALL`, `actor_id` = người dùng của kết nối, `entity_type = course_drafting_session`,
+`entity_id` = phiên (nếu có), `details` = `connectionId, tool, sessionId, step, outcome (ok | refused | failed),
+durationMs`. Không bao giờ ghi nội dung đề xuất hay tên tài liệu. Lời gọi bị chặn trước công cụ (401/404/413/429)
+không có dòng audit mà chỉ có log cảnh báo.

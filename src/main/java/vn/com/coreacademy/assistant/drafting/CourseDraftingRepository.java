@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant.drafting;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -23,10 +24,23 @@ import vn.com.coreacademy.knowledge.entity.DocumentScope;
 @Repository
 @RequiredArgsConstructor
 public class CourseDraftingRepository {
+    /** {@code proposer} is who makes the Đề xuất ({@link DraftingStates#IN_HOUSE} or {@link DraftingStates#EXTERNAL}). */
     public record SessionRow(long id, String ownerUserId, long ownerOrgId, Long sourceDocumentId, Long conversationId,
                              Long courseId, Long revisionId, int currentStep, String status, String errorMessage,
                              String hints, String sourceSummary, OffsetDateTime createTime,
-                             OffsetDateTime updateTime) {
+                             OffsetDateTime updateTime, String proposer, String sourceName) {
+        /** A session of the in-house assistant. */
+        public SessionRow(long id, String ownerUserId, long ownerOrgId, Long sourceDocumentId, Long conversationId,
+                          Long courseId, Long revisionId, int currentStep, String status, String errorMessage,
+                          String hints, String sourceSummary, OffsetDateTime createTime, OffsetDateTime updateTime) {
+            this(id, ownerUserId, ownerOrgId, sourceDocumentId, conversationId, courseId, revisionId, currentStep,
+                status, errorMessage, hints, sourceSummary, createTime, updateTime, DraftingStates.IN_HOUSE, null);
+        }
+
+        /** A Trợ lý ngoài makes this session's Đề xuất: the worker and the chat leave it alone. */
+        public boolean external() {
+            return DraftingStates.EXTERNAL.equals(proposer);
+        }
     }
 
     public record DraftingStepRow(long id, long sessionId, int stepNo, String state, String proposal, String notes,
@@ -75,7 +89,7 @@ public class CourseDraftingRepository {
         (Long) rs.getObject("conversation_id"), (Long) rs.getObject("course_id"), (Long) rs.getObject("revision_id"),
         rs.getInt("current_step"), rs.getString("status"), rs.getString("error_message"), rs.getString("hints"),
         rs.getString("source_summary"), rs.getObject("create_time", OffsetDateTime.class),
-        rs.getObject("update_time", OffsetDateTime.class));
+        rs.getObject("update_time", OffsetDateTime.class), rs.getString("proposer"), rs.getString("source_name"));
     private static final RowMapper<DraftingStepRow> STEP = (rs, row) -> new DraftingStepRow(rs.getLong("step_id"),
         rs.getLong("session_id"), rs.getInt("step_no"), rs.getString("state"), rs.getString("proposal"),
         rs.getString("notes"), rs.getString("error_message"), rs.getInt("attempts"),
@@ -96,28 +110,52 @@ public class CourseDraftingRepository {
             .addValue("active", DraftingStates.ACTIVE)
             .addValue("finished", DraftingStates.FINISHED)
             .addValue("manualSession", DraftingStates.MANUAL_SESSION)
-            .addValue("failedSession", DraftingStates.FAILED_SESSION);
+            .addValue("failedSession", DraftingStates.FAILED_SESSION)
+            .addValue("inHouse", DraftingStates.IN_HOUSE);
     }
 
     // ---- sessions --------------------------------------------------------------------------------------------------
 
     public long insertSession(String ownerUserId, long ownerOrgId, long sourceDocumentId, Long conversationId,
                               String hintsJson) {
+        return insertSession(ownerUserId, ownerOrgId, sourceDocumentId, conversationId, hintsJson,
+            DraftingStates.IN_HOUSE, null);
+    }
+
+    /** A session of a Trợ lý ngoài: no source document (the server never receives it), only its name for display. */
+    /** The user's sessions a Trợ lý ngoài drives that are still going. */
+    public int activeExternalSessions(String ownerUserId) {
+        Integer count = jdbc.queryForObject("""
+            SELECT count(*) FROM learning_hub.course_drafting_sessions
+             WHERE owner_user_id = :user AND proposer = :external AND status = :active
+            """, states().addValue("user", ownerUserId).addValue("external", DraftingStates.EXTERNAL), Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    public long insertExternalSession(String ownerUserId, long ownerOrgId, String sourceName) {
+        return insertSession(ownerUserId, ownerOrgId, null, null, "{}", DraftingStates.EXTERNAL, sourceName);
+    }
+
+    private long insertSession(String ownerUserId, long ownerOrgId, Long sourceDocumentId, Long conversationId,
+                               String hintsJson, String proposer, String sourceName) {
         return jdbc.queryForObject("""
             INSERT INTO learning_hub.course_drafting_sessions (owner_user_id, owner_org_id, source_document_id,
-                                                               conversation_id, current_step, status, hints)
-            VALUES (:owner, :org, :document, :conversation, :firstStep, :active, :hints::jsonb)
+                                                               conversation_id, current_step, status, hints,
+                                                               proposer, source_name)
+            VALUES (:owner, :org, :document, :conversation, :firstStep, :active, :hints::jsonb, :proposer,
+                    :sourceName)
             RETURNING session_id
             """, states().addValue("owner", ownerUserId).addValue("org", ownerOrgId)
             .addValue("document", sourceDocumentId).addValue("conversation", conversationId)
-            .addValue("firstStep", DraftingStates.FIRST_STEP).addValue("hints", hintsJson), Long.class);
+            .addValue("firstStep", DraftingStates.FIRST_STEP).addValue("hints", hintsJson)
+            .addValue("proposer", proposer).addValue("sourceName", sourceName), Long.class);
     }
 
     public Optional<SessionRow> session(long sessionId) {
         return jdbc.query("""
             SELECT session_id, owner_user_id, owner_org_id, source_document_id, conversation_id, course_id,
                    revision_id, current_step, status, error_message, hints::text AS hints,
-                   source_summary::text AS source_summary, create_time, update_time
+                   source_summary::text AS source_summary, create_time, update_time, proposer, source_name
               FROM learning_hub.course_drafting_sessions
              WHERE session_id = :session
             """, Map.of("session", sessionId), SESSION).stream().findFirst();
@@ -125,7 +163,8 @@ public class CourseDraftingRepository {
 
     /**
      * Start times of the user's course generation since the instant, oldest first: old jobs (deleted ones too) and
-     * drafting sessions count against the same daily allowance.
+     * drafting sessions count against the same daily allowance. Sessions a Trợ lý ngoài drives do not: they cost the
+     * in-house model nothing (they have their own limit of open sessions).
      */
     public List<OffsetDateTime> startedSince(String ownerUserId, OffsetDateTime since) {
         return jdbc.queryForList("""
@@ -136,13 +175,13 @@ public class CourseDraftingRepository {
                     UNION ALL
                     SELECT create_time
                       FROM learning_hub.course_drafting_sessions
-                     WHERE owner_user_id = :owner AND create_time > :since
+                     WHERE owner_user_id = :owner AND create_time > :since AND proposer = :inHouse
                     UNION ALL
                     SELECT create_time
                       FROM learning_hub.course_drafting_reproposals
                      WHERE owner_user_id = :owner AND create_time > :since) starts
              ORDER BY started
-            """, Map.of("owner", ownerUserId, "since", since), OffsetDateTime.class);
+            """, Map.of("owner", ownerUserId, "since", since, "inHouse", DraftingStates.IN_HOUSE), OffsetDateTime.class);
     }
 
     /**
@@ -212,7 +251,7 @@ public class CourseDraftingRepository {
         return jdbc.query("""
             SELECT session_id, owner_user_id, owner_org_id, source_document_id, conversation_id, course_id,
                    revision_id, current_step, status, error_message, hints::text AS hints,
-                   source_summary::text AS source_summary, create_time, update_time
+                   source_summary::text AS source_summary, create_time, update_time, proposer, source_name
               FROM learning_hub.course_drafting_sessions
              WHERE session_id = :session
                FOR UPDATE
@@ -224,7 +263,7 @@ public class CourseDraftingRepository {
         return jdbc.query("""
             SELECT session_id, owner_user_id, owner_org_id, source_document_id, conversation_id, course_id,
                    revision_id, current_step, status, error_message, hints::text AS hints,
-                   source_summary::text AS source_summary, create_time, update_time
+                   source_summary::text AS source_summary, create_time, update_time, proposer, source_name
               FROM learning_hub.course_drafting_sessions
              WHERE course_id = :course AND owner_user_id = :owner
              ORDER BY create_time DESC, session_id DESC
@@ -388,8 +427,9 @@ public class CourseDraftingRepository {
     }
 
     /**
-     * Takes the oldest waiting step of an active session and marks it claimed. Callers run this in a transaction;
-     * {@code SKIP LOCKED} lets another instance take another step meanwhile.
+     * Takes the oldest waiting step of an active session of the in-house assistant and marks it claimed: a Trợ lý ngoài
+     * proposes the steps of its own sessions. Callers run this in a transaction; {@code SKIP LOCKED} lets another
+     * instance take another step meanwhile.
      */
     public Optional<DraftingStepRow> claimNext() {
         return jdbc.query("""
@@ -399,13 +439,46 @@ public class CourseDraftingRepository {
                                   FROM learning_hub.course_drafting_steps st
                                   JOIN learning_hub.course_drafting_sessions se ON se.session_id = st.session_id
                                  WHERE st.state = :proposing AND st.claimed_at IS NULL AND NOT st.stopped
-                                   AND se.status = :active
+                                   AND se.status = :active AND se.proposer = :inHouse
                                  ORDER BY st.update_time, st.step_id
                                  FOR UPDATE OF st SKIP LOCKED
                                  LIMIT 1)
             RETURNING step_id, session_id, step_no, state, proposal::text AS proposal, notes::text AS notes,
                       error_message, attempts, claimed_at, stopped, update_time
             """, states(), STEP).stream().findFirst();
+    }
+
+    /**
+     * {@code propose_step} of a Trợ lý ngoài: the waiting step holds its proposal, and the attempt counts as the
+     * worker's would (so "Đề xuất lại" keeps its limit). False when the step no longer waits.
+     */
+    public boolean storeExternalProposal(long sessionId, int stepNo, String proposalJson, String notesJson) {
+        return jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET state = :proposed, proposal = :proposal::jsonb, notes = :notes::jsonb, error_message = NULL,
+                   attempts = attempts + 1, update_time = now()
+             WHERE session_id = :session AND step_no = :step AND state = :proposing
+            """, states().addValue("proposal", proposalJson).addValue("notes", notesJson)
+            .addValue("session", sessionId).addValue("step", stepNo)) == 1;
+    }
+
+    /** What the author confirmed at a step of a Trợ lý ngoài's session, for {@code get_drafting_session}. */
+    public void setConfirmed(long sessionId, int stepNo, String confirmedJson) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps SET confirmed = :confirmed::jsonb
+             WHERE session_id = :session AND step_no = :step
+            """, Map.of("confirmed", confirmedJson, "session", sessionId, "step", stepNo));
+    }
+
+    /** Step number to what the author confirmed there, for the steps that keep it. */
+    public Map<Integer, String> confirmedValues(long sessionId) {
+        Map<Integer, String> values = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT step_no, confirmed::text AS confirmed FROM learning_hub.course_drafting_steps
+             WHERE session_id = :session AND confirmed IS NOT NULL ORDER BY step_no
+            """, Map.of("session", sessionId),
+            (RowCallbackHandler) rs -> values.put(rs.getInt(1), rs.getString(2)));
+        return values;
     }
 
     // A worker's writes name the claim they finish ({@code claimedAt}): once the author stopped the step, filled it by
@@ -663,12 +736,13 @@ public class CourseDraftingRepository {
             """, revision, (rs, row) -> new LessonSnapshot(rs.getString(2), rs.getObject(3, Long.class),
             rs.getObject(4, Long.class), blocks.getOrDefault(rs.getLong(1), List.of())));
         // The final exam as the course detail reads it: the exam link overrides the completion rule's legacy column.
-        Long finalQuizId = jdbc.query("""
+        // One row always, its value null when the course has no final exam yet.
+        Long finalQuizId = jdbc.queryForObject("""
             SELECT COALESCE(
                 (SELECT assessment_revision_id FROM learning_hub.course_assessments
                   WHERE revision_id = :revision AND placement = 'final' ORDER BY link_id DESC LIMIT 1),
                 (SELECT final_quiz_id FROM learning_hub.course_completion_rules WHERE revision_id = :revision LIMIT 1))
-            """, revision, (rs, row) -> rs.getObject(1, Long.class)).stream().findFirst().orElse(null);
+            """, revision, Long.class);
 
         return jdbc.query("""
             SELECT title, program_id, level

@@ -50,10 +50,21 @@ public final class DraftingViews {
                            @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode lessonNotes) {
     }
 
-    @Schema(description = "Phiên Soạn cùng trợ lý; steps chỉ gồm các bước đã tới, tăng dần.")
+    @Schema(description = """
+        Phiên Soạn cùng trợ lý; steps chỉ gồm các bước đã tới, tăng dần.
+        - proposer: assistant (trợ lý nội bộ) | external (Trợ lý ngoài; source null, sourceName là tên tài liệu).
+        """)
     public record SessionView(long id, String status, int currentStep, Long courseId, Long revisionId,
                               Long conversationId, SourceView source, String error, List<StepView> steps,
-                              OffsetDateTime createTime, OffsetDateTime updateTime) {
+                              OffsetDateTime createTime, OffsetDateTime updateTime, String proposer,
+                              String sourceName) {
+        /** A session of the in-house assistant. */
+        public SessionView(long id, String status, int currentStep, Long courseId, Long revisionId,
+                           Long conversationId, SourceView source, String error, List<StepView> steps,
+                           OffsetDateTime createTime, OffsetDateTime updateTime) {
+            this(id, status, currentStep, courseId, revisionId, conversationId, source, error, steps, createTime,
+                updateTime, DraftingStates.IN_HOUSE, null);
+        }
     }
 
     /** Chốt bước 1: the course create command built from the page's current values. */

@@ -79,6 +79,8 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 public class CourseDraftingService {
     /** Where a confirmed outline keeps its lesson notes in the step's proposal. */
     static final String LESSON_NOTES = "lessonNotes";
+    /** The code of the refusal when the user already has the most Trợ lý ngoài sessions going. */
+    public static final String TOO_MANY_ACTIVE = "TOO_MANY_ACTIVE";
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
     // The final exam step 3 creates gets the defaults the page's own new final exam form offers.
     private static final String FINAL_EXAM_TITLE = "Thi cuối khóa";
@@ -145,6 +147,77 @@ public class CourseDraftingService {
             conversationId);
 
         return queue(prepared, documentId, true);
+    }
+
+    /**
+     * {@code start_course_drafting} of a Trợ lý ngoài, as the caller (the connection's user): the same role and unit
+     * checks as {@link #start}, with no document (the server never receives it), only {@code sourceName} to show. The
+     * worker never takes its steps: step 1 waits in {@code proposing} for the {@code propose_step} tool. It does not count
+     * against the daily course generation allowance, which is for the in-house model. A user has at most
+     * {@code maxActive} such sessions going at once; one stopped, finished or filled by hand frees its place.
+     */
+    public SessionView startExternal(String sourceName, int maxActive) {
+        String userId = SecurityContextUtils.getUserId();
+        Actor actor = identity.actor(userId);
+        requireManager(actor);
+        long ownerOrgId = ownerOrg(actor, null);
+        String name = blankToNull(sourceName);
+        if (name == null || name.length() > GenerationSchemas.MAX_TITLE) {
+            throw BusinessException.validation("source_name", "INVALID_LENGTH",
+                "Tên tài liệu từ 1 đến " + GenerationSchemas.MAX_TITLE + " ký tự.");
+        }
+        long sessionId = transaction.execute(status -> {
+            // The allowance lock serialises the user's starts, so two cannot both take the last place.
+            allowance.lock(userId);
+            if (drafting.activeExternalSessions(userId) >= maxActive) {
+                throw BusinessException.validation("session", TOO_MANY_ACTIVE,
+                    "Đã có " + maxActive + " phiên Trợ lý ngoài đang soạn; dừng hoặc hoàn tất một phiên trước.");
+            }
+            long created = drafting.insertExternalSession(userId, ownerOrgId, name);
+            drafting.insertStep(created, DraftingStates.FIRST_STEP);
+            return created;
+        });
+
+        return view(drafting.session(sessionId).orElseThrow());
+    }
+
+    /** The caller's own session that a Trợ lý ngoài drives; any other answers as missing. */
+    public SessionView getExternal(long sessionId) {
+        requireManager(access.actor());
+        return view(ownedExternal(sessionId));
+    }
+
+    /**
+     * {@code stop_course_drafting}: the Trợ lý ngoài's part of the session ends (status manual), as "Tự điền" would end
+     * it. What it already proposed and what the author confirmed stay; a step still waiting for a proposal is the
+     * author's to fill. A session already over is returned as it is.
+     */
+    public SessionView stopExternal(long sessionId) {
+        requireManager(access.actor());
+        ownedExternal(sessionId);
+        return view(transaction.execute(status -> {
+            SessionRow session = drafting.lockSession(sessionId).orElseThrow();
+            if (open(session)) {
+                drafting.stopProposing(sessionId);
+                drafting.endAsManual(sessionId);
+            }
+            return drafting.session(sessionId).orElseThrow();
+        }));
+    }
+
+    /** The unit a Trợ lý ngoài session of the caller is for: their own, as {@link #startExternal} decides it. */
+    long externalOwnerOrg(Actor actor) {
+        requireManager(actor);
+        return ownerOrg(actor, null);
+    }
+
+    SessionRow ownedExternal(long sessionId) {
+        SessionRow session = owned(sessionId);
+        if (!session.external()) {
+            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+
+        return session;
     }
 
     public SessionView get(long sessionId) {
@@ -234,6 +307,7 @@ public class CourseDraftingService {
         CourseDetail created = courses.create(basics.course());
         drafting.linkCourse(sessionId, created.course().id(), created.revision().id(), DraftingStates.OUTLINE_STEP);
         drafting.confirmStep(sessionId, DraftingStates.BASICS_STEP);
+        keepConfirmed(session, DraftingStates.BASICS_STEP, ExternalConfirmed.basics(basics.course()));
         drafting.insertStep(sessionId, DraftingStates.OUTLINE_STEP);
 
         return drafting.session(sessionId).orElseThrow();
@@ -259,6 +333,7 @@ public class CourseDraftingService {
             drafting.markAiGenerated(session.revisionId());
         }
         drafting.confirmOutline(sessionId, step, write(notes));
+        keepConfirmed(session, step, ExternalConfirmed.outline(outline.draft()));
         drafting.advance(sessionId, DraftingStates.RULES_STEP);
         drafting.insertStep(sessionId, DraftingStates.RULES_STEP);
 
@@ -307,6 +382,7 @@ public class CourseDraftingService {
             }
         }
         drafting.confirmStep(sessionId, step);
+        keepConfirmed(session, step, ExternalConfirmed.rules(rules));
         drafting.advance(sessionId, DraftingStates.AUDIENCE_STEP);
         drafting.insertStep(sessionId, DraftingStates.AUDIENCE_STEP);
 
@@ -323,6 +399,7 @@ public class CourseDraftingService {
         SessionRow session = drafting.lockSession(sessionId).orElseThrow();
         requireCurrent(session, step);
         drafting.confirmStep(sessionId, step);
+        keepConfirmed(session, step, ExternalConfirmed.audience());
         drafting.finish(sessionId);
 
         return drafting.session(sessionId).orElseThrow();
@@ -334,7 +411,8 @@ public class CourseDraftingService {
      * into that step's fields only. Only the current step can be: a new proposal for a confirmed step would reach no
      * form and no "Đã chốt". Neither can a step being proposed or filled by hand, or one of a session that is over. It
      * counts against the daily course generation allowance, and a step that has used every attempt is left to the
-     * author. A failed session is active again.
+     * author. A failed session is active again. In a Trợ lý ngoài's session the step waits for its next
+     * {@code propose_step} instead, outside the allowance; the attempt limit still applies.
      */
     public SessionView proposeAgain(long sessionId, int step) {
         requireManager(access.actor());
@@ -355,6 +433,12 @@ public class CourseDraftingService {
             if (row.attempts() >= CourseDraftService.MAX_STEP_ATTEMPTS) {
                 throw BusinessException.validation("step", "REPROPOSE_LIMIT",
                     "Bước này đã được đề xuất lại quá nhiều lần, hãy tự điền.");
+            }
+            if (session.external()) {
+                // The step waits for the Trợ lý ngoài again; the worker never takes it and the allowance is the
+                // in-house model's.
+                drafting.reopenStep(sessionId, step);
+                return drafting.session(sessionId).orElseThrow();
             }
             allowance.lock(userId);
             allowance.require(userId);
@@ -474,6 +558,13 @@ public class CourseDraftingService {
         return notes;
     }
 
+    /** A Trợ lý ngoài reads back what the author confirmed; an in-house session keeps nothing extra. */
+    private void keepConfirmed(SessionRow session, int step, ObjectNode values) {
+        if (session.external()) {
+            drafting.setConfirmed(session.id(), step, write(values));
+        }
+    }
+
     private DraftingStepRow stepRow(long sessionId, int step) {
         return drafting.steps(sessionId).stream().filter(row -> row.stepNo() == step).findFirst().orElse(null);
     }
@@ -563,9 +654,7 @@ public class CourseDraftingService {
     // ---- checks ----------------------------------------------------------------------------------------------------
 
     private static void requireManager(Actor actor) {
-        if (actor.grants().stream().noneMatch(grant -> RoleCodes.COURSE_MANAGERS.contains(grant.roleCode()))) {
-            throw new AccessDeniedException("Only roles that manage courses may draft a course with the assistant");
-        }
+        DraftingRoles.require(actor);
     }
 
     /**
@@ -631,7 +720,8 @@ public class CourseDraftingService {
         List<StepView> steps = drafting.steps(row.id()).stream().map(this::stepView).toList();
 
         return new SessionView(row.id(), row.status(), row.currentStep(), row.courseId(), row.revisionId(),
-            row.conversationId(), source, row.errorMessage(), steps, row.createTime(), row.updateTime());
+            row.conversationId(), source, row.errorMessage(), steps, row.createTime(), row.updateTime(),
+            row.proposer(), row.sourceName());
     }
 
     private StepView stepView(DraftingStepRow step) {

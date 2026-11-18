@@ -22,6 +22,32 @@ spring:
       location: ${UPLOAD_TEMP_DIR:${java.io.tmpdir}}
       max-file-size: 500MB
       max-request-size: 501MB
+  ai:
+    mcp:
+      server:
+        # Trợ lý ngoài (ADR 0004): /api/v1/mcp, stateless Streamable HTTP. The connection token filter answers 404
+        # while app.assistant.external.enabled is off. Only the five tools and one prompt of ExternalMcpConfig are
+        # served: no Spring AI tool callbacks, annotation scanning, resources or completions.
+        protocol: STATELESS
+        type: SYNC
+        name: chan-academy
+        version: 1.0.0
+        tool-callback-converter: false
+        annotation-scanner:
+          enabled: false
+        capabilities:
+          resource: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /api/v1/mcp
+        instructions: >-
+          You draft a CHAN Academy course for the signed-in author from a document the author gave you in this chat.
+          The server never sees that document and you cannot read anything stored in CHAN Academy. Work one step at a
+          time: start_course_drafting, give the author the editor link, then propose_step for the step that waits
+          (1 basics, 2 outline, 3 rules and questions, 4 audience). After each step tell the author to open the link,
+          edit the fields and press "Chốt bước", then wait until the author says "tiếp"; call get_drafting_session to
+          read what the author confirmed before the next step. Never write lesson content. Never say a course was
+          created, published, assigned or shared: only the author does that, on the page.
   mvc:
     async:
       # A streamed answer (agent or document chat) may make max-steps model calls, each up to the Ollama read-timeout.
@@ -117,6 +143,16 @@ app:
       # Chat attachments for Soạn cùng trợ lý: uploads per user in 24 hours, and how long one no session uses is kept.
       source-uploads-per-day: ${ASSISTANT_GENERATION_SOURCE_UPLOADS_PER_DAY:10}
       unused-source-ttl: ${ASSISTANT_GENERATION_UNUSED_SOURCE_TTL:24h}
+    # Trợ lý ngoài (ADR 0004): an outside assistant drafts courses through /api/v1/mcp with a Kết nối trợ lý ngoài.
+    # Off until the bank approves sending documents to an outside model; when off the endpoints answer 404.
+    external:
+      enabled: ${ASSISTANT_EXTERNAL_ENABLED:false}
+      # The web app the editor link of a session opens.
+      app-base-url: ${ASSISTANT_EXTERNAL_APP_BASE_URL:${SCORM_LMS_ORIGIN:http://localhost:4200}}
+      calls-per-minute: ${ASSISTANT_EXTERNAL_CALLS_PER_MINUTE:60}
+      max-body: ${ASSISTANT_EXTERNAL_MAX_BODY:256KB}
+      max-active-sessions: ${ASSISTANT_EXTERNAL_MAX_ACTIVE_SESSIONS:3}
+      last-used-interval: 1m
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 600
