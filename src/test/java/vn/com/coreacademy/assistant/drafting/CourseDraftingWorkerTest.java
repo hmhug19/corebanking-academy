@@ -26,6 +26,7 @@ import vn.com.coreacademy.knowledge.ai.OllamaClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -49,6 +50,7 @@ class CourseDraftingWorkerTest {
         false, null);
     private final SessionRow session = new SessionRow(5, "000005", 1, 9L, null, null, null, 1, "active", null, "{}",
         null, null, null);
+    private final DraftingMessages messages = mock(DraftingMessages.class);
     private final CourseDraftingWorker worker;
 
     @SuppressWarnings("unchecked")
@@ -67,7 +69,7 @@ class CourseDraftingWorkerTest {
         when(drafting.storeProposal(anyLong(), any(), anyString(), anyString())).thenReturn(true);
         when(drafting.failStep(anyLong(), any(), anyString())).thenReturn(true);
         worker = new CourseDraftingWorker(drafting, provider, ollama, transaction, mock(AssistantMetrics.class),
-            limiter, json);
+            limiter, json, messages);
     }
 
     @Test
@@ -92,6 +94,8 @@ class CourseDraftingWorkerTest {
         verify(drafting).setSourceSummary(eq(5L), anyString());
         verify(drafting).storeProposal(7, claimedAt, "{\"title\":\"Khóa\"}", "[\"Chưa chọn được chương trình\"]");
         verify(drafting, never()).failSession(anyLong(), any());
+        verify(messages).proposed(session, 1, List.of("Chưa chọn được chương trình"));
+        verify(messages, never()).failed(any(), anyInt(), any());
     }
 
     @Test
@@ -102,6 +106,8 @@ class CourseDraftingWorkerTest {
 
         verify(drafting).failStep(7, claimedAt, "Tài liệu quá ngắn.");
         verify(drafting).failSession(5, "Tài liệu quá ngắn.");
+        verify(messages).failed(session, 1, "Tài liệu quá ngắn.");
+        verify(messages, never()).proposed(any(), anyInt(), any());
     }
 
     @Test
@@ -134,6 +140,7 @@ class CourseDraftingWorkerTest {
 
         verify(drafting, never()).setSourceSummary(anyLong(), anyString());
         verify(drafting, never()).touchSession(anyLong());
+        verify(messages, never()).proposed(any(), anyInt(), any());
     }
 
     @Test
@@ -144,5 +151,16 @@ class CourseDraftingWorkerTest {
         worker.runOnce();
 
         verify(drafting, never()).failSession(anyLong(), any());
+        verify(messages, never()).failed(any(), anyInt(), any());
+    }
+
+    @Test
+    void aSourceStillBeingReadSendsNoMessage() {
+        when(proposer.propose(session, step)).thenThrow(new StepNotReadyException("reading"));
+
+        worker.runOnce();
+
+        verify(messages, never()).proposed(any(), anyInt(), any());
+        verify(messages, never()).failed(any(), anyInt(), any());
     }
 }

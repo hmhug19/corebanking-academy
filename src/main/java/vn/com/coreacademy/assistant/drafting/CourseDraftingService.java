@@ -54,6 +54,7 @@ import vn.com.coreacademy.assistant.drafting.DraftingViews.StepView;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.identity.constants.RoleCodes;
+import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
 import vn.com.coreacademy.knowledge.service.KnowledgeDocumentService;
@@ -91,6 +92,7 @@ public class CourseDraftingService {
     private final Validator validator;
     private final QuestionService questions;
     private final CourseExamService exams;
+    private final LearningIdentityService identity;
 
     private record Prepared(String userId, long ownerOrgId, StartFields fields, Long conversationId) {
     }
@@ -101,7 +103,9 @@ public class CourseDraftingService {
      * when the session cannot be queued.
      */
     public SessionView start(MultipartFile file, StartFields fields, Long conversationId) {
-        Prepared prepared = prepare(fields == null ? StartFields.NONE : fields, conversationId);
+        String userId = SecurityContextUtils.getUserId();
+        Prepared prepared = prepare(identity.actor(userId), userId, fields == null ? StartFields.NONE : fields,
+            conversationId);
         long documentId = documents.upload(file, DocumentScope.COURSE_SOURCE, null).id();
         try {
             return queue(prepared, documentId);
@@ -109,6 +113,34 @@ public class CourseDraftingService {
             documents.delete(documentId);
             throw exception;
         }
+    }
+
+    /**
+     * The chat's file, uploaded before the turn that hands it to {@link #startFromSource}: stored as the caller's
+     * course source (only they read it, it is never listed or searched) and linked to nothing yet. Only roles that
+     * manage courses may upload one.
+     */
+    public SourceView uploadSource(MultipartFile file) {
+        requireManager(access.actor());
+        var uploaded = documents.upload(file, DocumentScope.COURSE_SOURCE, null);
+
+        return new SourceView(uploaded.id(), uploaded.fileName(), uploaded.status());
+    }
+
+    /**
+     * Starts a session from a document the chat already uploaded ({@code start_course_drafting}); step messages go to
+     * {@code conversationId}. It runs on the chat stream's thread, so the caller is {@code userId} from the turn's own
+     * context, never the security context. The document must be {@code userId}'s own course source that no session or
+     * job uses yet; any other id is refused as missing. The same checks as {@link #start} apply.
+     */
+    public SessionView startFromSource(String userId, long documentId, StartFields hints, Long conversationId) {
+        Prepared prepared = prepare(identity.actor(userId), userId, hints == null ? StartFields.NONE : hints,
+            conversationId);
+        if (!drafting.freeSourceOf(documentId, userId)) {
+            throw BusinessException.validation("documentId", "NOT_FOUND", "Không tìm thấy tài liệu đính kèm.");
+        }
+
+        return queue(prepared, documentId);
     }
 
     public SessionView get(long sessionId) {
@@ -467,12 +499,10 @@ public class CourseDraftingService {
         return value;
     }
 
-    private Prepared prepare(StartFields requested, Long conversationId) {
-        Actor actor = access.actor();
+    private Prepared prepare(Actor actor, String userId, StartFields requested, Long conversationId) {
         requireManager(actor);
         long ownerOrgId = ownerOrg(actor, requested.ownerOrgId());
         StartFields fields = checked(requested, ownerOrgId);
-        String userId = SecurityContextUtils.getUserId();
         if (conversationId != null && !drafting.conversationOwnedBy(conversationId, userId)) {
             // Step messages go to this conversation: someone else's must not receive them.
             throw BusinessException.validation("conversationId", "NOT_FOUND", "Không tìm thấy hội thoại.");

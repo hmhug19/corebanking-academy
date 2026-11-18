@@ -54,7 +54,18 @@ public final class ConversationViews {
         Instant createTime,
         @Schema(description = "false khi câu trả lời dùng tài liệu nhưng không ghi nguồn [n] nào (hiện nhãn "
             + "\"Chưa có nguồn\"); không có trường nghĩa là bình thường.")
-        @JsonInclude(JsonInclude.Include.NON_NULL) Boolean grounded) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) Boolean grounded,
+        @Schema(description = "Thẻ \"Đã chốt\" của tin nhắn bước Soạn cùng trợ lý, kèm trạng thái hiện tại của bước; "
+            + "không có trường khi lượt không phải tin nhắn bước.")
+        @JsonInclude(JsonInclude.Include.NON_NULL) DraftingCard draftingCard) {
+    }
+
+    @Schema(description = "Bước Soạn cùng trợ lý mà tin nhắn nói tới, với trạng thái hiện tại.")
+    public record DraftingCard(
+        long sessionId,
+        @Schema(description = "1 đến 4.") int step,
+        @Schema(description = "proposing, proposed, confirmed, failed hoặc manual.") String state,
+        @Schema(description = "Khóa học nháp của phiên; null trước khi chốt bước 1.") Long courseId) {
     }
 
     @Schema(description = "Thay đổi dữ liệu mà một lượt đã đề xuất, với trạng thái hiện tại.")

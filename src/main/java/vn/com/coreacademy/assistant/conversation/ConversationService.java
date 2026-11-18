@@ -57,6 +57,7 @@ public class ConversationService implements Conversations {
     private static final TypeReference<List<PendingActionView.Change>> CHANGES = new TypeReference<>() {
     };
     private static final int HISTORY_TURNS_READ = 50;
+    private static final int PREVIOUS_QUESTION_TURNS = 10;
 
     private final ConversationRepository conversations;
     private final TurnRepository turns;
@@ -66,17 +67,25 @@ public class ConversationService implements Conversations {
     private final Clock clock;
     private final int historyTurns;
     private final int historyTokens;
+    private final DraftingCards drafting;
 
     @Autowired
     public ConversationService(ConversationRepository conversations, TurnRepository turns,
                                PendingActionRepository actions, FeedbackRepository feedback, ObjectMapper json,
-                               AssistantProperties properties, AssistantBudget budget) {
-        this(conversations, turns, actions, feedback, json, Clock.systemUTC(), properties, budget);
+                               AssistantProperties properties, AssistantBudget budget, DraftingCards drafting) {
+        this(conversations, turns, actions, feedback, json, Clock.systemUTC(), properties, budget, drafting);
     }
 
     ConversationService(ConversationRepository conversations, TurnRepository turns, PendingActionRepository actions,
                         FeedbackRepository feedback, ObjectMapper json, Clock clock, AssistantProperties properties,
                         AssistantBudget budget) {
+        this(conversations, turns, actions, feedback, json, clock, properties, budget, DraftingCards.NONE);
+    }
+
+    ConversationService(ConversationRepository conversations, TurnRepository turns, PendingActionRepository actions,
+                        FeedbackRepository feedback, ObjectMapper json, Clock clock, AssistantProperties properties,
+                        AssistantBudget budget, DraftingCards drafting) {
+        this.drafting = drafting;
         this.conversations = conversations;
         this.turns = turns;
         this.actions = actions;
@@ -103,8 +112,10 @@ public class ConversationService implements Conversations {
         }
         requireOwned(ownerId, conversationId);
 
+        // A drafting step message has no question: the last question is the user's own.
         return turns.findByConversationIdAndStatusOrderByIdDesc(conversationId, TurnRecord.Status.DONE.name(),
-            PageRequest.of(0, 1)).stream().map(AssistantTurn::getQuestion).findFirst().orElse(null);
+            PageRequest.of(0, PREVIOUS_QUESTION_TURNS)).stream().map(AssistantTurn::getQuestion)
+            .filter(question -> !question.isBlank()).findFirst().orElse(null);
     }
 
     @Override
@@ -142,7 +153,8 @@ public class ConversationService implements Conversations {
         List<Exchange> kept = new ArrayList<>();
         int budget = historyTokens;
         for (AssistantTurn turn : recent) {
-            if (turn.getAnswer() == null || turn.getAnswer().isBlank()) {
+            // A drafting step message is the server's, not an exchange: the page and the card carry it.
+            if (turn.getAnswer() == null || turn.getAnswer().isBlank() || turn.getQuestion().isBlank()) {
                 continue;
             }
             String answer = cut(CitationRule.withoutMarkers(turn.getAnswer()), MAX_ANSWER_CHARS);
@@ -188,6 +200,35 @@ public class ConversationService implements Conversations {
         return id;
     }
 
+    /**
+     * A message the server adds on its own when a drafting step of a session started from this conversation is ready:
+     * no question, the assistant's text, and the step its "Đã chốt" card points at. Nothing happens when the
+     * conversation is gone (deleted or expired); returns the turn id, or null then.
+     */
+    @Transactional
+    public Long recordDraftingStep(long conversationId, String answer, long sessionId, int step) {
+        AssistantConversation conversation = conversations.findById(conversationId).orElse(null);
+        if (conversation == null) {
+            return null;
+        }
+        AssistantTurn row = new AssistantTurn();
+        row.setConversationId(conversationId);
+        row.setSurface(TurnRecord.AGENT);
+        row.setQuestion("");
+        row.setAnswer(answer);
+        row.setStatus(TurnRecord.Status.DONE.name());
+        row.setDurationMs(0);
+        row.setDraftingSessionId(sessionId);
+        row.setDraftingStep((short) step);
+        long id = turns.save(row).getId();
+        conversation.setLastActivityTime(clock.instant());
+        conversations.save(conversation);
+        log.info("Assistant drafting message stored conversationId={} turnId={} sessionId={} step={}",
+            conversationId, id, sessionId, step);
+
+        return id;
+    }
+
     @Transactional(readOnly = true)
     public PageResponse<ConversationSummary> list(String ownerId, String q, int page, int size) {
         PageRequest paging = PageQuery.of(page, size, "lastActivityTime,desc", Set.of("lastActivityTime"));
@@ -217,10 +258,12 @@ public class ConversationService implements Conversations {
         Map<Long, FeedbackView> rated = new HashMap<>();
         feedback.findByTurnIdIn(stored.stream().map(AssistantTurn::getId).toList()).forEach(row -> rated.put(
             row.getTurnId(), new FeedbackView(row.isHelpful(), row.getReasonCode(), row.getNote(), row.isShared())));
+        Map<DraftingCards.Key, ConversationViews.DraftingCard> cards = drafting.cards(ownerId, stored.stream()
+            .map(ConversationService::draftingKey).filter(Objects::nonNull).distinct().toList());
         Instant now = clock.instant();
         List<TurnView> views = stored.stream()
             .map(turn -> view(turn, turn.getActionId() == null ? null : proposed.get(turn.getActionId()),
-                rated.get(turn.getId()), now))
+                rated.get(turn.getId()), now, card(cards, turn)))
             .toList();
 
         return new ConversationDetail(conversation.getId(), conversation.getTitle(),
@@ -295,7 +338,19 @@ public class ConversationService implements Conversations {
                 conversation.getContextLessonId(), conversation.getContextLabel());
     }
 
-    private TurnView view(AssistantTurn turn, AssistantPendingAction action, FeedbackView rating, Instant now) {
+    private static ConversationViews.DraftingCard card(Map<DraftingCards.Key, ConversationViews.DraftingCard> cards,
+                                                       AssistantTurn turn) {
+        DraftingCards.Key key = draftingKey(turn);
+        return key == null ? null : cards.get(key);
+    }
+
+    private static DraftingCards.Key draftingKey(AssistantTurn turn) {
+        return turn.getDraftingSessionId() == null || turn.getDraftingStep() == null ? null
+            : new DraftingCards.Key(turn.getDraftingSessionId(), turn.getDraftingStep());
+    }
+
+    private TurnView view(AssistantTurn turn, AssistantPendingAction action, FeedbackView rating, Instant now,
+                          ConversationViews.DraftingCard card) {
         return new TurnView(turn.getId(), turn.getSurface(), turn.getQuestion(), turn.getAnswer(),
             read(turn.getCitations(), CITATIONS, List.of()), read(turn.getToolNames(), NAMES, List.of()),
             turn.getNavigation() == null ? null
@@ -303,7 +358,7 @@ public class ConversationService implements Conversations {
                 }, null),
             turn.getActionId(), action == null ? null : state(action, now), rating,
             turn.getStatus().toLowerCase(java.util.Locale.ROOT), turn.getCreateTime(),
-            ungrounded(turn) ? Boolean.FALSE : null);
+            ungrounded(turn) ? Boolean.FALSE : null, card);
     }
 
     /**

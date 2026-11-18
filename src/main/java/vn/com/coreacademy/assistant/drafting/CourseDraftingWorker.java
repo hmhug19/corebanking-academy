@@ -41,10 +41,11 @@ public class CourseDraftingWorker {
     private final AssistantMetrics metrics;
     private final TurnLimiter chat;
     private final ObjectMapper json;
+    private final DraftingMessages messages;
 
     public CourseDraftingWorker(CourseDraftingRepository drafting, ObjectProvider<DraftingStepProposer> proposer,
                                 OllamaClient ollama, TransactionTemplate transaction, AssistantMetrics metrics,
-                                TurnLimiter chat, ObjectMapper json) {
+                                TurnLimiter chat, ObjectMapper json, DraftingMessages messages) {
         this.drafting = drafting;
         this.proposer = proposer;
         this.ollama = ollama;
@@ -52,6 +53,7 @@ public class CourseDraftingWorker {
         this.metrics = metrics;
         this.chat = chat;
         this.json = json;
+        this.messages = messages;
     }
 
     /** A step claimed when the server stopped waits again; one that used every attempt fails instead of looping. */
@@ -105,7 +107,10 @@ public class CourseDraftingWorker {
         String outcome = "done";
         try {
             Proposal proposal = active.propose(session.get(), step);
-            transaction.executeWithoutResult(status -> store(step, proposal));
+            if (Boolean.TRUE.equals(transaction.execute(status -> store(step, proposal)))) {
+                // After the commit: the chat message points at a step that really holds the proposal.
+                messages.proposed(session.get(), step.stepNo(), proposal.notes());
+            }
         } catch (StepNotReadyException exception) {
             // The source document is still being read: the step waits for the next poll.
             outcome = "waiting";
@@ -137,17 +142,21 @@ public class CourseDraftingWorker {
         }
     }
 
-    /** Stores the proposal unless the author stopped the step, filled it by hand or asked again meanwhile. */
-    private void store(DraftingStepRow step, Proposal proposal) {
+    /**
+     * Stores the proposal unless the author stopped the step, filled it by hand or asked again meanwhile; false when
+     * it was dropped.
+     */
+    private boolean store(DraftingStepRow step, Proposal proposal) {
         if (!drafting.storeProposal(step.id(), step.claimedAt(), write(proposal.proposal()),
             write(proposal.notes()))) {
             log.info("Drafting step changed while proposed, proposal dropped stepId={}", step.id());
-            return;
+            return false;
         }
         if (proposal.sourceSummary() != null) {
             drafting.setSourceSummary(step.sessionId(), write(proposal.sourceSummary()));
         }
         drafting.touchSession(step.sessionId());
+        return true;
     }
 
     /**
@@ -155,11 +164,16 @@ public class CourseDraftingWorker {
      * changed meanwhile (stopped, filled by hand, asked again) keeps what they made of it.
      */
     private void fail(DraftingStepRow step, String message) {
-        transaction.executeWithoutResult(status -> {
-            if (drafting.failStep(step.id(), step.claimedAt(), message)) {
-                drafting.failSession(step.sessionId(), message);
+        boolean failed = Boolean.TRUE.equals(transaction.execute(status -> {
+            if (!drafting.failStep(step.id(), step.claimedAt(), message)) {
+                return false;
             }
-        });
+            drafting.failSession(step.sessionId(), message);
+            return true;
+        }));
+        if (failed) {
+            drafting.session(step.sessionId()).ifPresent(session -> messages.failed(session, step.stepNo(), message));
+        }
     }
 
     private String write(Object value) {

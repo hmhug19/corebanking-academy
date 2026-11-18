@@ -162,14 +162,15 @@ public class AgentService {
                     history.add(ChatMessage.assistant(exchange.answer()));
                 }
                 history.add(ChatMessage.user(question));
-                Skill skill = selector.select(requestedSkill, question, asked, last);
+                AgentContext inTurn = asked.withConversation(opened.conversationId());
+                Skill skill = selector.select(requestedSkill, question, inTurn, last);
                 metrics.skill(skill.id());
-                List<AgentTool> tools = registry.availableTo(asked).stream()
+                List<AgentTool> tools = registry.availableTo(inTurn).stream()
                     .filter(tool -> skill.tools().contains(tool.name())).toList();
-                List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(asked)).toList();
+                List<ToolDefinition> definitions = tools.stream().map(tool -> tool.definition(inTurn)).toList();
                 TurnLog turnLog = new TurnLog(opened.conversationId(), question, skill.id(), catalog.version());
                 try {
-                    run(output, history, asked, skill, tools, definitions, turnLog, turnSlot.cancellation());
+                    run(output, history, inTurn, skill, tools, definitions, turnLog, turnSlot.cancellation());
                 } finally {
                     store(turnLog);
                 }
@@ -291,7 +292,7 @@ public class AgentService {
     }
 
     /** Tells the model a file is attached; it never sees the document id, the tool takes it from the context. */
-    static String attachmentNote(AgentContext context) {
+    public static String attachmentNote(AgentContext context) {
         return context.attachedDocumentId() == null ? ""
             : "\n\nNgười dùng đã đính kèm một tệp tài liệu trong tin nhắn này.";
     }
@@ -329,7 +330,6 @@ public class AgentService {
         return outcome;
     }
 
-    /** Writes the closing events of a terminal outcome; false for a result that goes back to the model. */
     /** Copies the searches the tool just made into the stored turn, and counts each one once. */
     private void traceSearches(TurnState turn, TurnLog turnLog) {
         List<TurnRecord.Search> trace = turn.retrievalTrace();
@@ -339,10 +339,15 @@ public class AgentService {
         turnLog.retrieval = trace;
     }
 
+    /** Writes the closing events of a terminal outcome; false for a result that goes back to the model. */
     private boolean end(OutputStream output, TurnLog turnLog, ToolOutcome outcome) {
         if (outcome instanceof ToolOutcome.Navigate navigate) {
             emit(output, turnLog, AgentStreamEvent.navigate(navigate.path(), navigate.title(), navigate.prefill()));
             emit(output, turnLog, AgentStreamEvent.done(navigate.text(), List.of()));
+            return true;
+        }
+        if (outcome instanceof ToolOutcome.Reply reply) {
+            emit(output, turnLog, AgentStreamEvent.done(reply.text(), List.of()));
             return true;
         }
         if (outcome instanceof ToolOutcome.ActionRequired required) {

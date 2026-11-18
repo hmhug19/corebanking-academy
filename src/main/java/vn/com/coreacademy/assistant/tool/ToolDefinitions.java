@@ -16,7 +16,7 @@ public final class ToolDefinitions {
     public static final String SEARCH_COMMUNITY = "search_community";
     public static final String OPEN_SCREEN = "open_screen";
     public static final String UPDATE_PROFILE = "update_profile";
-    public static final String OPEN_COURSE_FORM = "open_course_form";
+    public static final String START_COURSE_DRAFTING = "start_course_drafting";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -105,25 +105,23 @@ public final class ToolDefinitions {
                 + "Thay đổi chỉ có hiệu lực sau khi người dùng bấm xác nhận.", parameters);
     }
 
-    public static ToolDefinition openCourseForm() {
+    public static ToolDefinition startCourseDrafting() {
         ObjectNode parameters = object();
         parameters.put("additionalProperties", false);
         ObjectNode properties = parameters.putObject("properties");
-        properties.putObject("title").put("type", "string").put("maxLength", 200)
+        properties.putObject("title").put("type", "string").put("maxLength", 255)
             .put("description", "Tên khóa học nếu người dùng đã nói. Không tự đặt.");
         properties.putObject("targetLearners").put("type", "string").put("maxLength", 500)
             .put("description", "Đối tượng học viên nếu người dùng đã nói, ví dụ: giao dịch viên mới vào làm.");
         properties.putObject("level").put("type", "string")
-            .set("enum", JSON.createArrayNode().add("BEGINNER").add("INTERMEDIATE").add("ADVANCED"));
-        properties.putObject("chapters").put("type", "integer").put("minimum", 1).put("maximum", 20)
-            .put("description", "Số chương nếu người dùng đã nói.");
-        properties.putObject("durationMinutes").put("type", "integer").put("minimum", 15).put("maximum", 1200)
-            .put("description", "Tổng thời lượng mong muốn, phút, nếu người dùng đã nói.");
+            .put("description", "Mức độ nếu người dùng đã nói: basic (cơ bản), intermediate (trung cấp), "
+                + "advanced (nâng cao).")
+            .set("enum", JSON.createArrayNode().add("basic").add("intermediate").add("advanced"));
 
-        return new ToolDefinition(OPEN_COURSE_FORM,
-            "Mở form Khóa học mới để tạo khóa học bằng AI, điền sẵn những gì người dùng đã nói trong tin nhắn. "
-                + "Gọi ngay khi người dùng muốn tạo khóa học; không hỏi thêm, không tra chương trình hay năng lực, "
-                + "chỉ gửi trường người dùng đã nói.", parameters);
+        return new ToolDefinition(START_COURSE_DRAFTING,
+            "Bắt đầu Soạn cùng trợ lý: đọc tài liệu người dùng đính kèm, mở trang Khóa học mới và điền từng bước. "
+                + "Gọi ngay khi người dùng muốn tạo hoặc soạn khóa học, kể cả khi chưa đính kèm tài liệu; không hỏi "
+                + "thêm, không tra chương trình hay năng lực, chỉ gửi trường người dùng đã nói.", parameters);
     }
 
     private static ObjectNode object() {

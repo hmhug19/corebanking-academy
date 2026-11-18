@@ -1,9 +1,9 @@
-description: mở form Khóa học mới điền sẵn từ tin nhắn để tạo khóa học bằng AI (chỉ giảng viên và quản trị)
+description: soạn khóa học cùng trợ lý từ một tài liệu đính kèm, điền từng bước trên trang Khóa học mới (chỉ giảng viên và quản trị)
 tools:
-  - open_course_form
+  - start_course_drafting
 roles:
   - INSTRUCTOR
   - ADMIN
   - SUPER_ADMIN
-output: Báo đã mở form Khóa học mới và nhắc bấm "Tạo bằng AI" sau khi chọn chương trình và năng lực. Bắt buộc gọi công cụ mở form trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
-requiredTool: open_course_form
+output: Câu trả lời là của công cụ. Bắt buộc gọi công cụ bắt đầu soạn khóa học trước khi trả lời; không bao giờ viết việc gọi công cụ thành câu trả lời.
+requiredTool: start_course_drafting

@@ -370,11 +370,20 @@ Chỉ chủ job gọi được (người khác: `CORE-RESOURCE_NOT_FOUND`), kể
 - Chỉ câu hỏi `accepted` được ghi vào ngân hàng câu hỏi (qua `QuestionService`, kèm chương trình và năng lực do người dùng chọn, chưa gắn khóa/bài).
 - Thời lượng mỗi bước ghi vào meter `assistant.generation.step.duration` (tag `kind`, `outcome`).
 
-### Mở form tạo khóa học từ chatbot (kỹ năng `tao_khoa_hoc`, công cụ `open_course_form`)
+### Soạn cùng trợ lý từ chatbot (kỹ năng `tao_khoa_hoc`, công cụ `start_course_drafting`)
 
-- Công cụ không tạo gì và không đọc tệp: nó trả sự kiện `navigate` tới `/admin/courses/new` kèm `prefill` (`title`, `targetLearners`, `level`,
-  `chapters`, `durationMinutes`, chỉ những trường người dùng đã nói và nằm trong giới hạn của form). Không hỏi thêm, không tra chương trình hay năng lực.
-- Tệp đính kèm ở lại trình duyệt (`CourseFormPrefillStore`); chỉ khi bấm "Tạo bằng AI" trên form tệp mới được tải lên (scope `COURSE_SOURCE`) và job mới tạo.
+- Ứng dụng tải tệp đính kèm lên `POST /api/v1/assistant/drafting-sessions/sources` (multipart `file`; chỉ INSTRUCTOR, ADMIN,
+  SUPER_ADMIN có `AI_ASSISTANT`). Tệp thành tài liệu `course_source` của người gọi, chưa gắn phiên nào; trả `{ documentId, fileName, status }`.
+  Lượt chat gửi `attachmentDocumentId` = `documentId`.
+- Công cụ nhận `title`, `targetLearners`, `level` (`basic|intermediate|advanced`), chỉ những gì người dùng đã nói. Tài liệu, người gọi và hội thoại lấy từ
+  ngữ cảnh của lượt, không từ model. Có tài liệu (của chính người gọi, chưa phiên hay job nào dùng): bắt đầu phiên Soạn cùng trợ lý gắn với hội thoại (cùng kiểm
+  tra và hạn mức như `POST /drafting-sessions`), trả `navigate` tới `/admin/courses/new?session={id}`. Không có tài liệu: trả lời xin tài liệu, không mở trang.
+  Bị từ chối (hạn mức, đơn vị, tài liệu không hợp lệ): trả đúng thông báo đó. Câu trả lời luôn là của công cụ (sự kiện `done`), model không viết thêm.
+- Kỹ năng bắt buộc gọi công cụ (`requiredTool`): model chỉ trả chữ thì lượt kết thúc bằng câu cố định, không phiên nào được tạo.
+- Mỗi khi một bước của phiên có đề xuất (hoặc lỗi), server thêm một lượt vào hội thoại đã bắt đầu phiên: `question` rỗng, `answer` nói đã điền gì và cần
+  kiểm tra gì (chương trình trống, trường chưa chắc, bước 4 kèm những gì còn chặn xuất bản), và `draftingCard: { sessionId, step, state, courseId }`. `state`
+  đọc trực tiếp từ phiên mỗi lần mở hội thoại, nên thẻ luôn đúng kết cục thật. Lượt này không vào lịch sử gửi model. Phiên bắt đầu từ trang (không hội thoại)
+  không có tin nhắn. Cột: `assistant_turns.drafting_session_id`, `drafting_step` (`docs/sql/upgrade/2026-11-26-assistant-turn-drafting-step.sql`).
 - Kỹ năng và công cụ chỉ dành cho INSTRUCTOR, ADMIN, SUPER_ADMIN. Học viên không được cấp kỹ năng; `style.md` bảo trợ lý trả lời ngắn rằng tính năng
   dành cho giảng viên.
 

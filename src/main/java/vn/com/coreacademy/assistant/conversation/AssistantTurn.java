@@ -71,4 +71,11 @@ public class AssistantTurn extends CreatedEntity {
 
     @Column(name = "duration_ms")
     private Integer durationMs;
+
+    /** Tin nhắn bước của Soạn cùng trợ lý: phiên và bước mà thẻ "Đã chốt" trỏ tới; null với lượt thường. */
+    @Column(name = "drafting_session_id")
+    private Long draftingSessionId;
+
+    @Column(name = "drafting_step")
+    private Short draftingStep;
 }

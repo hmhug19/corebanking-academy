@@ -47,6 +47,10 @@ public class CourseDraftingRepository {
     public record DocumentInfo(long id, String fileName, String status) {
     }
 
+    /** A step's state as a chat card shows it, with its session's draft course once step 1 created it. */
+    public record StepState(long sessionId, int stepNo, String state, Long courseId) {
+    }
+
     /** A unit or team of the course's owner unit: {@code org} or {@code team}, with the unit a team belongs to. */
     public record Unit(String targetType, long id, String name, long orgId) {
     }
@@ -441,6 +445,41 @@ public class CourseDraftingRepository {
             """, Boolean.class, conversationId, userId);
 
         return Boolean.TRUE.equals(owned);
+    }
+
+    /**
+     * The document is the user's own course source and no session or old job uses it yet: what the chat may hand to a
+     * new session. Any other id (someone else's, a shared document, one already used) is not.
+     */
+    public boolean freeSourceOf(long documentId, String userId) {
+        Boolean free = jdbc.queryForObject("""
+            SELECT EXISTS (SELECT 1 FROM learning_hub.knowledge_documents d
+                            WHERE d.document_id = ? AND d.uploaded_by = ? AND d.scope = 'course_source'
+                              AND NOT EXISTS (SELECT 1 FROM learning_hub.course_drafting_sessions s
+                                               WHERE s.source_document_id = d.document_id)
+                              AND NOT EXISTS (SELECT 1 FROM learning_hub.course_generation_jobs j
+                                               WHERE j.source_document_id = d.document_id))
+            """, Boolean.class, documentId, userId);
+
+        return Boolean.TRUE.equals(free);
+    }
+
+    /** The state of each step of these sessions of the owner, with the session's draft course: the chat's cards. */
+    public List<StepState> stepStates(String ownerUserId, List<Long> sessionIds) {
+        if (sessionIds.isEmpty()) {
+            return List.of();
+        }
+        String marks = String.join(", ", Collections.nCopies(sessionIds.size(), "?"));
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(ownerUserId);
+        arguments.addAll(sessionIds);
+        return jdbc.query("""
+            SELECT s.session_id, st.step_no, st.state, s.course_id
+              FROM learning_hub.course_drafting_sessions s
+              JOIN learning_hub.course_drafting_steps st ON st.session_id = s.session_id
+             WHERE s.owner_user_id = ? AND s.session_id IN (""" + marks + ")",
+            (rs, row) -> new StepState(rs.getLong(1), rs.getInt(2), rs.getString(3), (Long) rs.getObject(4)),
+            arguments.toArray());
     }
 
     public Optional<DocumentInfo> document(long documentId) {

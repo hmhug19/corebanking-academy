@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import vn.com.coreacademy.assistant.agent.AssistantGate;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SessionView;
+import vn.com.coreacademy.assistant.drafting.DraftingViews.SourceView;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.StartFields;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.exception.BusinessException;
@@ -56,6 +57,21 @@ public class CourseDraftingController {
                                            @Positive Long conversationId) {
         gate.requireAccess();
         return BaseResponse.ok(sessions.start(file, parse(fields), conversationId));
+    }
+
+    @PostMapping(value = "/sources", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(
+        summary = "Tải tài liệu đính kèm của chat cho Soạn cùng trợ lý",
+        description = """
+            multipart: file (.pdf, .docx hoặc .md, tối đa theo app.knowledge.max-file-size).
+            - Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng AI_ASSISTANT; người khác nhận 403.
+            - Tệp trở thành tài liệu course_source của người gọi (chỉ người đó đọc được, không bao giờ được liệt kê hay tìm thấy) và chưa gắn với phiên nào.
+            - Gửi documentId trả về làm attachmentDocumentId của lượt chat; công cụ start_course_drafting bắt đầu phiên từ tài liệu đó (tính vào giới hạn mỗi ngày lúc bắt đầu, không phải lúc tải lên).
+            """
+    )
+    public BaseResponse<SourceView> uploadSource(@RequestPart MultipartFile file) {
+        gate.requireAccess();
+        return BaseResponse.ok(sessions.uploadSource(file));
     }
 
     /** The part is JSON text, whether the client labelled it application/json or sent a plain form field. */
