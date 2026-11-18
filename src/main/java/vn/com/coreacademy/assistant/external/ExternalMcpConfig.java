@@ -48,7 +48,8 @@ public class ExternalMcpConfig {
             tool(ExternalAssistantTools.GET_SESSION, """
                 Read one of your drafting sessions: each step's state (proposing, proposed, confirmed, failed, \
                 manual), your proposal and the values the author confirmed, including their own edits. Read it after \
-                the author says "tiếp" and build the next step on what they confirmed.""",
+                the author says "tiếp" and build the next step on what they confirmed. Step 4's confirmed value is \
+                always empty: its targets are saved only when the author publishes.""",
                 schema(Map.of(SESSION_ID, SESSION_ID_SCHEMA), SESSION_ID),
                 (context, request) -> tools.get(request.arguments())),
             tool(ExternalAssistantTools.PROPOSE, """

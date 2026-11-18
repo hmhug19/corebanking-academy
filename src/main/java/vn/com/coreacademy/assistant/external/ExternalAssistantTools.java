@@ -44,6 +44,13 @@ public class ExternalAssistantTools {
     static final String OK = "ok";
     static final String REFUSED = "refused";
     static final String FAILED = "failed";
+    /**
+     * Why step 4's {@code confirmed} is empty: Chốt bước 4 saves no targets, so the empty value is not the author's
+     * choice. Without this a Trợ lý ngoài told the author they had removed the proposed targets.
+     */
+    static final String AUDIENCE_KEEPS_NOTHING = "Step 4 stores no targets when the author confirms it, so its "
+        + "confirmed value is always empty: the proposed targets stay in the page's assign form and are saved only "
+        + "when the author presses \"Xuất bản và giao\". Do not tell the author they removed them.";
 
     private final CourseDraftingService sessions;
     private final ExternalDrafting drafting;
@@ -122,8 +129,11 @@ public class ExternalAssistantTools {
 
     private static String next(SessionView view, Integer waiting) {
         if (!DraftingStates.ACTIVE.equals(view.status())) {
-            return "The session is " + view.status() + ": nothing more to propose. Tell the author the page holds "
-                + "what was confirmed; do not say the course was created or published.";
+            String done = "The session is " + view.status() + ": nothing more to propose. Tell the author the page "
+                + "holds what was confirmed; do not say the course was created or published.";
+            boolean audienceConfirmed = view.steps().stream().anyMatch(step ->
+                step.step() == DraftingStates.AUDIENCE_STEP && DraftingStates.CONFIRMED.equals(step.state()));
+            return audienceConfirmed ? done + " " + AUDIENCE_KEEPS_NOTHING : done;
         }
         if (waiting != null) {
             return "Step " + waiting + " waits for your proposal: call propose_step for it.";

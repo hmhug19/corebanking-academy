@@ -300,6 +300,11 @@ class ExternalProposeIT extends ExternalAssistantIT {
         JsonNode audience = propose(id, 4, Map.of("targets", List.of())).data();
         assertThat(audience.path("steps").get(3).path("proposal").path("publishBlockers").isArray()).isTrue();
         api.ok(INSTRUCTOR, confirm(id, 4, Map.of()));
+        // Step 4 keeps nothing on Chốt bước; the read says so, so the empty value is not taken for the author's choice.
+        JsonNode finished = mcp.ok(token, ExternalAssistantTools.GET_SESSION, Map.of("session_id", id)).data();
+        assertThat(finished.path("steps").get(3).path("confirmed").isEmpty()).isTrue();
+        assertThat(finished.path("next").asText()).contains("Step 4 stores no targets")
+            .contains("Xuất bản và giao");
         assertThat(propose(id, 4, Map.of("targets", List.of())).text()).contains("session is finished");
 
         assertThat(turns(id)).isZero();
