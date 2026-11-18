@@ -439,8 +439,8 @@ Năm công cụ (không công cụ nào đọc tài liệu, bài học, khóa h�
 |---|---|---|
 | `start_course_drafting` | `source_name` (1–255 ký tự) | Phiên mới `proposer = external`, không có tài liệu nguồn, cho đơn vị của người gọi; `editorUrl` = `{app.assistant.external.app-base-url}/admin/courses/new?session={id}` (sau bước 1: `/admin/courses/{courseId}/edit?step={n}`), `waitingStep: 1`. Không tính vào giới hạn tạo khóa học mỗi ngày. |
 | `get_reference_data` | — | `programmes`, `modules` (`id, name, fieldId`), `competencies` (`id, name`), `audience` (`key, type, name, canIncludeSubunits`), `levels`, `requirements`. |
-| `get_drafting_session` | `session_id` | Trạng thái, bước hiện tại, `waitingStep`, từng bước (`state, proposal, notes, error`), `next`. Chỉ phiên external của chính người gọi; khác đi là lỗi "not found". |
-| `propose_step` | `session_id`, `step`, `proposal` | (ticket 03) |
+| `get_drafting_session` | `session_id` | Trạng thái, bước hiện tại, `waitingStep`, từng bước (`state, proposal, notes, error, confirmed`: giá trị tác giả đã chốt, gồm cả chỗ tác giả sửa; không có nội dung bài học), `next`. Chỉ phiên external của chính người gọi; khác đi là lỗi "not found". |
+| `propose_step` | `session_id`, `step`, `proposal` | Đề xuất cho bước đang chờ (`waitingStep`). Kiểm bằng schema sinh của bước (`draft_basics` … `draft_audience`; `unsure` không bắt buộc) và cùng danh sách id như trợ lý nội bộ; id ngoài danh sách bị từ chối kèm tên trường (`proposal.programId`, `proposal.targets[0].key`…), không bị bỏ im lặng. Lưu như đề xuất của worker (trang soạn hiển thị y như cũ, mã khóa học do server tạo). Bước không ở `proposing`, không phải bước hiện tại, hoặc phiên không `active` → lỗi nêu trạng thái. Worker không bao giờ nhận bước của phiên external, không ghi tin nhắn chat. "Đề xuất lại" trên trang đưa bước về `proposing` chờ Trợ lý ngoài (không tính hạn mức sinh trong ngày; giới hạn số lần vẫn áp dụng). |
 | `stop_course_drafting` | `session_id` | Phiên kết thúc phần của trợ lý (status `manual`); những gì đã ghi giữ nguyên. |
 
 Lỗi của công cụ là kết quả `isError: true` với câu tiếng Anh ngắn (tham số nào, trạng thái nào), không lặp lại nội

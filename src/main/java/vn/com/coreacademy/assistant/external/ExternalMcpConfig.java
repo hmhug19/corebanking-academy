@@ -51,6 +51,25 @@ public class ExternalMcpConfig {
                 the author says "tiếp" and build the next step on what they confirmed.""",
                 schema(Map.of(SESSION_ID, SESSION_ID_SCHEMA), SESSION_ID),
                 (context, request) -> tools.get(request.arguments())),
+            tool(ExternalAssistantTools.PROPOSE, """
+                Propose the session's waiting step (waitingStep) from the document, one step per call; the author \
+                reviews it on the editor page and presses "Chốt bước". Use ids from get_reference_data only; leave an \
+                id out when nothing fits. Never write lesson content. The proposal object per step:
+                1: {title, summary, objectives: [1-10 texts], level: basic|intermediate|advanced, \
+                defaultRequirement: mandatory|optional, programId?, moduleId? (a module of the programme's fieldId), \
+                unsure?: [field names you are not sure of]}. The server makes the course code.
+                2: {chapters: [{title, lessons: [{title, description: one line on what it teaches, section: the \
+                document part it comes from, at most 20 characters}]}]}, 1-20 chapters of 1-10 lessons.
+                3: {rewardPoints: 0-1000, competencyId?, questions: [1-15 of {type: SINGLE|MULTIPLE, content, \
+                explanation?: text, difficulty: EASY|MEDIUM|HARD, options: [2-6 of {content, correct}], section}]}.
+                4: {targets: [0-10 of {key: an audience key, includeDescendants?}]}.
+                A refusal names the state or the field to fix.""",
+                schema(Map.of(SESSION_ID, SESSION_ID_SCHEMA,
+                    "step", Map.of("type", "integer", "minimum", 1, "maximum", 4,
+                        "description", "The step to propose: the session's waitingStep."),
+                    "proposal", Map.of("type", "object", "description", "The step's fields, as described above.")),
+                    SESSION_ID, "step", "proposal"),
+                (context, request) -> tools.propose(request.arguments())),
             tool(ExternalAssistantTools.STOP, """
                 Stop a drafting session when the author asks to. What was proposed and confirmed stays; the author \
                 fills the rest by hand on the page.""",

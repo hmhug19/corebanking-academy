@@ -64,7 +64,8 @@ public class DraftingMessages {
     }
 
     private void send(SessionRow session, int step, String text) {
-        if (session.conversationId() == null) {
+        // A Trợ lý ngoài's session has no conversation here: the author talks to it in their own client.
+        if (session.external() || session.conversationId() == null) {
             return;
         }
         try {

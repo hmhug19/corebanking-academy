@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant.drafting;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -109,7 +110,8 @@ public class CourseDraftingRepository {
             .addValue("active", DraftingStates.ACTIVE)
             .addValue("finished", DraftingStates.FINISHED)
             .addValue("manualSession", DraftingStates.MANUAL_SESSION)
-            .addValue("failedSession", DraftingStates.FAILED_SESSION);
+            .addValue("failedSession", DraftingStates.FAILED_SESSION)
+            .addValue("inHouse", DraftingStates.IN_HOUSE);
     }
 
     // ---- sessions --------------------------------------------------------------------------------------------------
@@ -416,8 +418,9 @@ public class CourseDraftingRepository {
     }
 
     /**
-     * Takes the oldest waiting step of an active session and marks it claimed. Callers run this in a transaction;
-     * {@code SKIP LOCKED} lets another instance take another step meanwhile.
+     * Takes the oldest waiting step of an active session of the in-house assistant and marks it claimed: a Trợ lý ngoài
+     * proposes the steps of its own sessions. Callers run this in a transaction; {@code SKIP LOCKED} lets another
+     * instance take another step meanwhile.
      */
     public Optional<DraftingStepRow> claimNext() {
         return jdbc.query("""
@@ -427,13 +430,46 @@ public class CourseDraftingRepository {
                                   FROM learning_hub.course_drafting_steps st
                                   JOIN learning_hub.course_drafting_sessions se ON se.session_id = st.session_id
                                  WHERE st.state = :proposing AND st.claimed_at IS NULL AND NOT st.stopped
-                                   AND se.status = :active
+                                   AND se.status = :active AND se.proposer = :inHouse
                                  ORDER BY st.update_time, st.step_id
                                  FOR UPDATE OF st SKIP LOCKED
                                  LIMIT 1)
             RETURNING step_id, session_id, step_no, state, proposal::text AS proposal, notes::text AS notes,
                       error_message, attempts, claimed_at, stopped, update_time
             """, states(), STEP).stream().findFirst();
+    }
+
+    /**
+     * {@code propose_step} of a Trợ lý ngoài: the waiting step holds its proposal, and the attempt counts as the
+     * worker's would (so "Đề xuất lại" keeps its limit). False when the step no longer waits.
+     */
+    public boolean storeExternalProposal(long sessionId, int stepNo, String proposalJson, String notesJson) {
+        return jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps
+               SET state = :proposed, proposal = :proposal::jsonb, notes = :notes::jsonb, error_message = NULL,
+                   attempts = attempts + 1, update_time = now()
+             WHERE session_id = :session AND step_no = :step AND state = :proposing
+            """, states().addValue("proposal", proposalJson).addValue("notes", notesJson)
+            .addValue("session", sessionId).addValue("step", stepNo)) == 1;
+    }
+
+    /** What the author confirmed at a step of a Trợ lý ngoài's session, for {@code get_drafting_session}. */
+    public void setConfirmed(long sessionId, int stepNo, String confirmedJson) {
+        jdbc.update("""
+            UPDATE learning_hub.course_drafting_steps SET confirmed = :confirmed::jsonb
+             WHERE session_id = :session AND step_no = :step
+            """, Map.of("confirmed", confirmedJson, "session", sessionId, "step", stepNo));
+    }
+
+    /** Step number to what the author confirmed there, for the steps that keep it. */
+    public Map<Integer, String> confirmedValues(long sessionId) {
+        Map<Integer, String> values = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT step_no, confirmed::text AS confirmed FROM learning_hub.course_drafting_steps
+             WHERE session_id = :session AND confirmed IS NOT NULL ORDER BY step_no
+            """, Map.of("session", sessionId),
+            (RowCallbackHandler) rs -> values.put(rs.getInt(1), rs.getString(2)));
+        return values;
     }
 
     // A worker's writes name the claim they finish ({@code claimedAt}): once the author stopped the step, filled it by
@@ -691,12 +727,13 @@ public class CourseDraftingRepository {
             """, revision, (rs, row) -> new LessonSnapshot(rs.getString(2), rs.getObject(3, Long.class),
             rs.getObject(4, Long.class), blocks.getOrDefault(rs.getLong(1), List.of())));
         // The final exam as the course detail reads it: the exam link overrides the completion rule's legacy column.
-        Long finalQuizId = jdbc.query("""
+        // One row always, its value null when the course has no final exam yet.
+        Long finalQuizId = jdbc.queryForObject("""
             SELECT COALESCE(
                 (SELECT assessment_revision_id FROM learning_hub.course_assessments
                   WHERE revision_id = :revision AND placement = 'final' ORDER BY link_id DESC LIMIT 1),
                 (SELECT final_quiz_id FROM learning_hub.course_completion_rules WHERE revision_id = :revision LIMIT 1))
-            """, revision, (rs, row) -> rs.getObject(1, Long.class)).stream().findFirst().orElse(null);
+            """, revision, Long.class);
 
         return jdbc.query("""
             SELECT title, program_id, level

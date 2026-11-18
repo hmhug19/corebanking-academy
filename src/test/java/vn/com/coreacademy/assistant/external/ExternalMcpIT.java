@@ -95,7 +95,7 @@ class ExternalMcpIT extends AssessmentIntegrationTest {
             assertThat(tool.path("description").asText()).isNotBlank();
         });
         assertThat(names).containsExactlyInAnyOrder("start_course_drafting", "get_reference_data",
-            "get_drafting_session", "stop_course_drafting");
+            "get_drafting_session", "propose_step", "stop_course_drafting");
 
         JsonNode prompts = mcp.result(token, "prompts/list", Map.of()).path("prompts");
         assertThat(prompts).hasSize(1);

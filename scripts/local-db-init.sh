@@ -75,6 +75,7 @@ FILES=(
   upgrade/2026-11-26-assistant-turn-drafting-step.sql
   upgrade/2026-11-27-external-assistant-connections.sql
   upgrade/2026-11-28-course-drafting-proposer.sql
+  upgrade/2026-11-29-course-drafting-confirmed.sql
   learning_hub_community.sql
   learning_hub_community_functions.sql
   learning_hub_community_catalog.sql

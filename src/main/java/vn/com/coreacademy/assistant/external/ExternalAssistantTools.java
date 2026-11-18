@@ -16,6 +16,7 @@ import vn.com.coreacademy.assistant.drafting.CourseDraftingService;
 import vn.com.coreacademy.assistant.drafting.DraftingStates;
 import vn.com.coreacademy.assistant.drafting.DraftingViews.SessionView;
 import vn.com.coreacademy.assistant.drafting.ExternalDrafting;
+import vn.com.coreacademy.assistant.drafting.ExternalDrafting.ProposalRefused;
 import vn.com.coreacademy.common.dto.FieldViolation;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
@@ -40,8 +41,12 @@ public class ExternalAssistantTools {
     private final ExternalAssistantProperties properties;
     private final ObjectMapper json;
 
-    /** A step as the Trợ lý ngoài reads it. */
-    public record StepView(int step, String state, JsonNode proposal, List<String> notes, String error) {
+    /**
+     * A step as the Trợ lý ngoài reads it: {@code confirmed} is what the author confirmed there, their edits included
+     * (null until confirmed); the next step builds on it.
+     */
+    public record StepView(int step, String state, JsonNode proposal, List<String> notes, String error,
+                           JsonNode confirmed) {
     }
 
     /**
@@ -64,6 +69,19 @@ public class ExternalAssistantTools {
         return run(() -> session(sessions.getExternal(sessionId(arguments))));
     }
 
+    public CallToolResult propose(Map<String, Object> arguments) {
+        return run(() -> {
+            long sessionId = sessionId(arguments);
+            long step = wholeNumber(arguments, "step");
+            Object proposal = arguments.get("proposal");
+            if (proposal == null) {
+                throw new ArgumentException("proposal is required: an object with the fields of the step.");
+            }
+            return session(drafting.propose(sessionId, (int) Math.min(step, Integer.MAX_VALUE),
+                json.valueToTree(proposal)));
+        });
+    }
+
     public CallToolResult stop(Map<String, Object> arguments) {
         return run(() -> session(sessions.stopExternal(sessionId(arguments))));
     }
@@ -75,8 +93,11 @@ public class ExternalAssistantTools {
             .filter(step -> DraftingStates.ACTIVE.equals(view.status()) && step.step() == view.currentStep()
                 && DraftingStates.PROPOSING.equals(step.state()))
             .map(step -> step.step()).findFirst().orElse(null);
+        Map<Integer, JsonNode> confirmed = drafting.confirmed(view.id());
         List<StepView> steps = view.steps().stream()
-            .map(step -> new StepView(step.step(), step.state(), step.proposal(), step.notes(), step.error())).toList();
+            .map(step -> new StepView(step.step(), step.state(), step.proposal(), step.notes(), step.error(),
+                confirmed.get(step.step())))
+            .toList();
 
         return new SessionResult(view.id(), view.status(), view.currentStep(), waiting, view.sourceName(),
             editorUrl(view), steps, next(view, waiting));
@@ -138,7 +159,7 @@ public class ExternalAssistantTools {
         try {
             return CallToolResult.builder().addTextContent(json.writeValueAsString(body.get())).isError(false)
                 .build();
-        } catch (ArgumentException exception) {
+        } catch (ArgumentException | ProposalRefused exception) {
             return refusal(exception.getMessage());
         } catch (BusinessException exception) {
             return refusal(message(exception));

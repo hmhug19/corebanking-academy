@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -107,7 +108,7 @@ public class CourseDraftingProposer implements DraftingStepProposer {
         JsonNode answer = summariser.ask(GenerationSchemas.DRAFT_BASICS, basicsMessage(summary, hints, programmes,
             modules), GenerationSchemas::draftBasics);
 
-        return checkedBasics(answer, hints, programmes, modules, made);
+        return checkedBasics(answer, hints, programmes, modules, freeCode(), made);
     }
 
     private static String basicsMessage(JsonNode summary, JsonNode hints, List<Candidate> programmes,
@@ -148,8 +149,8 @@ public class CourseDraftingProposer implements DraftingStepProposer {
      * The proposal the author sees. What the author said wins over the model (title, level); a programme outside the
      * list, or a module outside the list or of another field than the programme, is dropped and named in the notes.
      */
-    Proposal checkedBasics(JsonNode answer, JsonNode hints, List<Candidate> programmes, List<Candidate> modules,
-                           JsonNode madeSummary) {
+    static Proposal checkedBasics(JsonNode answer, JsonNode hints, List<Candidate> programmes,
+                                  List<Candidate> modules, String code, JsonNode madeSummary) {
         Set<String> unsure = new LinkedHashSet<>();
         answer.path("unsure").forEach(field -> unsure.add(field.asText()));
 
@@ -175,7 +176,7 @@ public class CourseDraftingProposer implements DraftingStepProposer {
             unsure.add("moduleId");
         }
 
-        ObjectNode proposal = json.createObjectNode();
+        ObjectNode proposal = JsonNodeFactory.instance.objectNode();
         proposal.put("title", hintTitle.isEmpty() ? answer.path("title").asText().strip()
             : hintTitle.substring(0, Math.min(hintTitle.length(), GenerationSchemas.MAX_TITLE)));
         proposal.put("summary", answer.path("summary").asText().strip());
@@ -193,7 +194,7 @@ public class CourseDraftingProposer implements DraftingStepProposer {
         } else {
             proposal.put("moduleId", module.id());
         }
-        proposal.put("code", freeCode());
+        proposal.put("code", code);
         var unsureList = proposal.putArray("unsure");
         GenerationSchemas.BASICS_FIELDS.stream().filter(unsure::contains).forEach(unsureList::add);
 
@@ -304,8 +305,8 @@ public class CourseDraftingProposer implements DraftingStepProposer {
     }
 
     /** The proposal the author sees: the model's outline with each section key replaced by the section's title. */
-    Proposal checkedOutline(JsonNode answer, Map<String, String> sections, JsonNode madeSummary) {
-        ObjectNode proposal = json.createObjectNode();
+    static Proposal checkedOutline(JsonNode answer, Map<String, String> sections, JsonNode madeSummary) {
+        ObjectNode proposal = JsonNodeFactory.instance.objectNode();
         var chapters = proposal.putArray("chapters");
         int lessons = 0;
         for (JsonNode chapter : answer.path("chapters")) {
@@ -395,12 +396,12 @@ public class CourseDraftingProposer implements DraftingStepProposer {
      * The proposal the author sees: points, the competency when it is in the list (else null and a note), and the
      * questions with each section key replaced by the section's title.
      */
-    Proposal checkedRules(JsonNode answer, Map<String, String> sections, List<Choice> competencies,
-                          JsonNode madeSummary) {
+    static Proposal checkedRules(JsonNode answer, Map<String, String> sections, List<Choice> competencies,
+                                 JsonNode madeSummary) {
         Set<Long> known = competencies.stream().map(Choice::id).collect(Collectors.toSet());
         Long competency = id(answer, "competencyId").filter(known::contains).orElse(null);
 
-        ObjectNode proposal = json.createObjectNode();
+        ObjectNode proposal = JsonNodeFactory.instance.objectNode();
         int points = answer.path("rewardPoints").asInt();
         proposal.put("rewardPoints", points);
         if (competency == null) {
@@ -502,11 +503,11 @@ public class CourseDraftingProposer implements DraftingStepProposer {
      * The proposal the author sees: each target the model named that is in the list, once, as the page's assign row
      * takes it ({@code TargetPick}); "include the units below" only where the author may assign to all of them.
      */
-    Proposal checkedAudience(JsonNode answer, List<DraftingTargets.Target> assignable, List<String> blockers) {
+    static Proposal checkedAudience(JsonNode answer, List<DraftingTargets.Target> assignable, List<String> blockers) {
         Map<String, DraftingTargets.Target> byKey = new LinkedHashMap<>();
         assignable.forEach(target -> byKey.put(targetKey(target), target));
         Set<String> seen = new LinkedHashSet<>();
-        ObjectNode proposal = json.createObjectNode();
+        ObjectNode proposal = JsonNodeFactory.instance.objectNode();
         var picks = proposal.putArray("targets");
         List<String> names = new ArrayList<>();
         for (JsonNode item : answer) {

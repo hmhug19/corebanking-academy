@@ -299,6 +299,7 @@ public class CourseDraftingService {
         CourseDetail created = courses.create(basics.course());
         drafting.linkCourse(sessionId, created.course().id(), created.revision().id(), DraftingStates.OUTLINE_STEP);
         drafting.confirmStep(sessionId, DraftingStates.BASICS_STEP);
+        keepConfirmed(session, DraftingStates.BASICS_STEP, ExternalConfirmed.basics(basics.course()));
         drafting.insertStep(sessionId, DraftingStates.OUTLINE_STEP);
 
         return drafting.session(sessionId).orElseThrow();
@@ -324,6 +325,7 @@ public class CourseDraftingService {
             drafting.markAiGenerated(session.revisionId());
         }
         drafting.confirmOutline(sessionId, step, write(notes));
+        keepConfirmed(session, step, ExternalConfirmed.outline(outline.draft()));
         drafting.advance(sessionId, DraftingStates.RULES_STEP);
         drafting.insertStep(sessionId, DraftingStates.RULES_STEP);
 
@@ -372,6 +374,7 @@ public class CourseDraftingService {
             }
         }
         drafting.confirmStep(sessionId, step);
+        keepConfirmed(session, step, ExternalConfirmed.rules(rules));
         drafting.advance(sessionId, DraftingStates.AUDIENCE_STEP);
         drafting.insertStep(sessionId, DraftingStates.AUDIENCE_STEP);
 
@@ -388,6 +391,7 @@ public class CourseDraftingService {
         SessionRow session = drafting.lockSession(sessionId).orElseThrow();
         requireCurrent(session, step);
         drafting.confirmStep(sessionId, step);
+        keepConfirmed(session, step, ExternalConfirmed.audience());
         drafting.finish(sessionId);
 
         return drafting.session(sessionId).orElseThrow();
@@ -399,7 +403,8 @@ public class CourseDraftingService {
      * into that step's fields only. Only the current step can be: a new proposal for a confirmed step would reach no
      * form and no "Đã chốt". Neither can a step being proposed or filled by hand, or one of a session that is over. It
      * counts against the daily course generation allowance, and a step that has used every attempt is left to the
-     * author. A failed session is active again.
+     * author. A failed session is active again. In a Trợ lý ngoài's session the step waits for its next
+     * {@code propose_step} instead, outside the allowance; the attempt limit still applies.
      */
     public SessionView proposeAgain(long sessionId, int step) {
         requireManager(access.actor());
@@ -420,6 +425,12 @@ public class CourseDraftingService {
             if (row.attempts() >= CourseDraftService.MAX_STEP_ATTEMPTS) {
                 throw BusinessException.validation("step", "REPROPOSE_LIMIT",
                     "Bước này đã được đề xuất lại quá nhiều lần, hãy tự điền.");
+            }
+            if (session.external()) {
+                // The step waits for the Trợ lý ngoài again; the worker never takes it and the allowance is the
+                // in-house model's.
+                drafting.reopenStep(sessionId, step);
+                return drafting.session(sessionId).orElseThrow();
             }
             allowance.lock(userId);
             allowance.require(userId);
@@ -537,6 +548,13 @@ public class CourseDraftingService {
         }
 
         return notes;
+    }
+
+    /** A Trợ lý ngoài reads back what the author confirmed; an in-house session keeps nothing extra. */
+    private void keepConfirmed(SessionRow session, int step, ObjectNode values) {
+        if (session.external()) {
+            drafting.setConfirmed(session.id(), step, write(values));
+        }
     }
 
     private DraftingStepRow stepRow(long sessionId, int step) {
