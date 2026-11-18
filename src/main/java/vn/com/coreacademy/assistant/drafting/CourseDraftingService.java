@@ -79,6 +79,8 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 public class CourseDraftingService {
     /** Where a confirmed outline keeps its lesson notes in the step's proposal. */
     static final String LESSON_NOTES = "lessonNotes";
+    /** The code of the refusal when the user already has the most Trợ lý ngoài sessions going. */
+    public static final String TOO_MANY_ACTIVE = "TOO_MANY_ACTIVE";
     private static final Set<String> ADMINS = Set.of(RoleCodes.SUPER_ADMIN, RoleCodes.ADMIN);
     // The final exam step 3 creates gets the defaults the page's own new final exam form offers.
     private static final String FINAL_EXAM_TITLE = "Thi cuối khóa";
@@ -151,9 +153,10 @@ public class CourseDraftingService {
      * {@code start_course_drafting} of a Trợ lý ngoài, as the caller (the connection's user): the same role and unit
      * checks as {@link #start}, with no document (the server never receives it), only {@code sourceName} to show. The
      * worker never takes its steps: step 1 waits in {@code proposing} for the {@code propose_step} tool. It does not count
-     * against the daily course generation allowance, which is for the in-house model.
+     * against the daily course generation allowance, which is for the in-house model. A user has at most
+     * {@code maxActive} such sessions going at once; one stopped, finished or filled by hand frees its place.
      */
-    public SessionView startExternal(String sourceName) {
+    public SessionView startExternal(String sourceName, int maxActive) {
         String userId = SecurityContextUtils.getUserId();
         Actor actor = identity.actor(userId);
         requireManager(actor);
@@ -164,7 +167,12 @@ public class CourseDraftingService {
                 "Tên tài liệu từ 1 đến " + GenerationSchemas.MAX_TITLE + " ký tự.");
         }
         long sessionId = transaction.execute(status -> {
+            // The allowance lock serialises the user's starts, so two cannot both take the last place.
             allowance.lock(userId);
+            if (drafting.activeExternalSessions(userId) >= maxActive) {
+                throw BusinessException.validation("session", TOO_MANY_ACTIVE,
+                    "Đã có " + maxActive + " phiên Trợ lý ngoài đang soạn; dừng hoặc hoàn tất một phiên trước.");
+            }
             long created = drafting.insertExternalSession(userId, ownerOrgId, name);
             drafting.insertStep(created, DraftingStates.FIRST_STEP);
             return created;

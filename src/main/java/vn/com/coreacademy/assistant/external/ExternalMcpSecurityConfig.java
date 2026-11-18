@@ -27,11 +27,13 @@ public class ExternalMcpSecurityConfig {
                                                ExternalConnectionRepository connections,
                                                ExternalConnectionService service, LearningIdentityService identity,
                                                UserJwtAuthenticationConverter converter, ObjectMapper mapper,
-                                               ApiSecurityErrorHandler errors) throws Exception {
+                                               ApiSecurityErrorHandler errors, ExternalCallLimiter limiter)
+        throws Exception {
         http.securityMatcher(MCP_PATH, MCP_PATH + "/**")
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .addFilterBefore(new ExternalTokenFilter(properties, connections, service, identity, converter, mapper),
+            .addFilterBefore(new ExternalTokenFilter(properties, connections, service, identity, converter, mapper,
+                limiter),
                 AnonymousAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
             .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors));

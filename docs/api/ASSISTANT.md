@@ -447,3 +447,18 @@ Lỗi của công cụ là kết quả `isError: true` với câu tiếng Anh ng
 dung đã lưu. Prompt `soan_khoa_hoc` (tham số tùy chọn `tai_lieu`) mở đầu luồng; `instructions` của server và mô tả
 từng công cụ nêu quy tắc: từng bước một, không viết nội dung bài, sau mỗi bước dặn tác giả mở link, sửa, Chốt bước rồi
 chờ "tiếp", không bao giờ nói khóa học đã được tạo hay xuất bản.
+
+### Giới hạn và audit của Trợ lý ngoài
+
+| Giới hạn | Mặc định (`app.assistant.external.*`) | Khi vượt |
+|---|---|---|
+| Số lần gọi mỗi kết nối trong một phút (đếm theo phút lịch, trên từng instance) | `calls-per-minute: 60` | HTTP 429 `CORE-TOO_MANY_REQUESTS`, header `Retry-After` (giây đến phút sau), `errors[0]` có câu tiếng Anh |
+| Kích thước body của `/api/v1/mcp` | `max-body: 256KB` | HTTP 413 `CORE-PAYLOAD_TOO_LARGE`, từ chối trước khi đọc JSON |
+| Phiên external đang soạn (`active`) của một người dùng | `max-active-sessions: 3` | `start_course_drafting` trả lỗi công cụ; dừng/hoàn tất/tự điền một phiên là có chỗ lại |
+| Ghi "lần dùng cuối" của kết nối | `last-used-interval: 1m` | ghi tối đa một lần mỗi khoảng |
+
+Mỗi lần gọi công cụ (kể cả bị từ chối hay lỗi) ghi một dòng `learning_hub.audit_log` trong transaction riêng:
+`action = EXTERNAL_ASSISTANT_TOOL_CALL`, `actor_id` = người dùng của kết nối, `entity_type = course_drafting_session`,
+`entity_id` = phiên (nếu có), `details` = `connectionId, tool, sessionId, step, outcome (ok | refused | failed),
+durationMs`. Không bao giờ ghi nội dung đề xuất hay tên tài liệu. Lời gọi bị chặn trước công cụ (401/404/413/429)
+không có dòng audit mà chỉ có log cảnh báo.

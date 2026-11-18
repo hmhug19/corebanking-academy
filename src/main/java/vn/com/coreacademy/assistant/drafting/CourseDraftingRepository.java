@@ -123,6 +123,15 @@ public class CourseDraftingRepository {
     }
 
     /** A session of a Trợ lý ngoài: no source document (the server never receives it), only its name for display. */
+    /** The user's sessions a Trợ lý ngoài drives that are still going. */
+    public int activeExternalSessions(String ownerUserId) {
+        Integer count = jdbc.queryForObject("""
+            SELECT count(*) FROM learning_hub.course_drafting_sessions
+             WHERE owner_user_id = :user AND proposer = :external AND status = :active
+            """, states().addValue("user", ownerUserId).addValue("external", DraftingStates.EXTERNAL), Integer.class);
+        return count == null ? 0 : count;
+    }
+
     public long insertExternalSession(String ownerUserId, long ownerOrgId, String sourceName) {
         return insertSession(ownerUserId, ownerOrgId, null, null, "{}", DraftingStates.EXTERNAL, sourceName);
     }

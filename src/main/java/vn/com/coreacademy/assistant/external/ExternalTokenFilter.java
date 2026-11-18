@@ -1,15 +1,24 @@
 package vn.com.coreacademy.assistant.external;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpHeaders;
@@ -22,6 +31,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.filter.OncePerRequestFilter;
 import vn.com.coreacademy.assistant.external.ExternalConnectionRepository.ConnectionRow;
 import vn.com.coreacademy.common.dto.BaseResponse;
+import vn.com.coreacademy.common.dto.FieldViolation;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.identity.security.UserJwtAuthenticationConverter;
@@ -37,7 +47,11 @@ import vn.com.coreacademy.security.SecurityConstants;
  * of authentication a sign-in JWT gives, checked by the same converter (active account, current auth_ver), so every
  * service applies its own role and owner checks unchanged. That in-memory token is never sent anywhere and carries the
  * connection id ({@link #CONNECTION_CLAIM}) and its purpose. The connection's "lần dùng cuối" is written at most once
- * per {@code lastUsedInterval}. Built by {@link ExternalMcpSecurityConfig}, not a servlet component, so it runs only in
+ * per {@code lastUsedInterval}.
+ *
+ * <p>Before that, a body over {@code max-body} is refused (413) without being parsed: the body is read here, up to the
+ * limit, and handed on as it is. After it, a connection over {@code calls-per-minute} is refused (429, Retry-After).
+ * Built by {@link ExternalMcpSecurityConfig}, not a servlet component, so it runs only in
  * that chain.
  */
 @Log4j2
@@ -54,16 +68,19 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
     private final LearningIdentityService identity;
     private final UserJwtAuthenticationConverter converter;
     private final ObjectMapper mapper;
+    private final ExternalCallLimiter limiter;
 
     public ExternalTokenFilter(ExternalAssistantProperties properties, ExternalConnectionRepository connections,
                                ExternalConnectionService service, LearningIdentityService identity,
-                               UserJwtAuthenticationConverter converter, ObjectMapper mapper) {
+                               UserJwtAuthenticationConverter converter, ObjectMapper mapper,
+                               ExternalCallLimiter limiter) {
         this.properties = properties;
         this.connections = connections;
         this.service = service;
         this.identity = identity;
         this.converter = converter;
         this.mapper = mapper;
+        this.limiter = limiter;
     }
 
     @Override
@@ -71,6 +88,16 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
         throws ServletException, IOException {
         if (!properties.enabled()) {
             write(response, ResponseCode.NOT_FOUND);
+            return;
+        }
+        int maxBody = (int) Math.min(Integer.MAX_VALUE - 1, properties.maxBody().toBytes());
+        byte[] body = request.getContentLengthLong() > maxBody ? null
+            : request.getInputStream().readNBytes(maxBody + 1);
+        if (body == null || body.length > maxBody) {
+            // Refused before the MCP server reads a byte of it as JSON.
+            log.warn("Refused external assistant call over the body limit maxBytes={}", maxBody);
+            write(response, ResponseCode.PAYLOAD_TOO_LARGE, "body", "TOO_LARGE",
+                "The request body is over " + maxBody / 1024 + " KB. Send a shorter proposal.");
             return;
         }
         Optional<ConnectionRow> connection = connection(request.getHeader(HttpHeaders.AUTHORIZATION));
@@ -82,10 +109,21 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
             write(response, ResponseCode.UNAUTHORIZED);
             return;
         }
+        Duration wait = limiter.admit(connection.get().id());
+        if (wait != null) {
+            SecurityContextHolder.clearContext();
+            long seconds = Math.max(1, wait.toSeconds());
+            response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(seconds));
+            log.warn("Refused external assistant call over the rate limit connectionId={}", connection.get().id());
+            write(response, ResponseCode.TOO_MANY_REQUESTS, "connection", "CALLS_PER_MINUTE",
+                "At most " + limiter.callsPerMinute() + " calls a minute per connection. Try again in " + seconds
+                    + " seconds.");
+            return;
+        }
         connections.touch(connection.get().id(),
             OffsetDateTime.now().minus(properties.lastUsedInterval()));
         try {
-            chain.doFilter(request, response);
+            chain.doFilter(new ReadBody(request, body), response);
         } finally {
             SecurityContextHolder.clearContext();
         }
@@ -140,10 +178,78 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
     }
 
     private void write(HttpServletResponse response, ResponseCode code) throws IOException {
+        write(response, BaseResponse.fail(code), code);
+    }
+
+    /** A refusal whose one field error tells the Trợ lý ngoài, in English, what to do about it. */
+    private void write(HttpServletResponse response, ResponseCode code, String field, String reason, String message)
+        throws IOException {
+        write(response, BaseResponse.fail(code, List.of(new FieldViolation(field, reason, message))), code);
+    }
+
+    private void write(HttpServletResponse response, BaseResponse<Void> body, ResponseCode code) throws IOException {
         response.setStatus(code.getHttpStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        mapper.writeValue(response.getOutputStream(), BaseResponse.fail(code));
+        mapper.writeValue(response.getOutputStream(), body);
+    }
+
+    /** The request with its body already read (within the limit), served again to the MCP server. */
+    private static final class ReadBody extends HttpServletRequestWrapper {
+        private final byte[] body;
+
+        ReadBody(HttpServletRequest request, byte[] body) {
+            super(request);
+            this.body = body;
+        }
+
+        @Override
+        public ServletInputStream getInputStream() {
+            ByteArrayInputStream in = new ByteArrayInputStream(body);
+            return new ServletInputStream() {
+                @Override
+                public boolean isFinished() {
+                    return in.available() == 0;
+                }
+
+                @Override
+                public boolean isReady() {
+                    return true;
+                }
+
+                @Override
+                public void setReadListener(ReadListener listener) {
+                    throw new UnsupportedOperationException("The body is already read");
+                }
+
+                @Override
+                public int read() {
+                    return in.read();
+                }
+
+                @Override
+                public int read(byte[] buffer, int offset, int length) {
+                    return in.read(buffer, offset, length);
+                }
+            };
+        }
+
+        @Override
+        public BufferedReader getReader() {
+            Charset charset = getCharacterEncoding() == null ? StandardCharsets.UTF_8
+                : Charset.forName(getCharacterEncoding());
+            return new BufferedReader(new InputStreamReader(getInputStream(), charset));
+        }
+
+        @Override
+        public int getContentLength() {
+            return body.length;
+        }
+
+        @Override
+        public long getContentLengthLong() {
+            return body.length;
+        }
     }
 
     /** The connection the current call came through; only set inside {@code /api/v1/mcp}. */
