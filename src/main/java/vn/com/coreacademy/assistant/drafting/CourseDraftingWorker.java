@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.drafting;
 
 import java.time.OffsetDateTime;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -11,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -50,6 +52,12 @@ public class CourseDraftingWorker {
     private final ObjectMapper json;
     private final DraftingMessages messages;
     private final GenerationProperties generation;
+    /**
+     * The drafting thread: a model call can last a minute and a half, and the scheduler thread it is polled from also
+     * runs the document reader, so the steps are proposed here and the poll returns at once. Resolved by name.
+     */
+    private final TaskExecutor draftingWorkerExecutor;
+    private final AtomicBoolean busy = new AtomicBoolean();
     /** The step this instance is proposing now: its claim may outlast one model call (step 1 summarises first). */
     private final AtomicLong running = new AtomicLong(NONE);
 
@@ -81,12 +89,26 @@ public class CourseDraftingWorker {
     @Scheduled(fixedDelayString = "${app.assistant.generation.poll-interval}",
         initialDelayString = "${app.assistant.generation.poll-interval}")
     public void poll() {
+        if (!busy.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            draftingWorkerExecutor.execute(this::drain);
+        } catch (RuntimeException exception) {
+            busy.set(false);
+            log.warn("Drafting hand-over failed type={}", exception.getClass().getName());
+        }
+    }
+
+    private void drain() {
         try {
             while (runOnce()) {
-                // keep going while steps wait
+                // keep going while steps get proposed
             }
         } catch (RuntimeException exception) {
             log.warn("Drafting poll failed type={}", exception.getClass().getName());
+        } finally {
+            busy.set(false);
         }
     }
 

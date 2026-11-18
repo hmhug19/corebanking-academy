@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.drafting;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -9,6 +10,7 @@ import java.util.function.Consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -56,6 +58,16 @@ class CourseDraftingWorkerTest {
     private final SessionRow session = new SessionRow(5, "000005", 1, 9L, null, null, null, 1, "active", null, "{}",
         null, null, null);
     private final DraftingMessages messages = mock(DraftingMessages.class);
+    /** Runs what the worker hands over right away, unless a test holds it to look at what was handed over. */
+    private final List<Runnable> handedOver = new ArrayList<>();
+    private boolean holdHandOver;
+    private final TaskExecutor executor = task -> {
+        if (holdHandOver) {
+            handedOver.add(task);
+        } else {
+            task.run();
+        }
+    };
     private final CourseDraftingWorker worker;
 
     @SuppressWarnings("unchecked")
@@ -75,7 +87,7 @@ class CourseDraftingWorkerTest {
         when(drafting.failStep(anyLong(), any(), anyString())).thenReturn(true);
         worker = new CourseDraftingWorker(drafting, provider, ollama, transaction, mock(AssistantMetrics.class),
             limiter, json, messages, new GenerationProperties(3, Duration.ofSeconds(3), Duration.ofDays(30),
-            Duration.ofSeconds(90)));
+            Duration.ofSeconds(90)), executor);
     }
 
     @Test
@@ -153,6 +165,44 @@ class CourseDraftingWorkerTest {
         worker.poll();
 
         verify(drafting, times(1)).claimNext();
+    }
+
+    @Test
+    void aPollHandsTheStepsToTheWorkerThreadInsteadOfProposingOnTheScheduler() {
+        // The scheduler thread is shared with the document reader, quiz auto-submit and the chat room: a model call of
+        // up to a minute and a half must not hold it.
+        holdHandOver = true;
+        when(proposer.propose(session, step)).thenReturn(new Proposal(json.createObjectNode(), List.of(), null));
+
+        worker.poll();
+
+        verify(drafting, never()).claimNext();
+        assertThat(handedOver).hasSize(1);
+        when(drafting.claimNext()).thenReturn(Optional.of(step), Optional.empty());
+        handedOver.get(0).run();
+        verify(drafting, times(2)).claimNext();
+    }
+
+    @Test
+    void aPollWhileTheWorkerThreadIsBusyHandsNothingMoreOver() {
+        holdHandOver = true;
+
+        worker.poll();
+        worker.poll();
+
+        assertThat(handedOver).hasSize(1);
+    }
+
+    @Test
+    void theWorkerThreadIsFreeAgainAfterARunThatFailed() {
+        holdHandOver = true;
+        when(drafting.claimNext()).thenThrow(new IllegalStateException("database down"));
+
+        worker.poll();
+        handedOver.get(0).run();
+        worker.poll();
+
+        assertThat(handedOver).hasSize(2);
     }
 
     @Test
