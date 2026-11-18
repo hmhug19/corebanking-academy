@@ -71,4 +71,8 @@ public class LessonBlock extends LearningRecord {
     @Column(name = "transcript", columnDefinition = "jsonb")
     @JdbcTypeCode(SqlTypes.JSON)
     private JsonNode transcript;
+
+    /** Khối video cho phép người học tua tự do; luôn false với khối khác. */
+    @Column(name = "allow_seeking", nullable = false)
+    private Boolean allowSeeking = false;
 }
