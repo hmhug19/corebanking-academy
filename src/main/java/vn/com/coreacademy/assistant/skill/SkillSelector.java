@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant.skill;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Component;
 import vn.com.coreacademy.assistant.agent.AgentContext;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.conversation.Conversations;
+import vn.com.coreacademy.identity.dto.FunctionInfo;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 
 /**
@@ -21,6 +23,11 @@ import vn.com.coreacademy.knowledge.ai.OllamaClient;
 @RequiredArgsConstructor
 public class SkillSelector {
     public static final String LESSON_SKILL = "hoi_bai_hoc";
+    public static final String NAVIGATION_SKILL = "dieu_huong";
+    /** "Mở trang …", "vào màn hình …": a plain request to open a screen, never a question about its data. */
+    private static final Pattern OPEN_PAGE = Pattern.compile(
+        "^(mở|vào|đi tới|đi đến|chuyển tới|chuyển đến|truy cập)\\s+(lại\\s+)?(trang|màn hình|mục)(?!\\s*\\d)(\\s|$)",
+        Pattern.UNICODE_CASE | Pattern.CASE_INSENSITIVE);
     private static final Pattern LABEL = Pattern.compile("[a-z_]+");
 
     private final OllamaClient ollama;
@@ -43,6 +50,11 @@ public class SkillSelector {
         if (named != null) {
             return named;
         }
+        Skill navigation = catalog.find(NAVIGATION_SKILL).filter(skill -> offered(skill, context)).orElse(null);
+        if (navigation != null && question != null && OPEN_PAGE.matcher(question.strip()).find()) {
+            // The wording alone says "open a screen": no model call, and no chance of a document search instead.
+            return navigation;
+        }
         if (context.lesson() != null) {
             // Asked from a lesson page: the question is about that lesson, so no classifier call is needed; the
             // lesson skill reads the lesson itself first.
@@ -52,7 +64,7 @@ public class SkillSelector {
         List<Skill> allowed = catalog.all().stream().filter(skill -> offered(skill, context)).toList();
         try {
             String reply = ollama.chat(List.of(
-                OllamaClient.Message.system(prompt(allowed)),
+                OllamaClient.Message.system(prompt(allowed, context)),
                 OllamaClient.Message.user(classifierInput(question, last))),
                 models.classifierOptions());
             if (reply != null) {
@@ -92,13 +104,30 @@ public class SkillSelector {
         return skill.allowedFor(context) && (!skill.needsLesson() || context.lesson() != null);
     }
 
-    private static String prompt(List<Skill> allowed) {
+    private static String prompt(List<Skill> allowed, AgentContext context) {
         StringBuilder text = new StringBuilder("Chọn đúng một nhãn kỹ năng phù hợp nhất với yêu cầu của người dùng. "
             + "Chỉ trả lời nhãn, không giải thích.\n");
         for (Skill skill : allowed) {
-            text.append("- ").append(skill.id()).append(": ").append(skill.description()).append('\n');
+            text.append("- ").append(skill.id()).append(": ").append(skill.description());
+            if (NAVIGATION_SKILL.equals(skill.id())) {
+                text.append(screenNames(context));
+            }
+            text.append('\n');
         }
 
         return text.toString();
+    }
+
+    /** The names of the screens this user can open, so an "open the page of a screen name" request is recognised as navigation. */
+    static String screenNames(AgentContext context) {
+        if (context.rights() == null || context.rights().functions() == null) {
+            return "";
+        }
+        String names = context.rights().functions().stream()
+            .filter(function -> function.routePattern() != null && !function.routePattern().isBlank()
+                && !function.routePattern().contains(":"))
+            .map(FunctionInfo::name).distinct().collect(Collectors.joining(", "));
+
+        return names.isEmpty() ? "" : ". Các màn hình của người dùng: " + names;
     }
 }

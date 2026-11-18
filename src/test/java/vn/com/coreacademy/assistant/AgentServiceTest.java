@@ -372,6 +372,51 @@ class AgentServiceTest {
         assertThat(meters.find("assistant.tool_missing").counter()).isNull();
     }
 
+    private SkillCatalog anyOfCatalog() {
+        return new SkillCatalog("base", List.of(new Skill("qa_tai_lieu", "hỏi đáp",
+            List.of("search_documents", "search_community"), List.of(), "system", "", "",
+            List.of("search_documents", "search_community"))), "v1");
+    }
+
+    @Test
+    void callingAnyOneOfSeveralRequiredToolsLiftsTheRequirement() throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("đoạn tài liệu"));
+        tool("search_community", true, true, false, (arguments, turn) -> new ToolOutcome.Result("bài cộng đồng"));
+        modelAnswers(List.of(), List.of(call("search_community")), new ChatTurn("Có một bài.", List.of()));
+
+        List<JsonNode> events = events(service(anyOfCatalog()).stream("Tìm bài về CIF", null, "qa_tai_lieu"));
+
+        assertThat(types(events)).contains("tool").endsWith("done");
+        assertThat(meters.find("assistant.tool_missing").counter()).isNull();
+    }
+
+    @Test
+    void aTextOnlyAnswerWhenOneOfSeveralToolsIsRequiredIsNudgedWithEveryNameThenReplacedByTheFixedSentence()
+        throws IOException {
+        tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("x"));
+        tool("search_community", true, true, false, (arguments, turn) -> new ToolOutcome.Result("y"));
+        modelAnswers(List.of("Không tìm thấy."), List.of());
+
+        List<JsonNode> events = events(service(anyOfCatalog()).stream("Quy trình EOD?", null, "qa_tai_lieu"));
+
+        assertThat(events.get(events.size() - 1).path("answer").asText()).isEqualTo(AgentService.TOOL_MISSING_ANSWER);
+        ArgumentCaptor<List<ChatMessage>> messages = ArgumentCaptor.captor();
+        verify(ollama, times(2)).chatWithTools(messages.capture(), anyList(), any(), any(), any());
+        List<ChatMessage> retry = messages.getAllValues().get(1);
+        assertThat(retry.get(retry.size() - 1).content()).contains("search_documents").contains("search_community");
+    }
+
+    @Test
+    void aRequiredToolTheUserIsNotOfferedDoesNotForceTheTurn() throws IOException {
+        tool("search_documents", false, (arguments, turn) -> new ToolOutcome.Result("x"));
+        tool("search_community", false, (arguments, turn) -> new ToolOutcome.Result("y"));
+        modelAnswers(List.of("Xin chào bạn."), List.of());
+
+        List<JsonNode> events = events(service(anyOfCatalog()).stream("Xin chào", null, "qa_tai_lieu"));
+
+        assertThat(events.get(events.size() - 1).path("answer").asText()).isEqualTo("Xin chào bạn.");
+    }
+
     @Test
     void aSkillWithoutAMandatoryToolStreamsItsTextAnswer() throws IOException {
         modelAnswers(List.of("CIF là mã."), List.of());
@@ -773,12 +818,14 @@ class AgentServiceTest {
         tool("search_documents", true, true, false, (arguments, turn) -> new ToolOutcome.Result("[1] tài liệu"));
         tool("update_profile", true, false, true, (arguments, turn) -> new ToolOutcome.Result("không được chạy"));
         tool("open_screen", true, false, true, (arguments, turn) -> new ToolOutcome.Result("không được chạy"));
-        modelAnswers(List.of("Mình không đổi hồ sơ trong lượt này."), List.of());
+        // The document skill must search first, so the model searches and then answers.
+        modelAnswers(List.of(), List.of(call("search_documents")),
+            new ChatTurn("Mình không đổi hồ sơ trong lượt này.", List.of()));
 
         List<JsonNode> events = events(service(real).stream("Đổi email của tôi thành a@b.vn", null, "qa_tai_lieu"));
 
         ArgumentCaptor<List<ToolDefinition>> offered = ArgumentCaptor.captor();
-        verify(ollama).chatWithTools(anyList(), offered.capture(), any(), any(), any());
+        verify(ollama, times(2)).chatWithTools(anyList(), offered.capture(), any(), any(), any());
         assertThat(offered.getValue()).extracting(ToolDefinition::name)
             .contains("search_documents").doesNotContain("update_profile", "open_screen");
         assertThat(types(events)).doesNotContain("action_required", "navigate");

@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -10,6 +11,8 @@ import vn.com.coreacademy.assistant.agent.LessonFocus;
 import vn.com.coreacademy.assistant.config.AssistantModels;
 import vn.com.coreacademy.assistant.skill.SkillCatalog;
 import vn.com.coreacademy.assistant.skill.SkillSelector;
+import vn.com.coreacademy.identity.dto.FunctionInfo;
+import vn.com.coreacademy.identity.dto.UserRights;
 import vn.com.coreacademy.knowledge.ai.OllamaClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,6 +63,45 @@ class SkillSelectorTest {
         assertThat(skill.id()).isEqualTo("ho_so");
         assertThat(user).contains("Cập nhật chức danh của tôi").contains("Đã gửi thẻ xác nhận").endsWith("Còn email thì sao?");
         assertThat(user.length()).isLessThan(SkillSelector.ANSWER_CUT + 400);
+    }
+
+    private static AgentContext learnerWithScreens() {
+        return new AgentContext("000004", null, new UserRights(List.of(), List.of(
+            new FunctionInfo(1L, "PROFILE", "Hồ sơ cá nhân", "/profile", null, 10),
+            new FunctionInfo(2L, "COURSE_LEARNING", "Học tập", "/learn", null, 20),
+            new FunctionInfo(3L, "COURSE_DETAIL", "Chi tiết khóa", "/learn/:id", null, 30)), Map.of()));
+    }
+
+    @Test
+    void aPlainOpenThePageRequestGoesToNavigationWithoutAClassifierCall() {
+        for (String question : List.of("Mở trang khóa học của tôi", "mở trang hồ sơ cá nhân", "Vào màn hình tiến độ",
+            "Đi tới trang cộng đồng", "  Mở mục Học tập")) {
+            assertThat(selector.select(null, question, learnerWithScreens()).id()).as(question).isEqualTo("dieu_huong");
+        }
+        verifyNoInteractions(ollama);
+    }
+
+    @Test
+    void aQuestionAboutDataIsNotTakenForNavigationByTheWording() {
+        when(ollama.chat(anyList(), any())).thenReturn("hoc_tap_cua_toi");
+
+        assertThat(selector.select(null, "Danh sách khóa học quá hạn của tôi", learnerWithScreens()).id())
+            .isEqualTo("hoc_tap_cua_toi");
+        assertThat(selector.select(null, "Mở trang 5 của tài liệu nói gì", learnerWithScreens()).id())
+            .isEqualTo("hoc_tap_cua_toi");
+    }
+
+    @Test
+    void theClassifierPromptNamesTheUsersScreensForNavigationAndExcludesPersonalDataFromDocumentQa() {
+        when(ollama.chat(anyList(), any())).thenReturn("qa_tai_lieu");
+
+        selector.select(null, "Cho mình xem lại trang cũ", learnerWithScreens());
+
+        ArgumentCaptor<List<OllamaClient.Message>> sent = ArgumentCaptor.captor();
+        verify(ollama).chat(sent.capture(), any());
+        String prompt = sent.getValue().get(0).content();
+        assertThat(prompt).contains("dieu_huong:").contains("Các màn hình của người dùng: Hồ sơ cá nhân, Học tập")
+            .doesNotContain("Chi tiết khóa").contains("hoc_tap_cua_toi:").contains("KHÔNG dùng cho dữ liệu cá nhân");
     }
 
     @Test

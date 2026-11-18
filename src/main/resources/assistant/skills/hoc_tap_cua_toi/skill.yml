@@ -1,0 +1,6 @@
+description: hỏi dữ liệu học tập của CHÍNH người dùng - khóa học của tôi, khóa quá hạn, sắp đến hạn, hạn hoàn thành, tiến độ, khóa đang học hoặc đã hoàn thành (không phải nội dung bài học, không phải mở trang)
+tools:
+  - my_learning
+roles: []
+output: Trả lời đúng danh sách do công cụ trả về (tên khóa, hạn, tiến độ); chỉ nói "không có" khi công cụ trả danh sách rỗng. Bắt buộc gọi công cụ xem khóa học của tôi trước khi trả lời.
+requiredTool: my_learning

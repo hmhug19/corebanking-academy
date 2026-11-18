@@ -56,7 +56,7 @@ class LearningAiOwnershipTest {
 
     private static BlockInput input(String body) {
         return new BlockInput("text", "Nội dung", body, "markdown", "manual", null, true, List.of(), List.of(), null,
-            null);
+            null, false);
     }
 
     private static LessonInput lessonInput(String title, BlockInput... blocks) {

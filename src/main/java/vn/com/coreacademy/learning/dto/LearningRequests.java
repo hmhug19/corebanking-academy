@@ -220,7 +220,8 @@ public final class LearningRequests {
         @NotNull @Size(max = 20) List<@Valid AssetUse> assets,
         @NotNull @Size(max = 200) List<@Valid StepInput> steps,
         List<VideoChapterInput> videoChapters,
-        List<TranscriptLineInput> transcript) {
+        List<TranscriptLineInput> transcript,
+        boolean allowSeeking) {
     }
 
     /** Mốc của khối video; service kiểm tra số lượng, độ dài, thứ tự và giới hạn thời lượng. */

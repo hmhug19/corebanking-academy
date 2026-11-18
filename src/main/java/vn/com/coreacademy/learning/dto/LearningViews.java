@@ -180,6 +180,7 @@ public final class LearningViews {
         Long mediaAssetId,
         List<VideoChapterView> videoChapters,
         List<TranscriptLineView> transcript,
+        Boolean allowSeeking,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {
