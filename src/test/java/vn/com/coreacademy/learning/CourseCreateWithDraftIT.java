@@ -612,4 +612,57 @@ class CourseCreateWithDraftIT extends AssessmentIntegrationTest {
         api.error(INSTRUCTOR, api.post(update, "/api/v1/course-exams"), "LEARNING-CONFLICT");
         api.http(LEARNER, api.post(update, "/api/v1/course-exams"), 403, "CORE-ACCESS_DENIED");
     }
+
+    @Test
+    void quizLessonAndQuestionPoolAreSavedAndPublishedWithTheirCourse() {
+        var fixtures = new AssessmentFixtures(api, jdbc);
+        var bankCourse = fixtures.course();
+        long question = fixtures.question(bankCourse.id(), fixtures.competency(), "SINGLE", 0);
+        Long program = jdbc.queryForObject(
+            "SELECT program_id FROM learning_hub.course_revisions WHERE revision_id = ?",
+            Long.class, bankCourse.revisionId());
+        var lesson = new HashMap<String, Object>(Map.of("title", "Ôn tập", "lessonType", "quiz",
+            "estimatedDurationSeconds", 300, "isRequired", false, "blocks", List.of()));
+        Map<String, Object> content = draft("Khóa kèm bài kiểm tra", block("text"));
+        content.put("programId", program);
+        content.put("chapters", List.of(Map.of("title", "Chương 1", "lessons", List.of(lesson))));
+        var quiz = AssessmentFixtures.quizBody(bankCourse.id());
+        quiz.remove("courseId");
+        quiz.put("title", "Bài kiểm tra chương 1 bài 1");
+        quiz.put("quizType", "PRACTICE");
+        quiz.put("questionCount", 1);
+        var pool = Map.of("items", List.of(Map.of("questionId", question, "sortNo", 0)));
+        String code = unique("QUIZLESSON");
+        String saveExam = "/api/v1/course-exams";
+        var newCourse = create(code, "Khóa kèm bài kiểm tra", content);
+        api.error(INSTRUCTOR, api.post(Map.of("course", newCourse, "quiz", quiz, "pool", pool,
+            "lessonTarget", Map.of("chapter", 0, "lesson", 1)), saveExam), "CORE-VALIDATION_FAILED");
+        assertThat(courseCount(code)).isZero();
+
+        var saved = api.ok(INSTRUCTOR, api.post(Map.of("course", newCourse, "quiz", quiz, "pool", pool,
+            "lessonTarget", Map.of("chapter", 0, "lesson", 0)), saveExam));
+        long courseId = saved.path("course").path("id").asLong();
+        long revisionId = saved.path("revision").path("id").asLong();
+        long version = saved.path("revision").path("rowVersion").asLong();
+        long quizId = saved.path("chapters").get(0).path("lessons").get(0).path("lesson").path("quizId").asLong();
+        assertThat(quizId).isPositive();
+        assertThat(saved.path("finalQuizId").isNull()).isTrue();
+        var exam = api.ok(INSTRUCTOR, ApiClient.get("/api/v1/quizzes/{id}", quizId));
+        assertThat(exam.path("quiz").path("status").asText()).isEqualTo("DRAFT");
+        assertThat(exam.path("pool").get(0).path("questionId").asLong()).isEqualTo(question);
+        String publish = "/api/v1/courses/{c}/revisions/{r}/publish";
+        api.error(INSTRUCTOR, api.post(Map.of("expectedVersion", version), publish, courseId, revisionId),
+            "LEARNING-NOT_PUBLISHABLE");
+        assertThat(api.ok(INSTRUCTOR, ApiClient.get("/api/v1/quizzes/{id}", quizId))
+            .path("quiz").path("status").asText()).isEqualTo("DRAFT");
+
+        lesson.put("isRequired", true);
+        lesson.put("quizId", quizId);
+        content.put("expectedVersion", version);
+        var ready = api.ok(INSTRUCTOR, api.put(content, "/api/v1/courses/{c}/revisions/{r}", courseId, revisionId));
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", ready.path("revision").path("rowVersion").asLong()),
+            publish, courseId, revisionId));
+        assertThat(api.ok(INSTRUCTOR, ApiClient.get("/api/v1/quizzes/{id}", quizId))
+            .path("quiz").path("status").asText()).isEqualTo("PUBLISHED");
+    }
 }

@@ -96,7 +96,7 @@ Module Assessment truy cập Learning qua adapter công khai `LearningAssessment
 | 45 | GET `/api/v1/reports/assessment/{type}/export` | CSV cho `results/learners/competency/questions`, tối đa 10.000 dòng |
 | 46 | GET `/api/v1/me/competency?courseId` | Năng lực của chính học viên |
 | 47 | GET `/api/v1/me/courses/{courseId}/quizzes` | Đề đã xuất bản của khóa (FINAL_EXAM cuối) kèm lượt còn lại, lý do chặn và `lessonId` của bài quiz |
-| 48 | POST `/api/v1/course-exams` | Lưu khóa học kèm bài thi cuối khóa và bộ câu hỏi trong một giao dịch |
+| 48 | POST `/api/v1/course-exams` | Lưu khóa học cùng bộ câu hỏi của bài học hoặc đề cuối khóa trong một giao dịch |
 
 API 21–28, 30–33, 37–39 yêu cầu quyền quản lý khóa chứa câu hỏi/đề; API 36 cần vai trò giảng viên/quản trị; bulk cần
 quyền trên mọi khóa trong lô. API 29 chỉ dành cho quản trị GLOBAL; API 34–35, 46 chỉ trả dữ liệu của caller. API 40–45
@@ -110,10 +110,13 @@ với `quizId` và `status` theo AND (ví dụ `status=VOIDED&graded=true` trả
 
 ## Quy tắc chính
 
-**Soạn khóa học kèm bài thi.** `POST /api/v1/course-exams` nhận JSON, trả envelope
-`BaseResponse<CourseDetail>` giống API chi tiết khóa học; `finalQuizId` và
-`completionRule.finalQuizId` chứa ID đề vừa liên kết. Không tự xuất bản khóa/đề.
-Hai dạng request:
+**Soạn khóa học kèm bài kiểm tra.** `POST /api/v1/course-exams` nhận JSON và trả
+`BaseResponse<CourseDetail>` giống API chi tiết khóa. Bỏ `lessonTarget` để gắn đề
+`FINAL_EXAM` vào `finalQuizId` và `completionRule.finalQuizId`. Gửi
+`lessonTarget: { "chapter": 0, "lesson": 0 }` để tạo đề `PRACTICE` nháp và ghi ID vào
+`quizId` của bài học loại `quiz` tại vị trí tương ứng trong cây gửi cùng request.
+Chỉ số bắt đầu từ 0. Khi xuất bản khóa, các đề nháp được gắn với bài học của phiên bản
+được kiểm tra và xuất bản trong cùng giao dịch. Hai dạng request lưu cây:
 
 ```json
 {

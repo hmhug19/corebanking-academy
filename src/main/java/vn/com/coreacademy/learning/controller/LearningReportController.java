@@ -31,6 +31,13 @@ import vn.com.coreacademy.learning.service.LearningAnalyticsService;
 public class LearningReportController {
     private final LearningAnalyticsService reports;
 
+    @GetMapping("/dashboard")
+    @ApiResponse(responseCode = "200", useReturnTypeSchema = true)
+    @Operation(summary = "Tổng quan cho giảng viên và quản trị theo phạm vi khóa học quản lý")
+    public BaseResponse<LearningAnalytics.Dashboard> dashboard() {
+        return BaseResponse.ok(reports.dashboard());
+    }
+
     @GetMapping("/summary")
     @ApiResponse(responseCode = "200", useReturnTypeSchema = true)
     @Operation(summary = "Tổng quan tiến độ đào tạo", description = """

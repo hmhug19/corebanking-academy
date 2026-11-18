@@ -170,6 +170,16 @@ public class LearningRepository {
             """, TrainingProgram.class, Map.of("org", orgId));
     }
 
+    public List<Long> scopedProgramIds(Long orgId, Collection<Long> teams, String ownerId) {
+        return query("""
+            select distinct r.programId
+            from CourseRevision r, Course c
+            where r.courseId = c.id and c.ownerOrgId = :org and r.programId is not null
+              and (c.ownerTeamId in :teams or c.ownerUserId = :owner)
+            """, Long.class, Map.of("org", orgId, "teams", teams.isEmpty() ? List.of(-1L) : teams,
+                "owner", ownerId == null ? "" : ownerId));
+    }
+
     /** Khóa của đơn vị kèm bản đang hiển thị (bản xuất bản, nếu chưa có thì bản mới nhất) đã xếp vào chương trình. */
     public List<Object[]> treeCourses(Long orgId) {
         return query("""

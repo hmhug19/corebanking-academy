@@ -153,14 +153,15 @@ Chạy `mvn test -Dtest=RoomBoardPositionTest,RoomBoardMatchTest,ChatRoomPlaygro
 
 #### Thoại trong phòng
 
-Client gửi `voice: true` khi vào phòng và nhận `voice-ready` với cấu hình ICE dùng chung với trình chiếu.
-Giữ V hoặc giữ nút thoại để mở micrô. `voice-talk` đăng ký ID lượt nói hoặc gửi `null` khi thả.
-Server báo `voice-state` cho người nghe, kể cả người mới vào. Người nghe gửi `voice-watch`; server
-gửi `voice-peer` cho người nói. `voice-signal` chuyển offer/answer/ICE giữa đúng hai phiên đã vào
-phòng, theo ID lượt nói hiện tại, kèm `speaker` và `to` (server thay `to` bằng `from`).
-Âm thanh truyền qua WebRTC. Server chỉ chuyển tín hiệu và không ghi âm hay ghi DB.
-Client ngừng track và đóng kết nối khi thả, mất focus, chuyển tab hoặc rời phòng. Trình duyệt cần
-HTTPS ngoài localhost và quyền micrô. Mạng hạn chế có thể cần TURN.
+Client mới gửi `voice: true, voiceRelay: true` khi vào phòng và nhận `voice-ready` với `relay: true`.
+Bấm **Bật âm thanh thoại** để mở AudioContext và đăng ký nghe bằng `voice-listen`. Cấp quyền micrô
+riêng trước khi giữ V hoặc giữ nút thoại. `voice-talk` đăng ký ID lượt nói hoặc gửi `null` khi thả.
+`voice-frame` chuyển 60 ms âm thanh mono 16 kHz qua WebSocket hiện có. Server chuyển tiếp theo thời
+gian thực cho các phiên đang nghe, chỉ nhận gói đúng độ dài từ người hiện đang giữ lượt nói.
+Tối đa ba người nói cùng lúc. Server kết thúc lượt thiếu khung âm thanh sau 2,5 giây, không ghi âm
+hay ghi DB. Client ngừng track khi thả nút, mất focus, chuyển tab hoặc rời phòng.
+Trình duyệt cần HTTPS ngoài localhost. Thoại relay không cần TURN. Client cũ vẫn có luồng WebRTC
+riêng trong thời gian cập nhật. Cả người nói và người nghe cần tải bản mới để dùng relay với nhau.
 
 #### Bàn trình chiếu và màn hình 16:9
 

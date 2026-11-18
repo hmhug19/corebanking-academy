@@ -1,6 +1,7 @@
 package vn.com.coreacademy.learning.service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -8,6 +9,8 @@ import java.util.Map;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vn.com.coreacademy.audit.service.IdentityAuditService;
@@ -29,6 +32,7 @@ import vn.com.coreacademy.learning.repository.BusinessModuleRepository;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 import vn.com.coreacademy.learning.repository.TrainingFieldRepository;
 import vn.com.coreacademy.learning.repository.TrainingProgramRepository;
+import vn.com.coreacademy.learning.service.LearningAccessPolicy.CatalogPermission;
 
 @Service
 @Transactional(readOnly = true)
@@ -46,41 +50,76 @@ public class LearningCatalogService {
     private final LearningContentService content;
     private final IdentityAuditService audit;
 
+    private record CatalogScope(List<TrainingField> fields, List<TrainingProgram> programs) {
+    }
+
+    private CatalogScope catalogScope(Long orgId, CatalogPermission permission) {
+        if (permission.orgWide()) {
+            return new CatalogScope(repository.fields(orgId), repository.programs(orgId));
+        }
+        Set<Long> scopedPrograms = access.scopedProgramIds(orgId, permission);
+        List<TrainingProgram> visiblePrograms = repository.programs(orgId).stream()
+            .filter(program -> scopedPrograms.contains(program.getId()) || permission.includesOwner(program.getCreatedBy()))
+            .toList();
+        Set<Long> parentIds = new HashSet<>();
+        visiblePrograms.forEach(program -> parentIds.add(program.getFieldId()));
+        List<TrainingField> visibleFields = repository.fields(orgId).stream()
+            .filter(field -> parentIds.contains(field.getId()) || permission.includesOwner(field.getCreatedBy()))
+            .toList();
+        return new CatalogScope(visibleFields, visiblePrograms);
+    }
+
+    private <T> PageResponse<T> page(List<T> values, int index, int size) {
+        var paging = PageQuery.of(index, size, "id,asc", Set.of("id"));
+        int start = (int) Math.min(values.size(), paging.getOffset());
+        int end = Math.min(values.size(), start + paging.getPageSize());
+        return PageResponse.from(new PageImpl<>(values.subList(start, end), paging, values.size()));
+    }
+
     public PageResponse<LearningViews.TrainingFieldView> fields(Long orgId, int page, int size) {
-        var actor = access.actor();
-        access.requireManage(actor, orgId, actor.person().teamId(), actor.person().id());
-        return PageResponse.from(fields.findByOwnerOrgId(orgId,
-            PageQuery.of(page, size, "id,asc", Set.of("id"))).map(mapper::view));
+        CatalogPermission permission = access.catalogPermission(access.actor(), orgId);
+        if (permission.orgWide()) {
+            return PageResponse.from(fields.findByOwnerOrgId(orgId,
+                PageQuery.of(page, size, "id,asc", Set.of("id"))).map(mapper::view));
+        }
+        return page(catalogScope(orgId, permission).fields().stream()
+            .sorted(Comparator.comparing(TrainingField::getId)).map(mapper::view).toList(), page, size);
     }
 
     public PageResponse<LearningViews.TrainingProgramView> programs(Long orgId, int page, int size) {
-        var actor = access.actor();
-        access.requireManage(actor, orgId, actor.person().teamId(), actor.person().id());
-        return PageResponse.from(programs.findByOwnerOrgId(orgId,
-            PageQuery.of(page, size, "id,asc", Set.of("id"))).map(mapper::view));
+        CatalogPermission permission = access.catalogPermission(access.actor(), orgId);
+        if (permission.orgWide()) {
+            return PageResponse.from(programs.findByOwnerOrgId(orgId,
+                PageQuery.of(page, size, "id,asc", Set.of("id"))).map(mapper::view));
+        }
+        return page(catalogScope(orgId, permission).programs().stream()
+            .sorted(Comparator.comparing(TrainingProgram::getId)).map(mapper::view).toList(), page, size);
     }
 
     /** Cây lĩnh vực → chương trình → khóa học của một đơn vị, cùng quyền quản lý với các danh sách phẳng. */
     public LearningViews.CatalogTreeView tree(Long orgId) {
-        var actor = access.actor();
-        access.requireManage(actor, orgId, actor.person().teamId(), actor.person().id());
+        CatalogPermission permission = access.catalogPermission(access.actor(), orgId);
+        CatalogScope scope = catalogScope(orgId, permission);
         Map<Long, List<LearningViews.CatalogTreeCourse>> coursesByProgram = new HashMap<>();
         for (Object[] row : repository.treeCourses(orgId)) {
             Course course = (Course) row[0];
+            if (!permission.includesCourse(course)) {
+                continue;
+            }
             CourseRevision revision = (CourseRevision) row[1];
             coursesByProgram.computeIfAbsent(revision.getProgramId(), key -> new ArrayList<>())
                 .add(new LearningViews.CatalogTreeCourse(course.getId(), course.getCode(), revision.getTitle(),
                     course.getLifecycleStatus(), course.getPublishedRevisionId() != null));
         }
         Map<Long, List<LearningViews.CatalogTreeProgram>> programsByField = new HashMap<>();
-        for (TrainingProgram program : repository.programs(orgId)) {
+        for (TrainingProgram program : scope.programs()) {
             programsByField.computeIfAbsent(program.getFieldId(), key -> new ArrayList<>())
                 .add(new LearningViews.CatalogTreeProgram(program.getId(), program.getFieldId(),
                     program.getOwnerOrgId(), program.getCode(), program.getName(), program.getDescription(),
                     program.getStatus(), program.getSortNo(), program.getRowVersion(),
                     coursesByProgram.getOrDefault(program.getId(), List.of())));
         }
-        return new LearningViews.CatalogTreeView(repository.fields(orgId).stream()
+        return new LearningViews.CatalogTreeView(scope.fields().stream()
             .map(field -> new LearningViews.CatalogTreeField(field.getId(), field.getOwnerOrgId(), field.getCode(),
                 field.getName(), field.getDescription(), field.getStatus(), field.getSortNo(),
                 field.getRowVersion(), programsByField.getOrDefault(field.getId(), List.of())))
@@ -89,8 +128,12 @@ public class LearningCatalogService {
 
     public PageResponse<LearningViews.BusinessModuleView> modules(Long fieldId, int page, int size) {
         TrainingField field = repository.require(TrainingField.class, fieldId);
-        var actor = access.actor();
-        access.requireManage(actor, field.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        Long orgId = field.getOwnerOrgId();
+        CatalogPermission permission = access.catalogPermission(access.actor(), orgId);
+        if (!permission.includesOwner(field.getCreatedBy()) && catalogScope(orgId, permission).fields().stream()
+            .noneMatch(visible -> fieldId.equals(visible.getId()))) {
+            throw new AccessDeniedException("Training field scope denied");
+        }
         return PageResponse.from(modules.findByFieldId(fieldId,
             PageQuery.of(page, size, "id,asc", Set.of("id"))).map(mapper::view));
     }
@@ -132,9 +175,9 @@ public class LearningCatalogService {
     public LearningViews.TrainingFieldView saveField(Long id, Long version, LearningRequests.CatalogRequest request) {
         // Bước 1: chỉ quản lý danh mục trong scope thật; khóa kiểm tra mã trước INSERT/UPDATE.
         var actor = access.actor();
-        access.requireManage(actor, request.ownerOrgId(), actor.person().teamId(), actor.person().id());
         lock.acquire();
         TrainingField value = id == null ? new TrainingField() : repository.require(TrainingField.class, id);
+        access.requireManage(actor, request.ownerOrgId(), null, id == null ? actor.person().id() : value.getCreatedBy());
         if (id != null) {
             LearningContentService.version(value, version);
             requireSameOrg(value.getOwnerOrgId(), request.ownerOrgId());
@@ -162,11 +205,12 @@ public class LearningCatalogService {
     public LearningViews.TrainingProgramView saveProgram(Long id, Long version,
                                                          LearningRequests.CatalogRequest request) {
         var actor = access.actor();
-        access.requireManage(actor, request.ownerOrgId(), actor.person().teamId(), actor.person().id());
         lock.acquire();
         TrainingField parent = repository.require(TrainingField.class, request.fieldId());
         requireSameOrg(parent.getOwnerOrgId(), request.ownerOrgId());
+        access.requireManage(actor, parent.getOwnerOrgId(), null, parent.getCreatedBy());
         TrainingProgram value = id == null ? new TrainingProgram() : repository.require(TrainingProgram.class, id);
+        access.requireManage(actor, request.ownerOrgId(), null, id == null ? actor.person().id() : value.getCreatedBy());
         if (id != null) {
             LearningContentService.version(value, version);
             requireSameOrg(value.getOwnerOrgId(), request.ownerOrgId());
@@ -197,7 +241,7 @@ public class LearningCatalogService {
     public void deleteField(Long id, Long version) {
         var actor = access.actor();
         TrainingField value = repository.require(TrainingField.class, id);
-        access.requireManage(actor, value.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        access.requireManage(actor, value.getOwnerOrgId(), null, value.getCreatedBy());
         lock.acquire();
         repository.refresh(value);
         LearningContentService.version(value, version);
@@ -215,7 +259,7 @@ public class LearningCatalogService {
     public void deleteProgram(Long id, Long version) {
         var actor = access.actor();
         TrainingProgram value = repository.require(TrainingProgram.class, id);
-        access.requireManage(actor, value.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        access.requireManage(actor, value.getOwnerOrgId(), null, value.getCreatedBy());
         lock.acquire();
         repository.refresh(value);
         LearningContentService.version(value, version);
@@ -233,7 +277,7 @@ public class LearningCatalogService {
     public LearningViews.TrainingProgramView copyProgram(Long id) {
         var actor = access.actor();
         TrainingProgram source = repository.require(TrainingProgram.class, id);
-        access.requireManage(actor, source.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        access.requireManage(actor, source.getOwnerOrgId(), null, source.getCreatedBy());
         lock.acquire();
         repository.refresh(source);
 
@@ -250,10 +294,14 @@ public class LearningCatalogService {
         repository.save(copy, actor.person().id());
         repository.flush();
 
+        CatalogPermission permission = access.catalogPermission(actor, source.getOwnerOrgId());
         for (Object[] row : repository.treeCourses(source.getOwnerOrgId())) {
             CourseRevision revision = (CourseRevision) row[1];
             if (source.getId().equals(revision.getProgramId())) {
                 Course course = (Course) row[0];
+                if (!permission.includesCourse(course)) {
+                    continue;
+                }
                 content.copyIntoProgram(course, copy.getId(),
                     content.freeCopyCode(course.getCode(), repository::courseCodeExists));
                 repository.flush();
@@ -267,9 +315,9 @@ public class LearningCatalogService {
     @Transactional
     public LearningViews.BusinessModuleView saveModule(Long id, Long version, LearningRequests.CatalogRequest request) {
         var actor = access.actor();
-        access.requireManage(actor, request.ownerOrgId(), actor.person().teamId(), actor.person().id());
         lock.acquire();
         TrainingField field = repository.require(TrainingField.class, request.fieldId());
+        access.requireManage(actor, field.getOwnerOrgId(), null, field.getCreatedBy());
         requireSameOrg(field.getOwnerOrgId(), request.ownerOrgId());
         BusinessModule value = id == null ? new BusinessModule() : repository.require(BusinessModule.class, id);
         if (id != null) {
@@ -306,7 +354,7 @@ public class LearningCatalogService {
         lock.acquire();
         BusinessModule value = repository.require(BusinessModule.class, id);
         TrainingField field = repository.require(TrainingField.class, value.getFieldId());
-        access.requireManage(actor, field.getOwnerOrgId(), actor.person().teamId(), actor.person().id());
+        access.requireManage(actor, field.getOwnerOrgId(), null, field.getCreatedBy());
         LearningContentService.version(value, version);
         if (repository.moduleInUse(id)) {
             throw new BusinessException(LearningResponseCode.CATALOG_IN_USE);

@@ -13,18 +13,30 @@ import vn.com.coreacademy.identity.enums.ScopeType;
 import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.identity.service.LearningIdentityService.Actor;
 import vn.com.coreacademy.learning.entity.Course;
+import vn.com.coreacademy.learning.entity.TrainingProgram;
+import vn.com.coreacademy.learning.repository.LearningRepository;
 import vn.com.coreacademy.security.SecurityContextUtils;
 
 @Component
 @RequiredArgsConstructor
 public class LearningAccessPolicy {
     private final LearningIdentityService identity;
+    private final LearningRepository repository;
 
     public Actor actor() {
         return identity.actor(SecurityContextUtils.getUserId());
     }
 
     public record SearchScope(boolean global, Set<Long> orgIds, Set<Long> teamIds, boolean own) {
+    }
+
+    public void requireStaff(Actor actor) {
+        boolean staff = actor.grants().stream().anyMatch(grant ->
+            (RoleCodes.SUPER_ADMIN.equals(grant.roleCode()) && grant.scope().type() == ScopeType.GLOBAL)
+                || Set.of(RoleCodes.ADMIN, RoleCodes.INSTRUCTOR).contains(grant.roleCode()));
+        if (!staff) {
+            throw new AccessDeniedException("Staff role required");
+        }
     }
 
     public SearchScope searchScope(Actor actor) {
@@ -44,6 +56,52 @@ public class LearningAccessPolicy {
             }
         }
         return new SearchScope(global, Set.copyOf(orgs), Set.copyOf(teams), own);
+    }
+
+    /** Grant đã được đối chiếu với một đơn vị; chỉ dùng để lọc dữ liệu thuộc chính đơn vị đó. */
+    public record CatalogPermission(boolean orgWide, Set<Long> teams, String ownerId) {
+        public boolean includesOwner(String createdBy) {
+            return orgWide || (ownerId != null && ownerId.equals(createdBy));
+        }
+
+        public boolean includesCourse(Course course) {
+            return includesOwner(course.getOwnerUserId())
+                || (course.getOwnerTeamId() != null && teams.contains(course.getOwnerTeamId()));
+        }
+    }
+
+    public CatalogPermission catalogPermission(Actor actor, Long orgId) {
+        requireStaff(actor);
+        SearchScope scope = searchScope(actor);
+        if (scope.global() || scope.orgIds().contains(orgId)) {
+            identity.activeOrg(orgId);
+            return new CatalogPermission(true, Set.of(), null);
+        }
+        Set<Long> teams = new HashSet<>();
+        for (Long teamId : scope.teamIds()) {
+            if (Objects.equals(identity.activeTeam(teamId).orgId(), orgId)) {
+                teams.add(teamId);
+            }
+        }
+        String owner = scope.own() && Objects.equals(actor.person().orgId(), orgId) ? actor.person().id() : null;
+        if (teams.isEmpty() && owner == null) {
+            throw new AccessDeniedException("Catalog scope denied");
+        }
+        identity.activeOrg(orgId);
+        return new CatalogPermission(false, Set.copyOf(teams), owner);
+    }
+
+    public Set<Long> scopedProgramIds(Long orgId, CatalogPermission permission) {
+        return Set.copyOf(repository.scopedProgramIds(orgId, permission.teams(), permission.ownerId()));
+    }
+
+    public void requireUsableProgram(Actor actor, TrainingProgram program) {
+        Long orgId = program.getOwnerOrgId();
+        CatalogPermission permission = catalogPermission(actor, orgId);
+        if (!permission.includesOwner(program.getCreatedBy())
+            && !scopedProgramIds(orgId, permission).contains(program.getId())) {
+            throw new AccessDeniedException("Training program scope denied");
+        }
     }
 
     /** Role và scope luôn xét trên cùng grant; chủ sở hữu vẫn phải có quyền giảng viên/quản trị hiện tại. */

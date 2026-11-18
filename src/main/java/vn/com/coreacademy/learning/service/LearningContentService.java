@@ -193,6 +193,37 @@ public class LearningContentService {
         return detail(course, revision);
     }
 
+    /** Gắn đề vừa tạo vào bài học của cây nháp đã ghi trong cùng transaction. */
+    @Transactional
+    public LearningDetails.CourseDetail attachLessonQuiz(LearningDetails.CourseDetail saved, int chapterIndex,
+                                                          int lessonIndex, Long quizId) {
+        if (chapterIndex >= saved.chapters().size()
+            || lessonIndex >= saved.chapters().get(chapterIndex).lessons().size()) {
+            throw BusinessException.validation("lessonTarget", "INVALID_VALUE", "Không tìm thấy bài học trong bản nháp.");
+        }
+        var selected = saved.chapters().get(chapterIndex).lessons().get(lessonIndex).lesson();
+        if (!LessonType.QUIZ.equals(selected.lessonType())) {
+            throw BusinessException.validation("lessonTarget", "INVALID_VALUE", "Chọn bài học loại bài kiểm tra.");
+        }
+        var actor = access.actor();
+        Course course = repository.require(Course.class, saved.course().id());
+        access.requireManage(actor, course);
+        writeLock.acquire();
+        CourseRevision revision = repository.require(CourseRevision.class, saved.revision().id());
+        requireDraft(course, revision);
+        version(revision, saved.revision().rowVersion());
+        var quiz = quizzes.find(quizId);
+        if (quiz.isEmpty() || quiz.get().deleted() || !course.getId().equals(quiz.get().courseId())) {
+            throw new BusinessException(LearningResponseCode.QUIZ_INVALID);
+        }
+        CourseLesson lesson = repository.require(CourseLesson.class, selected.id());
+        lesson.setQuizId(quizId);
+        repository.save(lesson, actor.person().id());
+        repository.flush();
+        repository.incrementVersion(revision);
+        return detail(course, revision);
+    }
+
     /**
      * Kiểm tra rồi ghi toàn bộ nội dung nháp vào revision; dùng chung cho lưu nháp và tạo khóa kèm nháp.
      * Lỗi bất kỳ ném ngoại lệ trước khi cây cũ bị thay, transaction của caller sẽ rollback.
@@ -201,6 +232,9 @@ public class LearningContentService {
                             String actor) {
         // Bước 1: kiểm tra danh mục và quy mô.
         validateCatalog(course, draft.programId(), draft.moduleId(), false);
+        if (draft.programId() != null && !Objects.equals(draft.programId(), revision.getProgramId())) {
+            access.requireUsableProgram(access.actor(), repository.require(TrainingProgram.class, draft.programId()));
+        }
         validateDraftSize(draft);
 
         // Bước 2: kiểm tra tệp/quy tắc khối trước khi thay cây; lỗi bất kỳ rollback toàn bộ.
@@ -291,6 +325,7 @@ public class LearningContentService {
         CourseRevision revision = repository.require(CourseRevision.class, revisionId);
         requireDraft(course, revision);
         version(revision, request.expectedVersion());
+        publishLessonQuizzes(course, revisionId);
         requirePublishable(course, revision);
         resourceExtensions.forEach(extension -> extension.validateBeforePublish(revisionId));
         // Nội dung do AI tạo chỉ xuất bản được khi người xuất bản xác nhận đã rà soát; ghi lại ai và khi nào.
@@ -714,6 +749,14 @@ public class LearningContentService {
             throw new BusinessException(LearningResponseCode.ASSET_INVALID);
         }
         return asset;
+    }
+
+    private void publishLessonQuizzes(Course course, Long revisionId) {
+        repository.lessons(revisionId).stream()
+            .filter(lesson -> LessonType.QUIZ.equals(lesson.getLessonType()) && lesson.getQuizId() != null)
+            .map(CourseLesson::getQuizId)
+            .distinct()
+            .forEach(quizId -> quizzes.publishDraftLessonQuiz(course.getId(), quizId));
     }
 
     private void requirePublishable(Course course, CourseRevision revision) {
