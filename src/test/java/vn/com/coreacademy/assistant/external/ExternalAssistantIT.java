@@ -8,6 +8,8 @@ import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
  * they share one application context (and one connection pool) instead of one each.
  */
 @TestPropertySource(properties = {"app.assistant.external.enabled=true",
-    "app.assistant.external.app-base-url=https://lms.example"})
+    "app.assistant.external.app-base-url=https://lms.example",
+    // Every OAuth IT registers from the same address; the limit itself is pinned by PerMinuteLimiterTest.
+    "app.assistant.external.oauth-registrations-per-minute=1000"})
 abstract class ExternalAssistantIT extends AssessmentIntegrationTest {
 }

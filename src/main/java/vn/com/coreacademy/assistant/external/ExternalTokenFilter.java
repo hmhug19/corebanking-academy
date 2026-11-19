@@ -103,7 +103,9 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
         Optional<ConnectionRow> connection = connection(request.getHeader(HttpHeaders.AUTHORIZATION));
         if (connection.isEmpty() || !authenticate(connection.get())) {
             SecurityContextHolder.clearContext();
-            response.setHeader(HttpHeaders.WWW_AUTHENTICATE, SecurityConstants.TOKEN_TYPE);
+            // Names the OAuth metadata, so a client that has only the MCP URL can start signing in (RFC 9728 §5.1).
+            response.setHeader(HttpHeaders.WWW_AUTHENTICATE, SecurityConstants.TOKEN_TYPE + " resource_metadata=\""
+                + properties.resourceMetadataUrl() + "\"");
             log.warn("Rejected external assistant call method={} path={} messageCode={}", request.getMethod(),
                 request.getRequestURI(), ResponseCode.UNAUTHORIZED.getCode());
             write(response, ResponseCode.UNAUTHORIZED);

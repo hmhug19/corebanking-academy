@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assistant.external;
 
+import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -8,7 +9,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import vn.com.coreacademy.assessment.support.ApiClient;
 import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
 
@@ -60,6 +63,18 @@ class ExternalAssistantDisabledIT extends AssessmentIntegrationTest {
         } finally {
             jdbc.update("DELETE FROM learning_hub.external_assistant_connection");
         }
+    }
+
+    @Test
+    void theOAuthEndpointsAnswer404() throws Exception {
+        for (String path : List.of("/.well-known/oauth-protected-resource",
+            "/.well-known/oauth-protected-resource/api/v1/mcp", "/.well-known/oauth-authorization-server")) {
+            assertThat(mvc.perform(MockMvcRequestBuilders.get(path)).andReturn().getResponse().getStatus())
+                .as(path).isEqualTo(404);
+        }
+        assertThat(mvc.perform(MockMvcRequestBuilders.post("/api/v1/oauth/register")
+            .contentType(MediaType.APPLICATION_JSON).content("{\"redirect_uris\":[\"http://localhost:1/cb\"]}"))
+            .andReturn().getResponse().getStatus()).isEqualTo(404);
     }
 
     @Test

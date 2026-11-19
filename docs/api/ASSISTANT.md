@@ -462,3 +462,22 @@ Mỗi lần gọi công cụ (kể cả bị từ chối hay lỗi) ghi một d�
 `entity_id` = phiên (nếu có), `details` = `connectionId, tool, sessionId, step, outcome (ok | refused | failed),
 durationMs`. Không bao giờ ghi nội dung đề xuất hay tên tài liệu. Lời gọi bị chặn trước công cụ (401/404/413/429)
 không có dòng audit mà chỉ có log cảnh báo.
+
+### Kết nối bằng OAuth (ADR 0005 bên lms-vip-pro-max)
+
+Client MCP (Claude App, Claude Code) chỉ cần URL `{app-base-url}/api/v1/mcp`: lời gọi chưa có token nhận 401 với
+`WWW-Authenticate: Bearer resource_metadata="{app-base-url}/.well-known/oauth-protected-resource/api/v1/mcp"`, từ đó
+client tìm authorization server, tự đăng ký và đăng nhập bằng trình duyệt. `{app-base-url}` là
+`app.assistant.external.app-base-url` (origin của web, proxy `/api` và `/.well-known/oauth-` về backend). Các endpoint
+dưới đây công khai (chain bảo mật riêng, không JWT, CORS mọi origin không credentials), trả lỗi dạng OAuth
+(`{error, error_description}`, `Cache-Control: no-store`), và trả HTTP 404 `CORE-ENDPOINT_NOT_FOUND` khi cờ tắt.
+
+| Endpoint | Nội dung |
+|---|---|
+| `GET /.well-known/oauth-protected-resource` (và `…/api/v1/mcp`) | RFC 9728: `resource` = URL MCP, `authorization_servers` = [`{app-base-url}`], `scopes_supported` = [`course_drafting`], `bearer_methods_supported` = [`header`] |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414: `issuer` = `{app-base-url}`, các endpoint `/api/v1/oauth/{authorize,token,register,revoke}`, `response_types_supported` [`code`], `grant_types_supported` [`authorization_code`, `refresh_token`], `code_challenge_methods_supported` [`S256`], `token_endpoint_auth_methods_supported` [`none`] |
+| `POST /api/v1/oauth/register` | RFC 7591, JSON. Chỉ client public (`token_endpoint_auth_method` vắng hoặc `none`, không có secret). `redirect_uris` 1–5 URI, mỗi URI là `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback` hoặc `http://localhost`/`127.0.0.1`/`[::1]` với cổng và đường dẫn bất kỳ (không userinfo, không fragment); khác đi → 400 `invalid_redirect_uri` và một dòng audit `REGISTRATION_REFUSED`. `client_name` do client tự khai (cắt còn 100 ký tự; vắng → "Trợ lý ngoài"). Trả 201 `client_id` (`chan_cli_…`), `client_id_issued_at`, `client_name`, `redirect_uris`, `grant_types`, `response_types`, `token_endpoint_auth_method: none`. Tối đa `oauth-registrations-per-minute` (mặc định 10) lần mỗi địa chỉ (`remoteAddr`) mỗi phút, vượt → 429 `slow_down`. Bảng `oauth_client` (`docs/sql/upgrade/2026-11-30-external-assistant-oauth.sql`). |
+
+Sự kiện OAuth ghi `learning_hub.audit_log` với `action = EXTERNAL_ASSISTANT_OAUTH`,
+`entity_type = external_assistant_connection`, `details` = `event, clientId, connectionId, reason`; không bao giờ
+ghi token, code hay verifier.

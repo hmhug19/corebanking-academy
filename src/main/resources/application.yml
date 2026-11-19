@@ -154,6 +154,8 @@ app:
       max-body: ${ASSISTANT_EXTERNAL_MAX_BODY:256KB}
       max-active-sessions: ${ASSISTANT_EXTERNAL_MAX_ACTIVE_SESSIONS:3}
       last-used-interval: 1m
+      # OAuth clients one address may register a minute (ADR 0005).
+      oauth-registrations-per-minute: ${ASSISTANT_EXTERNAL_OAUTH_REGISTRATIONS_PER_MINUTE:10}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 600
