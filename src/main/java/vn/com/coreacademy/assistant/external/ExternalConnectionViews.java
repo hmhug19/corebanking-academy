@@ -19,8 +19,13 @@ public final class ExternalConnectionViews {
     }
 
     @Schema(description = "Một kết nối còn hiệu lực hoặc đã hết hạn (chưa thu hồi); không bao giờ có token.")
-    public record ConnectionView(long id, String name,
-                                 @Schema(description = "Vài ký tự đầu của token để nhận ra kết nối") String tokenPrefix,
+    public record ConnectionView(long id,
+                                 @Schema(description = "Tên người dùng đặt (token) hoặc tên client tự khai (oauth)")
+                                 String name,
+                                 @Schema(description = "token: mã chan_ext_ dán tay; oauth: cấp qua trang Cho phép kết nối")
+                                 String kind,
+                                 @Schema(description = "Vài ký tự đầu của mã chan_ext_; null với kết nối oauth",
+                                     nullable = true) String tokenPrefix,
                                  OffsetDateTime createTime, OffsetDateTime expiresAt, OffsetDateTime lastUsedAt) {
     }
 

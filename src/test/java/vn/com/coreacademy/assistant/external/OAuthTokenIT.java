@@ -72,7 +72,10 @@ class OAuthTokenIT extends ExternalAssistantIT {
         assertThat(row).containsEntry("access_token_hash", ExternalConnectionService.hash(access))
             .containsEntry("refresh_token_hash", ExternalConnectionService.hash(tokens.path("refresh_token").asText()))
             .containsEntry("thirty_days", true).containsEntry("used", true);
-        assertThat(new ApiClient(mvc, json).ok(INSTRUCTOR, ApiClient.get(CONNECTIONS))).hasSize(1);
+        JsonNode listed = new ApiClient(mvc, json).ok(INSTRUCTOR, ApiClient.get(CONNECTIONS));
+        assertThat(listed).hasSize(1);
+        assertThat(listed.get(0).path("kind").asText()).isEqualTo("oauth");
+        assertThat(listed.get(0).path("tokenPrefix").isNull()).isTrue();
     }
 
     @Test

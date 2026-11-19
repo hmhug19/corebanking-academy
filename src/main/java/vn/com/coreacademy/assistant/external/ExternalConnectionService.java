@@ -119,7 +119,8 @@ public class ExternalConnectionService {
     }
 
     private static ConnectionView view(ConnectionRow row) {
-        return new ConnectionView(row.id(), row.name(), row.tokenPrefix(), row.createTime(), row.expiresAt(),
+        return new ConnectionView(row.id(), row.name(), row.kind(), row.tokenPrefix(), row.createTime(),
+            row.expiresAt(),
             row.lastUsedAt());
     }
 }

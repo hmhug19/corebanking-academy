@@ -57,6 +57,7 @@ class ExternalConnectionIT extends ExternalAssistantIT {
         assertThat(token).startsWith("chan_ext_").hasSizeGreaterThan(40);
         assertThat(connection.path("name").asText()).isEqualTo("Claude trên máy tôi");
         assertThat(connection.path("tokenPrefix").asText()).isEqualTo(token.substring(0, 13));
+        assertThat(connection.path("kind").asText()).isEqualTo("token");
         assertThat(connection.path("lastUsedAt").isNull()).isTrue();
         OffsetDateTime expires = OffsetDateTime.parse(connection.path("expiresAt").asText());
         assertThat(expires).isBetween(OffsetDateTime.now().plusDays(29), OffsetDateTime.now().plusDays(31));
