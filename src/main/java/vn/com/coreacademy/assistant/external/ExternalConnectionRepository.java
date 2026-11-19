@@ -15,14 +15,26 @@ import org.springframework.stereotype.Repository;
 @Repository
 @RequiredArgsConstructor
 public class ExternalConnectionRepository {
+    /** {@code kind} is {@link #TOKEN} or {@link #OAUTH}; an oauth row has a client and no token prefix. */
     public record ConnectionRow(long id, String userId, String name, String tokenPrefix, OffsetDateTime createTime,
-                                OffsetDateTime expiresAt, OffsetDateTime lastUsedAt, OffsetDateTime revokedAt) {
+                                OffsetDateTime expiresAt, OffsetDateTime lastUsedAt, OffsetDateTime revokedAt,
+                                String kind, String clientId) {
     }
+
+    /** A pasted chan_ext_ token (ADR 0004). */
+    public static final String TOKEN = "token";
+    /** Granted on the Cho phép kết nối page (ADR 0005). */
+    public static final String OAUTH = "oauth";
+
+    private static final String COLUMNS = """
+        connection_id, user_id, name, token_prefix, create_time, expires_at, last_used_at, revoked_at, kind, client_id
+        """;
 
     private static final RowMapper<ConnectionRow> CONNECTION = (rs, row) -> new ConnectionRow(
         rs.getLong("connection_id"), rs.getString("user_id"), rs.getString("name"), rs.getString("token_prefix"),
         rs.getObject("create_time", OffsetDateTime.class), rs.getObject("expires_at", OffsetDateTime.class),
-        rs.getObject("last_used_at", OffsetDateTime.class), rs.getObject("revoked_at", OffsetDateTime.class));
+        rs.getObject("last_used_at", OffsetDateTime.class), rs.getObject("revoked_at", OffsetDateTime.class),
+        rs.getString("kind"), rs.getString("client_id"));
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -38,21 +50,23 @@ public class ExternalConnectionRepository {
 
     public Optional<ConnectionRow> find(long connectionId) {
         return jdbc.query("""
-            SELECT connection_id, user_id, name, token_prefix, create_time, expires_at, last_used_at, revoked_at
+            SELECT %s
               FROM learning_hub.external_assistant_connection
              WHERE connection_id = :id
-            """, Map.of("id", connectionId), CONNECTION).stream().findFirst();
+            """.formatted(COLUMNS), Map.of("id", connectionId), CONNECTION).stream().findFirst();
     }
 
     /** The user's connections that are not revoked, newest first; expired ones stay listed until revoked. */
     public List<ConnectionRow> listOwn(String userId) {
         return jdbc.query("""
-            SELECT connection_id, user_id, name, token_prefix, create_time, expires_at, last_used_at, revoked_at
+            SELECT %s
               FROM learning_hub.external_assistant_connection
              WHERE user_id = :user
                AND revoked_at IS NULL
+               -- An approval whose code was never exchanged leaves nothing to show.
+               AND NOT (kind = 'oauth' AND access_token_hash IS NULL AND expires_at <= now())
              ORDER BY create_time DESC, connection_id DESC
-            """, Map.of("user", userId), CONNECTION);
+            """.formatted(COLUMNS), Map.of("user", userId), CONNECTION);
     }
 
     /** Revokes the user's own connection; false when it is not theirs or already revoked. */
@@ -69,12 +83,36 @@ public class ExternalConnectionRepository {
     /** The connection a token's hash names, if it is neither revoked nor expired. */
     public Optional<ConnectionRow> findUsable(String tokenHash) {
         return jdbc.query("""
-            SELECT connection_id, user_id, name, token_prefix, create_time, expires_at, last_used_at, revoked_at
+            SELECT %s
               FROM learning_hub.external_assistant_connection
              WHERE token_hash = :hash
                AND revoked_at IS NULL
                AND expires_at > now()
-            """, Map.of("hash", tokenHash), CONNECTION).stream().findFirst();
+            """.formatted(COLUMNS), Map.of("hash", tokenHash), CONNECTION).stream().findFirst();
+    }
+
+    /**
+     * A connection granted on the Cho phép kết nối page. It lives only until {@code expiresAt}, the code's lifetime,
+     * unless its code is exchanged for tokens.
+     */
+    public long insertOAuth(String userId, String name, String clientId, OffsetDateTime expiresAt) {
+        return jdbc.queryForObject("""
+            INSERT INTO learning_hub.external_assistant_connection (user_id, name, kind, client_id, expires_at)
+            VALUES (:user, :name, 'oauth', :client, :expires)
+            RETURNING connection_id
+            """, new MapSqlParameterSource().addValue("user", userId).addValue("name", name)
+            .addValue("client", clientId).addValue("expires", expiresAt), Long.class);
+    }
+
+    /** The user's connections that work now or may: not revoked and not expired, of both kinds. */
+    public int countLive(String userId) {
+        return jdbc.queryForObject("""
+            SELECT count(*)
+              FROM learning_hub.external_assistant_connection
+             WHERE user_id = :user
+               AND revoked_at IS NULL
+               AND expires_at > now()
+            """, Map.of("user", userId), Integer.class);
     }
 
     /** Writes "lần dùng cuối" unless it is newer than {@code staleBefore}, so a busy connection writes it rarely. */

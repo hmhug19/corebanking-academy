@@ -17,4 +17,62 @@ COMMENT ON COLUMN learning_hub.oauth_client.client_name IS 'Tên do client tự 
 COMMENT ON COLUMN learning_hub.oauth_client.redirect_uris IS
     'Mảng JSON các redirect URI đã đăng ký: callback của Claude hoặc loopback (localhost, 127.0.0.1).';
 
+CREATE TABLE IF NOT EXISTS learning_hub.oauth_authorization_request (
+    request_id varchar(64) PRIMARY KEY,
+    client_id varchar(64) NOT NULL,
+    redirect_uri varchar(500) NOT NULL,
+    state varchar(500),
+    code_challenge varchar(128) NOT NULL,
+    scope varchar(100) NOT NULL,
+    create_time timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz
+);
+COMMENT ON TABLE learning_hub.oauth_authorization_request IS
+    'Yêu cầu cấp quyền đang chờ người dùng Cho phép hoặc Từ chối trên trang Cho phép kết nối; dùng một lần, hết hạn sau 10 phút.';
+
+CREATE TABLE IF NOT EXISTS learning_hub.oauth_authorization_code (
+    code_hash char(64) PRIMARY KEY,
+    connection_id bigint NOT NULL,
+    redirect_uri varchar(500) NOT NULL,
+    code_challenge varchar(128) NOT NULL,
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz
+);
+COMMENT ON TABLE learning_hub.oauth_authorization_code IS
+    'Code một lần (60 giây) sau khi người dùng Cho phép; chỉ lưu SHA-256 của code.';
+
+ALTER TABLE learning_hub.external_assistant_connection
+    ADD COLUMN IF NOT EXISTS kind varchar(10) NOT NULL DEFAULT 'token',
+    ADD COLUMN IF NOT EXISTS client_id varchar(64),
+    ADD COLUMN IF NOT EXISTS access_token_hash char(64),
+    ADD COLUMN IF NOT EXISTS access_expires_at timestamptz,
+    ADD COLUMN IF NOT EXISTS refresh_token_hash char(64),
+    ADD COLUMN IF NOT EXISTS previous_refresh_hash char(64),
+    ALTER COLUMN token_hash DROP NOT NULL,
+    ALTER COLUMN token_prefix DROP NOT NULL;
+ALTER TABLE learning_hub.external_assistant_connection
+    DROP CONSTRAINT IF EXISTS ck_external_assistant_connection_kind;
+ALTER TABLE learning_hub.external_assistant_connection
+    ADD CONSTRAINT ck_external_assistant_connection_kind CHECK (
+        (kind = 'token' AND token_hash IS NOT NULL AND token_prefix IS NOT NULL)
+        OR (kind = 'oauth' AND client_id IS NOT NULL));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_external_assistant_connection_access
+    ON learning_hub.external_assistant_connection (access_token_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_external_assistant_connection_refresh
+    ON learning_hub.external_assistant_connection (refresh_token_hash);
+CREATE INDEX IF NOT EXISTS idx_external_assistant_connection_previous_refresh
+    ON learning_hub.external_assistant_connection (previous_refresh_hash);
+COMMENT ON COLUMN learning_hub.external_assistant_connection.kind IS
+    'token: mã chan_ext_ dán tay (ADR 0004); oauth: cấp qua trang Cho phép kết nối (ADR 0005).';
+COMMENT ON COLUMN learning_hub.external_assistant_connection.client_id IS 'Client OAuth (oauth_client) của kết nối oauth.';
+COMMENT ON COLUMN learning_hub.external_assistant_connection.access_token_hash IS
+    'SHA-256 của access token hiện tại (chan_oat_, sống 1 giờ); token không bao giờ được lưu hay ghi log.';
+COMMENT ON COLUMN learning_hub.external_assistant_connection.refresh_token_hash IS
+    'SHA-256 của refresh token hiện tại (chan_ort_); đổi mới mỗi lần refresh.';
+COMMENT ON COLUMN learning_hub.external_assistant_connection.previous_refresh_hash IS
+    'SHA-256 của refresh token trước đó: dùng lại nó nghĩa là token bị lộ, kết nối bị thu hồi.';
+COMMENT ON COLUMN learning_hub.external_assistant_connection.expires_at IS
+    'token: 30 hoặc 90 ngày từ lúc tạo; oauth: 30 ngày từ lần refresh gần nhất (hết hạn sau 30 ngày không dùng).';
+
 COMMIT;

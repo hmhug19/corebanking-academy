@@ -477,6 +477,19 @@ dưới đây công khai (chain bảo mật riêng, không JWT, CORS mọi origi
 | `GET /.well-known/oauth-protected-resource` (và `…/api/v1/mcp`) | RFC 9728: `resource` = URL MCP, `authorization_servers` = [`{app-base-url}`], `scopes_supported` = [`course_drafting`], `bearer_methods_supported` = [`header`] |
 | `GET /.well-known/oauth-authorization-server` | RFC 8414: `issuer` = `{app-base-url}`, các endpoint `/api/v1/oauth/{authorize,token,register,revoke}`, `response_types_supported` [`code`], `grant_types_supported` [`authorization_code`, `refresh_token`], `code_challenge_methods_supported` [`S256`], `token_endpoint_auth_methods_supported` [`none`] |
 | `POST /api/v1/oauth/register` | RFC 7591, JSON. Chỉ client public (`token_endpoint_auth_method` vắng hoặc `none`, không có secret). `redirect_uris` 1–5 URI, mỗi URI là `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback` hoặc `http://localhost`/`127.0.0.1`/`[::1]` với cổng và đường dẫn bất kỳ (không userinfo, không fragment); khác đi → 400 `invalid_redirect_uri` và một dòng audit `REGISTRATION_REFUSED`. `client_name` do client tự khai (cắt còn 100 ký tự; vắng → "Trợ lý ngoài"). Trả 201 `client_id` (`chan_cli_…`), `client_id_issued_at`, `client_name`, `redirect_uris`, `grant_types`, `response_types`, `token_endpoint_auth_method: none`. Tối đa `oauth-registrations-per-minute` (mặc định 10) lần mỗi địa chỉ (`remoteAddr`) mỗi phút, vượt → 429 `slow_down`. Bảng `oauth_client` (`docs/sql/upgrade/2026-11-30-external-assistant-oauth.sql`). |
+| `GET /api/v1/oauth/authorize` | `response_type=code`, `client_id`, `redirect_uri` (một URI đã đăng ký; loopback được khác cổng), `code_challenge` (43–128 ký tự) + `code_challenge_method=S256`, `state` (≤ 500), `scope` (vắng hoặc `course_drafting`), `resource` (vắng hoặc URL MCP). Client hay `redirect_uri` sai → 400 trang HTML, **không** chuyển hướng, audit `AUTHORIZE_REFUSED`. Lỗi khác → 302 về `redirect_uri` với `error` (`unsupported_response_type`, `invalid_request`, `invalid_scope`, `invalid_target`), `error_description`, `state`, `iss`. Hợp lệ → lưu yêu cầu 10 phút (`oauth_authorization_request`) và 302 tới `{app-base-url}/tro-ly-ngoai/cho-phep?request={id}`. |
+
+#### Cho phép kết nối (`/api/v1/assistant/oauth-requests/{requestId}`, JWT đăng nhập)
+
+Trang Cho phép kết nối của web gọi các API này rồi chuyển trình duyệt tới `redirectUrl`. Chỉ vai trò quản lý khóa học
+có chức năng `AI_ASSISTANT` (403 cho người khác); yêu cầu đã dùng, hết hạn hay không có → `CORE-RESOURCE_NOT_FOUND`;
+cờ tắt → 404. Mỗi kết nối mới cần một lần Cho phép, kể cả với client đã từng được cho phép.
+
+| Endpoint | Nội dung |
+|---|---|
+| `GET` | `clientName` (tự khai, không xác minh), `redirectHost` (`claude.ai`, `127.0.0.1`…), `idleDays` (30), `atLimit`, `maxConnections` (10) |
+| `POST /approve` | Tạo Kết nối trợ lý ngoài `kind = oauth` (tên = tên client) và code một lần (60 giây, chỉ lưu SHA-256); trả `redirectUrl` = `redirect_uri` kèm `code`, `state`, `iss`. Kết nối chỉ sống bằng code cho đến khi đổi được token. Đã có 10 kết nối còn hiệu lực (cả hai loại) → `CORE-STATE_CONFLICT` trường `connections`, yêu cầu vẫn mở. Audit `GRANTED`. |
+| `POST /deny` | `redirectUrl` kèm `error=access_denied`, `state`, `iss`; không tạo gì. Audit `DENIED`. |
 
 Sự kiện OAuth ghi `learning_hub.audit_log` với `action = EXTERNAL_ASSISTANT_OAUTH`,
 `entity_type = external_assistant_connection`, `details` = `event, clientId, connectionId, reason`; không bao giờ

@@ -68,13 +68,21 @@ class ExternalAssistantDisabledIT extends AssessmentIntegrationTest {
     @Test
     void theOAuthEndpointsAnswer404() throws Exception {
         for (String path : List.of("/.well-known/oauth-protected-resource",
-            "/.well-known/oauth-protected-resource/api/v1/mcp", "/.well-known/oauth-authorization-server")) {
+            "/.well-known/oauth-protected-resource/api/v1/mcp", "/.well-known/oauth-authorization-server",
+            "/api/v1/oauth/authorize?client_id=x")) {
             assertThat(mvc.perform(MockMvcRequestBuilders.get(path)).andReturn().getResponse().getStatus())
                 .as(path).isEqualTo(404);
         }
         assertThat(mvc.perform(MockMvcRequestBuilders.post("/api/v1/oauth/register")
             .contentType(MediaType.APPLICATION_JSON).content("{\"redirect_uris\":[\"http://localhost:1/cb\"]}"))
             .andReturn().getResponse().getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    void theChoPhepApiAnswers404() {
+        api.http(INSTRUCTOR, get("/api/v1/assistant/oauth-requests/{id}", "x"), 404, "CORE-ENDPOINT_NOT_FOUND");
+        api.http(INSTRUCTOR, api.post(Map.of(), "/api/v1/assistant/oauth-requests/{id}/approve", "x"), 404,
+            "CORE-ENDPOINT_NOT_FOUND");
     }
 
     @Test
