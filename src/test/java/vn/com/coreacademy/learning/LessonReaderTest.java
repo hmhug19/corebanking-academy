@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.unit.DataSize;
 import vn.com.coreacademy.knowledge.chunking.Chunker;
@@ -60,6 +61,22 @@ class LessonReaderTest {
 
         assertThat(read.noText()).isTrue();
         assertThat(read.hits()).isEmpty();
+    }
+
+    @Test
+    void aLessonWhoseOnlyBlockIsAVideoWithAnUntimedTranscriptHasText() {
+        var lines = JsonNodeFactory.instance.arrayNode();
+        lines.addObject().putNull("startSeconds").put("text", "Xin chào các bạn.");
+        lines.addObject().putNull("startSeconds").put("text", "Hôm nay học về lãi suất.");
+        when(retrieval.lessonChunks(71, LessonReader.MAX_CHUNKS_PLUS_ONE)).thenReturn(List.of());
+        when(index.lessonBlocks(3, 71)).thenReturn(List.of(new SourceBlock(1, "Chương 1", 71, "Bài video", 5, "Video",
+            "video", null, null, null, lines)));
+
+        LessonText read = reader.read(25, "Khóa video", 3, 71, "Bài video");
+
+        assertThat(read.noText()).isFalse();
+        assertThat(read.hits()).isNotEmpty();
+        assertThat(read.hits().get(0).content()).contains("Xin chào các bạn.").contains("Hôm nay học về lãi suất.");
     }
 
     @Test

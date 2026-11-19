@@ -686,8 +686,9 @@ public class LearningContentService {
     }
 
     /**
-     * Mốc và transcript chỉ dành cho khối video: tối đa 50 mốc (tên 1-120 ký tự) và 2000 đoạn (nội dung 1-1000 ký tự),
-     * startSeconds không âm, tăng ngặt và không vượt thời lượng tài nguyên chính khi đã biết.
+     * Mốc và transcript chỉ dành cho khối video: tối đa 50 mốc (tên 1-120 ký tự) và 2000 đoạn (nội dung 1-1000 ký tự).
+     * Mốc luôn có startSeconds không âm, tăng ngặt và không vượt thời lượng tài nguyên chính khi đã biết. Transcript
+     * hoặc đều có startSeconds với cùng luật đó, hoặc đều để null (không thời điểm); trộn hai loại bị từ chối.
      */
     private void validatePlayerLists(Course course, LearningRequests.BlockInput block) {
         var chapters = block.videoChapters() == null ? List.<LearningRequests.VideoChapterInput>of()
@@ -703,10 +704,10 @@ public class LearningContentService {
         BigDecimal duration = block.assets().stream().filter(a -> AssetUsage.PRIMARY.equals(a.usage())).findFirst()
             .map(a -> repository.require(LearningAsset.class, a.assetId()).getDurationSeconds()).orElse(null);
         checkPlayerList("videoChapters", "mốc", LearningLimits.MAX_VIDEO_CHAPTERS,
-            LearningLimits.MAX_CHAPTER_TITLE_LENGTH, duration, chapters.stream()
+            LearningLimits.MAX_CHAPTER_TITLE_LENGTH, duration, false, chapters.stream()
                 .map(c -> c == null ? null : new PlayerItem(c.startSeconds(), c.title())).toList());
         checkPlayerList("transcript", "đoạn transcript", LearningLimits.MAX_TRANSCRIPT_LINES,
-            LearningLimits.MAX_TRANSCRIPT_TEXT_LENGTH, duration, lines.stream()
+            LearningLimits.MAX_TRANSCRIPT_TEXT_LENGTH, duration, true, lines.stream()
                 .map(t -> t == null ? null : new PlayerItem(t.startSeconds(), t.text())).toList());
     }
 
@@ -714,16 +715,25 @@ public class LearningContentService {
     }
 
     private void checkPlayerList(String field, String noun, int maxCount, int maxLength, BigDecimal duration,
-                                 List<PlayerItem> items) {
+                                 boolean untimedAllowed, List<PlayerItem> items) {
         if (items.size() > maxCount) {
             throw BusinessException.validation(field, "TOO_MANY", "Tối đa " + maxCount + " " + noun + ".");
         }
+        long untimed = items.stream().filter(i -> i != null && i.startSeconds() == null).count();
+        if (untimedAllowed && untimed > 0 && untimed < items.size()) {
+            throw BusinessException.validation(field, "INVALID_VALUE",
+                "Các " + noun + " phải đều có thời điểm hoặc đều không có.");
+        }
+        boolean allUntimed = untimedAllowed && untimed > 0;
         BigDecimal previous = null;
         for (PlayerItem item : items) {
             String label = item == null || item.label() == null ? "" : item.label().strip();
             if (label.isEmpty() || label.length() > maxLength) {
                 throw BusinessException.validation(field, "INVALID_VALUE",
                     "Nội dung của " + noun + " phải từ 1 đến " + maxLength + " ký tự.");
+            }
+            if (allUntimed) {
+                continue;
             }
             BigDecimal start = item.startSeconds();
             if (start == null || start.signum() < 0) {

@@ -749,13 +749,18 @@ Khối `video` có thể mang **mốc** (`videoChapters`) và **transcript** (`t
 | Trường của khối | Kiểu | Ghi chú |
 |---|---|---|
 | `videoChapters` | `[{ startSeconds, title }]` | Request: bỏ qua, `null` hoặc `[]` đều nghĩa là không có mốc. Response: luôn là danh sách, `[]` khi không có |
-| `transcript` | `[{ startSeconds, text }]` | Cùng quy tắc |
+| `transcript` | `[{ startSeconds, text }]` | Cùng quy tắc; `startSeconds` có thể `null` (đoạn không có thời điểm), xem quy tắc đều-có-hoặc-đều-không bên dưới |
 
 Giới hạn (vi phạm là `CORE-VALIDATION_FAILED`, `errors[0].field` là `videoChapters` hoặc `transcript`):
 
 - Tối đa 50 mốc, tên 1-120 ký tự sau khi cắt khoảng trắng; tối đa 2000 đoạn, nội dung 1-1000 ký tự sau khi cắt.
-- `startSeconds` là số không âm (cho phép phần thập phân), **tăng ngặt** trong từng danh sách, và không vượt
-  `duration_seconds` của tài nguyên chính khi đã biết (chưa biết thì không kiểm).
+- `startSeconds` của **mốc** là số không âm (cho phép phần thập phân), **tăng ngặt** trong danh sách, và không vượt
+  `duration_seconds` của tài nguyên chính khi đã biết (chưa biết thì không kiểm). Mốc luôn cần thời điểm.
+- **Transcript đều có hoặc đều không có thời điểm**: hoặc mọi đoạn có `startSeconds` theo đúng luật của mốc ở trên, hoặc
+  mọi đoạn có `startSeconds` là `null` (transcript không mốc thời gian; trình phát hiển thị và tìm kiếm được nhưng không
+  cho nhấn để tua). Trộn đoạn có và không có thời điểm bị từ chối: `CORE-VALIDATION_FAILED`, `errors[0].field` là
+  `transcript`. `null` được lưu và trả về nguyên vẹn (không đổi thành `0`). Phía frontend và backend phải triển khai cùng
+  lúc vì backend cũ từ chối thời điểm `null`.
 - Chỉ khối `video` được mang hai danh sách; khối khác gửi danh sách không rỗng bị từ chối.
 
 Lưu ý khi tích hợp:

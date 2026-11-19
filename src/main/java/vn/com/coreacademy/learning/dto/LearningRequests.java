@@ -228,7 +228,7 @@ public final class LearningRequests {
     public record VideoChapterInput(BigDecimal startSeconds, String title) {
     }
 
-    /** Một đoạn transcript của khối video; cùng luật kiểm tra với mốc. */
+    /** Một đoạn transcript của khối video; startSeconds null = không có thời điểm (đều null hoặc đều có, xem service). */
     public record TranscriptLineInput(BigDecimal startSeconds, String text) {
     }
 

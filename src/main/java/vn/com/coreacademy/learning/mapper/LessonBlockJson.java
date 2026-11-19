@@ -16,7 +16,8 @@ import vn.com.coreacademy.learning.dto.LearningViews.VideoChapterView;
 
 /**
  * Chuyển mốc video và transcript giữa cột jsonb của lesson_blocks và danh sách DTO. Cột NULL đọc ra danh sách rỗng;
- * danh sách rỗng hoặc null được lưu thành NULL.
+ * danh sách rỗng hoặc null được lưu thành NULL. Dòng transcript không có thời điểm lưu {@code "startSeconds": null}
+ * và đọc lại thành null (không thành 0).
  */
 public final class LessonBlockJson {
     private static final String START = "startSeconds";
@@ -48,7 +49,8 @@ public final class LessonBlockJson {
         List<T> items = new ArrayList<>();
         if (column != null && column.isArray()) {
             for (JsonNode item : column) {
-                items.add(factory.apply(item.path(START).decimalValue(), item.path(label).asText()));
+                JsonNode start = item.path(START);
+                items.add(factory.apply(start.isNumber() ? start.decimalValue() : null, item.path(label).asText()));
             }
         }
         return items;
