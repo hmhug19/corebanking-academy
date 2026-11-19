@@ -124,6 +124,15 @@ class OAuthTokenIT extends ExternalAssistantIT {
             .isEqualTo(401);
         mcp.initialize(access);
 
+        // Right after the rotation the old token is refused but nothing is revoked: two sessions of one client that
+        // refreshed together, or a retry after a lost response.
+        assertThat(refresh(oldRefresh, 400).path("error").asText()).isEqualTo("invalid_grant");
+        mcp.initialize(access);
+        assertThat(events()).contains("REFRESH_REFUSED").doesNotContain("REFRESH_REUSED");
+
+        // Later it means the token leaked: the connection stops.
+        jdbc.update("UPDATE learning_hub.external_assistant_connection SET refresh_rotated_at = now() - interval "
+            + "'1 minute'");
         assertThat(refresh(oldRefresh, 400).path("error").asText()).isEqualTo("invalid_grant");
 
         assertThat(mcp.raw("Bearer " + access, "tools/list", Map.of()).getStatus()).isEqualTo(401);
@@ -187,11 +196,29 @@ class OAuthTokenIT extends ExternalAssistantIT {
     }
 
     @Test
-    void aConnectionWhoseUserLostTheRoleStops() {
-        String access = exchange(flow.code(INSTRUCTOR, client)).path("access_token").asText();
+    void aConnectionWhoseUserLostTheRoleStopsAndCannotBeRenewed() {
+        JsonNode tokens = exchange(flow.code(INSTRUCTOR, client));
+        String access = tokens.path("access_token").asText();
         jdbc.update("UPDATE learning_hub.external_assistant_connection SET user_id = '000004'");
 
         assertThat(mcp.raw("Bearer " + access, "tools/list", Map.of()).getStatus()).isEqualTo(401);
+        // A refresh would push the connection 30 days out; instead it is revoked, so a role given back later
+        // needs a new Cho phép.
+        assertThat(refresh(tokens.path("refresh_token").asText(), 400).path("error").asText())
+            .isEqualTo("invalid_grant");
+        assertThat(jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM learning_hub.external_assistant_connection",
+            Boolean.class)).isTrue();
+        assertThat(events()).contains("REFRESH_REFUSED");
+    }
+
+    @Test
+    void aCodeForAUserWhoLostTheRoleSinceTheApprovalGivesNoTokens() {
+        String code = flow.code(INSTRUCTOR, client);
+        jdbc.update("UPDATE learning_hub.external_assistant_connection SET user_id = '000004'");
+
+        assertGrantRefused(form(code, OAuthFlow.VERIFIER, OAuthFlow.CALLBACK, client), "invalid_grant");
+        assertThat(jdbc.queryForObject("SELECT access_token_hash IS NULL AND revoked_at IS NOT NULL "
+            + "FROM learning_hub.external_assistant_connection", Boolean.class)).isTrue();
     }
 
     private JsonNode exchange(String code) {

@@ -14,6 +14,7 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.assistant.external.ExternalConnectionAuthenticator;
 import vn.com.coreacademy.assistant.external.ExternalConnectionRepository;
 import vn.com.coreacademy.assistant.external.ExternalConnectionRepository.ConnectionRow;
 import vn.com.coreacademy.assistant.external.ExternalConnectionService;
@@ -22,8 +23,11 @@ import vn.com.coreacademy.assistant.external.oauth.OAuthGrantRepository.CodeRow;
 /**
  * The token endpoint and revocation (RFC 6749, RFC 7636, RFC 7009). Access tokens live an hour; a refresh rotates
  * the pair and pushes the connection's expiry 30 days out, so a connection lapses after 30 days unused. A code or a
- * rotated refresh token used a second time means it leaked: the connection is revoked. Tokens are random strings
- * stored only as SHA-256, like the chan_ext_ ones.
+ * rotated refresh token used a second time means it leaked: the connection is revoked, unless the rotation was a
+ * moment ago ({@link OAuthCodes#REFRESH_REUSE_GRACE}), which is two sessions of one client refreshing together or a
+ * retry after a lost response. Tokens are issued and renewed only while the user may still connect (role, active
+ * account); otherwise the connection is revoked, so a role given back later needs a new Cho phép. Tokens are random
+ * strings stored only as SHA-256, like the chan_ext_ ones.
  */
 @Log4j2
 @Service
@@ -34,6 +38,7 @@ public class OAuthTokens {
     private final OAuthGrantRepository grants;
     private final ExternalConnectionRepository connections;
     private final OAuthAudit audit;
+    private final ExternalConnectionAuthenticator authenticator;
 
     /** The token response for a {@code grant_type} of authorization_code or refresh_token. */
     @Transactional(noRollbackFor = OAuthException.class)
@@ -96,6 +101,7 @@ public class OAuthTokens {
         if (!pkce(verifier, row.codeChallenge())) {
             throw invalidGrant("code_verifier does not match the code_challenge.");
         }
+        requireMayConnect(connection);
         String access = OAuthServer.random(OAuthCodes.ACCESS_TOKEN_PREFIX, 32);
         String refresh = OAuthServer.random(OAuthCodes.REFRESH_TOKEN_PREFIX, 32);
         OffsetDateTime now = OffsetDateTime.now();
@@ -119,11 +125,20 @@ public class OAuthTokens {
         if (known.isPresent() && !clientId.equals(known.get().clientId())) {
             throw invalidGrant("The refresh token was not issued to this client.");
         }
+        if (known.isPresent() && isLive(known.get())) {
+            requireMayConnect(known.get());
+        }
         Optional<Map<String, Object>> rotated = rotate(hash);
         if (rotated.isPresent()) {
             return rotated.get();
         }
-        if (known.isPresent() && connections.isPreviousRefresh(known.get().id(), hash)) {
+        if (known.isPresent() && connections.isPreviousRefresh(known.get().id(), hash)
+            && connections.rotatedWithin(known.get().id(), OAuthCodes.REFRESH_REUSE_GRACE)) {
+            // The other refresh of a pair that raced, or a retry: refused, but nothing leaked.
+            ConnectionRow connection = known.get();
+            audit.record(OAuthAudit.Event.REFRESH_REFUSED, connection.userId(), connection.id(), clientId,
+                "just_rotated");
+        } else if (known.isPresent() && connections.isPreviousRefresh(known.get().id(), hash)) {
             ConnectionRow connection = known.get();
             if (connections.revokeAny(connection.id())) {
                 log.warn("Revoked an external assistant connection whose refresh token was reused connectionId={}",
@@ -138,6 +153,27 @@ public class OAuthTokens {
                 connection == null ? "unknown" : "not_live");
         }
         throw invalidGrant("The refresh token is unknown, expired, revoked or already used.");
+    }
+
+    /**
+     * Refuses, and revokes the connection, when its user may no longer connect (lost the role, deactivated, signed
+     * out everywhere): a connection must not outlive the permission it was granted under.
+     */
+    private void requireMayConnect(ConnectionRow connection) {
+        if (authenticator.authenticate(connection).isPresent()) {
+            return;
+        }
+        if (connections.revokeAny(connection.id())) {
+            log.warn("Revoked an external assistant connection whose user may no longer connect connectionId={}",
+                connection.id());
+        }
+        audit.record(OAuthAudit.Event.REFRESH_REFUSED, connection.userId(), connection.id(), connection.clientId(),
+            "may_not_connect");
+        throw invalidGrant("The user may no longer connect an assistant.");
+    }
+
+    private static boolean isLive(ConnectionRow connection) {
+        return connection.revokedAt() == null && connection.expiresAt().isAfter(OffsetDateTime.now());
     }
 
     /** The new pair if this is the current refresh token of a live connection; empty otherwise. */

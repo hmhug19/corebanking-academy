@@ -164,6 +164,7 @@ public class OAuthAuthorizations {
     public ConsentResult approve(String requestId, String browser) {
         String userId = requireAllowed();
         openRequestOf(requestId, browser, userId);
+        connections.lockUser(userId);
         if (connections.countLive(userId) >= OAuthCodes.MAX_LIVE_CONNECTIONS) {
             throw BusinessException.field(ResponseCode.CONFLICT, "connections", "LIMIT",
                 "Bạn đã có " + OAuthCodes.MAX_LIVE_CONNECTIONS + " kết nối trợ lý ngoài còn hiệu lực. "

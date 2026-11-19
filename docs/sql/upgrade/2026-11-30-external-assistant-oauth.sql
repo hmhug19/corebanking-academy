@@ -52,6 +52,7 @@ ALTER TABLE learning_hub.external_assistant_connection
     ADD COLUMN IF NOT EXISTS access_expires_at timestamptz,
     ADD COLUMN IF NOT EXISTS refresh_token_hash char(64),
     ADD COLUMN IF NOT EXISTS previous_refresh_hash char(64),
+    ADD COLUMN IF NOT EXISTS refresh_rotated_at timestamptz,
     ALTER COLUMN token_hash DROP NOT NULL,
     ALTER COLUMN token_prefix DROP NOT NULL;
 ALTER TABLE learning_hub.external_assistant_connection
@@ -74,7 +75,9 @@ COMMENT ON COLUMN learning_hub.external_assistant_connection.access_token_hash I
 COMMENT ON COLUMN learning_hub.external_assistant_connection.refresh_token_hash IS
     'SHA-256 của refresh token hiện tại (chan_ort_); đổi mới mỗi lần refresh.';
 COMMENT ON COLUMN learning_hub.external_assistant_connection.previous_refresh_hash IS
-    'SHA-256 của refresh token trước đó: dùng lại nó nghĩa là token bị lộ, kết nối bị thu hồi.';
+    'SHA-256 của refresh token trước đó: dùng lại nó nghĩa là token bị lộ, kết nối bị thu hồi (trừ trong 30 giây sau khi xoay).';
+COMMENT ON COLUMN learning_hub.external_assistant_connection.refresh_rotated_at IS
+    'Lúc refresh token được xoay gần nhất; dùng lại token cũ ngay sau đó (hai phiên cùng refresh) chỉ bị từ chối.';
 COMMENT ON COLUMN learning_hub.external_assistant_connection.expires_at IS
     'token: 30 hoặc 90 ngày từ lúc tạo; oauth: 30 ngày từ lần refresh gần nhất (hết hạn sau 30 ngày không dùng).';
 

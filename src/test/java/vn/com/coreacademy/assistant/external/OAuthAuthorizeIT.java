@@ -1,7 +1,13 @@
 package vn.com.coreacademy.assistant.external;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import jakarta.servlet.http.Cookie;
 
@@ -249,6 +255,38 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
         jdbc.update("UPDATE learning_hub.external_assistant_connection SET revoked_at = now() WHERE connection_id = "
             + "(SELECT min(connection_id) FROM learning_hub.external_assistant_connection)");
         assertThat(OAuthFlow.query(flow.approve(INSTRUCTOR, request))).containsKey("code");
+    }
+
+    @Test
+    void twoApprovalsAtOnceCannotBothTakeTheLastPlace() throws Exception {
+        for (int i = 0; i < 9; i++) {
+            jdbc.update("INSERT INTO learning_hub.external_assistant_connection (user_id, name, kind, client_id, "
+                + "expires_at) VALUES (?, 'x', 'oauth', ?, now() + interval '1 day')", INSTRUCTOR, client);
+        }
+        List<String> requests = List.of(flow.requestId(client, OAuthFlow.CALLBACK),
+            flow.requestId(client, OAuthFlow.CALLBACK));
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<String>> answers = new ArrayList<>();
+            for (String request : requests) {
+                answers.add(pool.submit(() -> {
+                    start.await();
+                    return flow.api().raw(INSTRUCTOR, flow.answering(request, "approve")).getContentAsString();
+                }));
+            }
+            start.countDown();
+            List<String> bodies = new ArrayList<>();
+            for (Future<String> answer : answers) {
+                bodies.add(answer.get(30, TimeUnit.SECONDS));
+            }
+            assertThat(bodies).filteredOn(body -> body.contains("\"redirectUrl\"")).hasSize(1);
+            assertThat(bodies).filteredOn(body -> body.contains("CORE-STATE_CONFLICT")).hasSize(1);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.external_assistant_connection "
+            + "WHERE revoked_at IS NULL AND expires_at > now()", Integer.class)).isEqualTo(10);
     }
 
     @Test

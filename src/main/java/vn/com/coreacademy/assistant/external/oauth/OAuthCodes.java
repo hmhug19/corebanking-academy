@@ -39,6 +39,8 @@ public final class OAuthCodes {
     public static final Duration IDLE_EXPIRY = Duration.ofDays(30);
     public static final Duration CODE_TTL = Duration.ofSeconds(60);
     public static final Duration REQUEST_TTL = Duration.ofMinutes(10);
+    /** How soon after a rotation the replaced refresh token is refused without revoking (a race or a retry). */
+    public static final Duration REFRESH_REUSE_GRACE = Duration.ofSeconds(30);
     /** Live connections a user may hold, of both kinds. */
     public static final int MAX_LIVE_CONNECTIONS = 10;
 

@@ -18,6 +18,7 @@ ALTER TABLE learning_hub.external_assistant_connection
     DROP COLUMN IF EXISTS access_expires_at,
     DROP COLUMN IF EXISTS refresh_token_hash,
     DROP COLUMN IF EXISTS previous_refresh_hash,
+    DROP COLUMN IF EXISTS refresh_rotated_at,
     ALTER COLUMN token_hash SET NOT NULL,
     ALTER COLUMN token_prefix SET NOT NULL;
 DROP TABLE IF EXISTS learning_hub.oauth_authorization_code;

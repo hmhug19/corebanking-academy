@@ -1,5 +1,6 @@
 package vn.com.coreacademy.assistant.external;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -105,6 +106,15 @@ public class ExternalConnectionRepository {
     }
 
     /** The user's connections that work now or may: not revoked and not expired, of both kinds. */
+    /**
+     * Holds the user's connection lock until the transaction ends, so a count and the insert that follows it are one
+     * step: two approvals at once cannot both see room under the limit.
+     */
+    public void lockUser(String userId) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext(:key))", Map.of("key", "external_assistant_connection:"
+            + userId), rs -> null);
+    }
+
     public int countLive(String userId) {
         return jdbc.queryForObject("""
             SELECT count(*)
@@ -124,7 +134,8 @@ public class ExternalConnectionRepository {
         return jdbc.update("""
             UPDATE learning_hub.external_assistant_connection
                SET access_token_hash = :access, access_expires_at = :accessExpires,
-                   previous_refresh_hash = refresh_token_hash, refresh_token_hash = :refresh, expires_at = :expires
+                   previous_refresh_hash = refresh_token_hash, refresh_token_hash = :refresh, expires_at = :expires,
+                   refresh_rotated_at = now()
              WHERE connection_id = :id
                AND kind = 'oauth'
                AND revoked_at IS NULL
@@ -143,7 +154,8 @@ public class ExternalConnectionRepository {
         return jdbc.query("""
             UPDATE learning_hub.external_assistant_connection
                SET access_token_hash = :access, access_expires_at = :accessExpires,
-                   previous_refresh_hash = refresh_token_hash, refresh_token_hash = :refresh, expires_at = :expires
+                   previous_refresh_hash = refresh_token_hash, refresh_token_hash = :refresh, expires_at = :expires,
+                   refresh_rotated_at = now()
              WHERE refresh_token_hash = :old
                AND kind = 'oauth'
                AND revoked_at IS NULL
@@ -171,6 +183,16 @@ public class ExternalConnectionRepository {
               FROM learning_hub.external_assistant_connection
              WHERE connection_id = :id
             """, new MapSqlParameterSource().addValue("id", connectionId).addValue("hash", tokenHash),
+            Boolean.class));
+    }
+
+    /** Whether the connection's refresh token was rotated less than {@code grace} ago. */
+    public boolean rotatedWithin(long connectionId, Duration grace) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+            SELECT coalesce(refresh_rotated_at > now() - make_interval(secs => :seconds), false)
+              FROM learning_hub.external_assistant_connection
+             WHERE connection_id = :id
+            """, new MapSqlParameterSource().addValue("id", connectionId).addValue("seconds", grace.toSeconds()),
             Boolean.class));
     }
 

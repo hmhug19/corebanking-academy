@@ -7,7 +7,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -25,7 +24,6 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -33,10 +31,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import vn.com.coreacademy.assistant.external.ExternalConnectionRepository.ConnectionRow;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.FieldViolation;
-import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
-import vn.com.coreacademy.identity.security.UserJwtAuthenticationConverter;
-import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.security.SecurityConstants;
 
 /**
@@ -59,28 +54,23 @@ import vn.com.coreacademy.security.SecurityConstants;
 @Log4j2
 public class ExternalTokenFilter extends OncePerRequestFilter {
     /** The claim of the in-memory token that names the connection a call came through. */
-    public static final String CONNECTION_CLAIM = "externalConnectionId";
+    public static final String CONNECTION_CLAIM = ExternalConnectionAuthenticator.CONNECTION_CLAIM;
     /** The purpose claim of that token, so nothing mistakes it for a sign-in. */
-    public static final String PURPOSE = "external_assistant";
+    public static final String PURPOSE = ExternalConnectionAuthenticator.PURPOSE;
     private static final String BEARER = SecurityConstants.TOKEN_TYPE + " ";
 
     private final ExternalAssistantProperties properties;
     private final ExternalConnectionRepository connections;
-    private final ExternalConnectionService service;
-    private final LearningIdentityService identity;
-    private final UserJwtAuthenticationConverter converter;
+    private final ExternalConnectionAuthenticator authenticator;
     private final ObjectMapper mapper;
     private final ExternalCallLimiter limiter;
 
     public ExternalTokenFilter(ExternalAssistantProperties properties, ExternalConnectionRepository connections,
-                               ExternalConnectionService service, LearningIdentityService identity,
-                               UserJwtAuthenticationConverter converter, ObjectMapper mapper,
+                               ExternalConnectionAuthenticator authenticator, ObjectMapper mapper,
                                ExternalCallLimiter limiter) {
         this.properties = properties;
         this.connections = connections;
-        this.service = service;
-        this.identity = identity;
-        this.converter = converter;
+        this.authenticator = authenticator;
         this.mapper = mapper;
         this.limiter = limiter;
     }
@@ -151,38 +141,15 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
 
     /** Puts the connection's user in the context; false (context cleared by the caller) when they may not act now. */
     private boolean authenticate(ConnectionRow connection) {
-        long version;
-        try {
-            version = identity.authorizationVersion(connection.userId());
-        } catch (BusinessException exception) {
+        Optional<Authentication> authentication = authenticator.authenticate(connection);
+        if (authentication.isEmpty()) {
             return false;
         }
-        Instant now = Instant.now();
-        Jwt token = Jwt.withTokenValue("external-connection-" + connection.id())
-            .header("alg", "none")
-            .subject(connection.userId())
-            .claim(SecurityConstants.AUTH_VERSION_CLAIM, version)
-            .claim(SecurityConstants.TOKEN_PURPOSE_CLAIM, PURPOSE)
-            .claim(CONNECTION_CLAIM, connection.id())
-            .issuedAt(now)
-            .expiresAt(connection.expiresAt().toInstant())
-            .build();
-        Authentication authentication;
-        try {
-            authentication = converter.convert(token);
-        } catch (AuthenticationException exception) {
-            return false;
-        }
+        // Roles are read now, at each call: losing the role stops the connection at once.
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(authentication);
+        context.setAuthentication(authentication.get());
         SecurityContextHolder.setContext(context);
-        try {
-            // Roles are read now, at each call: losing the role stops the connection at once.
-            return service.mayConnect(connection.userId());
-        } catch (RuntimeException exception) {
-            // A temporary password (no functions) and similar refusals all mean "may not act now".
-            return false;
-        }
+        return true;
     }
 
     private void write(HttpServletResponse response, ResponseCode code) throws IOException {
