@@ -416,12 +416,14 @@ Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chứ
 | POST | `/` | `{ name (1–100 ký tự), validDays (30 \| 90) }` → `{ connection, token }`. Token `chan_ext_` + 43 ký tự base64url chỉ trả về đúng một lần; DB chỉ giữ SHA-256 và 13 ký tự đầu. `validDays` khác trả `CORE-VALIDATION_FAILED` trường `validDays`. |
 | DELETE | `/{connectionId}` | Thu hồi ngay. Kết nối của người khác hoặc đã thu hồi trả `CORE-RESOURCE_NOT_FOUND`. |
 
-Token chỉ xác thực `/api/v1/mcp`; mọi API khác từ chối nó (401, vì không phải JWT). Kết nối hết hạn, đã thu hồi,
+Token chỉ xác thực `/api/v1/mcp`; mọi API khác từ chối nó (401, vì không phải JWT). Danh sách gồm cả kết nối
+OAuth (`kind = oauth`, mục bên dưới); thu hồi một kết nối OAuth ở đây làm cả access lẫn refresh token mất hiệu lực
+ngay và ghi audit `REVOKED` (`reason = user`). Kết nối hết hạn, đã thu hồi,
 hoặc người dùng mất vai trò quản lý khóa học/chức năng `AI_ASSISTANT` thì `/api/v1/mcp` trả 401.
 `lastUsedAt` cập nhật tối đa mỗi phút một lần. Bảng: `external_assistant_connection`
 (`docs/sql/upgrade/2026-11-27-external-assistant-connections.sql`).
 
-### Endpoint MCP (`/api/v1/mcp`, token Kết nối trợ lý ngoài)
+### Endpoint MCP (`/api/v1/mcp`, token `chan_ext_` hoặc access token OAuth `chan_oat_`)
 
 Spring AI MCP Server 1.1.8 (dòng 1.1.x dựng trên Spring Boot 3.5 / Java 17; 2.x cần Boot 4), WebMVC, Streamable
 HTTP, **stateless** (`spring.ai.mcp.server.protocol=STATELESS`). Chỉ POST JSON-RPC (`initialize`, `tools/list`,
@@ -478,6 +480,8 @@ dưới đây công khai (chain bảo mật riêng, không JWT, CORS mọi origi
 | `GET /.well-known/oauth-authorization-server` | RFC 8414: `issuer` = `{app-base-url}`, các endpoint `/api/v1/oauth/{authorize,token,register,revoke}`, `response_types_supported` [`code`], `grant_types_supported` [`authorization_code`, `refresh_token`], `code_challenge_methods_supported` [`S256`], `token_endpoint_auth_methods_supported` [`none`] |
 | `POST /api/v1/oauth/register` | RFC 7591, JSON. Chỉ client public (`token_endpoint_auth_method` vắng hoặc `none`, không có secret). `redirect_uris` 1–5 URI, mỗi URI là `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback` hoặc `http://localhost`/`127.0.0.1`/`[::1]` với cổng và đường dẫn bất kỳ (không userinfo, không fragment); khác đi → 400 `invalid_redirect_uri` và một dòng audit `REGISTRATION_REFUSED`. `client_name` do client tự khai (cắt còn 100 ký tự; vắng → "Trợ lý ngoài"). Trả 201 `client_id` (`chan_cli_…`), `client_id_issued_at`, `client_name`, `redirect_uris`, `grant_types`, `response_types`, `token_endpoint_auth_method: none`. Tối đa `oauth-registrations-per-minute` (mặc định 10) lần mỗi địa chỉ (`remoteAddr`) mỗi phút, vượt → 429 `slow_down`. Bảng `oauth_client` (`docs/sql/upgrade/2026-11-30-external-assistant-oauth.sql`). |
 | `GET /api/v1/oauth/authorize` | `response_type=code`, `client_id`, `redirect_uri` (một URI đã đăng ký; loopback được khác cổng), `code_challenge` (43–128 ký tự) + `code_challenge_method=S256`, `state` (≤ 500), `scope` (vắng hoặc `course_drafting`), `resource` (vắng hoặc URL MCP). Client hay `redirect_uri` sai → 400 trang HTML, **không** chuyển hướng, audit `AUTHORIZE_REFUSED`. Lỗi khác → 302 về `redirect_uri` với `error` (`unsupported_response_type`, `invalid_request`, `invalid_scope`, `invalid_target`), `error_description`, `state`, `iss`. Hợp lệ → lưu yêu cầu 10 phút (`oauth_authorization_request`) và 302 tới `{app-base-url}/tro-ly-ngoai/cho-phep?request={id}`. |
+| `POST /api/v1/oauth/token` | Form. `grant_type=authorization_code`: `code` (một lần, 60 giây), `redirect_uri` (đúng URI của yêu cầu), `client_id`, `code_verifier` (43–128 ký tự, S256 khớp `code_challenge`). Code dùng lần hai → kết nối của nó bị thu hồi. `grant_type=refresh_token`: `refresh_token`, `client_id` (`scope` nếu có phải là `course_drafting`); cặp token được đổi mới, refresh token cũ hết hiệu lực; dùng lại refresh token cũ → kết nối bị thu hồi (audit `REFRESH_REUSED`); refresh của kết nối hết hạn/thu hồi → audit `REFRESH_REFUSED`. Trả `access_token` (`chan_oat_…`, 1 giờ), `token_type: Bearer`, `expires_in: 3600`, `refresh_token` (`chan_ort_…`), `scope`; `Cache-Control: no-store`. Kết nối hết hạn 30 ngày sau lần refresh gần nhất. Lỗi 400 `invalid_request`, `invalid_grant`, `unsupported_grant_type`, `invalid_scope`; 401 `invalid_client` khi `client_id` không có. |
+| `POST /api/v1/oauth/revoke` | RFC 7009, form `token` (access hoặc refresh), `client_id` tùy chọn. Thu hồi cả kết nối, audit `REVOKED` (`reason = rfc7009`); luôn 200. |
 
 #### Cho phép kết nối (`/api/v1/assistant/oauth-requests/{requestId}`, JWT đăng nhập)
 

@@ -6,6 +6,8 @@ import java.util.Set;
 public final class ExternalConnectionCodes {
     /** Every token starts with this, so a leaked one is easy to spot and to tell from a sign-in JWT. */
     public static final String TOKEN_PREFIX = "chan_ext_";
+    /** An OAuth access token of a connection granted on the Cho phép kết nối page (ADR 0005). */
+    public static final String OAUTH_ACCESS_TOKEN_PREFIX = "chan_oat_";
     /** Random bytes after the prefix (base64url, no padding: 43 characters). */
     public static final int TOKEN_RANDOM_BYTES = 32;
     /** How much of the token the list shows to tell connections apart: the prefix and four random characters. */

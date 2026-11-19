@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.external.oauth;
 
 import java.time.Duration;
 import java.util.List;
+import vn.com.coreacademy.assistant.external.ExternalConnectionCodes;
 
 /**
  * The fixed contract of the OAuth that lets a Trợ lý ngoài connect with one URL (ADR 0005): paths, token shapes and
@@ -22,7 +23,7 @@ public final class OAuthCodes {
     public static final String SCOPE = "course_drafting";
 
     public static final String CLIENT_ID_PREFIX = "chan_cli_";
-    public static final String ACCESS_TOKEN_PREFIX = "chan_oat_";
+    public static final String ACCESS_TOKEN_PREFIX = ExternalConnectionCodes.OAUTH_ACCESS_TOKEN_PREFIX;
     public static final String REFRESH_TOKEN_PREFIX = "chan_ort_";
 
     public static final Duration ACCESS_TOKEN_TTL = Duration.ofHours(1);

@@ -115,6 +115,88 @@ public class ExternalConnectionRepository {
             """, Map.of("user", userId), Integer.class);
     }
 
+    /**
+     * Gives a live oauth connection a new token pair and pushes its expiry to {@code expiresAt}; the refresh token it
+     * had becomes the previous one, so using it again is recognised. False when the connection is not live.
+     */
+    public boolean issueTokens(long connectionId, String accessHash, OffsetDateTime accessExpiresAt,
+                               String refreshHash, OffsetDateTime expiresAt) {
+        return jdbc.update("""
+            UPDATE learning_hub.external_assistant_connection
+               SET access_token_hash = :access, access_expires_at = :accessExpires,
+                   previous_refresh_hash = refresh_token_hash, refresh_token_hash = :refresh, expires_at = :expires
+             WHERE connection_id = :id
+               AND kind = 'oauth'
+               AND revoked_at IS NULL
+               AND expires_at > now()
+            """, new MapSqlParameterSource().addValue("id", connectionId).addValue("access", accessHash)
+            .addValue("accessExpires", accessExpiresAt).addValue("refresh", refreshHash)
+            .addValue("expires", expiresAt)) == 1;
+    }
+
+    /**
+     * Rotates the pair of the live connection whose current refresh token has this hash, in one statement so two
+     * refreshes with the same token cannot both win. The connection, or empty.
+     */
+    public Optional<ConnectionRow> rotate(String refreshHash, String accessHash, OffsetDateTime accessExpiresAt,
+                                          String newRefreshHash, OffsetDateTime expiresAt) {
+        return jdbc.query("""
+            UPDATE learning_hub.external_assistant_connection
+               SET access_token_hash = :access, access_expires_at = :accessExpires,
+                   previous_refresh_hash = refresh_token_hash, refresh_token_hash = :refresh, expires_at = :expires
+             WHERE refresh_token_hash = :old
+               AND kind = 'oauth'
+               AND revoked_at IS NULL
+               AND expires_at > now()
+            RETURNING %s
+            """.formatted(COLUMNS), new MapSqlParameterSource().addValue("old", refreshHash)
+            .addValue("access", accessHash).addValue("accessExpires", accessExpiresAt)
+            .addValue("refresh", newRefreshHash).addValue("expires", expiresAt), CONNECTION).stream().findFirst();
+    }
+
+    /** The oauth connection, in any state, whose current or previous refresh token, or access token, has this hash. */
+    public Optional<ConnectionRow> findByOAuthToken(String tokenHash) {
+        return jdbc.query("""
+            SELECT %s
+              FROM learning_hub.external_assistant_connection
+             WHERE kind = 'oauth'
+               AND (access_token_hash = :hash OR refresh_token_hash = :hash OR previous_refresh_hash = :hash)
+            """.formatted(COLUMNS), Map.of("hash", tokenHash), CONNECTION).stream().findFirst();
+    }
+
+    /** Whether this hash is the connection's previous refresh token, the one a rotation replaced. */
+    public boolean isPreviousRefresh(long connectionId, String tokenHash) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+            SELECT previous_refresh_hash = :hash
+              FROM learning_hub.external_assistant_connection
+             WHERE connection_id = :id
+            """, new MapSqlParameterSource().addValue("id", connectionId).addValue("hash", tokenHash),
+            Boolean.class));
+    }
+
+    /** The live oauth connection whose current, unexpired access token has this hash. */
+    public Optional<ConnectionRow> findUsableAccess(String accessHash) {
+        return jdbc.query("""
+            SELECT %s
+              FROM learning_hub.external_assistant_connection
+             WHERE access_token_hash = :hash
+               AND kind = 'oauth'
+               AND access_expires_at > now()
+               AND revoked_at IS NULL
+               AND expires_at > now()
+            """.formatted(COLUMNS), Map.of("hash", accessHash), CONNECTION).stream().findFirst();
+    }
+
+    /** Revokes the connection whoever's it is; false when it was already revoked. */
+    public boolean revokeAny(long connectionId) {
+        return jdbc.update("""
+            UPDATE learning_hub.external_assistant_connection
+               SET revoked_at = now()
+             WHERE connection_id = :id
+               AND revoked_at IS NULL
+            """, Map.of("id", connectionId)) == 1;
+    }
+
     /** Writes "lần dùng cuối" unless it is newer than {@code staleBefore}, so a busy connection writes it rarely. */
     public void touch(long connectionId, OffsetDateTime staleBefore) {
         jdbc.update("""

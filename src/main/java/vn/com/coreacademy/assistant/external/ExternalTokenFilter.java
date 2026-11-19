@@ -39,7 +39,8 @@ import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.security.SecurityConstants;
 
 /**
- * Authenticates a Kết nối trợ lý ngoài on {@code /api/v1/mcp}, the only path its token works on. With the feature off
+ * Authenticates a Kết nối trợ lý ngoài on {@code /api/v1/mcp}, the only path its token works on: a pasted chan_ext_
+ * token (ADR 0004) or an OAuth access token chan_oat_ (ADR 0005). With the feature off
  * the endpoint answers 404 before anything else. A token that is missing, unknown, revoked or expired, of a user who
  * is not active, or of one who no longer holds a role that may draft courses with the assistant, gets 401.
  *
@@ -136,11 +137,15 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
             return Optional.empty();
         }
         String token = header.substring(BEARER.length()).strip();
-        if (!token.startsWith(ExternalConnectionCodes.TOKEN_PREFIX)) {
-            return Optional.empty();
+        if (token.startsWith(ExternalConnectionCodes.TOKEN_PREFIX)) {
+            return connections.findUsable(ExternalConnectionService.hash(token));
+        }
+        if (token.startsWith(ExternalConnectionCodes.OAUTH_ACCESS_TOKEN_PREFIX)) {
+            // An OAuth access token (ADR 0005): an hour old at most, and only while its connection is live.
+            return connections.findUsableAccess(ExternalConnectionService.hash(token));
         }
 
-        return connections.findUsable(ExternalConnectionService.hash(token));
+        return Optional.empty();
     }
 
     /** Puts the connection's user in the context; false (context cleared by the caller) when they may not act now. */
