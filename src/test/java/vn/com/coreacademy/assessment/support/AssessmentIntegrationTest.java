@@ -21,6 +21,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -40,6 +41,8 @@ import org.testcontainers.utility.MountableFile;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+// The Trợ lý ngoài is on by default in application.yml; ITs run with it off unless they extend ExternalAssistantIT.
+@TestPropertySource(properties = "app.assistant.external.enabled=false")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @ExtendWith(AssessmentIntegrationTest.DatabaseAvailable.class)
 public abstract class AssessmentIntegrationTest {

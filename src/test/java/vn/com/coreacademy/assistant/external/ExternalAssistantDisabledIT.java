@@ -18,7 +18,7 @@ import static vn.com.coreacademy.assessment.support.ApiClient.get;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.INSTRUCTOR;
 
 /**
- * With {@code app.assistant.external.enabled=false}, the default (this IT runs on the default context), the feature does
+ * With {@code app.assistant.external.enabled=false}, as every IT but an ExternalAssistantIT runs, the feature does
  * not exist for anyone.
  */
 class ExternalAssistantDisabledIT extends AssessmentIntegrationTest {
