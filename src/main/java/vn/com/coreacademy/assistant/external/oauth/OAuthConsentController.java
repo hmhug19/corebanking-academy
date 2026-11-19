@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,22 +20,25 @@ import vn.com.coreacademy.common.web.StandardApiErrors;
  * The page then sends the browser to the returned URL.
  */
 @RestController
-@RequestMapping(value = "/api/v1/assistant/oauth-requests/{requestId}", produces = MediaType.APPLICATION_JSON_VALUE)
+@RequestMapping(value = OAuthCodes.CONSENT_API + "/{requestId}", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Assistant external OAuth")
 @StandardApiErrors
 @RequiredArgsConstructor
 public class OAuthConsentController {
     private static final String WHO = """
         - Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chức năng AI_ASSISTANT; người khác nhận 403.
-        - Yêu cầu đã dùng, hết hạn (10 phút) hoặc không có: CORE-RESOURCE_NOT_FOUND. Cờ tắt: 404.
+        - Yêu cầu đã dùng, hết hạn (10 phút), không có, hoặc mở từ trình duyệt khác trình duyệt đã bắt đầu (không có
+          cookie chan_oauth_request khớp): CORE-RESOURCE_NOT_FOUND. Cờ tắt: 404.
         """;
 
     private final OAuthAuthorizations authorizations;
 
     @GetMapping
     @Operation(summary = "Yêu cầu cấp quyền đang chờ Cho phép kết nối", description = WHO)
-    public BaseResponse<ConsentRequest> read(@PathVariable String requestId) {
-        return BaseResponse.ok(authorizations.read(requestId));
+    public BaseResponse<ConsentRequest> read(@PathVariable String requestId,
+                                             @CookieValue(name = OAuthCodes.BROWSER_COOKIE, required = false)
+                                             String browser) {
+        return BaseResponse.ok(authorizations.read(requestId, browser));
     }
 
     @PostMapping("/approve")
@@ -43,13 +47,17 @@ public class OAuthConsentController {
             Mỗi kết nối mới cần một lần Cho phép. Đã có 10 kết nối còn hiệu lực: CORE-STATE_CONFLICT trường
             connections (yêu cầu vẫn mở để thử lại sau khi thu hồi bớt).
             """ + WHO)
-    public BaseResponse<ConsentResult> approve(@PathVariable String requestId) {
-        return BaseResponse.ok(authorizations.approve(requestId));
+    public BaseResponse<ConsentResult> approve(@PathVariable String requestId,
+                                               @CookieValue(name = OAuthCodes.BROWSER_COOKIE, required = false)
+                                               String browser) {
+        return BaseResponse.ok(authorizations.approve(requestId, browser));
     }
 
     @PostMapping("/deny")
     @Operation(summary = "Từ chối: trả URL quay về client kèm error=access_denied", description = WHO)
-    public BaseResponse<ConsentResult> deny(@PathVariable String requestId) {
-        return BaseResponse.ok(authorizations.deny(requestId));
+    public BaseResponse<ConsentResult> deny(@PathVariable String requestId,
+                                            @CookieValue(name = OAuthCodes.BROWSER_COOKIE, required = false)
+                                            String browser) {
+        return BaseResponse.ok(authorizations.deny(requestId, browser));
     }
 }

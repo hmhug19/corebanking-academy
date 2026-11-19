@@ -62,4 +62,19 @@ public class OAuthClientRepository {
             throw new IllegalStateException(exception);
         }
     }
+
+    /**
+     * Deletes clients registered before {@code before} that no connection and no open request names: a registration
+     * nobody went on to use.
+     */
+    public int deleteUnused(OffsetDateTime before) {
+        return jdbc.update("""
+            DELETE FROM learning_hub.oauth_client c
+             WHERE c.create_time < :before
+               AND NOT EXISTS (SELECT 1 FROM learning_hub.external_assistant_connection x
+                                WHERE x.client_id = c.client_id)
+               AND NOT EXISTS (SELECT 1 FROM learning_hub.oauth_authorization_request r
+                                WHERE r.client_id = c.client_id AND r.expires_at > now())
+            """, Map.of("before", before));
+    }
 }

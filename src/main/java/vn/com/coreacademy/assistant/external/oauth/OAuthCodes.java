@@ -19,6 +19,13 @@ public final class OAuthCodes {
     public static final String REVOKE_PATH = OAUTH_PATH + "/revoke";
     /** The page of the web app where the user agrees or refuses (Cho phép kết nối). */
     public static final String CONSENT_PAGE = "/tro-ly-ngoai/cho-phep";
+    /** The Cho phép kết nối page's API, on the main sign-in chain. */
+    public static final String CONSENT_API = "/api/v1/assistant/oauth-requests";
+    /**
+     * The cookie authorize sets in the browser that started the request; only that browser may answer it, so a
+     * request link sent to someone else does nothing (it is scoped to {@link #CONSENT_API}).
+     */
+    public static final String BROWSER_COOKIE = "chan_oauth_request";
 
     /** The one scope: drafting courses with the five tools. */
     public static final String SCOPE = "course_drafting";

@@ -1,6 +1,9 @@
 package vn.com.coreacademy.assistant.external;
 
+import java.util.List;
 import java.util.Map;
+
+import jakarta.servlet.http.Cookie;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,7 +15,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import vn.com.coreacademy.assessment.support.ApiClient;
+import vn.com.coreacademy.assistant.external.oauth.OAuthCleanupJob;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static vn.com.coreacademy.assessment.support.AssessmentFixtures.ADMIN;
@@ -29,6 +34,9 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
     private ObjectMapper json;
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private OAuthCleanupJob cleanup;
 
     private OAuthFlow flow;
     private String client;
@@ -59,6 +67,76 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
         assertThat(shown.path("idleDays").asInt()).isEqualTo(30);
         assertThat(shown.path("atLimit").asBoolean()).isFalse();
         assertThat(shown.path("maxConnections").asInt()).isEqualTo(10);
+    }
+
+    @Test
+    void authorizeBindsTheRequestToTheBrowserWithAnHttpOnlyCookieOnlyTheConsentApiGets() {
+        MockHttpServletResponse response = flow.authorize(OAuthFlow.params(client, OAuthFlow.CALLBACK));
+
+        String header = response.getHeader(HttpHeaders.SET_COOKIE);
+        assertThat(header).startsWith("chan_oauth_request=").contains("Path=/api/v1/assistant/oauth-requests")
+            .contains("Max-Age=600").contains("HttpOnly").contains("Secure").contains("SameSite=Lax");
+        String cookie = response.getCookie("chan_oauth_request").getValue();
+        assertThat(jdbc.queryForObject("SELECT browser_hash FROM learning_hub.oauth_authorization_request",
+            String.class)).isEqualTo(ExternalConnectionService.hash(cookie));
+        // An error sent back to the client starts nothing, so it binds nothing.
+        Map<String, String> wrong = OAuthFlow.params(client, OAuthFlow.CALLBACK);
+        wrong.put("response_type", "token");
+        assertThat(flow.authorize(wrong).getHeader(HttpHeaders.SET_COOKIE)).isNull();
+    }
+
+    @Test
+    void aRequestLinkOpenedInAnotherBrowserCannotBeReadOrAnsweredAndIsAudited() {
+        String request = flow.requestId(client, OAuthFlow.CALLBACK);
+        Cookie other = new Cookie("chan_oauth_request", "someone-elses-browser");
+
+        for (MockHttpServletRequestBuilder call : List.of(ApiClient.get(REQUESTS, request),
+            ApiClient.get(REQUESTS, request).cookie(other),
+            flow.api().post(Map.of(), REQUESTS + "/approve", request),
+            flow.api().post(Map.of(), REQUESTS + "/approve", request).cookie(other),
+            flow.api().post(Map.of(), REQUESTS + "/deny", request).cookie(other))) {
+            flow.api().error(INSTRUCTOR, call, "CORE-RESOURCE_NOT_FOUND");
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.audit_log WHERE action = "
+            + "'EXTERNAL_ASSISTANT_OAUTH' AND details ->> 'event' = 'ANSWER_REFUSED' AND actor_id = ?", Integer.class,
+            INSTRUCTOR)).isEqualTo(5);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.external_assistant_connection",
+            Integer.class)).isZero();
+
+        // The browser that started it still can.
+        assertThat(OAuthFlow.query(flow.approve(INSTRUCTOR, request))).containsKey("code");
+    }
+
+    @Test
+    void theCleanupRemovesWhatNothingCanUseAndKeepsEveryConnectionThatWorked() {
+        jdbc.update("INSERT INTO learning_hub.oauth_client (client_id, client_name, redirect_uris, create_time) "
+            + "VALUES ('chan_cli_old', 'x', '[]', now() - interval '8 days'), "
+            + "('chan_cli_new', 'x', '[]', now() - interval '1 day'), "
+            + "('chan_cli_used', 'x', '[]', now() - interval '30 days')");
+        jdbc.update("INSERT INTO learning_hub.oauth_authorization_request (request_id, client_id, redirect_uri, "
+            + "code_challenge, scope, browser_hash, expires_at) VALUES "
+            + "('old', 'chan_cli_used', 'x', 'c', 's', repeat('a', 64), now() - interval '2 days'), "
+            + "('open', 'chan_cli_used', 'x', 'c', 's', repeat('a', 64), now() + interval '5 minutes')");
+        jdbc.update("INSERT INTO learning_hub.external_assistant_connection (user_id, name, kind, "
+            + "client_id, access_token_hash, expires_at) VALUES "
+            + "(?, 'never exchanged', 'oauth', 'chan_cli_used', NULL, now() - interval '2 days'), "
+            + "(?, 'worked, lapsed', 'oauth', 'chan_cli_used', repeat('b', 64), now() - interval '40 days'), "
+            + "(?, 'just approved', 'oauth', 'chan_cli_used', NULL, now() + interval '1 minute')",
+            INSTRUCTOR, INSTRUCTOR, INSTRUCTOR);
+        jdbc.update("INSERT INTO learning_hub.oauth_authorization_code (code_hash, connection_id, redirect_uri, "
+            + "code_challenge, expires_at) SELECT repeat('c', 64), connection_id, 'x', 'c', now() - interval '2 days' "
+            + "FROM learning_hub.external_assistant_connection WHERE name = 'never exchanged'");
+
+        cleanup.purge();
+
+        assertThat(jdbc.queryForList("SELECT client_id FROM learning_hub.oauth_client ORDER BY 1", String.class))
+            .contains("chan_cli_new", "chan_cli_used").doesNotContain("chan_cli_old");
+        assertThat(jdbc.queryForList("SELECT request_id FROM learning_hub.oauth_authorization_request",
+            String.class)).containsExactly("open");
+        assertThat(jdbc.queryForList("SELECT name FROM learning_hub.external_assistant_connection ORDER BY name",
+            String.class)).containsExactly("just approved", "worked, lapsed");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.oauth_authorization_code",
+            Integer.class)).isZero();
     }
 
     @Test
@@ -113,9 +191,9 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
             INSTRUCTOR)).isEqualTo(1);
 
         // A request works once.
-        flow.api().error(INSTRUCTOR, flow.api().post(Map.of(), REQUESTS + "/approve", request),
+        flow.api().error(INSTRUCTOR, flow.answering(request, "approve"),
             "CORE-RESOURCE_NOT_FOUND");
-        flow.api().error(INSTRUCTOR, ApiClient.get(REQUESTS, request), "CORE-RESOURCE_NOT_FOUND");
+        flow.api().error(INSTRUCTOR, flow.reading(request), "CORE-RESOURCE_NOT_FOUND");
     }
 
     @Test
@@ -130,7 +208,7 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
             Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM learning_hub.audit_log WHERE action = "
             + "'EXTERNAL_ASSISTANT_OAUTH' AND details ->> 'event' = 'DENIED'", Integer.class)).isEqualTo(1);
-        flow.api().error(ADMIN, flow.api().post(Map.of(), REQUESTS + "/approve", request), "CORE-RESOURCE_NOT_FOUND");
+        flow.api().error(ADMIN, flow.answering(request, "approve"), "CORE-RESOURCE_NOT_FOUND");
     }
 
     @Test
@@ -138,8 +216,8 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
         String request = flow.requestId(client, OAuthFlow.CALLBACK);
         jdbc.update("UPDATE learning_hub.oauth_authorization_request SET expires_at = now() - interval '1 second'");
 
-        flow.api().error(INSTRUCTOR, ApiClient.get(REQUESTS, request), "CORE-RESOURCE_NOT_FOUND");
-        flow.api().error(INSTRUCTOR, flow.api().post(Map.of(), REQUESTS + "/approve", request),
+        flow.api().error(INSTRUCTOR, flow.reading(request), "CORE-RESOURCE_NOT_FOUND");
+        flow.api().error(INSTRUCTOR, flow.answering(request, "approve"),
             "CORE-RESOURCE_NOT_FOUND");
     }
 
@@ -147,10 +225,10 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
     void aLearnerMayNotAnswer() {
         String request = flow.requestId(client, OAuthFlow.CALLBACK);
 
-        flow.api().http(LEARNER, ApiClient.get(REQUESTS, request), 403, "CORE-ACCESS_DENIED");
-        flow.api().http(LEARNER, flow.api().post(Map.of(), REQUESTS + "/approve", request), 403,
+        flow.api().http(LEARNER, flow.reading(request), 403, "CORE-ACCESS_DENIED");
+        flow.api().http(LEARNER, flow.answering(request, "approve"), 403,
             "CORE-ACCESS_DENIED");
-        flow.api().http(null, flow.api().post(Map.of(), REQUESTS + "/approve", request), 401,
+        flow.api().http(null, flow.answering(request, "approve"), 401,
             "CORE-UNAUTHENTICATED");
     }
 
@@ -163,7 +241,7 @@ class OAuthAuthorizeIT extends ExternalAssistantIT {
         String request = flow.requestId(client, OAuthFlow.CALLBACK);
 
         assertThat(flow.read(INSTRUCTOR, request).path("atLimit").asBoolean()).isTrue();
-        JsonNode refused = flow.api().error(INSTRUCTOR, flow.api().post(Map.of(), REQUESTS + "/approve", request),
+        JsonNode refused = flow.api().error(INSTRUCTOR, flow.answering(request, "approve"),
             "CORE-STATE_CONFLICT");
         assertThat(refused.path("errors").get(0).path("field").asText()).isEqualTo("connections");
 

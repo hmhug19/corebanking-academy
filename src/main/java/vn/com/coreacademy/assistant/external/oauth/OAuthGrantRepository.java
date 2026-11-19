@@ -17,8 +17,9 @@ import org.springframework.stereotype.Repository;
 @Repository
 @RequiredArgsConstructor
 public class OAuthGrantRepository {
+    /** {@code browserHash} is the SHA-256 of the cookie authorize set in the browser that started the request. */
     public record RequestRow(String requestId, String clientId, String redirectUri, String state, String codeChallenge,
-                             String scope, OffsetDateTime expiresAt, OffsetDateTime usedAt) {
+                             String scope, String browserHash, OffsetDateTime expiresAt, OffsetDateTime usedAt) {
     }
 
     public record CodeRow(long connectionId, String redirectUri, String codeChallenge) {
@@ -26,26 +27,27 @@ public class OAuthGrantRepository {
 
     private static final RowMapper<RequestRow> REQUEST = (rs, row) -> new RequestRow(rs.getString("request_id"),
         rs.getString("client_id"), rs.getString("redirect_uri"), rs.getString("state"),
-        rs.getString("code_challenge"), rs.getString("scope"), rs.getObject("expires_at", OffsetDateTime.class),
+        rs.getString("code_challenge"), rs.getString("scope"), rs.getString("browser_hash"),
+        rs.getObject("expires_at", OffsetDateTime.class),
         rs.getObject("used_at", OffsetDateTime.class));
 
     private final NamedParameterJdbcTemplate jdbc;
 
     public void insertRequest(String requestId, String clientId, String redirectUri, String state,
-                              String codeChallenge, String scope, OffsetDateTime expiresAt) {
+                              String codeChallenge, String scope, String browserHash, OffsetDateTime expiresAt) {
         jdbc.update("""
             INSERT INTO learning_hub.oauth_authorization_request (request_id, client_id, redirect_uri, state,
-                                                                  code_challenge, scope, expires_at)
-            VALUES (:id, :client, :redirect, :state, :challenge, :scope, :expires)
+                                                                  code_challenge, scope, browser_hash, expires_at)
+            VALUES (:id, :client, :redirect, :state, :challenge, :scope, :browser, :expires)
             """, new MapSqlParameterSource().addValue("id", requestId).addValue("client", clientId)
             .addValue("redirect", redirectUri).addValue("state", state).addValue("challenge", codeChallenge)
-            .addValue("scope", scope).addValue("expires", expiresAt));
+            .addValue("scope", scope).addValue("browser", browserHash).addValue("expires", expiresAt));
     }
 
     /** The request if it is neither used nor expired. */
     public Optional<RequestRow> findOpenRequest(String requestId) {
         return jdbc.query("""
-            SELECT request_id, client_id, redirect_uri, state, code_challenge, scope, expires_at, used_at
+            SELECT request_id, client_id, redirect_uri, state, code_challenge, scope, browser_hash, expires_at, used_at
               FROM learning_hub.oauth_authorization_request
              WHERE request_id = :id
                AND used_at IS NULL
@@ -53,16 +55,21 @@ public class OAuthGrantRepository {
             """, Map.of("id", requestId), REQUEST).stream().findFirst();
     }
 
-    /** Marks the open request used and returns it; empty when it was used, expired or never existed. */
-    public Optional<RequestRow> claimRequest(String requestId) {
+    /**
+     * Marks the open request used and returns it; empty when it was used, expired, never existed or was started in
+     * another browser.
+     */
+    public Optional<RequestRow> claimRequest(String requestId, String browserHash) {
         return jdbc.query("""
             UPDATE learning_hub.oauth_authorization_request
                SET used_at = now()
              WHERE request_id = :id
+               AND browser_hash = :browser
                AND used_at IS NULL
                AND expires_at > now()
-            RETURNING request_id, client_id, redirect_uri, state, code_challenge, scope, expires_at, used_at
-            """, Map.of("id", requestId), REQUEST).stream().findFirst();
+            RETURNING request_id, client_id, redirect_uri, state, code_challenge, scope, browser_hash, expires_at,
+                      used_at
+            """, Map.of("id", requestId, "browser", browserHash), REQUEST).stream().findFirst();
     }
 
     public void insertCode(String codeHash, long connectionId, String redirectUri, String codeChallenge,
@@ -96,5 +103,12 @@ public class OAuthGrantRepository {
              WHERE code_hash = :hash
                AND used_at IS NOT NULL
             """, Map.of("hash", codeHash), (rs, row) -> rs.getLong("connection_id")).stream().findFirst();
+    }
+
+    /** Deletes requests and codes that expired before {@code before}; used or not, nothing reads them again. */
+    public int deleteExpired(OffsetDateTime before) {
+        Map<String, OffsetDateTime> params = Map.of("before", before);
+        return jdbc.update("DELETE FROM learning_hub.oauth_authorization_request WHERE expires_at < :before", params)
+            + jdbc.update("DELETE FROM learning_hub.oauth_authorization_code WHERE expires_at < :before", params);
     }
 }

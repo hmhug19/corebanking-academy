@@ -3,6 +3,8 @@ package vn.com.coreacademy.assistant.external.oauth;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -11,10 +13,11 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import vn.com.coreacademy.assistant.external.ExternalAssistantProperties;
 import vn.com.coreacademy.assistant.external.ExternalConnectionRepository;
 import vn.com.coreacademy.assistant.external.ExternalConnectionService;
 import vn.com.coreacademy.assistant.external.oauth.OAuthClientRepository.ClientRow;
@@ -26,10 +29,10 @@ import vn.com.coreacademy.security.SecurityContextUtils;
 /**
  * From a client's authorize to a one-time code: checks the request, keeps it while the user reads the Cho phép kết
  * nối page, and on Cho phép makes a Kết nối trợ lý ngoài and its code. Every new connection needs its own Cho phép;
- * a client is never approved on its own because it was approved before.
+ * a client is never approved on its own because it was approved before. Only the browser that started a request may
+ * answer it (the {@link OAuthCodes#BROWSER_COOKIE} cookie), so a request link sent to someone else does nothing.
  */
 @Service
-@RequiredArgsConstructor
 public class OAuthAuthorizations {
     /** What the authorization endpoint receives. */
     public record Authorize(String responseType, String clientId, String redirectUri, String codeChallenge,
@@ -46,14 +49,29 @@ public class OAuthAuthorizations {
         int maxConnections) {
     }
 
+    /** Where authorize sends the browser and, when it starts a request, the cookie that binds the request to it. */
+    public record Started(String location, String browserToken) {
+    }
+
     @Schema(description = "URL trình duyệt chuyển tới sau khi Cho phép hoặc Từ chối.")
     public record ConsentResult(String redirectUrl) {
     }
 
     /** A request that cannot be sent back to the client: its client or redirect URI is not one to trust. */
     static final class NoRedirect extends RuntimeException {
+        private final HttpStatus status;
+
         NoRedirect(String message) {
+            this(HttpStatus.BAD_REQUEST, message);
+        }
+
+        NoRedirect(HttpStatus status, String message) {
             super(message);
+            this.status = status;
+        }
+
+        HttpStatus status() {
+            return status;
         }
     }
 
@@ -63,10 +81,29 @@ public class OAuthAuthorizations {
     private final ExternalConnectionRepository connections;
     private final ExternalConnectionService connectionService;
     private final OAuthAudit audit;
+    private final PerMinuteLimiter limiter;
 
-    /** Where to send the browser: the Cho phép kết nối page, or back to the client with an error. */
-    public String authorize(Authorize request) {
+    public OAuthAuthorizations(OAuthServer server, OAuthClientRepository clients, OAuthGrantRepository grants,
+                               ExternalConnectionRepository connections, ExternalConnectionService connectionService,
+                               OAuthAudit audit, ExternalAssistantProperties properties) {
+        this.server = server;
+        this.clients = clients;
+        this.grants = grants;
+        this.connections = connections;
+        this.connectionService = connectionService;
+        this.audit = audit;
+        this.limiter = new PerMinuteLimiter(properties.oauthAuthorizationsPerMinute(), Clock.systemUTC());
+    }
+
+    /**
+     * Where to send the browser: the Cho phép kết nối page with a new request bound to this browser, or back to the
+     * client with an error. {@code address} is the caller's, for the per-address limit on new requests.
+     */
+    public Started authorize(Authorize request, String address) {
         server.requireEnabled();
+        if (!limiter.admit(address)) {
+            throw new NoRedirect(HttpStatus.TOO_MANY_REQUESTS, "quá nhiều yêu cầu kết nối, hãy thử lại sau một phút.");
+        }
         if (request.clientId() == null || request.clientId().isBlank()) {
             throw new NoRedirect("thiếu client_id.");
         }
@@ -99,16 +136,19 @@ public class OAuthAuthorizations {
         }
 
         String id = OAuthServer.random("", 24);
+        String browser = OAuthServer.random("", 32);
         grants.insertRequest(id, client.clientId(), redirect, request.state(), request.codeChallenge(),
-            OAuthCodes.SCOPE, OffsetDateTime.now().plus(OAuthCodes.REQUEST_TTL));
-        return server.url(OAuthCodes.CONSENT_PAGE) + "?request=" + encode(id);
+            OAuthCodes.SCOPE, ExternalConnectionService.hash(browser), OffsetDateTime.now().plus(OAuthCodes.REQUEST_TTL));
+        return new Started(server.url(OAuthCodes.CONSENT_PAGE) + "?request=" + encode(id), browser);
     }
 
-    /** The request the Cho phép kết nối page shows; missing once it is used or expired. */
-    public ConsentRequest read(String requestId) {
+    /**
+     * The request the Cho phép kết nối page shows; missing once it is used or expired, and to any browser but the one
+     * that started it ({@code browser} is that browser's cookie).
+     */
+    public ConsentRequest read(String requestId, String browser) {
         String userId = requireAllowed();
-        RequestRow request = grants.findOpenRequest(requestId)
-            .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
+        RequestRow request = openRequestOf(requestId, browser, userId);
         ClientRow client = clients.find(request.clientId())
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
         return new ConsentRequest(client.name(), URI.create(request.redirectUri()).getHost(),
@@ -121,17 +161,15 @@ public class OAuthAuthorizations {
      * as the code until the code is exchanged, so an approval left unfinished leaves nothing working.
      */
     @Transactional
-    public ConsentResult approve(String requestId) {
+    public ConsentResult approve(String requestId, String browser) {
         String userId = requireAllowed();
-        if (grants.findOpenRequest(requestId).isEmpty()) {
-            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
-        }
+        openRequestOf(requestId, browser, userId);
         if (connections.countLive(userId) >= OAuthCodes.MAX_LIVE_CONNECTIONS) {
             throw BusinessException.field(ResponseCode.CONFLICT, "connections", "LIMIT",
                 "Bạn đã có " + OAuthCodes.MAX_LIVE_CONNECTIONS + " kết nối trợ lý ngoài còn hiệu lực. "
                     + "Hãy thu hồi bớt rồi kết nối lại.");
         }
-        RequestRow request = grants.claimRequest(requestId)
+        RequestRow request = grants.claimRequest(requestId, browserHash(browser))
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
         ClientRow client = clients.find(request.clientId())
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
@@ -151,9 +189,10 @@ public class OAuthAuthorizations {
     }
 
     /** Từ chối: the client gets {@code access_denied} and nothing is made. */
-    public ConsentResult deny(String requestId) {
+    public ConsentResult deny(String requestId, String browser) {
         String userId = requireAllowed();
-        RequestRow request = grants.claimRequest(requestId)
+        openRequestOf(requestId, browser, userId);
+        RequestRow request = grants.claimRequest(requestId, browserHash(browser))
             .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
         audit.record(OAuthAudit.Event.DENIED, userId, null, request.clientId(), null);
         Map<String, String> params = new LinkedHashMap<>();
@@ -161,6 +200,26 @@ public class OAuthAuthorizations {
         params.put("state", request.state());
         params.put("iss", server.issuer());
         return new ConsentResult(withParams(request.redirectUri(), params));
+    }
+
+    /**
+     * The open request if this browser started it. A request answered from another browser (a link someone sent) is
+     * refused as missing, so the page says to start again from the assistant, and audited: it may be phishing.
+     */
+    private RequestRow openRequestOf(String requestId, String browser, String userId) {
+        RequestRow request = grants.findOpenRequest(requestId)
+            .orElseThrow(() -> new BusinessException(ResponseCode.RESOURCE_NOT_FOUND));
+        String hash = browserHash(browser);
+        if (hash == null || !MessageDigest.isEqual(hash.getBytes(StandardCharsets.US_ASCII),
+            request.browserHash().getBytes(StandardCharsets.US_ASCII))) {
+            audit.record(OAuthAudit.Event.ANSWER_REFUSED, userId, null, request.clientId(), "other_browser");
+            throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
+        }
+        return request;
+    }
+
+    private static String browserHash(String browser) {
+        return browser == null || browser.isBlank() ? null : ExternalConnectionService.hash(browser);
     }
 
     private String requireAllowed() {
@@ -172,13 +231,13 @@ public class OAuthAuthorizations {
         return userId;
     }
 
-    private String error(String redirect, String error, String description, String state) {
+    private Started error(String redirect, String error, String description, String state) {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("error", error);
         params.put("error_description", description);
         params.put("state", state);
         params.put("iss", server.issuer());
-        return withParams(redirect, params);
+        return new Started(withParams(redirect, params), null);
     }
 
     static String withParams(String uri, Map<String, String> params) {

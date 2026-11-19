@@ -24,12 +24,15 @@ CREATE TABLE IF NOT EXISTS learning_hub.oauth_authorization_request (
     state varchar(500),
     code_challenge varchar(128) NOT NULL,
     scope varchar(100) NOT NULL,
+    browser_hash char(64) NOT NULL,
     create_time timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz NOT NULL,
     used_at timestamptz
 );
 COMMENT ON TABLE learning_hub.oauth_authorization_request IS
     'Yêu cầu cấp quyền đang chờ người dùng Cho phép hoặc Từ chối trên trang Cho phép kết nối; dùng một lần, hết hạn sau 10 phút.';
+COMMENT ON COLUMN learning_hub.oauth_authorization_request.browser_hash IS
+    'SHA-256 của cookie chan_oauth_request đặt lúc authorize; chỉ trình duyệt đó trả lời được yêu cầu.';
 
 CREATE TABLE IF NOT EXISTS learning_hub.oauth_authorization_code (
     code_hash char(64) PRIMARY KEY,

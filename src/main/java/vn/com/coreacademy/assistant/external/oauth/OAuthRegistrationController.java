@@ -35,12 +35,13 @@ public class OAuthRegistrationController {
     }
 
     private final OAuthClientService clients;
+    private final OAuthClientAddress address;
 
     @PostMapping(value = OAuthCodes.REGISTER_PATH, consumes = MediaType.APPLICATION_JSON_VALUE,
         produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Client OAuth tự đăng ký (RFC 7591)",
         description = """
-            Công khai, giới hạn theo IP. Chỉ client public (token_endpoint_auth_method none).
+            Công khai, giới hạn theo IP người gọi (X-Real-IP từ proxy tin cậy) và tổng mỗi phút. Chỉ client public (token_endpoint_auth_method none).
             - redirect_uris: https://claude.ai/api/mcp/auth_callback, https://claude.com/api/mcp/auth_callback hoặc
               http://localhost / 127.0.0.1 / [::1] với cổng và đường dẫn bất kỳ; khác đi trả 400 invalid_redirect_uri.
             - client_name: tên do client tự khai, hiện trên trang Cho phép kết nối kèm ghi chú không xác minh.
@@ -49,6 +50,6 @@ public class OAuthRegistrationController {
     public ResponseEntity<Map<String, Object>> register(@RequestBody Registration registration,
                                                         HttpServletRequest http) {
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
-            .body(clients.register(registration, http.getRemoteAddr()));
+            .body(clients.register(registration, address.of(http)));
     }
 }

@@ -9,7 +9,9 @@ import vn.com.coreacademy.assessment.support.AssessmentIntegrationTest;
  */
 @TestPropertySource(properties = {"app.assistant.external.enabled=true",
     "app.assistant.external.app-base-url=https://lms.example",
-    // Every OAuth IT registers from the same address; the limit itself is pinned by OAuthRulesTest.
-    "app.assistant.external.oauth-registrations-per-minute=1000"})
+    // Every OAuth IT registers and authorizes from the same address; the limits are pinned by OAuthRulesTest.
+    "app.assistant.external.oauth-registrations-per-minute=1000",
+    "app.assistant.external.oauth-registrations-per-minute-total=1000",
+    "app.assistant.external.oauth-authorizations-per-minute=1000"})
 abstract class ExternalAssistantIT extends AssessmentIntegrationTest {
 }

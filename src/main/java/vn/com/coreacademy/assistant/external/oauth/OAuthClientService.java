@@ -18,10 +18,14 @@ import vn.com.coreacademy.assistant.external.oauth.OAuthRegistrationController.R
 public class OAuthClientService {
     private static final List<String> GRANT_TYPES = List.of("authorization_code", "refresh_token");
 
+    /** The key under which every registration counts toward the instance-wide ceiling. */
+    private static final String ALL_ADDRESSES = "*";
+
     private final OAuthClientRepository clients;
     private final OAuthServer server;
     private final OAuthAudit audit;
     private final PerMinuteLimiter limiter;
+    private final PerMinuteLimiter total;
 
     public OAuthClientService(OAuthClientRepository clients, OAuthServer server, OAuthAudit audit,
                               ExternalAssistantProperties properties) {
@@ -29,15 +33,16 @@ public class OAuthClientService {
         this.server = server;
         this.audit = audit;
         this.limiter = new PerMinuteLimiter(properties.oauthRegistrationsPerMinute(), Clock.systemUTC());
+        this.total = new PerMinuteLimiter(properties.oauthRegistrationsPerMinuteTotal(), Clock.systemUTC());
     }
 
     /** The new client's registration response; refuses what this server cannot honour. */
     public Map<String, Object> register(Registration registration, String address) {
         server.requireEnabled();
-        if (!limiter.admit(address)) {
+        if (!limiter.admit(address) || !total.admit(ALL_ADDRESSES)) {
             log.warn("Refused OAuth client registration over the rate limit");
             throw new OAuthException(HttpStatus.TOO_MANY_REQUESTS, "slow_down",
-                "Too many registrations from this address. Try again in a minute.");
+                "Too many registrations. Try again in a minute.");
         }
         List<String> uris = registration.redirectUris();
         if (uris == null || uris.isEmpty() || uris.size() > OAuthCodes.MAX_REDIRECT_URIS) {

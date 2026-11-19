@@ -1,15 +1,24 @@
 package vn.com.coreacademy.assistant.external.oauth;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.util.unit.DataSize;
+import vn.com.coreacademy.assistant.external.ExternalAssistantProperties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** The redirect URI rules and the registration limit, which the ITs cannot reach at their edges. */
+/** The redirect URI rules, the limits and the name rule, which the ITs cannot reach at their edges. */
 class OAuthRulesTest {
+    private static final String RIGHT_TO_LEFT_OVERRIDE = Character.toString(0x202E);
+    private static final String ZERO_WIDTH_SPACE = Character.toString(0x200B);
+    private static final String EMOJI = Character.toString(0x1F600);
+
     @Test
     void onlyClaudeCallbacksAndLoopbackUrisMayBeRegistered() {
         assertThat(OAuthRedirects.allowed("https://claude.ai/api/mcp/auth_callback")).isTrue();
@@ -55,14 +64,36 @@ class OAuthRulesTest {
 
     @Test
     void aClientNameLosesControlAndBidiCharactersAndIsCutByCodePoints() {
-        assertThat(OAuthClientService.name(registration("Claude‮ (official)\nline")))
+        assertThat(OAuthClientService.name(registration("Claude" + RIGHT_TO_LEFT_OVERRIDE + " (official)\nline")))
             .isEqualTo("Claude (official) line");
-        assertThat(OAuthClientService.name(registration("  ​ "))).isEqualTo(OAuthCodes.UNNAMED_CLIENT);
+        assertThat(OAuthClientService.name(registration("  " + ZERO_WIDTH_SPACE + " ")))
+            .isEqualTo(OAuthCodes.UNNAMED_CLIENT);
         assertThat(OAuthClientService.name(registration(null))).isEqualTo(OAuthCodes.UNNAMED_CLIENT);
 
-        String cut = OAuthClientService.name(registration("a".repeat(99) + "😀😀"));
+        String cut = OAuthClientService.name(registration("a".repeat(99) + EMOJI + EMOJI));
         assertThat(cut.codePointCount(0, cut.length())).isEqualTo(OAuthCodes.MAX_CLIENT_NAME);
-        assertThat(cut).endsWith("😀");
+        assertThat(cut).endsWith(EMOJI);
+    }
+
+    @Test
+    void theLimitsCountTheRealIpOnlyWhenATrustedProxySaysIt() {
+        OAuthClientAddress address = new OAuthClientAddress(new ExternalAssistantProperties(true, "https://lms.example",
+            60, DataSize.ofKilobytes(256), 3, Duration.ofMinutes(1), 10, 100, 30, List.of("172.16.0.0/12", "::1/128")));
+
+        assertThat(address.of(request("172.18.0.5", "203.0.113.7"))).isEqualTo("203.0.113.7");
+        assertThat(address.of(request("0:0:0:0:0:0:0:1", " 203.0.113.8 "))).isEqualTo("203.0.113.8");
+        // From anyone else the header is the caller's own claim, so it is ignored.
+        assertThat(address.of(request("198.51.100.9", "203.0.113.7"))).isEqualTo("198.51.100.9");
+        assertThat(address.of(request("172.18.0.5", null))).isEqualTo("172.18.0.5");
+    }
+
+    private static MockHttpServletRequest request(String peer, String realIp) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr(peer);
+        if (realIp != null) {
+            request.addHeader("X-Real-IP", realIp);
+        }
+        return request;
     }
 
     private static OAuthRegistrationController.Registration registration(String name) {

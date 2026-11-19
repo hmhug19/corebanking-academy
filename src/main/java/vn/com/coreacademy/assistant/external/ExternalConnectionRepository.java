@@ -206,4 +206,17 @@ public class ExternalConnectionRepository {
                AND (last_used_at IS NULL OR last_used_at < :staleBefore)
             """, new MapSqlParameterSource().addValue("id", connectionId).addValue("staleBefore", staleBefore));
     }
+
+    /**
+     * Deletes OAuth connections whose code was never exchanged and that lapsed before {@code before}: an approval
+     * left unfinished, which never worked and is not in the user's list.
+     */
+    public int deleteUnexchangedOAuth(OffsetDateTime before) {
+        return jdbc.update("""
+            DELETE FROM learning_hub.external_assistant_connection
+             WHERE kind = :oauth
+               AND access_token_hash IS NULL
+               AND expires_at < :before
+            """, Map.of("oauth", OAUTH, "before", before));
+    }
 }

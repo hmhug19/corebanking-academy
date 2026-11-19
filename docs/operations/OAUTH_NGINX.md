@@ -30,6 +30,20 @@ Dùng đúng upstream mà `location /api/` của server đó đang dùng (`backe
 `deploy/nginx/core-academy.conf.example` là `http://127.0.0.1:8019`). Không thêm `/` cuối vào `proxy_pass`, để giữ
 nguyên đường dẫn. Không cấu hình CORS ở Nginx: BE tự trả CORS `*` (không credentials) cho các endpoint OAuth.
 
+### Địa chỉ thật của người gọi
+
+Giới hạn đăng ký client và bắt đầu cấp quyền đếm theo `X-Real-IP` khi request đến từ proxy tin cậy
+(`ASSISTANT_EXTERNAL_OAUTH_TRUSTED_PROXIES`, mặc định loopback và dải private). Mọi location chuyển sang BE (cả
+`location /api/`) phải **ghi đè** header này bằng địa chỉ Nginx thấy, như snippet trên:
+
+```nginx
+proxy_set_header X-Real-IP $remote_addr;
+```
+
+Thiếu dòng này thì mọi người gọi chung một bucket (địa chỉ của Nginx) và một script nhỏ chặn được việc kết nối của
+mọi người. Nếu BE nhận request trực tiếp từ Internet mà không qua Nginx, đặt
+`ASSISTANT_EXTERNAL_OAUTH_TRUSTED_PROXIES` chỉ gồm địa chỉ của proxy thật.
+
 ### Chống nhúng trang Cho phép kết nối
 
 Trang `/tro-ly-ngoai/cho-phep` có nút Cho phép; nếu trang khác nhúng được nó trong iframe thì có thể lừa người dùng bấm

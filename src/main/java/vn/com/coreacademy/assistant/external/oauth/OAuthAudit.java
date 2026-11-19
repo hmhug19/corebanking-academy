@@ -21,7 +21,8 @@ public class OAuthAudit {
 
     /** What happened. */
     public enum Event {
-        REGISTRATION_REFUSED, AUTHORIZE_REFUSED, GRANTED, DENIED, REVOKED, REFRESH_REFUSED, REFRESH_REUSED
+        REGISTRATION_REFUSED, AUTHORIZE_REFUSED, ANSWER_REFUSED, GRANTED, DENIED, REVOKED, REFRESH_REFUSED,
+        REFRESH_REUSED
     }
 
     private final StandaloneAuditService audit;

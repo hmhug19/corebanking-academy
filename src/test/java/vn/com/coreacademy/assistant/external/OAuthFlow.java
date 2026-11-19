@@ -8,6 +8,9 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+import jakarta.servlet.http.Cookie;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,11 +31,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  */
 final class OAuthFlow {
     static final String CALLBACK = "http://127.0.0.1:53682/callback";
+    static final String REQUESTS = "/api/v1/assistant/oauth-requests/{id}";
     static final String VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk-with-enough-entropy";
 
     private final MockMvc mvc;
     private final ObjectMapper json;
     private final ApiClient api;
+    /** The cookie authorize set for each request, as the browser that started it keeps it. */
+    private final Map<String, String> browsers = new ConcurrentHashMap<>();
 
     OAuthFlow(MockMvc mvc, ObjectMapper json) {
         this.mvc = mvc;
@@ -95,21 +101,38 @@ final class OAuthFlow {
         assertThat(response.getStatus()).as(response.getHeader(HttpHeaders.LOCATION)).isEqualTo(302);
         String location = response.getHeader(HttpHeaders.LOCATION);
         assertThat(location).startsWith("https://lms.example/tro-ly-ngoai/cho-phep?request=");
-        return query(location).get("request");
+        String id = query(location).get("request");
+        Cookie cookie = response.getCookie("chan_oauth_request");
+        assertThat(cookie).as("the browser cookie of request " + id).isNotNull();
+        browsers.put(id, cookie.getValue());
+        return id;
+    }
+
+    /** The Cho phép kết nối page reading the request, from the browser that started it. */
+    MockHttpServletRequestBuilder reading(String requestId) {
+        return fromBrowser(ApiClient.get(REQUESTS, requestId), requestId);
+    }
+
+    /** The page answering {@code approve} or {@code deny}, from the browser that started the request. */
+    MockHttpServletRequestBuilder answering(String requestId, String answer) {
+        return fromBrowser(api.post(Map.of(), REQUESTS + "/" + answer, requestId), requestId);
     }
 
     JsonNode read(String user, String requestId) {
-        return api.ok(user, ApiClient.get("/api/v1/assistant/oauth-requests/{id}", requestId));
+        return api.ok(user, reading(requestId));
     }
 
     String approve(String user, String requestId) {
-        return api.ok(user, api.post(Map.of(), "/api/v1/assistant/oauth-requests/{id}/approve", requestId))
-            .path("redirectUrl").asText();
+        return api.ok(user, answering(requestId, "approve")).path("redirectUrl").asText();
     }
 
     String deny(String user, String requestId) {
-        return api.ok(user, api.post(Map.of(), "/api/v1/assistant/oauth-requests/{id}/deny", requestId))
-            .path("redirectUrl").asText();
+        return api.ok(user, answering(requestId, "deny")).path("redirectUrl").asText();
+    }
+
+    private MockHttpServletRequestBuilder fromBrowser(MockHttpServletRequestBuilder request, String requestId) {
+        String browser = browsers.get(requestId);
+        return browser == null ? request : request.cookie(new Cookie("chan_oauth_request", browser));
     }
 
     ApiClient api() {
