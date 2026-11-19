@@ -3,6 +3,7 @@ package vn.com.coreacademy.assistant.external.oauth;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,5 +51,21 @@ class OAuthRulesTest {
         PerMinuteLimiter nextMinute = new PerMinuteLimiter(2,
             Clock.fixed(Instant.parse("2026-11-19T10:01:00Z"), ZoneOffset.UTC));
         assertThat(nextMinute.admit("10.0.0.1")).isTrue();
+    }
+
+    @Test
+    void aClientNameLosesControlAndBidiCharactersAndIsCutByCodePoints() {
+        assertThat(OAuthClientService.name(registration("Claude‮ (official)\nline")))
+            .isEqualTo("Claude (official) line");
+        assertThat(OAuthClientService.name(registration("  ​ "))).isEqualTo(OAuthCodes.UNNAMED_CLIENT);
+        assertThat(OAuthClientService.name(registration(null))).isEqualTo(OAuthCodes.UNNAMED_CLIENT);
+
+        String cut = OAuthClientService.name(registration("a".repeat(99) + "😀😀"));
+        assertThat(cut.codePointCount(0, cut.length())).isEqualTo(OAuthCodes.MAX_CLIENT_NAME);
+        assertThat(cut).endsWith("😀");
+    }
+
+    private static OAuthRegistrationController.Registration registration(String name) {
+        return new OAuthRegistrationController.Registration(name, null, null, null, null);
     }
 }

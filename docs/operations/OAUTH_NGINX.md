@@ -30,6 +30,23 @@ Dùng đúng upstream mà `location /api/` của server đó đang dùng (`backe
 `deploy/nginx/core-academy.conf.example` là `http://127.0.0.1:8019`). Không thêm `/` cuối vào `proxy_pass`, để giữ
 nguyên đường dẫn. Không cấu hình CORS ở Nginx: BE tự trả CORS `*` (không credentials) cho các endpoint OAuth.
 
+### Chống nhúng trang Cho phép kết nối
+
+Trang `/tro-ly-ngoai/cho-phep` có nút Cho phép; nếu trang khác nhúng được nó trong iframe thì có thể lừa người dùng bấm
+(clickjacking). Header chống frame của BE chỉ có trên response API, không có trên HTML của SPA. Thêm trong cùng server
+block:
+
+```nginx
+location ^~ /tro-ly-ngoai/ {
+    add_header Content-Security-Policy "frame-ancestors 'none'" always;
+    add_header X-Frame-Options DENY always;
+    try_files $uri /index.html;
+}
+```
+
+Dùng đúng `root`/`try_files` mà `location /` của SPA đang dùng; `add_header` trong một location thay thế header kế
+thừa, nên chép thêm các `add_header` mà `location /` có nếu có.
+
 ## Áp dụng
 
 1. Sửa file cấu hình Nginx của container web (file được mount vào `/etc/nginx/conf.d/` của container web trên server).
@@ -54,6 +71,7 @@ curl -s -o /dev/null -D - -X POST https://chanacademy.io.vn/api/v1/mcp | grep -i
 - Lệnh 1 trả JSON có `"issuer":"https://chanacademy.io.vn"` và `authorization_endpoint`, `token_endpoint`,
   `registration_endpoint` đều trên origin này.
 - Lệnh 2 trả JSON có `"resource":"https://chanacademy.io.vn/api/v1/mcp"`.
+- `curl -sI https://chanacademy.io.vn/tro-ly-ngoai/cho-phep | grep -i frame` có `frame-ancestors 'none'` và `X-Frame-Options: DENY`.
 - Lệnh 3 (không token) có `WWW-Authenticate: Bearer resource_metadata="https://chanacademy.io.vn/.well-known/oauth-protected-resource/api/v1/mcp"`.
 
 Nếu lệnh 1 hoặc 2 trả HTML (`<!doctype html>`), location chưa có hiệu lực hoặc bị location khác giành trước. Nếu

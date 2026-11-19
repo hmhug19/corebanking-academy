@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.external.oauth;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;

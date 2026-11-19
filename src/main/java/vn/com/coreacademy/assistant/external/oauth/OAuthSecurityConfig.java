@@ -1,6 +1,7 @@
 package vn.com.coreacademy.assistant.external.oauth;
 
 import java.util.List;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;

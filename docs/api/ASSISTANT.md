@@ -411,7 +411,7 @@ Chỉ vai trò quản lý khóa học (INSTRUCTOR, ADMIN, SUPER_ADMIN) có chứ
 
 | Method | Path | Mô tả |
 |---|---|---|
-| GET | `/status` | `{ enabled, allowed }`: cờ bật chưa, người gọi có tạo được kết nối không. Luôn trả về. |
+| GET | `/status` | `{ enabled, allowed, mcpUrl }`: cờ bật chưa, người gọi có tạo được kết nối không, và địa chỉ MCP (`{app-base-url}/api/v1/mcp`) để trang hướng dẫn hiển thị. Luôn trả về. |
 | GET | `/` | Kết nối chưa thu hồi của người gọi (kể cả đã hết hạn), mới nhất trước: `id, name, kind, tokenPrefix, createTime, expiresAt, lastUsedAt`. `kind` là `token` (mã `chan_ext_` dán tay) hoặc `oauth` (cấp qua trang Cho phép kết nối; `name` là tên client tự khai, `tokenPrefix` là null). Không bao giờ có token. |
 | POST | `/` | `{ name (1–100 ký tự), validDays (30 \| 90) }` → `{ connection, token }`. Token `chan_ext_` + 43 ký tự base64url chỉ trả về đúng một lần; DB chỉ giữ SHA-256 và 13 ký tự đầu. `validDays` khác trả `CORE-VALIDATION_FAILED` trường `validDays`. |
 | DELETE | `/{connectionId}` | Thu hồi ngay. Kết nối của người khác hoặc đã thu hồi trả `CORE-RESOURCE_NOT_FOUND`. |

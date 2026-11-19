@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.external.oauth;
 
 import java.security.SecureRandom;
 import java.util.Base64;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import vn.com.coreacademy.assistant.external.ExternalAssistantProperties;
@@ -36,7 +37,7 @@ public class OAuthServer {
 
     /** The MCP endpoint's URL, the one resource tokens are for. */
     public String resource() {
-        return url("/api/v1/mcp");
+        return properties.mcpUrl();
     }
 
     /** A random value of {@code bytes} bytes, base64url without padding, after the prefix. */

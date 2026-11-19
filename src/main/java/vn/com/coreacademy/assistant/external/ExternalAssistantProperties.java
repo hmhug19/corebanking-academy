@@ -5,6 +5,7 @@ import java.time.Duration;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.util.unit.DataSize;
@@ -34,6 +35,11 @@ public record ExternalAssistantProperties(@DefaultValue("false") boolean enabled
     }
 
     /** Where a client finds the MCP endpoint's OAuth metadata (RFC 9728); a 401 from the endpoint names it. */
+    /** The MCP endpoint on the web origin: the URL users paste and the only resource OAuth grants. */
+    public String mcpUrl() {
+        return origin() + ExternalMcpSecurityConfig.MCP_PATH;
+    }
+
     public String resourceMetadataUrl() {
         return origin() + "/.well-known/oauth-protected-resource" + ExternalMcpSecurityConfig.MCP_PATH;
     }

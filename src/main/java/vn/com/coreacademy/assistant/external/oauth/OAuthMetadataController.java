@@ -1,15 +1,17 @@
 package vn.com.coreacademy.assistant.external.oauth;
 
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.security.SecurityRequirements;
-import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import vn.com.coreacademy.assistant.external.ExternalMcpSecurityConfig;
 
 /**
  * OAuth discovery for the MCP endpoint: the protected resource metadata (RFC 9728) and the authorization server
@@ -22,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class OAuthMetadataController {
     private final OAuthServer server;
 
-    @GetMapping(value = {OAuthCodes.PROTECTED_RESOURCE_PATH, OAuthCodes.PROTECTED_RESOURCE_PATH + "/api/v1/mcp"},
+    @GetMapping(value = {OAuthCodes.PROTECTED_RESOURCE_PATH, OAuthCodes.PROTECTED_RESOURCE_PATH + ExternalMcpSecurityConfig.MCP_PATH},
         produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Protected resource metadata của endpoint MCP (RFC 9728)",
         description = "Công khai. Client MCP đọc để biết authorization server. Cờ tắt: 404.")

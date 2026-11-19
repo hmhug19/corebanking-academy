@@ -1,5 +1,7 @@
 package vn.com.coreacademy.assistant.external.oauth;
 
+import java.nio.charset.StandardCharsets;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -55,7 +57,7 @@ public class OAuthAuthorizeController {
                 + "<p>Không thể kết nối trợ lý ngoài: " + HtmlUtils.htmlEscape(refusal.getMessage())
                 + "</p><p>Hãy thử kết nối lại từ ứng dụng trợ lý.</p></html>";
             return ResponseEntity.badRequest().contentType(new MediaType(MediaType.TEXT_HTML,
-                    java.nio.charset.StandardCharsets.UTF_8)).cacheControl(CacheControl.noStore()).body(page);
+                    StandardCharsets.UTF_8)).cacheControl(CacheControl.noStore()).body(page);
         }
     }
 }

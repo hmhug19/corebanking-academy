@@ -2,6 +2,7 @@ package vn.com.coreacademy.assistant.external.oauth;
 
 import java.time.Duration;
 import java.util.List;
+
 import vn.com.coreacademy.assistant.external.ExternalConnectionCodes;
 
 /**

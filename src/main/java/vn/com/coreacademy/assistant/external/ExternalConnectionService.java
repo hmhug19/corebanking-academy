@@ -45,10 +45,10 @@ public class ExternalConnectionService {
     /** Whether the feature is on and the caller may connect; answers even when it is off, so the page can hide it. */
     public ExternalAssistantStatus status() {
         if (!properties.enabled()) {
-            return new ExternalAssistantStatus(false, false);
+            return new ExternalAssistantStatus(false, false, properties.mcpUrl());
         }
 
-        return new ExternalAssistantStatus(true, mayConnect(SecurityContextUtils.getUserId()));
+        return new ExternalAssistantStatus(true, mayConnect(SecurityContextUtils.getUserId()), properties.mcpUrl());
     }
 
     public List<ConnectionView> list() {
@@ -120,7 +120,6 @@ public class ExternalConnectionService {
 
     private static ConnectionView view(ConnectionRow row) {
         return new ConnectionView(row.id(), row.name(), row.kind(), row.tokenPrefix(), row.createTime(),
-            row.expiresAt(),
-            row.lastUsedAt());
+            row.expiresAt(), row.lastUsedAt());
     }
 }

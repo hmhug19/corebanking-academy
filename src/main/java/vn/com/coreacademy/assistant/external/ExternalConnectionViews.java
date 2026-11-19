@@ -2,10 +2,11 @@ package vn.com.coreacademy.assistant.external;
 
 import java.time.OffsetDateTime;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+
+import io.swagger.v3.oas.annotations.media.Schema;
 
 /** What the Kết nối trợ lý ngoài endpoints receive and send. */
 public final class ExternalConnectionViews {
@@ -39,8 +40,10 @@ public final class ExternalConnectionViews {
 
     @Schema(description = """
         Tính năng Trợ lý ngoài: enabled là cờ cấu hình; allowed là người gọi được tạo kết nối (vai trò quản lý khóa học \
-        có chức năng AI_ASSISTANT, và cờ đang bật).
+        có chức năng AI_ASSISTANT, và cờ đang bật); mcpUrl là địa chỉ MCP để dán vào Claude App / Claude Code.
         """)
-    public record ExternalAssistantStatus(boolean enabled, boolean allowed) {
+    public record ExternalAssistantStatus(boolean enabled, boolean allowed,
+                                          @Schema(description = "{app-base-url}/api/v1/mcp, đúng resource mà OAuth chấp nhận")
+                                          String mcpUrl) {
     }
 }

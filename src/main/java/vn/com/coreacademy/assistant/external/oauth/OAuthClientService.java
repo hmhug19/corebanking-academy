@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -77,11 +78,18 @@ public class OAuthClientService {
         return body;
     }
 
-    private static String name(Registration registration) {
-        String name = registration.clientName() == null ? "" : registration.clientName().strip();
+    /**
+     * The self-declared name without control or format characters (bidi overrides, line breaks), cut to
+     * {@link OAuthCodes#MAX_CLIENT_NAME} code points so a surrogate pair is never split.
+     */
+    static String name(Registration registration) {
+        String raw = registration.clientName() == null ? "" : registration.clientName();
+        String name = raw.replaceAll("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]", " ").replaceAll("\\s+", " ").strip();
         if (name.isEmpty()) {
             return OAuthCodes.UNNAMED_CLIENT;
         }
-        return name.length() > OAuthCodes.MAX_CLIENT_NAME ? name.substring(0, OAuthCodes.MAX_CLIENT_NAME) : name;
+        return name.codePointCount(0, name.length()) > OAuthCodes.MAX_CLIENT_NAME
+            ? name.substring(0, name.offsetByCodePoints(0, OAuthCodes.MAX_CLIENT_NAME)).strip()
+            : name;
     }
 }
