@@ -375,6 +375,26 @@ class LearningPlayerModesIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void aCourseCopyKeepsAnUntimedTranscript() {
+        Draft draft = draft();
+        save(draft, block(draft, "video", null, untimedLines()));
+        JsonNode copy = api.ok(INSTRUCTOR, api.post(Map.of("code", AssessmentFixtures.unique("COPY")),
+            COURSE + "/copy", draft.course.id()));
+        assertThat(copy.path("course").path("id").asLong()).isNotEqualTo(draft.course.id());
+        assertUntimed(firstBlock(copy));
+    }
+
+    @Test
+    void aNulCharacterIsRefusedOnItsFieldBecauseJsonbCannotStoreIt() {
+        Draft draft = draft();
+        refused(draft, block(draft, "video", null, List.of(line(null, "Xin\0chào"))), TRANSCRIPT);
+        refused(draft, block(draft, "video", null, List.of(line(0, "Xin\0chào"))), TRANSCRIPT);
+        refused(draft, block(draft, "video", List.of(chapter(0, "Mở\0đầu")), null), CHAPTERS);
+        assertThat(firstBlock(save(draft, block(draft, "video", null, List.of(line(null, "Xin chào")))))
+            .path(TRANSCRIPT)).hasSize(1);
+    }
+
+    @Test
     void savingWithoutTheListsClearsThemAndAnEmptyListIsStoredAsNull() {
         Draft draft = draft();
         JsonNode saved = save(draft, block(draft, "video", sampleChapters(), sampleLines()));

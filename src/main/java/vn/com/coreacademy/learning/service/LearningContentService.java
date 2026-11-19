@@ -732,6 +732,10 @@ public class LearningContentService {
                 throw BusinessException.validation(field, "INVALID_VALUE",
                     "Nội dung của " + noun + " phải từ 1 đến " + maxLength + " ký tự.");
             }
+            if (label.indexOf('\0') >= 0) {
+                throw BusinessException.validation(field, "INVALID_VALUE",
+                    "Nội dung của " + noun + " không được chứa ký tự NUL (PostgreSQL jsonb không lưu được).");
+            }
             if (allUntimed) {
                 continue;
             }

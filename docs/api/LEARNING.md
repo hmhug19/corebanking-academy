@@ -754,6 +754,8 @@ Khối `video` có thể mang **mốc** (`videoChapters`) và **transcript** (`t
 Giới hạn (vi phạm là `CORE-VALIDATION_FAILED`, `errors[0].field` là `videoChapters` hoặc `transcript`):
 
 - Tối đa 50 mốc, tên 1-120 ký tự sau khi cắt khoảng trắng; tối đa 2000 đoạn, nội dung 1-1000 ký tự sau khi cắt.
+- Nội dung (tên mốc, nội dung đoạn) không được chứa ký tự NUL (`\u0000`): PostgreSQL jsonb không lưu được, nên bị từ chối
+  với field `videoChapters` hoặc `transcript` thay vì lỗi 500.
 - `startSeconds` của **mốc** là số không âm (cho phép phần thập phân), **tăng ngặt** trong danh sách, và không vượt
   `duration_seconds` của tài nguyên chính khi đã biết (chưa biết thì không kiểm). Mốc luôn cần thời điểm.
 - **Transcript đều có hoặc đều không có thời điểm**: hoặc mọi đoạn có `startSeconds` theo đúng luật của mốc ở trên, hoặc
