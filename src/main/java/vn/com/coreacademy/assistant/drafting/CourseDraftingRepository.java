@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import vn.com.coreacademy.knowledge.entity.DocumentScope;
+import vn.com.coreacademy.learning.constants.LearningCodes.BlockType;
 
 /**
  * The drafting sessions and their steps. A step in {@code proposing} with no {@code claimed_at} waits for the worker;
@@ -717,8 +718,9 @@ public class CourseDraftingRepository {
         Map<Long, List<BlockSnapshot>> blocks = new HashMap<>();
         jdbc.query("""
             SELECT b.lesson_id, b.block_type, b.body,
-                   CASE WHEN b.block_type = 'flow'
-                        THEN coalesce(jsonb_array_length(b.flow_model -> 'steps'), 0)
+                   CASE WHEN b.block_type = :flowType
+                        THEN CASE WHEN jsonb_typeof(b.flow_model -> 'steps') = 'array'
+                                  THEN jsonb_array_length(b.flow_model -> 'steps') ELSE 0 END
                         ELSE (SELECT count(*) FROM learning_hub.process_steps s WHERE s.block_id = b.block_id) END,
                    (SELECT count(*) FROM learning_hub.block_assets a WHERE a.block_id = b.block_id)
               FROM learning_hub.lesson_blocks b
@@ -726,7 +728,7 @@ public class CourseDraftingRepository {
               JOIN learning_hub.course_chapters c ON c.chapter_id = l.chapter_id
              WHERE c.revision_id = :revision
              ORDER BY b.sort_no, b.block_id
-            """, revision, (RowCallbackHandler) rs -> blocks
+            """, Map.of("revision", revisionId, "flowType", BlockType.FLOW), (RowCallbackHandler) rs -> blocks
             .computeIfAbsent(rs.getLong(1), id -> new ArrayList<>())
             .add(new BlockSnapshot(rs.getString(2), rs.getString(3), rs.getInt(4), rs.getInt(5))));
         List<LessonSnapshot> lessons = jdbc.query("""

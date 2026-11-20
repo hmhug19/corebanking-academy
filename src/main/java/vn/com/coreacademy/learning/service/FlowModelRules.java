@@ -18,6 +18,12 @@ import vn.com.coreacademy.learning.dto.FlowModel.FlowStep;
  * {@code flow.objects[i].field} / {@code flow.steps[i].field}.
  */
 public final class FlowModelRules {
+
+    /** Control characters except line feed and tab, and the bidi overrides that can reverse "A → B". */
+    private static final Pattern FORBIDDEN =
+        Pattern.compile("[\\p{Cc}&&[^\\n\\t]]|[\\u202A-\\u202E\\u2066-\\u2069]");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+
     public static final int VERSION = 1;
     public static final int MAX_OBJECTS = 30;
     public static final int MAX_STEPS = 100;
@@ -36,10 +42,12 @@ public final class FlowModelRules {
     /** Kiểm tra và trả bản đã chuẩn hóa (tên, tiêu đề, mô tả được cắt khoảng trắng; mô tả rỗng thành null). */
     public static FlowModel validated(FlowModel flow) {
         if (flow == null) {
-            throw BusinessException.validation("flow", "REQUIRED", "Khối Mô phỏng luồng cần dữ liệu đối tượng và bước.");
+            throw BusinessException.validation("flow", "REQUIRED",
+                "Khối Mô phỏng luồng cần dữ liệu đối tượng và bước.");
         }
         if (flow.version() == null || flow.version() != VERSION) {
-            throw BusinessException.validation("flow.version", INVALID, "Phiên bản dữ liệu Mô phỏng luồng không hợp lệ.");
+            throw BusinessException.validation("flow.version", INVALID,
+                "Phiên bản dữ liệu Mô phỏng luồng không hợp lệ.");
         }
         List<FlowObject> objects = flow.objects() == null ? List.of() : flow.objects();
         List<FlowStep> steps = flow.steps() == null ? List.of() : flow.steps();
@@ -82,7 +90,8 @@ public final class FlowModelRules {
             }
             id(at, s.id(), stepIds, "Mã bước");
             if (s.from() == null || !ids.contains(s.from())) {
-                throw BusinessException.validation(at + ".from", INVALID, "Bước chuyển phải bắt đầu từ một đối tượng có sẵn.");
+                throw BusinessException.validation(at + ".from", INVALID,
+                    "Bước chuyển phải bắt đầu từ một đối tượng có sẵn.");
             }
             if (s.to() != null && (!ids.contains(s.to()) || s.to().equals(s.from()))) {
                 throw BusinessException.validation(at + ".to", INVALID,
@@ -118,7 +127,7 @@ public final class FlowModelRules {
                 .append(names.getOrDefault(s.from(), "?")).append(" → ")
                 .append(s.to() == null ? "tự xử lý" : names.getOrDefault(s.to(), "?")).append(')');
             if (s.description() != null && !s.description().isBlank()) {
-                text.append(": ").append(s.description());
+                text.append(": ").append(WHITESPACE.matcher(s.description()).replaceAll(" "));
             }
             text.append('\n');
         }
@@ -136,8 +145,20 @@ public final class FlowModelRules {
         }
     }
 
+    /**
+     * Trims a field and refuses control and bidi-override characters. A name or a title stays on one line (its
+     * whitespace collapses to single spaces), so it cannot forge the line structure the assistant reads; only a
+     * description keeps its line breaks.
+     */
     private static String text(String field, String value, int max, String label, boolean required) {
+        boolean singleLine = !field.endsWith(".description");
         String clean = value == null ? "" : value.strip();
+        if (singleLine) {
+            clean = WHITESPACE.matcher(clean).replaceAll(" ");
+        }
+        if (FORBIDDEN.matcher(clean).find()) {
+            throw BusinessException.validation(field, "INVALID_VALUE", label + " chứa ký tự không hợp lệ.");
+        }
         if (clean.isEmpty()) {
             if (required) {
                 throw BusinessException.validation(field, "REQUIRED", label + " không được để trống.");

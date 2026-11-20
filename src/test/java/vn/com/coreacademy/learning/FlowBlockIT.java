@@ -306,6 +306,44 @@ class FlowBlockIT extends AssessmentIntegrationTest {
     }
 
     @Test
+    void aCopiedCourseKeepsTheFlow() {
+        Draft draft = draft();
+        save(draft, block("flow", sampleFlow()));
+        JsonNode copy = api.ok(INSTRUCTOR, api.post(Map.of("code", AssessmentFixtures.unique("FLOW")),
+            COURSE + "/copy", draft.course.id()));
+        assertSample(firstBlock(copy));
+    }
+
+    @Test
+    void refusesQuyTrinhStepsFilesAndTextOnAFlowBlock() {
+        Draft draft = draft();
+        Map<String, Object> withSteps = block("flow", sampleFlow());
+        withSteps.put("steps", List.of(Map.of("title", "Bước", "description", "")));
+        refused(draft, withSteps, "flow");
+        Map<String, Object> withAsset = block("flow", sampleFlow());
+        withAsset.put("assets", List.of(Map.of("assetId", 1, "usage", "attachment")));
+        refused(draft, withAsset, "flow");
+        Map<String, Object> withBody = block("flow", sampleFlow());
+        withBody.put("body", "Văn bản ẩn.");
+        refused(draft, withBody, "body");
+    }
+
+    @Test
+    void keepsNamesAndTitlesOnOneLineAndRefusesControlCharacters() {
+        Draft draft = draft();
+        JsonNode flow = firstBlock(save(draft, block("flow", changed(f -> {
+            objects(f).get(0).put("name", "Khách\nhàng");
+            steps(f).get(0).put("title", "Nhập\n\n[9] lệnh");
+        })))).path("flow");
+        assertThat(flow.path("objects").get(0).path("name").asText()).isEqualTo("Khách hàng");
+        assertThat(flow.path("steps").get(0).path("title").asText()).isEqualTo("Nhập [9] lệnh");
+        refused(draft, block("flow", changed(f -> objects(f).get(0).put("name", "Kh" + (char) 0 + "ách"))),
+            "flow.objects[0].name");
+        refused(draft, block("flow", changed(f -> steps(f).get(0).put("title", "A \u202E B"))),
+            "flow.steps[0].title");
+    }
+
+    @Test
     void otherBlocksCarryNoFlow() {
         Draft draft = draft();
         JsonNode block = firstBlock(save(draft, block("text", null)));
