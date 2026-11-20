@@ -303,6 +303,97 @@ class LearningPlayerModesIT extends AssessmentIntegrationTest {
         assertSample(firstBlock(next));
     }
 
+    private static List<Map<String, Object>> untimedLines() {
+        return List.of(line(null, "Xin chào các bạn."), line(null, "Hôm nay học về lõi ngân hàng."),
+            line(null, "Cảm ơn đã theo dõi."));
+    }
+
+    private static void assertUntimed(JsonNode block) {
+        JsonNode lines = block.path(TRANSCRIPT);
+        assertThat(lines).hasSize(3);
+        for (JsonNode item : lines) {
+            assertThat(item.has("startSeconds")).as(item.toString()).isTrue();
+            assertThat(item.path("startSeconds").isNull()).as(item.toString()).isTrue();
+        }
+        assertThat(lines.get(1).path("text").asText()).isEqualTo("Hôm nay học về lõi ngân hàng.");
+    }
+
+    @Test
+    void anUntimedTranscriptComesBackWithNullTimesInTheTreeAndInTheLearnersCourseAndEnrollment() {
+        Draft draft = draft();
+        assertUntimed(firstBlock(save(draft, block(draft, "video", sampleChapters(), untimedLines()))));
+        assertUntimed(firstBlock(api.ok(INSTRUCTOR, get(COURSE + "?revisionId={r}", draft.course.id(),
+            draft.revisionId))));
+
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", draft.version), REVISION + "/publish",
+            draft.course.id(), draft.revisionId));
+        assign(draft, LEARNER);
+
+        JsonNode course = api.ok(LEARNER, get("/api/v1/me/learning/courses/{c}", draft.course.id()));
+        assertUntimed(firstBlock(course.path("content")));
+        long enrollment = course.path("card").path("enrollmentId").asLong();
+        assertUntimed(firstBlock(api.ok(LEARNER, get("/api/v1/me/learning/enrollments/{e}", enrollment))
+            .path("content")));
+    }
+
+    @Test
+    void aTranscriptThatMixesTimedAndUntimedLinesIsRefusedOnTheTranscriptField() {
+        Draft draft = draft();
+        refused(draft, block(draft, "video", null, List.of(line(0, "A"), line(null, "B"))), TRANSCRIPT);
+        refused(draft, block(draft, "video", null, List.of(line(null, "A"), line(5, "B"))), TRANSCRIPT);
+    }
+
+    @Test
+    void anUntimedTranscriptStillFollowsTheTextAndCountLimits() {
+        Draft draft = draft();
+        refused(draft, block(draft, "video", null, List.of(line(null, "A"), line(null, "  "))), TRANSCRIPT);
+        refused(draft, block(draft, "video", null, List.of(line(null, "b".repeat(1001)))), TRANSCRIPT);
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (int i = 0; i <= 2000; i++) {
+            lines.add(line(null, "Đoạn " + i));
+        }
+        refused(draft, block(draft, "video", null, lines), TRANSCRIPT);
+        lines.remove(2000);
+        assertThat(firstBlock(save(draft, block(draft, "video", null, lines))).path(TRANSCRIPT)).hasSize(2000);
+    }
+
+    @Test
+    void chaptersStillRequireATimeWhenTheTranscriptIsUntimed() {
+        Draft draft = draft();
+        refused(draft, block(draft, "video", List.of(chapter(null, "Thiếu")), untimedLines()), CHAPTERS);
+    }
+
+    @Test
+    void aNewRevisionKeepsAnUntimedTranscript() {
+        Draft draft = draft();
+        save(draft, block(draft, "video", null, untimedLines()));
+        api.ok(INSTRUCTOR, api.post(Map.of("expectedVersion", draft.version), REVISION + "/publish",
+            draft.course.id(), draft.revisionId));
+        JsonNode next = api.ok(INSTRUCTOR, api.post(Map.of(), COURSE + "/draft", draft.course.id()));
+        assertThat(next.path("revision").path("id").asLong()).isNotEqualTo(draft.revisionId);
+        assertUntimed(firstBlock(next));
+    }
+
+    @Test
+    void aCourseCopyKeepsAnUntimedTranscript() {
+        Draft draft = draft();
+        save(draft, block(draft, "video", null, untimedLines()));
+        JsonNode copy = api.ok(INSTRUCTOR, api.post(Map.of("code", AssessmentFixtures.unique("COPY")),
+            COURSE + "/copy", draft.course.id()));
+        assertThat(copy.path("course").path("id").asLong()).isNotEqualTo(draft.course.id());
+        assertUntimed(firstBlock(copy));
+    }
+
+    @Test
+    void aNulCharacterIsRefusedOnItsFieldBecauseJsonbCannotStoreIt() {
+        Draft draft = draft();
+        refused(draft, block(draft, "video", null, List.of(line(null, "Xin\0chào"))), TRANSCRIPT);
+        refused(draft, block(draft, "video", null, List.of(line(0, "Xin\0chào"))), TRANSCRIPT);
+        refused(draft, block(draft, "video", List.of(chapter(0, "Mở\0đầu")), null), CHAPTERS);
+        assertThat(firstBlock(save(draft, block(draft, "video", null, List.of(line(null, "Xin chào")))))
+            .path(TRANSCRIPT)).hasSize(1);
+    }
+
     @Test
     void savingWithoutTheListsClearsThemAndAnEmptyListIsStoredAsNull() {
         Draft draft = draft();
