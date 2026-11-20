@@ -80,7 +80,7 @@ public class CourseDraftingRepository {
     public record LessonSnapshot(String lessonType, Long quizId, Long scormPackageId, List<BlockSnapshot> blocks) {
     }
 
-    /** A block with what makes it complete: its text, its process steps and its files. */
+    /** A block with what makes it complete: its text, its process or flow steps and its files. */
     public record BlockSnapshot(String blockType, String body, int steps, int assets) {
     }
 
@@ -717,7 +717,9 @@ public class CourseDraftingRepository {
         Map<Long, List<BlockSnapshot>> blocks = new HashMap<>();
         jdbc.query("""
             SELECT b.lesson_id, b.block_type, b.body,
-                   (SELECT count(*) FROM learning_hub.process_steps s WHERE s.block_id = b.block_id),
+                   CASE WHEN b.block_type = 'flow'
+                        THEN coalesce(jsonb_array_length(b.flow_model -> 'steps'), 0)
+                        ELSE (SELECT count(*) FROM learning_hub.process_steps s WHERE s.block_id = b.block_id) END,
                    (SELECT count(*) FROM learning_hub.block_assets a WHERE a.block_id = b.block_id)
               FROM learning_hub.lesson_blocks b
               JOIN learning_hub.course_lessons l ON l.lesson_id = b.lesson_id

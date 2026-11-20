@@ -4,6 +4,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.unit.DataSize;
 import vn.com.coreacademy.knowledge.chunking.Chunker;
@@ -49,6 +51,28 @@ class LessonReaderTest {
         assertThat(read.hits().get(0).lesson().url()).isEqualTo("/lesson/26/88");
         assertThat(read.hits().get(0).lesson().blockId()).isZero();
         assertThat(read.hits().get(0).chunkId()).isNegative();
+    }
+
+    @Test
+    void aFlowBlockIsReadAsItsStepsInOrderWithTheNamesOfItsObjects() throws Exception {
+        JsonNode flow = new ObjectMapper().readTree("""
+            {"version": 1,
+             "objects": [{"id": "kh", "name": "Khách hàng", "kind": "customer", "x": 0, "z": 0},
+                         {"id": "core", "name": "Core Banking", "kind": "system", "x": 3, "z": 0}],
+             "steps": [{"id": "s1", "from": "kh", "to": "core", "title": "Gửi lệnh", "description": "Qua app."},
+                       {"id": "s2", "from": "core", "to": null, "title": "Kiểm tra hạn mức", "description": null}]}
+            """);
+        when(retrieval.lessonChunks(72, LessonReader.MAX_CHUNKS_PLUS_ONE)).thenReturn(List.of());
+        when(index.lessonBlocks(3, 72)).thenReturn(List.of(new SourceBlock(1, "Chương 1", 72, "Bài luồng", 9,
+            "Chuyển tiền", "flow", null, null, null, null, flow)));
+
+        LessonText read = reader.read(25, "Khóa luồng", 3, 72, "Bài luồng");
+
+        assertThat(read.noText()).isFalse();
+        String text = String.join(" ", read.hits().stream().map(hit -> hit.content()).toList());
+        assertThat(text).contains("1. Gửi lệnh (Khách hàng → Core Banking): Qua app.")
+            .contains("2. Kiểm tra hạn mức (Core Banking → tự xử lý)");
+        assertThat(text.indexOf("1. Gửi lệnh")).isLessThan(text.indexOf("2. Kiểm tra hạn mức"));
     }
 
     @Test

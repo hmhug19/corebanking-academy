@@ -95,6 +95,9 @@ public class DraftingPublishCheck {
         if (blocks.stream().anyMatch(block -> BlockType.PROCESS.equals(block.blockType()) && block.steps() == 0)) {
             return "Khối quy trình chưa có bước";
         }
+        if (blocks.stream().anyMatch(block -> BlockType.FLOW.equals(block.blockType()) && block.steps() == 0)) {
+            return "Khối mô phỏng luồng chưa có bước chuyển";
+        }
         return blocks.stream().anyMatch(block -> FILE_BLOCKS.contains(block.blockType()) && block.assets() == 0)
             ? "Thiếu tệp" : null;
     }

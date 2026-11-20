@@ -84,8 +84,9 @@ public final class LearningCodes {
         public static final String PROCESS = "process";
         public static final String IMAGE = "image";
         public static final String ATTACHMENT = "attachment";
+        public static final String FLOW = "flow";
         public static final String PATTERN = VIDEO + "|" + PDF + "|" + TEXT + "|" + PROCESS + "|" + IMAGE + "|" +
-            ATTACHMENT;
+            ATTACHMENT + "|" + FLOW;
 
         private BlockType() {
         }

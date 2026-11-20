@@ -58,6 +58,7 @@ import vn.com.coreacademy.learning.entity.TrainingField;
 import vn.com.coreacademy.learning.entity.TrainingProgram;
 import vn.com.coreacademy.learning.exception.LearningResponseCode;
 import vn.com.coreacademy.learning.mapper.LearningMapper;
+import vn.com.coreacademy.learning.mapper.FlowModelJson;
 import vn.com.coreacademy.learning.mapper.LessonBlockJson;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 
@@ -648,6 +649,11 @@ public class LearningContentService {
             throw BusinessException.validation("completionThreshold", "REQUIRED", "Vui lòng đặt tỷ lệ xem video.");
         }
         validatePlayerLists(course, block);
+        if (BlockType.FLOW.equals(block.blockType())) {
+            FlowModelRules.validated(block.flow());
+        } else if (block.flow() != null) {
+            throw BusinessException.validation("flow", "INVALID_VALUE", "Dữ liệu Mô phỏng luồng chỉ dùng cho khối flow.");
+        }
         if (BlockType.TEXT.equals(block.blockType()) && BodyFormat.HTML.equals(block.bodyFormat()) && block.body() != null) {
             Document html = Jsoup.parseBodyFragment(block.body());
             Set<Long> attachedImages = block.assets().stream().filter(asset -> AssetUsage.IMAGE.equals(asset.usage()))
@@ -819,6 +825,7 @@ public class LearningContentService {
         boolean valid = switch (block.blockType()) {
             case BlockType.TEXT -> block.body() != null && !block.body().isBlank() && block.bodyFormat() != null;
             case BlockType.PROCESS -> !detail.steps().isEmpty();
+            case BlockType.FLOW -> FlowModelRules.stepCount(block.flow()) > 0;
             case BlockType.VIDEO, BlockType.PDF -> detail.assets().stream()
                 .filter(a -> AssetUsage.PRIMARY.equals(a.usage().usage())).count() == 1;
             case BlockType.IMAGE, BlockType.ATTACHMENT -> !detail.assets().isEmpty();
@@ -891,6 +898,8 @@ public class LearningContentService {
         block.setVideoChapters(LessonBlockJson.chaptersColumn(input.videoChapters()));
         block.setTranscript(LessonBlockJson.linesColumn(input.transcript()));
         block.setAllowSeeking(input.allowSeeking());
+        block.setFlowModel(BlockType.FLOW.equals(input.blockType())
+            ? FlowModelJson.column(FlowModelRules.validated(input.flow())) : null);
         block.setMediaAssetId(input.assets().stream().filter(a -> AssetUsage.PRIMARY.equals(a.usage()))
             .map(LearningRequests.AssetUse::assetId).findFirst().orElse(null));
         repository.save(block, actor);
@@ -962,7 +971,7 @@ public class LearningContentService {
                         b.block().videoChapters().stream().map(ch -> new LearningRequests.VideoChapterInput(
                             ch.startSeconds(), ch.title())).toList(), b.block().transcript().stream()
                             .map(t -> new LearningRequests.TranscriptLineInput(t.startSeconds(), t.text())).toList(),
-                        b.block().allowSeeking()))
+                        b.block().allowSeeking(), b.block().flow()))
                     .toList(), l.lesson().scormPackageId(), l.lesson().scormCompletionRule()))
                 .toList())).toList();
         var payload = new LearningRequests.DraftContent(source.getProgramId(), source.getModuleId(),

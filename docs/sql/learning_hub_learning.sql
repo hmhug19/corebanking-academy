@@ -259,6 +259,7 @@ CREATE TABLE learning_hub.lesson_blocks (
     source_block_id bigint,
     video_chapters jsonb,
     transcript jsonb,
+    flow_model jsonb,
     allow_seeking boolean NOT NULL DEFAULT false,
     created_by varchar(20) NOT NULL,
     updated_by varchar(20) NOT NULL,
@@ -280,6 +281,7 @@ COMMENT ON COLUMN learning_hub.lesson_blocks.sort_no IS 'Thuộc tính sortNo; x
 COMMENT ON COLUMN learning_hub.lesson_blocks.source_block_id IS 'ID tham chiếu logic, không có FK; backend kiểm tra tồn tại và quyền.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.video_chapters IS 'Mốc của khối video: mảng JSON [{"startSeconds": số giây, "title": tên mốc}], tối đa 50 mốc, startSeconds tăng dần; NULL khi không có mốc hoặc khối không phải video. Service kiểm tra, không có ràng buộc DB.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.transcript IS 'Transcript của khối video: mảng JSON [{"startSeconds": số giây, "text": nội dung}], tối đa 2000 đoạn, startSeconds tăng dần; NULL khi không có transcript hoặc khối không phải video. Service kiểm tra, không có ràng buộc DB.';
+COMMENT ON COLUMN learning_hub.lesson_blocks.flow_model IS 'Mô phỏng luồng của khối flow: JSON {"version": 1, "objects": [{id, name, kind, x, z}], "steps": [{id, from, to, title, description}]}, tối đa 30 đối tượng và 100 bước; NULL với loại khối khác. Service kiểm tra, không có ràng buộc DB.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.allow_seeking IS 'Khối video cho phép người học tua tự do (mặc định false); luôn false với khối khác, service kiểm tra. Không đổi cách tính hoàn thành: chỉ đoạn đã phát được tính.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.created_by IS 'Mã cán bộ tạo bản ghi.';
 COMMENT ON COLUMN learning_hub.lesson_blocks.updated_by IS 'Mã cán bộ cập nhật gần nhất.';

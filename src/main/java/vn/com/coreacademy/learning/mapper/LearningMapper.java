@@ -53,6 +53,7 @@ public interface LearningMapper {
 
     @Mapping(target = "videoChapters", expression = "java(LessonBlockJson.chapters(value.getVideoChapters()))")
     @Mapping(target = "transcript", expression = "java(LessonBlockJson.lines(value.getTranscript()))")
+    @Mapping(target = "flow", expression = "java(FlowModelJson.read(value.getFlowModel()))")
     LearningViews.LessonBlockView view(LessonBlock value);
 
     LearningViews.ProcessStepView view(ProcessStep value);

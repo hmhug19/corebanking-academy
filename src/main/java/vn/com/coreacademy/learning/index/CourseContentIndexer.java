@@ -20,6 +20,8 @@ import vn.com.coreacademy.knowledge.chunking.ChunkText;
 import vn.com.coreacademy.knowledge.chunking.Chunker;
 import vn.com.coreacademy.knowledge.extraction.TextLine;
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.BlockAsset;
+import vn.com.coreacademy.learning.mapper.FlowModelJson;
+import vn.com.coreacademy.learning.service.FlowModelRules;
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.NewChunk;
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.PendingRevision;
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.SourceBlock;
@@ -172,7 +174,7 @@ public class CourseContentIndexer {
     }
 
     /**
-     * Text, process and video blocks carry words here; the words of pdf and attachment blocks come from their files
+     * Text, process, video and flow blocks carry words here; the words of pdf and attachment blocks come from their files
      * ({@link CourseAssetText}) and an image has none.
      */
     static String text(SourceBlock block) {
@@ -180,6 +182,7 @@ public class CourseContentIndexer {
             case "text" -> plain(block.body(), block.bodyFormat());
             case "process" -> block.steps() == null ? "" : block.steps();
             case "video" -> transcript(block.transcript());
+            case "flow" -> FlowModelRules.text(FlowModelJson.read(block.flow()));
             default -> "";
         };
     }

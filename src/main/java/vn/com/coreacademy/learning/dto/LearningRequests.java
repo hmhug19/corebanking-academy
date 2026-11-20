@@ -221,7 +221,18 @@ public final class LearningRequests {
         @NotNull @Size(max = 200) List<@Valid StepInput> steps,
         List<VideoChapterInput> videoChapters,
         List<TranscriptLineInput> transcript,
-        boolean allowSeeking) {
+        boolean allowSeeking,
+        @Schema(description = "Chỉ khối flow (Mô phỏng luồng): đối tượng và bước chuyển; null với loại khác.",
+            nullable = true)
+        FlowModel flow) {
+
+        public BlockInput(String blockType, String title, String body, String bodyFormat, String completionMode,
+                          BigDecimal completionThreshold, boolean isRequired, List<AssetUse> assets,
+                          List<StepInput> steps, List<VideoChapterInput> videoChapters,
+                          List<TranscriptLineInput> transcript, boolean allowSeeking) {
+            this(blockType, title, body, bodyFormat, completionMode, completionThreshold, isRequired, assets, steps,
+                videoChapters, transcript, allowSeeking, null);
+        }
     }
 
     /** Mốc của khối video; service kiểm tra số lượng, độ dài, thứ tự và giới hạn thời lượng. */
