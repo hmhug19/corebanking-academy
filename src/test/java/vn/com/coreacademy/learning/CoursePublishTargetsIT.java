@@ -220,17 +220,47 @@ class CoursePublishTargetsIT extends AssessmentIntegrationTest {
             "reason", "Cập nhật nội dung bắt buộc", "idempotencyKey", AssessmentFixtures.unique("revision-change"));
     }
 
+    private long enrollmentOf(long recipient) {
+        return jdbc.queryForObject("select enrollment_id from learning_hub.assignment_recipients where recipient_id = ?",
+            Long.class, recipient);
+    }
+
     @Test
-    void publishingKeepsOldLearningAndExplicitChangesPreserveHistoryAndObligations() {
+    void publishingMovesUntouchedLearningAndKeepsStartedLearningOnItsRevision() {
         Course course = fixtures.course(LEARNER, LEARNER_2);
         long started = recipient(course, LEARNER), untouched = recipient(course, LEARNER_2);
-        long oldStarted = jdbc.queryForObject("select enrollment_id from learning_hub.assignment_recipients where recipient_id = ?", Long.class, started);
+        long oldStarted = enrollmentOf(started), oldUntouched = enrollmentOf(untouched);
         jdbc.update("update learning_hub.course_enrollments set status = 'in_progress', started_at = now(), progress_percent = 25 where enrollment_id = ?", oldStarted);
+
         long next = nextRevision(course).path("revision").path("id").asLong();
+
         assertThat(jdbc.queryForObject("select revision_id from learning_hub.course_enrollments where enrollment_id = ?", Long.class, oldStarted))
             .isEqualTo(course.revisionId());
         assertThat(jdbc.queryForObject("select progress_percent from learning_hub.course_enrollments where enrollment_id = ?", BigDecimal.class, oldStarted))
             .isEqualByComparingTo("25");
+        long moved = enrollmentOf(untouched);
+        assertThat(moved).isNotEqualTo(oldUntouched);
+        assertThat(jdbc.queryForMap("select revision_id, status, cycle_no from learning_hub.course_enrollments where enrollment_id = ?", moved))
+            .containsEntry("revision_id", next).containsEntry("status", "not_started").containsEntry("cycle_no", 2);
+        assertThat(jdbc.queryForObject("select status from learning_hub.course_enrollments where enrollment_id = ?", String.class, oldUntouched))
+            .isEqualTo("withdrawn");
+        assertThat(api.ok(LEARNER_2, ApiClient.get("/api/v1/me/learning/courses/{c}", course.id()))
+            .path("card").path("revisionId").asLong()).isEqualTo(next);
+        assertThat(revisionPreview(untouched).path("canTransfer").asBoolean()).isFalse();
+    }
+
+    @Test
+    void explicitChangesPreserveHistoryAndObligations() {
+        Course course = fixtures.course(LEARNER);
+        long started = recipient(course, LEARNER);
+        long oldStarted = enrollmentOf(started);
+        jdbc.update("update learning_hub.course_enrollments set status = 'in_progress', started_at = now(), progress_percent = 25 where enrollment_id = ?", oldStarted);
+        long next = nextRevision(course).path("revision").path("id").asLong();
+        // Lần học chưa đụng tới còn ở bản cũ chỉ có từ dữ liệu trước khi xuất bản tự chuyển; người quản lý chuyển tay.
+        fixtures.assign(course.id(), next, CHILD_LEARNER);
+        long untouched = recipient(course, CHILD_LEARNER);
+        jdbc.update("update learning_hub.course_enrollments set revision_id = ? where enrollment_id = ?",
+            course.revisionId(), enrollmentOf(untouched));
         fixtures.assign(course.id(), next, LEARNER);
         assertThat(jdbc.queryForObject("select count(*) from learning_hub.course_enrollments where course_id = ? and user_id = ?", Long.class, course.id(), LEARNER))
             .isEqualTo(1);
@@ -239,7 +269,7 @@ class CoursePublishTargetsIT extends AssessmentIntegrationTest {
         api.error(INSTRUCTOR, api.post(changeBody(startedPreview, "transfer_unstarted"),
             "/api/v1/learning-assignments/recipients/{id}/revision-change", started), "LEARNING-CONFLICT");
         JsonNode stale = revisionPreview(untouched);
-        fixtures.assign(course.id(), next, LEARNER_2);
+        fixtures.assign(course.id(), next, CHILD_LEARNER);
         api.error(INSTRUCTOR, api.post(changeBody(stale, "transfer_unstarted"),
             "/api/v1/learning-assignments/recipients/{id}/revision-change", untouched), "LEARNING-CONFLICT");
         JsonNode preview = revisionPreview(untouched);

@@ -480,6 +480,30 @@ public class LearningRepository {
             """).setParameter("id", enrollmentId).getSingleResult());
     }
 
+    /**
+     * Lần học mới nhất của mỗi người trên khóa mà còn ở bản khác {@code revisionId} và chưa có tương tác nào: cùng
+     * điều kiện "chưa đụng tới" với {@link #enrollmentHasInteractions} và xem trước chuyển phiên bản.
+     */
+    @SuppressWarnings("unchecked")
+    public List<CourseEnrollment> untouchedEnrollments(Long courseId, Long revisionId) {
+        return entityManager.createNativeQuery("""
+            select e.*
+            from learning_hub.course_enrollments e
+            where e.course_id = :course and e.revision_id <> :revision and e.status = :notStarted
+              and e.started_at is null and e.last_access_at is null and e.progress_percent = 0
+              and not exists (select 1 from learning_hub.course_enrollments later
+                              where later.course_id = e.course_id and later.user_id = e.user_id
+                                and later.cycle_no > e.cycle_no)
+              and not exists (select 1 from learning_hub.lesson_progress where enrollment_id = e.enrollment_id)
+              and not exists (select 1 from learning_hub.block_progress where enrollment_id = e.enrollment_id)
+              and not exists (select 1 from learning_hub.quiz_attempts where enrollment_id = e.enrollment_id)
+              and not exists (select 1 from learning_hub.scorm_registrations where enrollment_id = e.enrollment_id)
+            order by e.enrollment_id
+            """, CourseEnrollment.class)
+            .setParameter("course", courseId).setParameter("revision", revisionId)
+            .setParameter("notStarted", ProgressStatus.NOT_STARTED).getResultList();
+    }
+
     public List<CourseEnrollment> enrollmentHistory(Long courseId, String userId) {
         return query("""
             select e

@@ -43,8 +43,10 @@ class LearnerCourseIT extends AssessmentIntegrationTest {
     }
 
     @Test
-    void anEnrolledCourseKeepsItsRevisionAfterANewOneIsPublished() {
+    void aStartedCourseKeepsItsRevisionAfterANewOneIsPublished() {
         Course course = fixtures.course(LEARNER);
+        jdbc.update("update learning_hub.course_enrollments set status = 'in_progress', started_at = now() "
+            + "where course_id = ? and user_id = ?", course.id(), LEARNER);
         JsonNode draft = api.ok(INSTRUCTOR, api.post(Map.of(), "/api/v1/courses/{c}/draft", course.id()));
         long newRevision = draft.path("revision").path("id").asLong();
         assertThat(newRevision).isNotEqualTo(course.revisionId());
