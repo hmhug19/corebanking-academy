@@ -57,6 +57,7 @@ class ExternalConnectionIT extends ExternalAssistantIT {
         assertThat(token).startsWith("chan_ext_").hasSizeGreaterThan(40);
         assertThat(connection.path("name").asText()).isEqualTo("Claude trên máy tôi");
         assertThat(connection.path("tokenPrefix").asText()).isEqualTo(token.substring(0, 13));
+        assertThat(connection.path("kind").asText()).isEqualTo("token");
         assertThat(connection.path("lastUsedAt").isNull()).isTrue();
         OffsetDateTime expires = OffsetDateTime.parse(connection.path("expiresAt").asText());
         assertThat(expires).isBetween(OffsetDateTime.now().plusDays(29), OffsetDateTime.now().plusDays(31));
@@ -127,6 +128,7 @@ class ExternalConnectionIT extends ExternalAssistantIT {
         JsonNode instructor = api.ok(INSTRUCTOR, get(CONNECTIONS + "/status"));
         assertThat(instructor.path("enabled").asBoolean()).isTrue();
         assertThat(instructor.path("allowed").asBoolean()).isTrue();
+        assertThat(instructor.path("mcpUrl").asText()).isEqualTo("https://lms.example/api/v1/mcp");
 
         JsonNode learner = api.ok(LEARNER, get(CONNECTIONS + "/status"));
         assertThat(learner.path("enabled").asBoolean()).isTrue();

@@ -2,10 +2,11 @@ package vn.com.coreacademy.assistant.external;
 
 import java.time.OffsetDateTime;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+
+import io.swagger.v3.oas.annotations.media.Schema;
 
 /** What the Kết nối trợ lý ngoài endpoints receive and send. */
 public final class ExternalConnectionViews {
@@ -19,8 +20,13 @@ public final class ExternalConnectionViews {
     }
 
     @Schema(description = "Một kết nối còn hiệu lực hoặc đã hết hạn (chưa thu hồi); không bao giờ có token.")
-    public record ConnectionView(long id, String name,
-                                 @Schema(description = "Vài ký tự đầu của token để nhận ra kết nối") String tokenPrefix,
+    public record ConnectionView(long id,
+                                 @Schema(description = "Tên người dùng đặt (token) hoặc tên client tự khai (oauth)")
+                                 String name,
+                                 @Schema(description = "token: mã chan_ext_ dán tay; oauth: cấp qua trang Cho phép kết nối")
+                                 String kind,
+                                 @Schema(description = "Vài ký tự đầu của mã chan_ext_; null với kết nối oauth",
+                                     nullable = true) String tokenPrefix,
                                  OffsetDateTime createTime, OffsetDateTime expiresAt, OffsetDateTime lastUsedAt) {
     }
 
@@ -34,8 +40,10 @@ public final class ExternalConnectionViews {
 
     @Schema(description = """
         Tính năng Trợ lý ngoài: enabled là cờ cấu hình; allowed là người gọi được tạo kết nối (vai trò quản lý khóa học \
-        có chức năng AI_ASSISTANT, và cờ đang bật).
+        có chức năng AI_ASSISTANT, và cờ đang bật); mcpUrl là địa chỉ MCP để dán vào Claude App / Claude Code.
         """)
-    public record ExternalAssistantStatus(boolean enabled, boolean allowed) {
+    public record ExternalAssistantStatus(boolean enabled, boolean allowed,
+                                          @Schema(description = "{app-base-url}/api/v1/mcp, đúng resource mà OAuth chấp nhận")
+                                          String mcpUrl) {
     }
 }
