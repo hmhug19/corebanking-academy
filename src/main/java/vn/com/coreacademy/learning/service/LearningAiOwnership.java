@@ -14,6 +14,7 @@ import vn.com.coreacademy.learning.entity.CourseChapter;
 import vn.com.coreacademy.learning.entity.CourseLesson;
 import vn.com.coreacademy.learning.entity.LessonBlock;
 import vn.com.coreacademy.learning.entity.ProcessStep;
+import vn.com.coreacademy.learning.mapper.FlowModelJson;
 import vn.com.coreacademy.learning.repository.LearningRepository;
 
 /**
@@ -158,7 +159,8 @@ public class LearningAiOwnership {
         for (LessonBlock block : blocks.stream().sorted((a, b) -> Integer.compare(a.getSortNo(), b.getSortNo()))
             .toList()) {
             text.append(block.getBlockType()).append('|').append(block.getTitle()).append('|')
-                .append(Objects.toString(block.getBody(), "")).append('|');
+                .append(Objects.toString(block.getBody(), "")).append('|')
+                .append(Objects.toString(block.getFlowModel(), "")).append('|');
             for (ProcessStep step : steps.getOrDefault(block.getId(), List.of())) {
                 text.append(step.getTitle()).append('/').append(Objects.toString(step.getDescription(), "")).append(';');
             }
@@ -171,7 +173,8 @@ public class LearningAiOwnership {
         StringBuilder text = new StringBuilder();
         for (LearningRequests.BlockInput block : blocks) {
             text.append(block.blockType()).append('|').append(block.title()).append('|')
-                .append(Objects.toString(block.body(), "")).append('|');
+                .append(Objects.toString(block.body(), "")).append('|')
+                .append(Objects.toString(FlowModelJson.column(block.flow()), "")).append('|');
             for (LearningRequests.StepInput step : block.steps()) {
                 text.append(step.title()).append('/').append(Objects.toString(step.description(), "")).append(';');
             }

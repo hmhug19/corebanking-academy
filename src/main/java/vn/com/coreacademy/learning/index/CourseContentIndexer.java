@@ -23,6 +23,8 @@ import vn.com.coreacademy.learning.index.CourseContentChunkRepository.BlockAsset
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.NewChunk;
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.PendingRevision;
 import vn.com.coreacademy.learning.index.CourseContentChunkRepository.SourceBlock;
+import vn.com.coreacademy.learning.mapper.FlowModelJson;
+import vn.com.coreacademy.learning.service.FlowModelRules;
 
 /**
  * Keeps the course index in step with the published revisions. Each run indexes the revisions that have no completed
@@ -172,14 +174,15 @@ public class CourseContentIndexer {
     }
 
     /**
-     * Text, process and video blocks carry words here; the words of pdf and attachment blocks come from their files
-     * ({@link CourseAssetText}) and an image has none.
+     * Text, process, video and flow blocks carry words here; the words of pdf and attachment blocks come from
+     * their files ({@link CourseAssetText}) and an image has none.
      */
     static String text(SourceBlock block) {
         return switch (block.blockType()) {
             case "text" -> plain(block.body(), block.bodyFormat());
             case "process" -> block.steps() == null ? "" : block.steps();
             case "video" -> transcript(block.transcript());
+            case "flow" -> FlowModelRules.text(FlowModelJson.read(block.flow()));
             default -> "";
         };
     }

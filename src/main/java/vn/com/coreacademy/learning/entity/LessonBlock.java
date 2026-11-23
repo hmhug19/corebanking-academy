@@ -72,6 +72,11 @@ public class LessonBlock extends LearningRecord {
     @JdbcTypeCode(SqlTypes.JSON)
     private JsonNode transcript;
 
+    /** Mô phỏng luồng của khối flow: tài liệu JSON {version, objects, steps}; NULL với loại khối khác. */
+    @Column(name = "flow_model", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private JsonNode flowModel;
+
     /** Khối video cho phép người học tua tự do; luôn false với khối khác. */
     @Column(name = "allow_seeking", nullable = false)
     private Boolean allowSeeking = false;

@@ -36,6 +36,7 @@ public class CourseContentChunkRepository {
     private static final String BLOCKS = """
         SELECT ch.chapter_id, ch.title AS chapter_title, l.lesson_id, l.title AS lesson_title, b.block_id,
                b.title AS block_title, b.block_type, b.body, b.body_format, CAST(b.transcript AS text) AS transcript,
+               CAST(b.flow_model AS text) AS flow_model,
                (SELECT string_agg(s.title || coalesce(': ' || s.description, ''), E'\\n' ORDER BY s.sort_no)
                   FROM learning_hub.process_steps s WHERE s.block_id = b.block_id) AS steps
           FROM learning_hub.course_chapters ch
@@ -68,7 +69,13 @@ public class CourseContentChunkRepository {
     /** One block of a revision as stored, before it is turned into text. */
     public record SourceBlock(long chapterId, String chapterTitle, long lessonId, String lessonTitle, long blockId,
                               String blockTitle, String blockType, String body, String bodyFormat, String steps,
-                              JsonNode transcript) {
+                              JsonNode transcript, JsonNode flow) {
+        public SourceBlock(long chapterId, String chapterTitle, long lessonId, String lessonTitle, long blockId,
+                           String blockTitle, String blockType, String body, String bodyFormat, String steps,
+                           JsonNode transcript) {
+            this(chapterId, chapterTitle, lessonId, lessonTitle, blockId, blockTitle, blockType, body, bodyFormat,
+                steps, transcript, null);
+        }
     }
 
     /** One chunk to store; {@code embedding} is the bge-m3 vector of the lesson title and the content. */
@@ -143,7 +150,8 @@ public class CourseContentChunkRepository {
         return jdbc.query(BLOCKS, (rs, rowNum) -> new SourceBlock(rs.getLong("chapter_id"),
             rs.getString("chapter_title"), rs.getLong("lesson_id"), rs.getString("lesson_title"),
             rs.getLong("block_id"), rs.getString("block_title"), rs.getString("block_type"), rs.getString("body"),
-            rs.getString("body_format"), rs.getString("steps"), parse(rs.getString("transcript"))), revisionId);
+            rs.getString("body_format"), rs.getString("steps"), parse(rs.getString("transcript")),
+            parse(rs.getString("flow_model"))), revisionId);
     }
 
     /** The blocks of one lesson of a revision in reading order, as {@link #blocks(long)} reads them. */
@@ -152,7 +160,8 @@ public class CourseContentChunkRepository {
             (rs, rowNum) -> new SourceBlock(rs.getLong("chapter_id"), rs.getString("chapter_title"),
                 rs.getLong("lesson_id"), rs.getString("lesson_title"), rs.getLong("block_id"),
                 rs.getString("block_title"), rs.getString("block_type"), rs.getString("body"),
-                rs.getString("body_format"), rs.getString("steps"), parse(rs.getString("transcript"))),
+                rs.getString("body_format"), rs.getString("steps"), parse(rs.getString("transcript")),
+            parse(rs.getString("flow_model"))),
             revisionId, lessonId);
     }
 

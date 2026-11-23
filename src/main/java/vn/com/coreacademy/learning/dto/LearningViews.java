@@ -183,6 +183,7 @@ public final class LearningViews {
         List<VideoChapterView> videoChapters,
         List<TranscriptLineView> transcript,
         Boolean allowSeeking,
+        FlowModel flow,
         Long rowVersion,
         Instant createTime,
         Instant updateTime) {

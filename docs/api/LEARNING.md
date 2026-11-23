@@ -774,6 +774,35 @@ Lưu ý khi tích hợp:
 - Schema: `docs/sql/upgrade/2026-11-03-lesson-player-modes.sql` phải chạy trên DB đã có dữ liệu **trước khi triển khai
   backend** (`ddl-auto=validate` từ chối khởi động nếu thiếu cột); xem [SQL README](../sql/README.md#nâng-cấp-schema-upgrade).
 
+### Mô phỏng luồng (khối `flow`)
+
+Khối `flow` mô hình hóa một quy trình nghiệp vụ: các **Đối tượng** (khách hàng, kênh, hệ thống…) đặt trên sàn lưới và các
+**Bước chuyển** theo thứ tự phát, mỗi bước là một Đối tượng chuyển cho Đối tượng khác hoặc tự xử lý. Tài liệu đi cùng khối
+trong lưu cây khóa (PUT `/api/v1/courses/{courseId}/revisions/{revisionId}`) ở trường `flow`, và trả về trong
+`LessonBlockView.flow` ở mọi nơi có khối. Khối khác loại trả `flow: null`.
+
+```json
+{ "version": 1,
+  "objects": [{ "id": "core", "name": "Core Banking", "kind": "system", "x": 3, "z": 0 }],
+  "steps":   [{ "id": "s1", "from": "kh", "to": "core", "title": "Gửi lệnh", "description": null }] }
+```
+
+Quy tắc (vi phạm là `CORE-VALIDATION_FAILED`, `errors[0].field` theo đường dẫn, ví dụ `flow.objects[1].kind`):
+
+- `flow` bắt buộc với khối `flow` và bị từ chối ở khối khác; khối `flow` không mang `steps` (của khối process) hay tài nguyên.
+- `version` = 1. Tối đa 30 đối tượng (`flow.objects`) và 100 bước (`flow.steps`).
+- `id`: 1-20 ký tự `[a-z0-9_-]`, không trùng trong danh sách của nó.
+- `kind`: `customer`, `staff`, `channel`, `system`, `database`, `queue`, `gateway`, `document`, `external`, `decision`.
+- `name` 1-60 ký tự, `title` 1-255 ký tự, `description` tối đa 2000 ký tự hoặc `null`; cắt khoảng trắng, mô tả rỗng thành `null`.
+- `x`, `z`: số nguyên -40..40; hai đối tượng không cùng ô.
+- `from` là một đối tượng có sẵn; `to` là đối tượng khác `from`, hoặc `null` khi đối tượng tự xử lý.
+- Không có thực thể liên kết: đường nối giữa hai đối tượng suy ra từ các bước.
+
+Lưu nháp chấp nhận khối `flow` chưa có bước; xuất bản từ chối (`LEARNING-NOT_PUBLISHABLE`) như khối process rỗng. Bản
+nháp mới và bản sao khóa giữ nguyên tài liệu. Khi index, văn bản của khối là các bước theo thứ tự, mỗi bước một dòng
+`n. tiêu đề (từ → tới | tự xử lý): mô tả`. Trợ lý không tạo khối `flow`. Schema: cột `lesson_blocks.flow_model` (jsonb),
+chạy `docs/sql/upgrade/2026-11-30-flow-model.sql` **trước khi triển khai backend**.
+
 ### Cho phép tua video (`allowSeeking`)
 
 Khối `video` có cờ `allowSeeking` (boolean, mặc định `false`): khi `true`, trình phát cho người học tua tự do tới/lùi.
