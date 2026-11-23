@@ -386,6 +386,7 @@ class CourseFinalExamIT extends AssessmentIntegrationTest {
     void anEnrollmentOnAnOlderRevisionIsNotAffectedByANewerFinalExam() {
         Course course = fixtures.course(LEARNER);
         long enrollment = enrollmentOf(course.id(), LEARNER);
+        start(enrollment);
         long quizId = quiz(course, "FINAL_EXAM", true);
         JsonNode published = publish(save(newDraft(course), course, quizId), course);
         fixtures.assign(course.id(), published.path("revision").path("id").asLong(), LEARNER_2);
@@ -397,9 +398,17 @@ class CourseFinalExamIT extends AssessmentIntegrationTest {
         assertThat(status(enrollment)).isEqualTo("completed");
         assertThat(status(newer)).isNotEqualTo("completed");
     }
+
+    /** Học viên đã bắt đầu học thì giữ bản cũ khi khóa được xuất bản lại. */
+    private void start(long enrollmentId) {
+        jdbc.update("UPDATE learning_hub.course_enrollments SET status = 'in_progress', started_at = now() "
+            + "WHERE enrollment_id = ?", enrollmentId);
+    }
+
     @Test
     void newFinalExamDoesNotReplaceTheExamOfAnExistingEnrollment() {
         WithExam old = publishedWithExam(LEARNER);
+        start(enrollmentOf(old.course().id(), LEARNER));
         long nextQuiz = quiz(old.course(), "FINAL_EXAM", true);
         JsonNode next = publish(save(newDraft(old.course()), old.course(), nextQuiz), old.course());
         fixtures.assign(old.course().id(), next.path("revision").path("id").asLong(), LEARNER_2);

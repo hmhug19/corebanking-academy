@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /** Read model scalar; không trả entity hoặc quan hệ JPA qua API. */
 public final class LearningViews {
     private LearningViews() {
@@ -190,7 +192,10 @@ public final class LearningViews {
     public record VideoChapterView(BigDecimal startSeconds, String title) {
     }
 
-    public record TranscriptLineView(BigDecimal startSeconds, String text) {
+    public record TranscriptLineView(
+        @Schema(description = "Giây bắt đầu của đoạn. null = đoạn không có thời điểm; một transcript hoặc đều có "
+            + "thời điểm, hoặc đều null.", nullable = true) BigDecimal startSeconds,
+        String text) {
     }
 
     public record ProcessStepView(

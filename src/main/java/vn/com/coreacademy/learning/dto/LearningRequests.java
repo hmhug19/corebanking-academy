@@ -239,8 +239,12 @@ public final class LearningRequests {
     public record VideoChapterInput(BigDecimal startSeconds, String title) {
     }
 
-    /** Một đoạn transcript của khối video; cùng luật kiểm tra với mốc. */
-    public record TranscriptLineInput(BigDecimal startSeconds, String text) {
+    /** Một đoạn transcript của khối video; startSeconds null = không có thời điểm (đều null hoặc đều có, xem service). */
+    public record TranscriptLineInput(
+        @Schema(description = "Giây bắt đầu của đoạn. null = đoạn không có thời điểm; một transcript hoặc đều có "
+            + "thời điểm (không âm, tăng ngặt), hoặc đều null; trộn hai loại bị từ chối.", nullable = true)
+        BigDecimal startSeconds,
+        String text) {
     }
 
     public record AssetUse(

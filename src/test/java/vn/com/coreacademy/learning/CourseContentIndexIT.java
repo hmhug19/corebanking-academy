@@ -190,6 +190,8 @@ class CourseContentIndexIT extends AssessmentIntegrationTest {
         AssessmentFixtures fixtures = new AssessmentFixtures(new ApiClient(mvc, json), jdbc);
         ApiClient api = new ApiClient(mvc, json);
         Course old = fixtures.course(LEARNER);
+        jdbc.update("UPDATE learning_hub.course_enrollments SET status = 'in_progress', started_at = now() "
+            + "WHERE course_id = ? AND user_id = ?", old.id(), LEARNER);
         indexAll();
         JsonNode draft = api.ok(INSTRUCTOR, api.post(Map.of(), "/api/v1/courses/{c}/draft", old.id()));
         long next = draft.path("revision").path("id").asLong();
