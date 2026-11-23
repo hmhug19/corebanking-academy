@@ -19,6 +19,7 @@ import vn.com.coreacademy.assistant.external.ExternalConnectionViews.ConnectionV
 import vn.com.coreacademy.assistant.external.ExternalConnectionViews.CreateConnection;
 import vn.com.coreacademy.assistant.external.ExternalConnectionViews.CreatedConnection;
 import vn.com.coreacademy.assistant.external.ExternalConnectionViews.ExternalAssistantStatus;
+import vn.com.coreacademy.assistant.external.oauth.OAuthAudit;
 import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
 import vn.com.coreacademy.identity.service.AuthService;
@@ -39,14 +40,15 @@ public class ExternalConnectionService {
     private final ExternalAssistantProperties properties;
     private final AuthService auth;
     private final LearningIdentityService identity;
+    private final OAuthAudit audit;
 
     /** Whether the feature is on and the caller may connect; answers even when it is off, so the page can hide it. */
     public ExternalAssistantStatus status() {
         if (!properties.enabled()) {
-            return new ExternalAssistantStatus(false, false);
+            return new ExternalAssistantStatus(false, false, properties.mcpUrl());
         }
 
-        return new ExternalAssistantStatus(true, mayConnect(SecurityContextUtils.getUserId()));
+        return new ExternalAssistantStatus(true, mayConnect(SecurityContextUtils.getUserId()), properties.mcpUrl());
     }
 
     public List<ConnectionView> list() {
@@ -77,6 +79,8 @@ public class ExternalConnectionService {
         if (!connections.revoke(connectionId, userId)) {
             throw new BusinessException(ResponseCode.RESOURCE_NOT_FOUND);
         }
+        connections.find(connectionId).filter(row -> ExternalConnectionRepository.OAUTH.equals(row.kind()))
+            .ifPresent(row -> audit.record(OAuthAudit.Event.REVOKED, userId, connectionId, row.clientId(), "user"));
     }
 
     /** The user may hold a connection now: a role that manages courses and the assistant function. */
@@ -115,7 +119,7 @@ public class ExternalConnectionService {
     }
 
     private static ConnectionView view(ConnectionRow row) {
-        return new ConnectionView(row.id(), row.name(), row.tokenPrefix(), row.createTime(), row.expiresAt(),
-            row.lastUsedAt());
+        return new ConnectionView(row.id(), row.name(), row.kind(), row.tokenPrefix(), row.createTime(),
+            row.expiresAt(), row.lastUsedAt());
     }
 }

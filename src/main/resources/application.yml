@@ -154,6 +154,13 @@ app:
       max-body: ${ASSISTANT_EXTERNAL_MAX_BODY:256KB}
       max-active-sessions: ${ASSISTANT_EXTERNAL_MAX_ACTIVE_SESSIONS:3}
       last-used-interval: 1m
+      # OAuth clients one address may register a minute (ADR 0005).
+      oauth-registrations-per-minute: ${ASSISTANT_EXTERNAL_OAUTH_REGISTRATIONS_PER_MINUTE:10}
+      oauth-registrations-per-minute-total: ${ASSISTANT_EXTERNAL_OAUTH_REGISTRATIONS_PER_MINUTE_TOTAL:100}
+      oauth-authorizations-per-minute: ${ASSISTANT_EXTERNAL_OAUTH_AUTHORIZATIONS_PER_MINUTE:30}
+      # Peers whose X-Real-IP is believed (the web nginx); anyone else is limited by their own address.
+      oauth-trusted-proxies: ${ASSISTANT_EXTERNAL_OAUTH_TRUSTED_PROXIES:127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+      oauth-cleanup-cron: ${ASSISTANT_EXTERNAL_OAUTH_CLEANUP_CRON:0 40 3 * * *}
   jwt:
     secret: ${JWT_SECRET}
     expiry-minutes: 600

@@ -20,6 +20,9 @@ root-owned trên server. Dùng player `https://chanacademy.io.vn:8020`, LMS `htt
 Nginx dùng HTTPS 8020 công khai, upstream player HTTP 8020 nội bộ. Cấu hình Nginx và port mapping xem
 [Triển khai SCORM](DEPLOY_UBUNTU.md#scorm-12). Sau thay environment phải recreate BE; `restart` không nạp biến mới.
 
+Trợ lý ngoài kết nối bằng OAuth cần Nginx của web chuyển `/.well-known/oauth-` sang BE; snippet, reload và
+lệnh kiểm tra ở [OAUTH_NGINX.md](OAUTH_NGINX.md). Image mới không tự thêm location này.
+
 Kiểm tra riêng ba biến không chứa secret, không dump toàn bộ environment:
 
 ```bash

@@ -8,8 +8,6 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
-import vn.com.coreacademy.identity.security.UserJwtAuthenticationConverter;
-import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.security.ApiSecurityErrorHandler;
 
 /**
@@ -25,15 +23,13 @@ public class ExternalMcpSecurityConfig {
     @Order(1)
     SecurityFilterChain externalMcpFilterChain(HttpSecurity http, ExternalAssistantProperties properties,
                                                ExternalConnectionRepository connections,
-                                               ExternalConnectionService service, LearningIdentityService identity,
-                                               UserJwtAuthenticationConverter converter, ObjectMapper mapper,
+                                               ExternalConnectionAuthenticator authenticator, ObjectMapper mapper,
                                                ApiSecurityErrorHandler errors, ExternalCallLimiter limiter)
         throws Exception {
         http.securityMatcher(MCP_PATH, MCP_PATH + "/**")
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .addFilterBefore(new ExternalTokenFilter(properties, connections, service, identity, converter, mapper,
-                limiter),
+            .addFilterBefore(new ExternalTokenFilter(properties, connections, authenticator, mapper, limiter),
                 AnonymousAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
             .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(errors).accessDeniedHandler(errors));

@@ -7,12 +7,10 @@ import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
@@ -20,11 +18,12 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -32,14 +31,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import vn.com.coreacademy.assistant.external.ExternalConnectionRepository.ConnectionRow;
 import vn.com.coreacademy.common.dto.BaseResponse;
 import vn.com.coreacademy.common.dto.FieldViolation;
-import vn.com.coreacademy.common.exception.BusinessException;
 import vn.com.coreacademy.common.exception.ResponseCode;
-import vn.com.coreacademy.identity.security.UserJwtAuthenticationConverter;
-import vn.com.coreacademy.identity.service.LearningIdentityService;
 import vn.com.coreacademy.security.SecurityConstants;
 
 /**
- * Authenticates a Kết nối trợ lý ngoài on {@code /api/v1/mcp}, the only path its token works on. With the feature off
+ * Authenticates a Kết nối trợ lý ngoài on {@code /api/v1/mcp}, the only path its token works on: a pasted chan_ext_
+ * token (ADR 0004) or an OAuth access token chan_oat_ (ADR 0005). With the feature off
  * the endpoint answers 404 before anything else. A token that is missing, unknown, revoked or expired, of a user who
  * is not active, or of one who no longer holds a role that may draft courses with the assistant, gets 401.
  *
@@ -57,28 +54,23 @@ import vn.com.coreacademy.security.SecurityConstants;
 @Log4j2
 public class ExternalTokenFilter extends OncePerRequestFilter {
     /** The claim of the in-memory token that names the connection a call came through. */
-    public static final String CONNECTION_CLAIM = "externalConnectionId";
+    public static final String CONNECTION_CLAIM = ExternalConnectionAuthenticator.CONNECTION_CLAIM;
     /** The purpose claim of that token, so nothing mistakes it for a sign-in. */
-    public static final String PURPOSE = "external_assistant";
+    public static final String PURPOSE = ExternalConnectionAuthenticator.PURPOSE;
     private static final String BEARER = SecurityConstants.TOKEN_TYPE + " ";
 
     private final ExternalAssistantProperties properties;
     private final ExternalConnectionRepository connections;
-    private final ExternalConnectionService service;
-    private final LearningIdentityService identity;
-    private final UserJwtAuthenticationConverter converter;
+    private final ExternalConnectionAuthenticator authenticator;
     private final ObjectMapper mapper;
     private final ExternalCallLimiter limiter;
 
     public ExternalTokenFilter(ExternalAssistantProperties properties, ExternalConnectionRepository connections,
-                               ExternalConnectionService service, LearningIdentityService identity,
-                               UserJwtAuthenticationConverter converter, ObjectMapper mapper,
+                               ExternalConnectionAuthenticator authenticator, ObjectMapper mapper,
                                ExternalCallLimiter limiter) {
         this.properties = properties;
         this.connections = connections;
-        this.service = service;
-        this.identity = identity;
-        this.converter = converter;
+        this.authenticator = authenticator;
         this.mapper = mapper;
         this.limiter = limiter;
     }
@@ -103,7 +95,9 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
         Optional<ConnectionRow> connection = connection(request.getHeader(HttpHeaders.AUTHORIZATION));
         if (connection.isEmpty() || !authenticate(connection.get())) {
             SecurityContextHolder.clearContext();
-            response.setHeader(HttpHeaders.WWW_AUTHENTICATE, SecurityConstants.TOKEN_TYPE);
+            // Names the OAuth metadata, so a client that has only the MCP URL can start signing in (RFC 9728 §5.1).
+            response.setHeader(HttpHeaders.WWW_AUTHENTICATE, SecurityConstants.TOKEN_TYPE + " resource_metadata=\""
+                + properties.resourceMetadataUrl() + "\"");
             log.warn("Rejected external assistant call method={} path={} messageCode={}", request.getMethod(),
                 request.getRequestURI(), ResponseCode.UNAUTHORIZED.getCode());
             write(response, ResponseCode.UNAUTHORIZED);
@@ -134,47 +128,28 @@ public class ExternalTokenFilter extends OncePerRequestFilter {
             return Optional.empty();
         }
         String token = header.substring(BEARER.length()).strip();
-        if (!token.startsWith(ExternalConnectionCodes.TOKEN_PREFIX)) {
-            return Optional.empty();
+        if (token.startsWith(ExternalConnectionCodes.TOKEN_PREFIX)) {
+            return connections.findUsable(ExternalConnectionService.hash(token));
+        }
+        if (token.startsWith(ExternalConnectionCodes.OAUTH_ACCESS_TOKEN_PREFIX)) {
+            // An OAuth access token (ADR 0005): an hour old at most, and only while its connection is live.
+            return connections.findUsableAccess(ExternalConnectionService.hash(token));
         }
 
-        return connections.findUsable(ExternalConnectionService.hash(token));
+        return Optional.empty();
     }
 
     /** Puts the connection's user in the context; false (context cleared by the caller) when they may not act now. */
     private boolean authenticate(ConnectionRow connection) {
-        long version;
-        try {
-            version = identity.authorizationVersion(connection.userId());
-        } catch (BusinessException exception) {
+        Optional<Authentication> authentication = authenticator.authenticate(connection);
+        if (authentication.isEmpty()) {
             return false;
         }
-        Instant now = Instant.now();
-        Jwt token = Jwt.withTokenValue("external-connection-" + connection.id())
-            .header("alg", "none")
-            .subject(connection.userId())
-            .claim(SecurityConstants.AUTH_VERSION_CLAIM, version)
-            .claim(SecurityConstants.TOKEN_PURPOSE_CLAIM, PURPOSE)
-            .claim(CONNECTION_CLAIM, connection.id())
-            .issuedAt(now)
-            .expiresAt(connection.expiresAt().toInstant())
-            .build();
-        Authentication authentication;
-        try {
-            authentication = converter.convert(token);
-        } catch (AuthenticationException exception) {
-            return false;
-        }
+        // Roles are read now, at each call: losing the role stops the connection at once.
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(authentication);
+        context.setAuthentication(authentication.get());
         SecurityContextHolder.setContext(context);
-        try {
-            // Roles are read now, at each call: losing the role stops the connection at once.
-            return service.mayConnect(connection.userId());
-        } catch (RuntimeException exception) {
-            // A temporary password (no functions) and similar refusals all mean "may not act now".
-            return false;
-        }
+        return true;
     }
 
     private void write(HttpServletResponse response, ResponseCode code) throws IOException {
