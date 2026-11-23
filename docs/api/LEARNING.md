@@ -1280,7 +1280,7 @@ After the SCORM library migration, apply `docs/sql/upgrade/2026-11-13-course-sco
 
 ## Republishing and explicit learning revision changes
 
-Publishing creates an immutable content revision and changes the latest published pointer. Existing assignments, enrollment revisions, progress, quiz results and certificates remain intact. New assignments target the latest published revision; CONTINUE reuses an existing unfinished cycle even when that cycle belongs to an older revision. A completed cycle on an older revision does not satisfy a new assignment targeting a different revision.
+Publishing creates an immutable content revision and changes the latest published pointer. Every learner's latest cycle that is still untouched (the same rule as transfer_unstarted below) moves to the new revision in the same transaction: the old cycle becomes withdrawn, a new not-started cycle keeps its enrollment origin and enrollment time, all its active recipient links move with it, and each move is audited as LEARNING_ENROLLMENT_TRANSFERRED. Cycles with any learning interaction, completed cycles, assignments, progress, quiz results and certificates remain intact on their revision. New assignments target the latest published revision; CONTINUE reuses an existing unfinished cycle even when that cycle belongs to an older revision. A completed cycle on an older revision does not satisfy a new assignment targeting a different revision.
 
 In assignment details, managers can preview and explicitly change one recipient's current learning:
 

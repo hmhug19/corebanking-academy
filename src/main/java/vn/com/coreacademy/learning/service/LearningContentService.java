@@ -34,6 +34,7 @@ import vn.com.coreacademy.learning.constants.LearningCodes.CompletionMode;
 import vn.com.coreacademy.learning.constants.LearningCodes.CourseStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.LessonType;
 import vn.com.coreacademy.learning.constants.LearningCodes.MediaMime;
+import vn.com.coreacademy.learning.constants.LearningCodes.ProgressStatus;
 import vn.com.coreacademy.learning.constants.LearningCodes.Requirement;
 import vn.com.coreacademy.learning.constants.LearningCodes.RevisionState;
 import vn.com.coreacademy.learning.constants.LearningCodes.ScormCompletion;
@@ -41,12 +42,14 @@ import vn.com.coreacademy.learning.constants.LearningLimits;
 import vn.com.coreacademy.learning.dto.LearningDetails;
 import vn.com.coreacademy.learning.dto.LearningRequests;
 import vn.com.coreacademy.learning.dto.LearningViews;
+import vn.com.coreacademy.learning.entity.AssignmentRecipient;
 import vn.com.coreacademy.learning.entity.BlockAsset;
 import vn.com.coreacademy.learning.entity.BusinessModule;
 import vn.com.coreacademy.learning.entity.Course;
 import vn.com.coreacademy.learning.entity.CourseAssessment;
 import vn.com.coreacademy.learning.entity.CourseChapter;
 import vn.com.coreacademy.learning.entity.CourseCompletionRule;
+import vn.com.coreacademy.learning.entity.CourseEnrollment;
 import vn.com.coreacademy.learning.entity.CourseLesson;
 import vn.com.coreacademy.learning.entity.CourseObjective;
 import vn.com.coreacademy.learning.entity.CourseRevision;
@@ -338,7 +341,7 @@ public class LearningContentService {
             revision.setReviewConfirmedAt(Instant.now());
         }
 
-        // Bước 2: đóng băng bản nội dung và chuyển con trỏ; enrollment cũ giữ revision_id cũ.
+        // Bước 2: đóng băng bản nội dung và chuyển con trỏ; lần học đã có tương tác giữ revision_id cũ.
         publishLinkedScorm(revisionId, actor.person().id());
         revision.setState(RevisionState.PUBLISHED);
         revision.setPublishedAt(Instant.now());
@@ -346,6 +349,7 @@ public class LearningContentService {
         course.setPublishedRevisionId(revision.getId());
         repository.save(revision, actor.person().id());
         repository.save(course, actor.person().id());
+        moveUntouchedLearning(course, revision, actor.person().id());
         if (revision.isAiGenerated()) {
             audit.record(actor.person().id(), AuditAction.COURSE_PUBLISHED, "course", course.getId().toString(),
                 course.getOwnerOrgId(), Map.of("revisionId", revision.getId(), "aiGenerated", true,
@@ -1008,6 +1012,41 @@ public class LearningContentService {
         repository.save(rule, actor);
         writeFinalAssessment(target, payload.finalQuizId() == null ? null
             : quizzes.find(payload.finalQuizId()).orElse(null), actor);
+    }
+
+    /**
+     * Lần học chưa có tương tác nào chuyển sang bản vừa xuất bản, như chế độ transfer_unstarted: lần cũ thành
+     * withdrawn để giữ lịch sử, lần mới cùng nguồn ghi danh, mọi nghĩa vụ đang hiệu lực trỏ sang lần mới.
+     */
+    private void moveUntouchedLearning(Course course, CourseRevision revision, String actor) {
+        for (CourseEnrollment previous : repository.untouchedEnrollments(course.getId(), revision.getId())) {
+            previous.setStatus(ProgressStatus.WITHDRAWN);
+            repository.save(previous, actor);
+            CourseEnrollment next = new CourseEnrollment();
+            next.setCourseId(course.getId());
+            next.setRevisionId(revision.getId());
+            next.setUserId(previous.getUserId());
+            next.setCycleNo(previous.getCycleNo() + 1);
+            next.setEnrollmentOrigin(previous.getEnrollmentOrigin());
+            next.setSelfEnrolledAt(previous.getSelfEnrolledAt());
+            next.setOrgIdSnapshot(previous.getOrgIdSnapshot());
+            next.setTeamIdSnapshot(previous.getTeamIdSnapshot());
+            next.setEnrolledAt(previous.getEnrolledAt());
+            next.setStatus(ProgressStatus.NOT_STARTED);
+            next.setProgressPercent(BigDecimal.ZERO);
+            repository.save(next, actor);
+            var obligations = repository.enrollmentRecipients(previous.getId());
+            for (AssignmentRecipient obligation : obligations) {
+                obligation.setEnrollmentId(next.getId());
+                repository.save(obligation, actor);
+            }
+            audit.record(actor, AuditAction.ENROLLMENT_TRANSFERRED, "course_enrollment", previous.getId().toString(),
+                course.getOwnerOrgId(), Map.of("previousRevisionId", previous.getRevisionId(),
+                    "revisionId", revision.getId(), "enrollmentId", next.getId(),
+                    "reason", "Tự động chuyển khi xuất bản phiên bản " + revision.getRevisionNo(),
+                    "previousStatus", ProgressStatus.NOT_STARTED,
+                    "affectedRecipientIds", obligations.stream().map(AssignmentRecipient::getId).toList()));
+        }
     }
 
     private void record(String actor, String action, Course course) {
